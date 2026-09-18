@@ -54,8 +54,8 @@ jobs:
             ghcr.io/gitleaks/gitleaks:v8.29.0 detect --no-banner --redact --exit-code 1
 
   tests:
-    # The suite on both supported hosts. Tests that need a host facility CI does not have — a
-    # systemd user manager, a vendor CLI — skip themselves and say so.
+    # The suite on both supported hosts. Tests that belong to one platform skip themselves there
+    # and say so; the vendor CLIs are never called, the suite uses its own stand-in.
     strategy:
       fail-fast: false
       matrix:
@@ -63,12 +63,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
+      # No version here on purpose: the action reads `required-version` from pyproject.toml,
+      # which is the only place this project's uv version is written.
       - uses: astral-sh/setup-uv@v7
-        with:
-          version: "0.9.9"
       - name: The environment this checkout pins
         run: uv sync --locked
       - name: Tests
         run: uv run --locked python -m unittest discover -s tests -t . -v
-        env:
-          ORCHESTRA_CI: "1"
