@@ -1,0 +1,16 @@
+{
+  "webapp": {
+    "path": "/mnt/c/Projects/webapp",
+    "target": "windows"
+  },
+  "service": {
+    "path": "/home/you/projects/service",
+    "target": "wsl",
+    "base_branch": "main",
+    "worktree_root": "/home/you/worktrees",
+    "todo_dir": "todo",
+    "todo_done_dir": "todo/done",
+    "todo_name": "%Y-%m-%d_%H%M-{slug}",
+    "lfs_pointers": false
+  }
+}

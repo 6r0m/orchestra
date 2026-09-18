@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orchestration workbench</title>
+<link rel="stylesheet" href="/vendor/xterm.css">
+<link rel="stylesheet" href="/style.css">
+<script id="config" type="application/json">{{CONFIG}}</script>
+</head>
+<body>
+<header class="bar">
+  <h1>Orchestration workbench</h1>
+  <span id="connection" class="muted"></span>
+</header>
+<main class="layout">
+  <aside class="sidebar">
+    <form id="start" class="card">
+      <h2>Start a run</h2>
+      <label>Task <textarea id="start-task" rows="4" required placeholder="What should be done"></textarea></label>
+      <label>Repository <select id="start-repo"></select></label>
+      <label>or its path <input id="start-path" type="text" placeholder="/mnt/e/Repos/name"></label>
+      <label class="inline"><input type="checkbox" id="start-auto"> skip the plan approval</label>
+      <button type="submit">Start</button>
+      <p id="start-result" class="muted"></p>
+    </form>
+    <section>
+      <h2>Needs you</h2>
+      <ul id="runs-waiting" class="runs"></ul>
+      <h2>Running</h2>
+      <ul id="runs-running" class="runs"></ul>
+      <h2>Finished</h2>
+      <ul id="runs-finished" class="runs"></ul>
+      <button id="runs-older" type="button" hidden>Load older runs</button>
+    </section>
+    <section>
+      <h2>Worktrees <button id="worktrees-load" type="button">Show</button></h2>
+      <label>Repository <select id="worktrees-repo"></select></label>
+      <label>or its path <input id="worktrees-path" type="text" placeholder="/mnt/e/Repos/name"></label>
+      <p id="worktrees-base" class="muted"></p>
+      <ul id="worktrees" class="runs"></ul>
+    </section>
+  </aside>
+  <section id="run" class="content" hidden>
+    <div class="card">
+      <h2 id="run-task"></h2>
+      <p id="run-meta" class="muted"></p>
+      <p class="links"><a id="link-temporal" target="_blank" rel="noopener">Temporal</a>
+        <a id="link-trace" target="_blank" rel="noopener">Langfuse trace</a></p>
+    </div>
+    <div id="stop" class="card stop" hidden>
+      <h2 id="stop-title"></h2>
+      <p id="stop-hint" class="muted"></p>
+      <p id="stop-todo" class="muted"></p>
+      <pre id="stop-feedback" class="text"></pre>
+      <label>Your note <textarea id="stop-note" rows="3" placeholder="Feedback or guidance for the action that needs it"></textarea></label>
+      <div id="stop-actions" class="actions"></div>
+      <p id="stop-result" class="muted"></p>
+    </div>
+    <div class="terminals">
+      <div class="terminal-card">
+        <h3>engineer <span id="state-engineer" class="muted"></span></h3>
+        <div id="term-engineer" class="term"></div>
+      </div>
+      <div class="terminal-card">
+        <h3>architect <span id="state-architect" class="muted"></span></h3>
+        <div id="term-architect" class="term"></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Plan and build</h2>
+      <div id="timeline"></div>
+    </div>
+    <div class="card">
+      <h2>Change <button id="diff-load" type="button">Load the diff</button></h2>
+      <pre id="diff-summary" class="text"></pre>
+      <pre id="diff-patch" class="text diff"></pre>
+      <button id="diff-more" type="button" hidden></button>
+    </div>
+    <details class="card">
+      <summary>Workflow lines</summary>
+      <pre id="lines" class="text"></pre>
+    </details>
+  </section>
+</main>
+<script src="/vendor/xterm.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+[project]
+name = "orchestra"
+version = "0"
+description = "Local-first orchestration and operator workbench for coding agents"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "temporalio==1.33.0",
+    "langfuse==4.15.1",
+    # The live agent terminals: their WebSocket, and on Windows their ConPTY.
+    "websockets==17.1",
+    "pywinpty==3.0.5; sys_platform == 'win32'",
+]
+
+[tool.uv]
+# An application run from its own directory, not a package to build or install.
+package = false
+# The interpreter is part of the toolchain: never an installed system Python.
+python-preference = "only-managed"
+required-version = "==0.12.15"

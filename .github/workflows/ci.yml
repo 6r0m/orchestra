@@ -1,0 +1,68 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  public-safety:
+    # Nothing private may reach this repository, and the scanner must be shown to be working.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0          # the history a push carries, not only its head
+      - name: Nothing private is tracked
+        run: |
+          set -e
+          for path in .env secrets repos.json tmp; do
+            if [ -n "$(git ls-files -- "$path" "$path/**")" ]; then
+              echo "::error::$path is tracked"; exit 1
+            fi
+          done
+          test -z "$(git ls-files -- '*.pem' '*.key' '*.p12' '*.pfx' '*.token')" || {
+            echo "::error::key or token files are tracked"; exit 1; }
+          test -z "$(git ls-files -- '*.out' '*.err' '*.prompt' '*.events' '*.pid' '*.log')" || {
+            echo "::error::run artefacts are tracked"; exit 1; }
+          git diff --check
+      - name: The scanner rejects a known-bad control
+        run: |
+          set -e
+          mkdir -p "$RUNNER_TEMP/control"
+          printf 'token = "ghp_%s"\n' "a1b2c3d4e5a1b2c3d4e5a1b2c3d4e5abcdef" > "$RUNNER_TEMP/control/c.txt"
+          if docker run --rm -v "$RUNNER_TEMP/control:/scan:ro" -w /scan \
+               ghcr.io/gitleaks/gitleaks:v8.29.0 detect --no-git --no-banner --redact; then
+            echo "::error::the control was not rejected; the scanner proves nothing"; exit 1
+          fi
+      - name: No secret in the tree or in the history
+        run: |
+          set -e
+          docker run --rm -v "$PWD:/scan:ro" -w /scan \
+            ghcr.io/gitleaks/gitleaks:v8.29.0 detect --no-git --no-banner --redact --exit-code 1
+          docker run --rm -v "$PWD:/scan:ro" -w /scan \
+            ghcr.io/gitleaks/gitleaks:v8.29.0 detect --no-banner --redact --exit-code 1
+
+  tests:
+    # The suite on both supported hosts. Tests that need a host facility CI does not have — a
+    # systemd user manager, a vendor CLI — skip themselves and say so.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.9.9"
+      - name: The environment this checkout pins
+        run: uv sync --locked
+      - name: Tests
+        run: uv run --locked python -m unittest discover -s tests -t . -v
+        env:
+          ORCHESTRA_CI: "1"

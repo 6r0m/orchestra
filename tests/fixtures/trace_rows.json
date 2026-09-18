@@ -1,0 +1,411 @@
+{
+ "rows": [
+  {
+   "as_type": "chain",
+   "filtered": {},
+   "input": [
+    "base_branch",
+    "repo",
+    "request",
+    "target"
+   ],
+   "level": "DEFAULT",
+   "metadata": [
+    "run_id",
+    "worktree"
+   ],
+   "name": "orchestration-run",
+   "output": [],
+   "parent": false,
+   "version": "observability-schema-v1"
+  },
+  {
+   "as_type": "chain",
+   "filtered": {
+    "phase": "plan"
+   },
+   "input": [
+    "phase",
+    "roles"
+   ],
+   "level": "DEFAULT",
+   "metadata": [
+    "phase"
+   ],
+   "name": "plan-phase",
+   "output": [],
+   "parent": true,
+   "version": "observability-schema-v1"
+  },
+  {
+   "as_type": "agent",
+   "filtered": {
+    "brain": "claude",
+    "phase": "plan",
+    "role": "engineer",
+    "round": 1,
+    "stage": "plan"
+   },
+   "input": [
+    "role",
+    "round",
+    "stage",
+    "task"
+   ],
+   "level": "DEFAULT",
+   "metadata": [
+    "brain",
+    "logs",
+    "phase",
+    "provider_session_id",
+    "role",
+    "round",
+    "run_id",
+    "stage",
+    "worktree"
+   ],
+   "name": "engineer-plan",
+   "output": [
+    "response"
+   ],
+   "parent": true,
+   "version": "observability-schema-v1"
+  },
+  {
+   "as_type": "agent",
+   "filtered": {
+    "brain": "codex",
+    "error_type": "telemetry_degraded",
+    "model": "gpt-5.6-sol",
+    "phase": "plan",
+    "reasoning_effort": "high",
+    "role": "architect",
+    "round": 1,
+    "stage": "assess",
+    "verdict": "PATCH"
+   },
+   "input": [
+    "role",
+    "round",
+    "stage",
+    "task"
+   ],
+   "level": "WARNING",
+   "metadata": [
+    "brain",
+    "error_type",
+    "logs",
+    "model",
+    "phase",
+    "provider_session_id",
+    "reasoning_effort",
+    "role",
+    "round",
+    "run_id",
+    "stage",
+    "verdict",
+    "worktree"
+   ],
+   "name": "architect-assess",
+   "output": [
+    "feedback",
+    "verdict",
+    "warning"
+   ],
+   "parent": true,
+   "version": "observability-schema-v1"
+  },
+  {
+   "as_type": "agent",
+   "filtered": {
+    "brain": "claude",
+    "phase": "plan",
+    "role": "engineer",
+    "round": 2,
+    "stage": "plan"
+   },
+   "input": [
+    "prior_feedback",
+    "role",
+    "round",
+    "stage",
+    "task"
+   ],
+   "level": "DEFAULT",
+   "metadata": [
+    "brain",
+    "logs",
+    "phase",
+    "provider_session_id",
+    "role",
+    "round",
+    "run_id",
+    "stage",
+    "worktree"
+   ],
+   "name": "engineer-plan",
+   "output": [
+    "response"
+   ],
+   "parent": true,
+   "version": "observability-schema-v1"
+  },
+  {
+   "as_type": "agent",
+   "filtered": {
+    "brain": "codex",
+    "error_type": "telemetry_degraded",
+    "gate_reason": "approval",
+    "model": "gpt-5.6-sol",
+    "phase": "plan",
+    "reasoning_effort": "high",
+    "role": "architect",
+    "round": 2,
+    "stage": "assess",
+    "verdict": "PASS"
+   },
+   "input": [
+    "prior_feedback",
+    "role",
+    "round",
+    "stage",
+    "task"
+   ],
+   "level": "WARNING",
+   "metadata": [
+    "brain",
+    "error_type",
+    "gate_reason",
+    "logs",
+    "model",
+    "phase",
+    "provider_session_id",
+    "reasoning_effort",
+    "role",
+    "round",
+    "run_id",
+    "stage",
+    "verdict",
+    "worktree"
+   ],
+   "name": "architect-assess",
+   "output": [
+    "feedback",
+    "gate_reason",
+    "verdict",
+    "warning"
+   ],
+   "parent": true,
+   "version": "observability-schema-v1"
+  },
+  {
+   "as_type": "span",
+   "filtered": {
+    "gate_reason": "approval",
+    "phase": "plan"
+   },
+   "input": [
+    "hint",
+    "phase",
+    "reason",
+    "todo"
+   ],
+   "level": "DEFAULT",
+   "metadata": [
+    "gate_reason",
+    "phase"
+   ],
+   "name": "human-gate",
+   "output": [
+    "summary"
+   ],
+   "parent": true,
+   "version": "observability-schema-v1"
+  },
+  {
+   "as_type": "span",
+   "filtered": {
+    "gate_reason": "approval",
+    "phase": "plan"
+   },
+   "input": [
+    "phase",
+    "reason"
+   ],
+   "level": "DEFAULT",
+   "metadata": [
+    "gate_reason",
+    "phase"
+   ],
+   "name": "human-answer",
+   "output": [
+    "answer"
+   ],
+   "parent": true,
+   "version": "observability-schema-v1"
+  },
+  {
+   "as_type": "chain",
+   "filtered": {
+    "phase": "build"
+   },
+   "input": [
+    "phase",
+    "roles"
+   ],
+   "level": "DEFAULT",
+   "metadata": [
+    "phase"
+   ],
+   "name": "build-phase",
+   "output": [],
+   "parent": true,
+   "version": "observability-schema-v1"
+  },
+  {
+   "as_type": "agent",
+   "filtered": {
+    "brain": "claude",
+    "error_type": "session_lost",
+    "phase": "build",
+    "role": "engineer",
+    "round": 1,
+    "stage": "build"
+   },
+   "input": [
+    "role",
+    "round",
+    "stage",
+    "task"
+   ],
+   "level": "WARNING",
+   "metadata": [
+    "brain",
+    "error_type",
+    "logs",
+    "phase",
+    "provider_session_id",
+    "role",
+    "round",
+    "run_id",
+    "stage",
+    "worktree"
+   ],
+   "name": "engineer-build",
+   "output": [
+    "response",
+    "warning"
+   ],
+   "parent": true,
+   "version": "observability-schema-v1"
+  },
+  {
+   "as_type": "agent",
+   "filtered": {
+    "brain": "codex",
+    "error_type": "telemetry_degraded",
+    "model": "gpt-5.6-sol",
+    "phase": "build",
+    "reasoning_effort": "high",
+    "role": "architect",
+    "round": 1,
+    "stage": "verify",
+    "verdict": "PASS"
+   },
+   "input": [
+    "role",
+    "round",
+    "stage",
+    "task"
+   ],
+   "level": "WARNING",
+   "metadata": [
+    "brain",
+    "error_type",
+    "logs",
+    "model",
+    "phase",
+    "provider_session_id",
+    "reasoning_effort",
+    "role",
+    "round",
+    "run_id",
+    "stage",
+    "verdict",
+    "worktree"
+   ],
+   "name": "architect-verify",
+   "output": [
+    "feedback",
+    "verdict",
+    "warning"
+   ],
+   "parent": true,
+   "version": "observability-schema-v1"
+  },
+  {
+   "as_type": "span",
+   "filtered": {
+    "error_type": "git_error"
+   },
+   "input": [
+    "status",
+    "worktree"
+   ],
+   "level": "ERROR",
+   "metadata": [
+    "error_type"
+   ],
+   "name": "final-diff",
+   "output": [
+    "error"
+   ],
+   "parent": true,
+   "version": "observability-schema-v1"
+  }
+ ],
+ "scores": [
+  {
+   "data_type": "CATEGORICAL",
+   "keyed": false,
+   "name": "architect_verdict",
+   "on_step": true,
+   "value": "PATCH"
+  },
+  {
+   "data_type": "BOOLEAN",
+   "keyed": true,
+   "name": "plan_first_pass",
+   "on_step": false,
+   "value": 0.0
+  },
+  {
+   "data_type": "CATEGORICAL",
+   "keyed": false,
+   "name": "architect_verdict",
+   "on_step": true,
+   "value": "PASS"
+  },
+  {
+   "data_type": "CATEGORICAL",
+   "keyed": false,
+   "name": "architect_verdict",
+   "on_step": true,
+   "value": "PASS"
+  },
+  {
+   "data_type": "BOOLEAN",
+   "keyed": true,
+   "name": "build_first_pass",
+   "on_step": false,
+   "value": 1.0
+  },
+  {
+   "data_type": "BOOLEAN",
+   "keyed": true,
+   "name": "final_verify_pass",
+   "on_step": false,
+   "value": 1.0
+  }
+ ]
+}
