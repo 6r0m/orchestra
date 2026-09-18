@@ -73,7 +73,7 @@ class Turns(unittest.TestCase):
             argv = ["codex", "resume", resume] if resume else ["codex"]
             argv += ["--sandbox", "read-only", "--ask-for-approval", "never"]
         return terminal.run_turn(self.worktree, argv, self.rdir, name or "%s-e1-1" % stage, prompt, timeout,
-                                 activities.agent_env({}))
+                                 activities.agent_env({}), brain=brain)
 
     def record(self, role="engineer"):
         try:
@@ -96,7 +96,7 @@ class Turns(unittest.TestCase):
         self.addCleanup(shutil.rmtree, worktree_skills, True)
         argv = ["claude", "--session-id", str(uuid.uuid4()), "--add-dir", worktree_skills]
         rc, out = terminal.run_turn(self.worktree, argv, self.rdir, "build-e1-1", "complete this", 60,
-                                    activities.agent_env({}))
+                                    activities.agent_env({}), brain="claude")
         self.assertEqual((rc, out), (0, "done complete"))
 
     def test_a_multiline_prompt_reaches_the_agent_whole(self):
@@ -250,7 +250,8 @@ OWNER = textwrap.dedent("""
             time.sleep(0.05)
     else:
         terminal.run_turn(worktree, ["claude", "--session-id", str(uuid.uuid4())], terminal.run_dir(run_id),
-                          "build-e1-1", "complete detach:" + pid_file, 60, activities.agent_env({}))
+                          "build-e1-1", "complete detach:" + pid_file, 60, activities.agent_env({}),
+                          brain="claude")
     print("ready", flush=True)
     time.sleep(600)
 """)
@@ -463,7 +464,7 @@ class Lifecycle(unittest.TestCase):
                  "agent_sessions": {"architect": "thread-1"}}
 
         def review(stage, edit):
-            def runner(*args):
+            def runner(*args, **kwargs):
                 if edit:
                     with open(os.path.join(repo, "app.txt"), "a") as fh:
                         fh.write("typed while the architect judged\n")
@@ -492,7 +493,7 @@ class Lifecycle(unittest.TestCase):
                  "worktree_path": "/fake/worktree", "todo_path": "/fake/worktree/todo/x.md", "agent_sessions": {}}
         from fakes import FakeWorktrees, codex_first_out
         out, _ = codex_first_out("no verdict here")
-        host = activities.Activities(runner=lambda *args: (0, out), git=FakeWorktrees(), telemetry=None)
+        host = activities.Activities(runner=lambda *args, **kwargs: (0, out), git=FakeWorktrees(), telemetry=None)
         with self.assertRaises(Exception):
             host.run_role({"stage": "assess", "state": state, "policy": policy})
         self.assertTrue(terminal.get(self.run_id, "architect").agent is None)

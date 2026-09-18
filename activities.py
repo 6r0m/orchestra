@@ -24,8 +24,6 @@ import terminal
 import trust
 import worktrees as W
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-RUNTIME_ROOT = os.path.join(repos.ORCHESTRATION_REPO, "tmp", "orchestration")
 
 # An agent's git can neither push nor reach any remote. The rewrite covers every
 # remote without its own push URL and cannot be undone with `git -c`; refusing every
@@ -62,7 +60,7 @@ class GitViolation(RuntimeError):
 
 
 def run_dir(run_id):
-    return os.path.join(RUNTIME_ROOT, run_id)
+    return os.path.join(repos.RUNTIME_ROOT, run_id)
 
 
 def host_argv(argv, brain, windows=WINDOWS, skills=None):
@@ -171,7 +169,7 @@ class Activities:
         role_name = P.STAGE_ROLE[stage]
         role = dict(policy["roles"][role_name])
         # The persona file as this host sees it.
-        role["prompt_path"] = os.path.join(HERE, role["prompt"])
+        role["prompt_path"] = os.path.join(repos.REPO, role["prompt"])
         is_reviewer = role["workspace_access"] == "read"
         resume_id = (state.get("agent_sessions") or {}).get(role_name)
         rdir = run_dir(state["run_id"])
@@ -187,7 +185,7 @@ class Activities:
                                     skills=policy.get("stage_skills"))
 
         span = T.begin(client, state, stage, role_name, role,
-                       log=os.path.relpath(os.path.join(rdir, "logs", name), repos.ORCHESTRATION_REPO))
+                       log=os.path.relpath(os.path.join(rdir, "logs", name), repos.REPO))
         settings = None
         try:
             # Holds the trace store's secret, so it exists only while this stage runs.
@@ -206,7 +204,7 @@ class Activities:
             argv, minted = N.build_argv(role_name, role, resume_id, rdir, settings)
             argv = host_argv(argv, role["brain"])
             rc, out = self.runner(worktree, argv, rdir, name, compose(resume_id is None),
-                                  policy["timeout_seconds"], env)
+                                  policy["timeout_seconds"], env, brain=role["brain"])
             effective_resume = resume_id
             if rc != 0 and N.classify_failure(role, resume_id, rc, out,
                                               _read(os.path.join(rdir, "logs", name + ".err"))) == "session_lost":
@@ -219,7 +217,7 @@ class Activities:
                 argv, minted = N.build_argv(role_name, role, None, rdir, settings)
                 argv = host_argv(argv, role["brain"])
                 rc, out = self.runner(worktree, argv, rdir, name + "-rehydrated", compose(True),
-                                      policy["timeout_seconds"], env)
+                                      policy["timeout_seconds"], env, brain=role["brain"])
             if rc != 0:
                 raise N.TransportError("%s failed rc=%d — inspect %s/logs/%s.*" % (stage, rc, rdir, name))
             if self.git.guard(worktree, state["run_id"]) != before:
@@ -279,7 +277,7 @@ class Activities:
         if state.get("status") == "ABORTED":
             # An aborted run keeps its worktree but no longer needs its live terminals.
             terminal.close_run(state["run_id"])
-        T.final_diff(client, state)
+        T.final_diff(client, state, W.review_diff)
         T.outcome_score(client, state)
         T.flush(client)
         return {"trace_url": T.trace_url(client, state.get("trace_id"))}

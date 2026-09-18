@@ -118,7 +118,7 @@ class Selection(unittest.TestCase):
         by_name = repos.select("tool", descriptors)
         self.assertEqual(by_name, {"id": "tool", "path": self.tmp, "target": "wsl", "base_branch": "main"})
         self.assertEqual(repos.select(self.tmp, descriptors), by_name)
-        self.assertEqual(repos.select(None, {})["path"], repos.ORCHESTRATION_REPO)
+        self.assertEqual(repos.select(None, {})["path"], repos.REPO)
 
     def test_a_repository_on_a_windows_drive_runs_on_windows_unless_its_entry_says_otherwise(self):
         self.assertEqual(repos.windows_path("/mnt/e/Projects/Sample"), "E:\\Projects\\Sample")

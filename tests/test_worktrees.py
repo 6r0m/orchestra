@@ -191,7 +191,7 @@ class Guard(Repo):
     def test_a_role_that_stages_fails_its_stage(self):
         path = self.worktree("run1")
 
-        def staging_agent(worktree, argv, rdir, name, prompt, timeout, env):
+        def staging_agent(worktree, argv, rdir, name, prompt, timeout, env, *, brain):
             git(worktree, "add", "-A")
             return 0, "done\n"
 

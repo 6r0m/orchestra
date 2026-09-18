@@ -36,9 +36,9 @@ class FakeAgent:
         self.script = list(script)
         self.calls = []
 
-    def __call__(self, worktree, argv, run_dir, name, prompt, timeout_seconds, env):
+    def __call__(self, worktree, argv, run_dir, name, prompt, timeout_seconds, env, *, brain):
         self.calls.append({"worktree": worktree, "argv": list(argv), "command": " ".join(argv),
-                           "name": name, "prompt": prompt, "env": env})
+                           "name": name, "prompt": prompt, "env": env, "brain": brain})
         if not self.script:
             raise AssertionError("unexpected extra invocation: %s" % name)
         expect, rc, out = self.script.pop(0)

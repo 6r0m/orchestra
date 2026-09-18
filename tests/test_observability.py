@@ -27,6 +27,7 @@ import launch  # noqa: E402
 import policy as policy_mod  # noqa: E402
 import temporal_env as E  # noqa: E402
 import trace_rows  # noqa: E402
+import worktrees  # noqa: E402
 from fakes import (FakeAgent, FakeWorktrees, Recorder, codex_review_first,  # noqa: E402
                    codex_review_resumed)
 from test_workflow import Scenario  # noqa: E402
@@ -358,7 +359,7 @@ class FinalDiff(unittest.TestCase):
         import telemetry
         client = _Events()
         values = {"run_id": "r1", "worktree_path": self.repo}
-        telemetry.final_diff(client, values)
+        telemetry.final_diff(client, values, worktrees.review_diff)
         self.assertEqual(client.events, [], "a run that stopped is not finished")
 
         # `git status` refreshes the index's stat cache itself, so it runs
@@ -367,7 +368,8 @@ class FinalDiff(unittest.TestCase):
         staged_before = _git(self.repo, "diff", "--cached", "--name-status")
         index = os.path.join(self.repo, ".git", "index")
         index_before = open(index, "rb").read()
-        telemetry.final_diff(client, dict(values, status="READY_FOR_HUMAN"))
+        telemetry.final_diff(client, dict(values, status="READY_FOR_HUMAN"),
+                             worktrees.review_diff)
 
         self.assertEqual(len(client.events), 1)
         patch = client.events[0]["output"]["patch"]
@@ -388,7 +390,7 @@ class FinalDiff(unittest.TestCase):
         for path in (not_a_repo, os.path.join(self.tmp, "missing")):
             client = _Events()
             telemetry.final_diff(client, {"run_id": "r1", "worktree_path": path,
-                                          "status": "READY_FOR_HUMAN"})
+                                          "status": "READY_FOR_HUMAN"}, worktrees.review_diff)
             self.assertEqual(len(client.events), 1, path)
             event = client.events[0]
             self.assertEqual(event.get("level"), "ERROR", path)
@@ -595,9 +597,10 @@ class ClaudeTracingGate(unittest.TestCase):
         made, present = [], {}
 
         class Watching(FakeAgent):
-            def __call__(self, worktree, argv, rdir, name, prompt, timeout, env):
+            def __call__(self, worktree, argv, rdir, name, prompt, timeout, env, *, brain):
                 present[name] = bool(made) and os.path.exists(made[-1])
-                return FakeAgent.__call__(self, worktree, argv, rdir, name, prompt, timeout, env)
+                return FakeAgent.__call__(self, worktree, argv, rdir, name, prompt, timeout, env,
+                                          brain=brain)
 
         original = telemetry.harness_settings
         telemetry.harness_settings = self._fake_settings(made)
@@ -632,12 +635,13 @@ class ClaudeTracingGate(unittest.TestCase):
         seen = []
 
         class Watching(FakeAgent):
-            def __call__(self, worktree, argv, rdir, name, prompt, timeout, env):
+            def __call__(self, worktree, argv, rdir, name, prompt, timeout, env, *, brain):
                 if "--settings" in argv:
                     path = argv[argv.index("--settings") + 1]
                     seen.append((path, stat.S_IMODE(os.stat(path).st_mode),
                                  stat.S_IMODE(os.stat(os.path.dirname(path)).st_mode)))
-                return FakeAgent.__call__(self, worktree, argv, rdir, name, prompt, timeout, env)
+                return FakeAgent.__call__(self, worktree, argv, rdir, name, prompt, timeout, env,
+                                          brain=brain)
 
         with contextlib.redirect_stderr(io.StringIO()):
             self.role_run([("plan-e1-1", 0, "p\n")], {}, "plan", telemetry=Recorder(), runner_class=Watching)
@@ -769,7 +773,7 @@ class TraceShape(Scenario):
                 telemetry.gate_event(client, values, {"reason": "blocker", "phase": "plan",
                                                       "feedback": "f"})
                 telemetry.gate_answer(client, values, "use B")
-                telemetry.final_diff(client, values)
+                telemetry.final_diff(client, values, worktrees.review_diff)
         finally:
             otel.get_current_span = original
         self.assertEqual(client.create_event_calls, [], "an event cannot be unmarked as a root")
@@ -831,17 +835,17 @@ class TraceShape(Scenario):
     def test_a_diff_past_the_cap_is_cut_and_marked(self):
         """The final diff is the whole `gdiff -s` patch up to its cap, and says when it is not."""
         import telemetry
-        saved = telemetry._review_diff, telemetry.DIFF_MAX_CHARS
-        telemetry._review_diff = lambda path: {"base": "abc1234", "summary": " 1 file changed",
-                                               "summary_total": 15, "patch": "x" * 50,
-                                               "offset": 0, "next": 50, "total": 50}
+        read = lambda path: {"base": "abc1234", "summary": " 1 file changed",
+                             "summary_total": 15, "patch": "x" * 50,
+                             "offset": 0, "next": 50, "total": 50}
+        saved = telemetry.DIFF_MAX_CHARS
         telemetry.DIFF_MAX_CHARS = 10
         client = _Events()
         try:
             telemetry.final_diff(client, {"run_id": "r1", "status": "READY_FOR_HUMAN",
-                                          "worktree_path": "/wt"})
+                                          "worktree_path": "/wt"}, read)
         finally:
-            telemetry._review_diff, telemetry.DIFF_MAX_CHARS = saved
+            telemetry.DIFF_MAX_CHARS = saved
         output = client.events[0]["output"]
         self.assertEqual((len(output["patch"]), output["truncated"]), (10, True))
 
@@ -1491,17 +1495,13 @@ class TraceContract(Scenario):
     def test_a_diff_that_held_a_secret_is_redacted_and_says_so(self):
         import telemetry
         leak = "ghp_" + "A1b2C3d4E5" * 4
-        saved = telemetry._review_diff
         client = _Events()
-        try:
-            for patch in ("+token = '%s'\n" % leak, "+plain\n"):
-                telemetry._review_diff = lambda path, _patch=patch: {
-                    "base": "abc1234", "summary": " 1 file changed", "summary_total": 15,
-                    "patch": _patch, "offset": 0, "next": len(_patch), "total": len(_patch)}
-                telemetry.final_diff(client, {"run_id": "r1", "status": "READY_FOR_HUMAN",
-                                              "worktree_path": "/wt"})
-        finally:
-            telemetry._review_diff = saved
+        for patch in ("+token = '%s'\n" % leak, "+plain\n"):
+            read = lambda path, _patch=patch: {
+                "base": "abc1234", "summary": " 1 file changed", "summary_total": 15,
+                "patch": _patch, "offset": 0, "next": len(_patch), "total": len(_patch)}
+            telemetry.final_diff(client, {"run_id": "r1", "status": "READY_FOR_HUMAN",
+                                          "worktree_path": "/wt"}, read)
         leaked, plain = (event["output"] for event in client.events)
         self.assertNotIn(leak, leaked["patch"])
         self.assertEqual((leaked["redacted"], plain["redacted"]), (True, False))

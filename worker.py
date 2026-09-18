@@ -11,28 +11,27 @@ import concurrent.futures
 import os
 import sys
 
-from temporalio.client import Client
 from temporalio.worker import Worker
 
 import activities
+import client as runs
 import policy as P
+import repos
 import terminal
 import workflow as WF
 
-ADDRESS = os.environ.get("TEMPORAL_ADDRESS", "localhost:7233")
-NAMESPACE = os.environ.get("TEMPORAL_NAMESPACE", WF.NAMESPACE)
 
 
 def pid_file(target):
     """The deployment's worker records its pid where workers.sh looks; a worker for another policy apart from it."""
     if os.environ.get("ORCH_POLICY"):
-        return os.path.join(activities.RUNTIME_ROOT, "worker-%s-%d.pid" % (target, os.getpid()))
-    return os.path.join(activities.RUNTIME_ROOT, "worker-%s.pid" % target)
+        return os.path.join(repos.RUNTIME_ROOT, "worker-%s-%d.pid" % (target, os.getpid()))
+    return os.path.join(repos.RUNTIME_ROOT, "worker-%s.pid" % target)
 
 
 async def main(target):
     policy = P.load(os.environ.get("ORCH_POLICY"))
-    client = await Client.connect(ADDRESS, namespace=NAMESPACE)
+    client = await runs.connect()
     queue = P.queue(policy, target)
     host = activities.Activities()
     # This host's live agent terminals, for the workbench page.
@@ -43,7 +42,7 @@ async def main(target):
     if target == "wsl":
         workers.append(Worker(client, task_queue=WF.TASK_QUEUE,
                               workflows=[WF.FeatureRun, WF.WorktreeView, WF.ReviewDiff]))
-    os.makedirs(activities.RUNTIME_ROOT, exist_ok=True)
+    os.makedirs(repos.RUNTIME_ROOT, exist_ok=True)
     with open(pid_file(target), "w", encoding="utf-8") as fh:
         fh.write(str(os.getpid()))
     print("worker for %s polling %s%s" % (target, queue, " and %s" % WF.TASK_QUEUE if target == "wsl" else ""),
@@ -58,12 +57,11 @@ async def main(target):
 
 
 async def check():
-    import cli
     from temporalio.api.enums.v1 import TaskQueueType
     try:
-        client = await Client.connect(ADDRESS, namespace=NAMESPACE)
-    except Exception as exc:                       # noqa: BLE001 - any connection failure is reported
-        print("Temporal is not reachable at %s: %s" % (ADDRESS, exc))
+        client = await runs.connect()
+    except runs.Refusal as exc:
+        print(exc)
         return 1
     policy = P.load(os.environ.get("ORCH_POLICY"))
     queues = [(WF.TASK_QUEUE, TaskQueueType.TASK_QUEUE_TYPE_WORKFLOW)] + [
@@ -71,9 +69,9 @@ async def check():
     missing = 0
     for name, kind in queues:
         try:
-            await cli.preflight(client, [(name, kind)])
+            await runs.preflight(client, [(name, kind)])
             print("%-22s polled" % name)
-        except cli.Refusal:
+        except runs.Refusal:
             print("%-22s NO WORKER" % name)
             missing += 1
     return 1 if missing else 0

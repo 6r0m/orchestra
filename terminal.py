@@ -33,12 +33,10 @@ import launch
 import policy as P
 import repos
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-RUNTIME_ROOT = os.path.join(repos.ORCHESTRATION_REPO, "tmp", "orchestration")
-PTYHOST = os.path.join(HERE, "ptyhost.py")
-TURN_HOOK = os.path.join(HERE, "turn_hook.py")
+PTYHOST = os.path.join(repos.REPO, "ptyhost.py")
+TURN_HOOK = os.path.join(repos.REPO, "turn_hook.py")
 # The page's token, shared by the workbench and both workers through the one checkout.
-TOKEN_FILE = os.path.join(repos.ORCHESTRATION_REPO, "secrets", "workbench.token")
+TOKEN_FILE = os.path.join(repos.REPO, "secrets", "workbench.token")
 COLS, ROWS = 160, 48
 TICK_SECONDS = 1.0
 # The page's subprotocol. The token is offered beside it, in the handshake's own header, so it
@@ -50,7 +48,7 @@ _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)
 
 
 def run_dir(run_id):
-    return os.path.join(RUNTIME_ROOT, run_id)
+    return os.path.join(repos.RUNTIME_ROOT, run_id)
 
 
 def record_path(run_id, role):
@@ -359,7 +357,7 @@ def _activity_tick(name):
         raise CancelledError("role-run %s cancelled" % name)
 
 
-def run_turn(worktree, argv, rdir, name, prompt, timeout, env, on_tick=None):
+def run_turn(worktree, argv, rdir, name, prompt, timeout, env, on_tick=None, *, brain):
     """The execution seam: one role turn in the role's live terminal; returns (exit status, output).
 
     The output is what `nodes` reads from a role-run: Claude's final message, or for Codex
@@ -367,6 +365,11 @@ def run_turn(worktree, argv, rdir, name, prompt, timeout, env, on_tick=None):
     directory keep the prompt, that output, the turn's events, and — as its error text —
     what the terminal showed during the turn.
     """
+    # The run already decided which agent this turn is; re-deriving it from the command would be a
+    # second authority, and a name this host does not know would silently be driven as the default.
+    if brain not in P.KNOWN_BRAINS:
+        raise launch.ExecutorError("unknown agent %r: cannot wire its completion events" % (brain,))
+
     logs = os.path.join(rdir, "logs")
     os.makedirs(logs, exist_ok=True)
     paths = {ext: os.path.join(logs, "%s.%s" % (name, ext)) for ext in ("prompt", "out", "err", "events")}
@@ -375,7 +378,6 @@ def run_turn(worktree, argv, rdir, name, prompt, timeout, env, on_tick=None):
     executable = shutil.which(argv[0])
     if not executable:
         raise launch.ExecutorError("%s is not installed on this host" % argv[0])
-    brain = "codex" if os.path.basename(argv[0]).lower().startswith("codex") else "claude"
     if os.path.exists(paths["events"]):
         os.remove(paths["events"])
     argv = [executable] + list(argv[1:])

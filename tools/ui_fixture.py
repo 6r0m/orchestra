@@ -157,7 +157,7 @@ def main():
             print("expected the stops blocker, approval, failed, final; got %s" % stops, file=sys.stderr)
             return 1
 
-        out_dir = os.path.join(repos.ORCHESTRATION_REPO, "tmp", "ui-fixture")
+        out_dir = os.path.join(repos.REPO, "tmp", "ui-fixture")
         os.makedirs(out_dir, exist_ok=True)
         expected = os.path.join(out_dir, "%s.expected.patch" % run.run_id)
         with open(expected, "wb") as fh:

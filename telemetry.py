@@ -34,10 +34,10 @@ import sys
 
 import envpath
 import policy as P
+import repos
 # The change a human reviews is the worktree's; the trace only records it.
-from worktrees import review_diff as _review_diff
 
-REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = repos.REPO
 # This checkout's private file — every credential this component reads, and nothing else; it is
 # gitignored, and `.env.example` names its keys. Only the key pair is exported from it; the mask
 # also keeps its secret values, in this process only, so that none of them can leave in a row.
@@ -57,9 +57,6 @@ GATE_NAME = "human-gate"
 ANSWER_NAME = "human-answer"
 DIFF_NAME = "final-diff"
 SCORE_NAMES = ("architect_verdict", "plan_first_pass", "build_first_pass", "final_verify_pass")
-# The orchestrator's own code, whose commit a release names: this repository.
-RELEASE_PATHS = (".",)
-
 # Read from the file only when the environment lacks them: an explicit
 # environment variable wins, as in the rest of this repository's tooling, and a
 # run needs no shell setup.
@@ -133,8 +130,8 @@ def _release():
     try:
         head = subprocess.run(["git", "-C", REPO_ROOT, "rev-parse", "--short=12", "HEAD"],
                               capture_output=True, text=True, timeout=10)
-        status = subprocess.run(["git", "-C", REPO_ROOT, "status", "--porcelain", "--"]
-                                + list(RELEASE_PATHS), capture_output=True, text=True, timeout=30)
+        status = subprocess.run(["git", "-C", REPO_ROOT, "status", "--porcelain"],
+                                capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.SubprocessError) as exc:
         _warn_once("release", exc)
         return None
@@ -941,8 +938,11 @@ def gate_answer(client, values, answer):
         _warn_once("gate answer", exc)
 
 
-def final_diff(client, values):
+def final_diff(client, values, read_diff):
     """Close a finished work item's trace with the change the operator reviews.
+
+    `read_diff` is the caller's own reader of a worktree, because what the change *is*
+    belongs to git and the trace only records it: this module never reads the repository.
 
     Only on `READY_FOR_HUMAN`: every other stop — the plan approval, a blocker,
     an exhausted budget, a failed stage — would put
@@ -964,7 +964,7 @@ def final_diff(client, values):
         return
     path = values.get("worktree_path")
     try:
-        read = _review_diff(path)
+        read = read_diff(path)
         base, summary, patch = read["base"], read["summary"], read["patch"]
     except Exception as exc:                       # noqa: BLE001 - by contract
         _warn_once("final diff", exc)

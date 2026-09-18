@@ -110,7 +110,7 @@ class SingleAttempt(Scenario):
         self.addCleanup(self.release.set)
 
     def hanging(self, launches):
-        def runner(worktree, argv, rdir, name, prompt, timeout, env):
+        def runner(worktree, argv, rdir, name, prompt, timeout, env, *, brain):
             launches.append(name)
             # A worker that stopped heartbeating: the activity is lost to Temporal.
             self.release.wait(60)

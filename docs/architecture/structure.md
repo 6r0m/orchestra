@@ -118,6 +118,14 @@ nothing else routes. Observability depends on the workflow and is never read bac
 each verdict means is in [the architect's own file](../../roles/architect.md); a host that binds its
 own methodology to a stage (`stage_skills`) owns it there instead.
 
+The modules themselves depend in four layers — facts and pure decisions, the mechanisms over them,
+what the outside drives a run through, and the entry points — and a module imports only a lower
+layer. Nothing imports an entry point, which is what keeps argparse and console output out of the
+worker and the workbench. That order is not a convention here: `tests/test_architecture.py` records
+it and fails on an import that inverts it, and its own control proves the check can reject one.
+Where a run may put files, and which agent a turn is, each have exactly one owner for the same
+reason — a second definition is equal only until someone moves a module.
+
 - **D4** **Only architect verdicts route** — `PASS / PATCH / BLOCKER /
   UNVERIFIED`. Engineer output always goes to the architect; an engineer-side
   blocker or open question reaches the human only through the architect.

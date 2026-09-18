@@ -207,7 +207,7 @@ class Wiring(unittest.TestCase):
         state = {"run_id": "r1", "task": "t", "phase": "plan", "round": 0, "episode": 1,
                  "repo_path": resolved["repo_path"], "worktree_path": "/fake/worktree",
                  "todo_path": "/fake/worktree/todo/x.md", "agent_sessions": {}}
-        host = activities.Activities(runner=lambda *args: (1, ""), git=FakeWorktrees(), telemetry=None)
+        host = activities.Activities(runner=lambda *args, **kwargs: (1, ""), git=FakeWorktrees(), telemetry=None)
         with self.assertRaises(Exception):
             host.run_role({"stage": "plan", "state": state, "policy": policy})
         self.assertEqual(recorded, [(resolved["repo_path"], ["claude"])],

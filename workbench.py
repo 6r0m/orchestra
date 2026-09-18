@@ -25,8 +25,7 @@ import policy as P
 import repos
 import terminal
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-PAGE = os.path.join(HERE, "workbench")
+PAGE = os.path.join(repos.REPO, "workbench")
 TEMPORAL_UI = os.environ.get("TEMPORAL_UI", "http://localhost:8080")
 STATIC = {"/": ("index.html", "text/html; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"),
           "/style.css": ("style.css", "text/css; charset=utf-8"),
@@ -260,13 +259,13 @@ def pid_file(port):
     Named by the port because a second instance on another port is a real thing to run (a browser
     check while the usual one keeps serving), and a shared name let its `down` stop the wrong one.
     """
-    return os.path.join(terminal.RUNTIME_ROOT, "workbench-%d.pid" % port)
+    return os.path.join(repos.RUNTIME_ROOT, "workbench-%d.pid" % port)
 
 
 def main():
     policy = P.load(os.environ.get("ORCH_POLICY"))
     server = serve(policy, Loop().call, trace_links())
-    os.makedirs(terminal.RUNTIME_ROOT, exist_ok=True)
+    os.makedirs(repos.RUNTIME_ROOT, exist_ok=True)
     with open(pid_file(policy["workbench_port"]), "w", encoding="utf-8") as fh:
         fh.write(str(os.getpid()))
     print("workbench on http://127.0.0.1:%d" % policy["workbench_port"], flush=True)

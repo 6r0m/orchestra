@@ -15,10 +15,13 @@ import re
 import shutil
 import subprocess
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+# This repository, and where a run keeps its state on this host. One definition each: a second
+# one is equal only while every module sits at the root, and drifts silently the moment one moves.
+# workers.sh and workers.ps1 build the same runtime path for the shell side of the lifecycle.
+REPO = os.path.dirname(os.path.abspath(__file__))
+RUNTIME_ROOT = os.path.join(REPO, "tmp", "orchestration")
 # ORCH_REPOS names another descriptor file, as the acceptance run's throwaway repository needs.
-DESCRIPTORS = os.environ.get("ORCH_REPOS") or os.path.join(HERE, "repos.json")
-ORCHESTRATION_REPO = HERE
+DESCRIPTORS = os.environ.get("ORCH_REPOS") or os.path.join(REPO, "repos.json")
 TARGETS = ("wsl", "windows")
 ENTRY_KEYS = {"path", "target", "base_branch", "worktree_root", "todo_dir", "todo_done_dir", "todo_name",
               "lfs_pointers"}
@@ -92,7 +95,7 @@ def select(repo=None, descriptors=None):
     if repo in descriptors:
         name, entry = repo, descriptors[repo]
     else:
-        path = os.path.abspath(repo or ORCHESTRATION_REPO)
+        path = os.path.abspath(repo or REPO)
         matches = [(n, e) for n, e in descriptors.items() if os.path.abspath(e["path"]) == path]
         name, entry = matches[0] if matches else (os.path.basename(path), {"path": path})
     path = os.path.abspath(entry["path"])

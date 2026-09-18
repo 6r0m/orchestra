@@ -25,7 +25,6 @@ import telemetry
 import workflow as WF
 from client import Refusal, preflight, work_item_label  # noqa: F401 - the CLI's names for them
 
-RUNTIME_ROOT = os.path.join(repos.ORCHESTRATION_REPO, "tmp", "orchestration")
 # The longest a follower waits between looks at a run when no history event wakes it.
 FOLLOW_SECONDS = 2
 
@@ -238,7 +237,7 @@ async def _show(client, run_id):
     if status["stop"]:
         print("\nwaiting at: %s (%s)" % (status["stop"]["reason"], status["stop"]["hint"]))
     print_verdicts(timeline)
-    print("\nlogs: %s" % os.path.join(RUNTIME_ROOT, run_id, "logs"))
+    print("\nlogs: %s" % os.path.join(repos.RUNTIME_ROOT, run_id, "logs"))
     return 0
 
 
