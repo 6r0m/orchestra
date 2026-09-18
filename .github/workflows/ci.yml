@@ -1,4 +1,7 @@
-name: ci
+# The only thing a robot checks here is that nothing private reaches this repository.
+# The suite is run by hand on both supported hosts — see AGENTS.md and tests/README.md —
+# because it drives real processes, real worktrees and a PTY on each host.
+name: public-safety
 
 on:
   push:
@@ -52,21 +55,3 @@ jobs:
             ghcr.io/gitleaks/gitleaks:v8.29.0 detect --no-git --no-banner --redact --exit-code 1
           docker run --rm -v "$PWD:/scan:ro" -w /scan \
             ghcr.io/gitleaks/gitleaks:v8.29.0 detect --no-banner --redact --exit-code 1
-
-  tests:
-    # The suite on both supported hosts. Tests that belong to one platform skip themselves there
-    # and say so; the vendor CLIs are never called, the suite uses its own stand-in.
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v5
-      # No version here on purpose: the action reads `required-version` from pyproject.toml,
-      # which is the only place this project's uv version is written.
-      - uses: astral-sh/setup-uv@v7
-      - name: The environment this checkout pins
-        run: uv sync --locked
-      - name: Tests
-        run: uv run --locked python -m unittest discover -s tests -t . -v

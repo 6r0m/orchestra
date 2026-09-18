@@ -22,7 +22,10 @@ Generated state belongs only in the ignored runtime directories.
 **Never disable, bypass, suppress or broadly allowlist a public-safety or secret-scanning failure to
 make a commit pass.** A suspected false positive is investigated and explained, never waved through.
 
-Before pushing: `make public-check`.
+Before pushing: `make public-check`. It also runs on every push here, and it is the only
+automated check — the suite is not run by CI, because it drives real processes, real worktrees
+and a PTY, so it must run on a real host. Run `make test` yourself on the host you changed, and
+on both when the change touches launching, terminals or worktrees.
 
 ## What owns what
 
