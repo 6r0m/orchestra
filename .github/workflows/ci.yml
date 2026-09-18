@@ -39,10 +39,16 @@ jobs:
                ghcr.io/gitleaks/gitleaks:v8.29.0 detect --no-git --no-banner --redact; then
             echo "::error::the control was not rejected; the scanner proves nothing"; exit 1
           fi
-      - name: No secret in the tree or in the history
+      - name: No secret in the files a push carries, or in the history
         run: |
           set -e
-          docker run --rm -v "$PWD:/scan:ro" -w /scan \
+          # The tracked files, exported on their own: an ignored `.env` holds real credentials by
+          # design, and that it is not tracked is checked above.
+          export_dir="$RUNNER_TEMP/tracked"
+          mkdir -p "$export_dir"
+          git archive HEAD | tar -x -C "$export_dir"
+          cp .gitleaks.toml "$export_dir/"
+          docker run --rm -v "$export_dir:/scan:ro" -w /scan \
             ghcr.io/gitleaks/gitleaks:v8.29.0 detect --no-git --no-banner --redact --exit-code 1
           docker run --rm -v "$PWD:/scan:ro" -w /scan \
             ghcr.io/gitleaks/gitleaks:v8.29.0 detect --no-banner --redact --exit-code 1

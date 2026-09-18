@@ -68,6 +68,7 @@ gitleaks() { docker run --rm -v "$1:/scan:ro" -w /scan "$GITLEAKS_IMAGE" "${@:2}
 
 control="$(mktemp -d)"
 trap 'rm -rf "$control"' EXIT
+
 # A credential shape the scanner must recognise, assembled here so the string exists only in a
 # temporary directory — never in a commit, and never usable. Neither a documented example key nor an
 # obvious placeholder: measured, the scanner allowlists both, and a control it ignores proves nothing.
@@ -78,11 +79,21 @@ else
     pass "the scanner rejects a known-bad control"
 fi
 
-if gitleaks "$REPO" detect --no-git --no-banner --redact --exit-code 1 >/tmp/gitleaks-worktree.txt 2>&1; then
-    pass "no secret in the working tree"
+# What a push would actually carry: the tracked files as they stand, exported to a directory of
+# their own. Scanning the checkout itself would scan `.env`, `secrets/` and `tmp/` — ignored files
+# that hold real credentials by design, and whose absence from the push is checked above.
+export_dir="$(mktemp -d)"
+trap 'rm -rf "$control" "$export_dir"' EXIT
+git ls-files -z | while IFS= read -r -d "" file; do
+    mkdir -p "$export_dir/$(dirname "$file")"
+    cp "$file" "$export_dir/$file"
+done
+cp "$REPO/.gitleaks.toml" "$export_dir/" 2>/dev/null || true
+if gitleaks "$export_dir" detect --no-git --no-banner --redact --exit-code 1 >/tmp/gitleaks-tracked.txt 2>&1; then
+    pass "no secret in the files a push would carry"
 else
-    fail "Gitleaks found something in the working tree:"
-    sed 's/^/     /' /tmp/gitleaks-worktree.txt | head -40
+    fail "Gitleaks found something in a tracked file:"
+    sed 's/^/     /' /tmp/gitleaks-tracked.txt | head -40
 fi
 
 if [ -d "$REPO/.git" ]; then
