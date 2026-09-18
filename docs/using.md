@@ -30,8 +30,8 @@ it. A large change is read in parts, a press each.
 
 ```bash
 # this checkout's own environment, on this host's disk
-export UV_PROJECT_ENVIRONMENT="$(uv run --no-project --managed-python --python 3.13 python envpath.py "$PWD")"
-O="uv run --locked python cli.py"
+export UV_PROJECT_ENVIRONMENT="$(uv run --no-project --managed-python --python 3.13 python app/foundation/envpath.py "$PWD")"
+O="uv run --locked python -m app.interfaces.cli"
 
 $O "<task>"                        # a run on this repository
 $O "<task>" --repo webapp          # a run on a repository named in repos.json

@@ -6,17 +6,17 @@ answer does are in [structure.md](../structure.md).
 
 ```mermaid
 graph LR
-    operator([operator]) -- "browser, 127.0.0.1" --> workbench[workbench.py<br/>+ workbench/ page]
-    operator -. "tests, automation" .-> cli[cli.py]
-    workbench -- "client.py" --> temporal[(Temporal server<br/>orchestration namespace)]
-    cli -- "client.py: start · Update answer:&lt;stop-id&gt; · status query" --> temporal
+    operator([operator]) -- "browser, 127.0.0.1" --> workbench[app/interfaces/workbench/<br/>server.py + static/ page]
+    operator -. "tests, automation" .-> cli[app/interfaces/cli.py]
+    workbench -- "application/client.py" --> temporal[(Temporal server<br/>orchestration namespace)]
+    cli -- "application/client.py: start · Update answer:&lt;stop-id&gt; · status query" --> temporal
     operator -- "terminal WebSocket, token + origin" --> wslterm
     ui([Temporal web UI]) -- reads --> temporal
-    temporal -- "workflow tasks, orchestration queue" --> wslworker[WSL worker<br/>workflow.py + routing.py]
-    temporal -- "activities, target:wsl:host" --> wslhost[WSL worker<br/>activities.py]
-    temporal -- "activities, target:windows:host" --> winhost[Windows worker<br/>activities.py]
-    wslhost --- wslterm[WSL terminals<br/>terminal.py]
-    winhost --- winterm[Windows terminals<br/>terminal.py]
+    temporal -- "workflow tasks, orchestration queue" --> wslworker[WSL worker<br/>orchestration/workflow.py + routing.py]
+    temporal -- "activities, target:wsl:host" --> wslhost[WSL worker<br/>application/activities.py]
+    temporal -- "activities, target:windows:host" --> winhost[Windows worker<br/>application/activities.py]
+    wslhost --- wslterm[WSL terminals<br/>agents/terminal.py]
+    winhost --- winterm[Windows terminals<br/>agents/terminal.py]
     operator -- "terminal WebSocket, token + origin" --> winterm
     wslterm -- "argv + prompt, PTY, contained tree" --> wslagents([claude · codex on WSL])
     winterm -- "argv + prompt, ConPTY, contained tree" --> winagents([claude.exe · codex.exe])

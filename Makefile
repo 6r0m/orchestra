@@ -10,8 +10,8 @@ TASK_SAFE := $(value TASK)
 unexport TASK
 export TASK_SAFE
 
-# This checkout's uv-managed environment, on this host's own disk (envpath.py).
-V = UV_PROJECT_ENVIRONMENT="$$(uv run --no-project --managed-python --python 3.13 python envpath.py $(CURDIR))" \
+# This checkout's uv-managed environment, on this host's own disk (app/foundation/envpath.py).
+V = UV_PROJECT_ENVIRONMENT="$$(uv run --no-project --managed-python --python 3.13 python app/foundation/envpath.py $(CURDIR))" \
     uv run --locked python
 
 .PHONY: help up check down feature test public-check
@@ -30,7 +30,7 @@ down: ## Stop the workbench, both workers and the stack; its data stays on its v
 
 feature: ## Run one task through the workflow (usage: make feature TASK="fix X in Y")
 	@test -n "$$TASK_SAFE" || { echo 'usage: make feature TASK="fix X in Y"' >&2; exit 2; }
-	@$(V) cli.py "$$TASK_SAFE"
+	@$(V) -m app.interfaces.cli "$$TASK_SAFE"
 
 test: ## Run the whole suite in this checkout's environment
 	@bash run-tests.sh

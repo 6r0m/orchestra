@@ -78,6 +78,40 @@ the merge that follows it commits the verified tree, moves the plan to its done 
 an explicit merge commit, and removes the worktree and its branch — or hands a conflict back to the
 run's own agents rather than resolving it.
 
+## The flat root was right until the repository stopped being a folder
+
+While the orchestration lived inside another repository, a standing decision held every module at
+its own root: layout churn bought nothing the workflow engine did not already enforce, and the
+boundary that mattered — determinism — is Temporal's at runtime, not a folder's. That decision was
+recorded, acted on, and kept. It is now **superseded by D30**.
+
+Two things changed it. Orchestra became a repository of its own, meant to be read by people who did
+not watch it being built, and the runtime engine turned out to enforce none of what a reader needs:
+Temporal owns determinism, not source ownership, not separation of concerns, not which module may
+know about which.
+
+The evidence that settled it came from the flat layout fighting a cleanup it had been given. The
+repository root had been defined six times under three names; the fix was to give it one owner, and
+five of the six were duly collapsed onto it. The sixth could not be: `policy.py` and the module that
+now held the root were in the same layer, and the layering test — correctly — forbids a same-layer
+import. There was no legal way to write the fix. The root also had the wrong owner: the module that
+knows *which repositories a run operates on* had been made to answer *where Orchestra itself is
+installed*, which is a different fact that merely happened to resolve to the same string while every
+file sat in one directory.
+
+Both are gone with D30. `app/foundation/paths.py` derives the checkout root once and owns nothing
+else; `app/workspace/repos.py` owns target repositories and no longer answers for Orchestra's own
+location. Three packages stopped importing it in the move — `agents`, `observability` and the worker
+had only ever wanted the root.
+
+The layering test changed shape with the source. It used to name every module at the root in a total
+order, so adding a file meant editing the manifest and two modules in one layer could not import each
+other however sensible it was. It now enforces the direction between *packages* and reads the folders
+to find them: a new module needs no entry anywhere, a new package does, and imports inside a package
+are that package's own business. The allowed edges were derived from the imports that already
+existed, not from a diagram — an earlier draft of the boundaries was checked against the real import
+graph, contradicted it in three places, and was discarded rather than satisfied with adapters.
+
 ## What observability is not
 
 The trace records a run; nothing reads it back. No routing, no gate and no guard depends on it, and

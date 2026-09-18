@@ -60,6 +60,9 @@ Windows gets Windows agents and a Linux-only repository gets WSL agents — from
 machine. A turn is the vendor's real interactive CLI in a real PTY (ConPTY on Windows), contained so
 that the worker's death is the agent's death, including anything it started.
 
+The source is organised the same way: one package per concern under [app/](app/README.md), whose
+README routes to each and says what it owns, what it may import, and the invariants it keeps.
+
 Read [docs/architecture/structure.md](docs/architecture/structure.md) for what owns what, and
 [docs/architecture/diagrams/main.md](docs/architecture/diagrams/main.md) for the parts and the
 processes they run in.
@@ -140,7 +143,7 @@ file proves; [docs/history/](docs/history/) records how the system got here.
 
 | what | where |
 |---|---|
-| roles, brains, budgets, timeouts, ports, target hosts | [`policy.json`](policy.json), validated strictly by [`policy.py`](policy.py) |
+| roles, brains, budgets, timeouts, ports, target hosts | [`policy.json`](policy.json), validated strictly by [`policy.py`](app/foundation/policy.py) |
 | how each role works | [`roles/engineer.md`](roles/engineer.md), [`roles/architect.md`](roles/architect.md) |
 | the repositories runs may work on | `repos.json` — yours, ignored; copy [`repos.example.json`](repos.example.json) |
 | credentials and machine-specific values | `.env` — see [`.env.example`](.env.example) |
@@ -154,5 +157,5 @@ and its role files say enough to work without one.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). The vendored `workbench/vendor/xterm/` is
+MIT — see [LICENSE](LICENSE). The vendored `app/interfaces/workbench/static/vendor/xterm/` is
 [@xterm/xterm](https://github.com/xtermjs/xterm.js) 5.5.0, MIT, unmodified.

@@ -17,8 +17,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
-import policy as P      # noqa: E402
-import telemetry as T   # noqa: E402
+from app.foundation import policy as P      # noqa: E402
+from app.observability import telemetry as T   # noqa: E402
 
 NAME = "Orchestration Health"
 DESCRIPTION = ("How work items end, how often a phase passes at its first judgement, what the "

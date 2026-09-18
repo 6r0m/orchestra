@@ -66,26 +66,40 @@ where the run was. Do not re-derive a `states/` layer here.
 
 | part | responsibility |
 |---|---|
-| [workflow.py](../../workflow.py) | the run: stages, verdict routes, stops and their named answers, the final gate, the `status` query |
-| [routing.py](../../routing.py) | which stop a verdict asks for and where it sends the run — no dependencies |
-| [activities.py](../../activities.py) | everything a run does on its target host: resolve, worktree, role-run, merge, discard, the change for review, trace writes |
-| [nodes.py](../../nodes.py) | prompt composition, the agent argv, session identity, verdict parsing, failure classes |
-| [terminal.py](../../terminal.py) · [ptyhost.py](../../ptyhost.py) · [turn_hook.py](../../turn_hook.py) | each role's live terminal on its host — its record, its WebSocket, a role turn run in it and that turn's completion |
-| [launch.py](../../launch.py) | one agent process from an argv list, with its whole descendant tree contained |
-| [worktrees.py](../../worktrees.py) | the run's worktree through the target's own git: create, guard, merge, discard, the view |
-| [repos.py](../../repos.py) · [repos.json](../../repos.json) | which repository, target, base branch and worktree root a run uses |
-| [trust.py](../../trust.py) | telling this host's agent CLIs that a run's repository is one the operator works in, so no turn stops at their trust dialog |
-| [policy.json](../../policy.json) · [policy.py](../../policy.py) | roles, brains, budgets, access, target hosts — and strict validation of them |
-| [workbench.py](../../workbench.py) · [workbench/](../../workbench/index.html) | the operator's page: every run, its stop and answers, its live terminals, its rounds and its change |
-| [client.py](../../client.py) | the one client of runs — start, list, status, answer, the change, the worktrees — shared by the page and the CLI |
-| [cli.py](../../cli.py) | the command line over the same client: start, answer, continue, show, list — for tests and automation |
-| [worker.py](../../worker.py) · [workers.sh](../../workers.sh) · [workers.ps1](../../workers.ps1) | one Temporal worker per host, and their start, check and stop |
+| [app/](../../app/README.md) | the production source, one package per concern; each package's README is its contract |
+| [app/orchestration/](../../app/orchestration/README.md) — [workflow.py](../../app/orchestration/workflow.py) | the run: stages, verdict routes, stops and their named answers, the final gate, the `status` query |
+| [routing.py](../../app/orchestration/routing.py) | which stop a verdict asks for and where it sends the run — no dependencies |
+| [app/application/](../../app/application/README.md) — [activities.py](../../app/application/activities.py) | everything a run does on its target host: resolve, worktree, role-run, merge, discard, the change for review, trace writes |
+| [client.py](../../app/application/client.py) | the one client of runs — start, list, status, answer, the change, the worktrees — shared by the page and the CLI |
+| [app/agents/](../../app/agents/README.md) — [nodes.py](../../app/agents/nodes.py) | prompt composition, the agent argv, session identity, verdict parsing, failure classes |
+| [terminal.py](../../app/agents/terminal.py) · [ptyhost.py](../../app/agents/ptyhost.py) · [turn_hook.py](../../app/agents/turn_hook.py) | each role's live terminal on its host — its record, its WebSocket, a role turn run in it and that turn's completion |
+| [launch.py](../../app/agents/launch.py) | one agent process from an argv list, with its whole descendant tree contained |
+| [trust.py](../../app/agents/trust.py) | telling this host's agent CLIs that a run's repository is one the operator works in, so no turn stops at their trust dialog |
+| [app/workspace/](../../app/workspace/README.md) — [worktrees.py](../../app/workspace/worktrees.py) | the run's worktree through the target's own git: create, guard, merge, discard, the view |
+| [repos.py](../../app/workspace/repos.py) · [repos.json](../../repos.example.json) | which repository, target, base branch and worktree root a run uses |
+| [app/foundation/](../../app/foundation/README.md) — [paths.py](../../app/foundation/paths.py) | the one derivation of this checkout's root, the runtime root a run writes under, and the secrets directory |
+| [policy.json](../../policy.json) · [policy.py](../../app/foundation/policy.py) | roles, brains, budgets, access, target hosts — and strict validation of them |
+| [envpath.py](../../app/foundation/envpath.py) | where each checkout's environment lives on each host, and its guarded removal |
+| [app/observability/](../../app/observability/README.md) — [telemetry.py](../../app/observability/telemetry.py) | the optional trace of a run — its work item, phases, role steps, stops, final diff and scores, written to the [trace contract](trace-contract.md) — and the per-run settings that let each agent's tracing plugin nest its turns there |
+| [app/interfaces/](../../app/interfaces/README.md) — [workbench/](../../app/interfaces/workbench/server.py) | the operator's page: every run, its stop and answers, its live terminals, its rounds and its change |
+| [cli.py](../../app/interfaces/cli.py) | the command line over the same client: start, answer, continue, show, list — for tests and automation |
+| [worker.py](../../app/interfaces/worker.py) · [workers.sh](../../workers.sh) · [workers.ps1](../../workers.ps1) | one Temporal worker per host, and their start, check and stop |
 | [temporal/](../../temporal/compose.yaml) | the Temporal service: server, its PostgreSQL, the web UI, the namespace |
-| [envpath.py](../../envpath.py) | where each checkout's environment lives on each host, and its guarded removal |
-| [telemetry.py](../../telemetry.py) | the optional trace of a run — its work item, phases, role steps, stops, final diff and scores, written to the [trace contract](trace-contract.md) — and the per-run settings that let each agent's tracing plugin nest its turns there |
 | [roles/](../../roles/) | two persona files, sent at session start |
 | [tests/](../../tests/README.md) | what is proven, and how to run it |
 
+- **D30** **Source is organised by concern, not by a flat root.** Each concern owns a
+  package under `app/` — `foundation`, `orchestration`, `workspace`, `agents`,
+  `observability`, `application`, `interfaces` — and each carries a README stating what it
+  owns, what it does not, what it may import and the invariants it keeps. The folder is the
+  structural source of truth: `tests/test_architecture.py` enforces the direction between
+  packages, so a new module inside a package needs no entry anywhere, and a new *package*
+  does. This supersedes the standing decision to keep every module at the repository root,
+  which held while the orchestration lived inside another repository and was reversed when
+  Orchestra became a repository of its own; the reasoning is in
+  [decisions.md](../history/decisions.md). Three files are still launched by path and
+  therefore import nothing of ours — `app/foundation/envpath.py`, `app/agents/ptyhost.py`
+  and `app/agents/turn_hook.py`.
 - **D2** **Two roles**: **engineer** (write access — plans the
   change, then builds it; one session, full context arc) and **architect**
   (read-only — assesses the plan, then verifies the build; one session, so
@@ -118,13 +132,29 @@ nothing else routes. Observability depends on the workflow and is never read bac
 each verdict means is in [the architect's own file](../../roles/architect.md); a host that binds its
 own methodology to a stage (`stage_skills`) owns it there instead.
 
-The modules themselves depend in four layers — facts and pure decisions, the mechanisms over them,
-what the outside drives a run through, and the entry points — and a module imports only a lower
-layer. Nothing imports an entry point, which is what keeps argparse and console output out of the
-worker and the workbench. That order is not a convention here: `tests/test_architecture.py` records
-it and fails on an import that inverts it, and its own control proves the check can reject one.
-Where a run may put files, and which agent a turn is, each have exactly one owner for the same
-reason — a second definition is equal only until someone moves a module.
+The source itself is organised by concern (D30): one package per concern under `app/`, and the
+folder is the ownership boundary. The packages depend in one direction —
+
+```
+foundation     <- everything. Reads nothing of ours.
+orchestration  -> foundation
+workspace      -> foundation
+agents         -> foundation
+observability  -> foundation
+application    -> foundation, orchestration, workspace, agents, observability
+interfaces     -> all of the above
+```
+
+— and nothing imports `interfaces`, which is what keeps argparse and console output out of the
+worker and the workbench. Imports inside a package are that package's own business. That direction
+is not a convention here: `tests/test_architecture.py` reads `app/` and fails on an import that
+crosses a boundary the table does not allow, and its own controls prove each check can reject one.
+The table records the imports that exist; no indirection exists here to satisfy it.
+
+Where a run may put files, where this checkout is, and which agent a turn is each have exactly one
+owner for the same reason — a second definition is equal only until someone moves a module. The
+checkout root is derived once, in `app/foundation/paths.py`, and the suite proves the derivation
+still lands on a checkout.
 
 - **D4** **Only architect verdicts route** — `PASS / PATCH / BLOCKER /
   UNVERIFIED`. Engineer output always goes to the architect; an engineer-side
@@ -391,7 +421,7 @@ constrains.
 |---|---|
 | D1 Temporal owns the workflow, D5 round budget and single attempts, D8 compact state | [Owns](#owns) |
 | D9 no chat-UI automation on critical accounts, D11 agents never stage, commit or push | [Does not own](#does-not-own) |
-| D2 two roles and four stages, D13 config versus code, D22 environments | [Composition](#composition) |
+| D2 two roles and four stages, D13 config versus code, D22 environments, D30 source organised by concern | [Composition](#composition) |
 | D4 verdict routing, D7 sessions, D17 execution seam, D18 model as configuration, D20 observability owners, D21 provider session stores, D23 a task queue per host, D24 worktree lifecycle and final gate, D29 the workbench | [Relationships and dependency direction](#relationships-and-dependency-direction) |
 | D3, D6, D10, D14, D15, D16, D18b, D19, D25 determinism, D26 repository facts, D27 controller-only git | [Invariants](#invariants) |
 | D28 containment, live-terminal and plugin-build limits | [Risks and technical debt](#risks-and-technical-debt) |

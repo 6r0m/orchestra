@@ -6,17 +6,17 @@ the test suite.
 | file | what it is for |
 |---|---|
 | [ui_fixture.py](ui_fixture.py) | emit one complete work item — both roles, a round sent back, a lost session rehydrated, a blocker answered with guidance, the approval with its summary, a failed build attempt continued, and a final diff — to the trace UI in seconds, through the real workflow on Temporal's time-skipping test server and without calling a model, so the operator view can be judged without spending a real run |
-| [trust_probe.py](trust_probe.py) | check on this host that a repository recorded by [`trust.py`](../trust.py) raises no trust dialog in a worktree of it: it makes a throwaway repository and worktree under `tmp/`, records it as a run does, starts the real CLI there, reports whether the dialog appeared — then removes the worktree, the files and the records it made. Run it per CLI after either vendor is upgraded |
+| [trust_probe.py](trust_probe.py) | check on this host that a repository recorded by [`trust.py`](../app/agents/trust.py) raises no trust dialog in a worktree of it: it makes a throwaway repository and worktree under `tmp/`, records it as a run does, starts the real CLI there, reports whether the dialog appeared — then removes the worktree, the files and the records it made. Run it per CLI after either vendor is upgraded |
 | [langfuse_dashboard.py](langfuse_dashboard.py) | create or update the *Orchestration Health* dashboard through Langfuse's API, from widgets the suite checks against the trace contract |
 
-Both write to the real Langfuse, with the keys `telemetry.py` reads from
+Both write to the real Langfuse, with the keys `app/observability/telemetry.py` reads from
 `secrets/langfuse.env`. They are therefore **not hermetic** and deliberately not
 named `test_*`, so the suite never collects them. The fixture files its rows under
 the environment `fixture`, apart from real runs.
 
 It also writes what `gdiff -s` would copy for the fixture's worktree to
 `tmp/ui-fixture/<run-id>.expected.patch`, computed by running `gdiff -s`'s own
-git commands on a copy rather than through `telemetry.py`, and the run and trace
+git commands on a copy rather than through `app/observability/telemetry.py`, and the run and trace
 ids to `tmp/ui-fixture/last.json`. A browser check can then compare what the
 final diff's copy button puts on the clipboard against an independent oracle.
 
@@ -25,8 +25,8 @@ final diff's copy button puts on the clipboard against an independent oracle.
 Role turns run the agents' interactive CLIs, and both stop at a trust dialog before working in a
 repository they have no record of — a turn would wait there, in its terminal, until someone answered
 it in the workbench. That dialog asks what the operator answered by starting a run on that repository — a
-[`repos.json`](../repos.json) entry, or a path typed into the workbench, which starts runs on any
-repository — so a run records the answer itself before any agent starts ([`trust.py`](../trust.py), from the `prepare`
+[`repos.json`](../repos.example.json) entry, or a path typed into the workbench, which starts runs on any
+repository — so a run records the answer itself before any agent starts ([`trust.py`](../app/agents/trust.py), from the `prepare`
 activity, on the run's own target host): Claude's `~/.claude.json` and Codex's `~/.codex/config.toml`
 gain one entry for that repository. Both CLIs resolve a run's worktree to the repository it belongs
 to, so the one entry covers every later run of it on that host (measured for both CLIs on both hosts:

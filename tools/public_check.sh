@@ -35,7 +35,7 @@ for path in .env secrets repos.json tmp; do
     fi
 done
 
-keys="$(tracked '*.pem' '*.key' '*.p12' '*.pfx' '*.token' | grep -v '^workbench/vendor/' || true)"
+keys="$(tracked '*.pem' '*.key' '*.p12' '*.pfx' '*.token' | grep -v '^app/interfaces/workbench/static/vendor/' || true)"
 if [ -n "$keys" ]; then
     fail "key or token files are tracked: $(echo "$keys" | tr '\n' ' ')"
 else

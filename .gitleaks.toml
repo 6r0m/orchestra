@@ -1,14 +1,23 @@
 # Gitleaks configuration for Orchestra. It extends the tool's own rules and narrows nothing about
-# them; the only allowlist here is one path, for one investigated reason.
+# them; the only allowlist here is one file, at the two paths it has lived at, for one investigated
+# reason.
 [extend]
 useDefault = true
 
 [[allowlists]]
 description = """
 The vendored xterm.js is minified upstream code, and one of its identifiers has enough entropy to
-match the generic-api-key rule. It is not a credential: workbench/vendor/xterm/ is @xterm/xterm
-5.5.0 exactly as published — xterm.js, xterm.css and LICENSE compare byte for byte against the
-registry tarball, whose sha512 is recorded in VERSION beside them. The allowlist is that directory
-and nothing else, so a real secret anywhere in this repository is still a failure.
+match the generic-api-key rule. The match is `t.FourKeyMap=t.TwoKeyMap`, a minified export
+assignment, and it is not a credential: the directory is @xterm/xterm 5.5.0 exactly as published —
+xterm.js, xterm.css and LICENSE compare byte for byte against the registry tarball, whose sha512 is
+recorded in VERSION beside them.
+
+Two paths, one file. The page moved to app/interfaces/workbench/static/ with the server that serves
+it (D30), and the history a push carries still holds the same bytes under workbench/vendor/xterm/ —
+identical sha256, so the second path allowlists no file the first did not. Both entries are that
+directory and nothing else, so a real secret anywhere in this repository is still a failure.
 """
-paths = ['''^workbench/vendor/xterm/''']
+paths = [
+    '''^app/interfaces/workbench/static/vendor/xterm/''',
+    '''^workbench/vendor/xterm/''',
+]

@@ -11,7 +11,7 @@ from temporalio import workflow
 
 with workflow.unsafe.imports_passed_through():
     import control_trace_sink
-    import workflow as WF
+    from app.orchestration import workflow as WF
 
 
 @workflow.defn

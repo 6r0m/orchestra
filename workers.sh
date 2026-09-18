@@ -2,7 +2,7 @@
 # Start, check or stop what a run needs: the Temporal stack, the WSL and Windows workers, and the workbench.
 #   bash workers.sh up | check | down
 # Invoke through `bash`: the Windows drive mounts without execute bits. Each worker
-# runs in its host's own uv-managed environment (envpath.py) and records its pid in
+# runs in its host's own uv-managed environment (app/foundation/envpath.py) and records its pid in
 # tmp/orchestration/worker-<host>.pid; the Windows side is workers.ps1.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,7 +19,7 @@ COMPOSE_ENV=""
 [ -f "$REPO/.env" ] && COMPOSE_ENV="--env-file $REPO/.env"
 mkdir -p "$RUNTIME"
 
-UV_PROJECT_ENVIRONMENT="$(uv run --no-project --managed-python --python 3.13 python "$HERE/envpath.py" "$REPO")"
+UV_PROJECT_ENVIRONMENT="$(uv run --no-project --managed-python --python 3.13 python "$HERE/app/foundation/envpath.py" "$REPO")"
 export UV_PROJECT_ENVIRONMENT
 
 windows() {
@@ -38,7 +38,7 @@ workbench_alive() {
 }
 
 check() {
-    uv --project "$HERE" run --locked --no-sync python "$HERE/worker.py" check || return 1
+    (cd "$HERE" && uv --project "$HERE" run --locked --no-sync python -m app.interfaces.worker check) || return 1
     if workbench_alive && curl -fsS -o /dev/null "$WORKBENCH_URL/"; then
         echo "workbench              $WORKBENCH_URL"
     else
@@ -66,7 +66,7 @@ case "${1:-}" in
             echo "wsl worker already running (pid $(cat "$PID"))"
         else
             # Every stream redirected and the shell replaced: nothing is left holding this script's output open.
-            (cd "$HERE" && exec setsid nohup uv --project "$HERE" run --locked --no-sync python worker.py wsl \
+            (cd "$HERE" && exec setsid nohup uv --project "$HERE" run --locked --no-sync python -m app.interfaces.worker wsl \
                 >>"$RUNTIME/worker-wsl.log" 2>&1 </dev/null) >/dev/null 2>&1 </dev/null &
             echo "wsl worker started; log: $RUNTIME/worker-wsl.log"
         fi
@@ -74,7 +74,7 @@ case "${1:-}" in
         if workbench_alive; then
             echo "workbench already running (pid $(cat "$WORKBENCH_PID"))"
         else
-            (cd "$HERE" && exec setsid nohup uv --project "$HERE" run --locked --no-sync python workbench.py \
+            (cd "$HERE" && exec setsid nohup uv --project "$HERE" run --locked --no-sync python -m app.interfaces.workbench.server \
                 >>"$RUNTIME/workbench.log" 2>&1 </dev/null) >/dev/null 2>&1 </dev/null &
             echo "workbench started; log: $RUNTIME/workbench.log"
         fi

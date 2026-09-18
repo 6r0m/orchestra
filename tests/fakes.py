@@ -91,7 +91,7 @@ class FakeRepos:
 
     def resolve(self, selected, brains, worktree_root):
         if self.refusal:
-            import repos
+            from app.workspace import repos
             raise repos.Refused(self.refusal)
         return {"repo_path": "/fake/repo", "base_branch": "develop", "worktree_root": "/fake/worktrees",
                 "todo_dir": "todo", "todo_done_dir": "todo/done", "todo_name": "%Y-%m-%d_%H%M-{slug}"}

@@ -1,7 +1,7 @@
 # Trace contract
 
 What the trace of a run promises the saved views, the dashboard and the scores built on it. The
-trace is written by [`telemetry.py`](../../telemetry.py), which owns the exact names and fields;
+trace is written by [`telemetry.py`](../../app/observability/telemetry.py), which owns the exact names and fields;
 this document owns what they mean, when each is written, and what the vendor plugins' rows do not
 promise. Where the trace sits among the observability owners is `structure.md` D20.
 

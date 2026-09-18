@@ -18,8 +18,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(
 HERE = os.path.dirname(os.path.abspath(__file__))
 ORCH = os.path.abspath(os.path.join(HERE, os.pardir))
 sys.path.insert(0, ORCH)
-import launch  # noqa: E402
-import trust  # noqa: E402
+from app.agents import launch  # noqa: E402
+from app.agents import trust  # noqa: E402
 
 CLEAN = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 ASKED = ("Accessing workspace", "Do you trust", "trust this folder", "Yes, continue")
@@ -55,7 +55,7 @@ def main(brain, argv):
         contained = launch._Tree()
         with open(out, "wb") as sink:
             # An interactive CLI does not exit: watch what it draws, then end its whole tree.
-            agent = contained.start([sys.executable, os.path.join(ORCH, "ptyhost.py"), "160", "48", "--"]
+            agent = contained.start([sys.executable, os.path.join(ORCH, "app", "agents", "ptyhost.py"), "160", "48", "--"]
                                     + argv + ["--", PROMPT],
                                     tree, subprocess.DEVNULL, sink, subprocess.STDOUT, dict(os.environ))
             try:

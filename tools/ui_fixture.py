@@ -24,8 +24,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ORCH = os.path.dirname(HERE)
 sys.path[:0] = [ORCH, os.path.join(ORCH, "tests")]
 
-import repos  # noqa: E402
-import telemetry as T  # noqa: E402
+from app.foundation import paths  # noqa: E402
+from app.observability import telemetry as T  # noqa: E402
 import temporal_env as E  # noqa: E402
 from fakes import FakeWorktrees, codex_review_first, codex_review_resumed  # noqa: E402
 
@@ -157,7 +157,7 @@ def main():
             print("expected the stops blocker, approval, failed, final; got %s" % stops, file=sys.stderr)
             return 1
 
-        out_dir = os.path.join(repos.REPO, "tmp", "ui-fixture")
+        out_dir = os.path.join(paths.REPO, "tmp", "ui-fixture")
         os.makedirs(out_dir, exist_ok=True)
         expected = os.path.join(out_dir, "%s.expected.patch" % run.run_id)
         with open(expected, "wb") as fh:

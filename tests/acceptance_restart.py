@@ -31,10 +31,10 @@ sys.path[:0] = [PKG, HERE]
 from temporalio.client import Client, WorkflowUpdateFailedError  # noqa: E402
 from temporalio.exceptions import WorkflowAlreadyStartedError  # noqa: E402
 
-import client as runs  # noqa: E402
-import policy as P  # noqa: E402
-import trust  # noqa: E402
-import workflow as WF  # noqa: E402
+from app.application import client as runs  # noqa: E402
+from app.foundation import policy as P  # noqa: E402
+from app.agents import trust  # noqa: E402
+from app.orchestration import workflow as WF  # noqa: E402
 
 RUNTIME = os.path.join(REPO, "tmp", "orchestration")
 
@@ -147,7 +147,7 @@ class Acceptance:
 
     def start_worker(self):
         log = open(os.path.join(self.tmp, "worker.log"), "a")
-        self.worker = subprocess.Popen([sys.executable, os.path.join(PKG, "worker.py"), "wsl"], cwd=PKG,
+        self.worker = subprocess.Popen([sys.executable, "-m", "app.interfaces.worker", "wsl"], cwd=PKG,
                                        env=self.env(), stdout=log, stderr=log, start_new_session=True)
 
     def kill_worker(self):
@@ -156,12 +156,12 @@ class Acceptance:
             self.worker.wait()
 
     def cli(self, *args):
-        done = subprocess.run([sys.executable, os.path.join(PKG, "cli.py")] + list(args), cwd=PKG,
+        done = subprocess.run([sys.executable, "-m", "app.interfaces.cli"] + list(args), cwd=PKG,
                               env=self.env(), capture_output=True, text=True, timeout=900)
         return done.returncode, done.stdout + done.stderr
 
     async def polled(self, client, queue, seconds=90):
-        import cli
+        from app.interfaces import cli
         from temporalio.api.enums.v1 import TaskQueueType
         deadline = time.monotonic() + seconds
         while time.monotonic() < deadline:
@@ -273,7 +273,7 @@ class Acceptance:
 
         step("a worker killed while its role runs takes the role's whole tree with it")
         open(self.hang, "w").close()
-        proc = subprocess.Popen([sys.executable, os.path.join(PKG, "cli.py"), "second change", "--repo", "sample",
+        proc = subprocess.Popen([sys.executable, "-m", "app.interfaces.cli", "second change", "--repo", "sample",
                                  "--policy", self.policy, "--auto-proceed"], cwd=PKG, env=self.env(),
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         deadline = time.monotonic() + 300

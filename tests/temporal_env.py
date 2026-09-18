@@ -25,10 +25,10 @@ for path in (PKG, HERE):
 from temporalio.testing import WorkflowEnvironment  # noqa: E402
 from temporalio.worker import Worker  # noqa: E402
 
-import activities as A  # noqa: E402
-import cli  # noqa: E402
-import policy as policy_mod  # noqa: E402
-import workflow as WF  # noqa: E402
+from app.application import activities as A  # noqa: E402
+from app.interfaces import cli  # noqa: E402
+from app.foundation import policy as policy_mod  # noqa: E402
+from app.orchestration import workflow as WF  # noqa: E402
 
 # As a host that binds its own methodology to each stage does; the shipped policy binds none, and
 # `test_workflow` proves both — that a bound skill leads the prompt, and that none appears without one.

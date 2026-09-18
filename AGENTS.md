@@ -43,11 +43,20 @@ carries the accepted decisions and the invariants that must not be weakened. In 
 
 ## Working here
 
-- The repository root is the package: modules are imported by bare name and the workers, the PTY
-  host and the tools are launched by path. Keep it that way.
+- Source is organised by concern under [app/](app/README.md), one package each, and the folder is
+  the ownership boundary (D30). [app/README.md](app/README.md) routes to them; each package's own
+  README states what it owns, what it does not and what it may import, and
+  `tests/test_architecture.py` enforces the direction. Put a new module in the package that owns
+  the concern rather than beside the one that calls it.
+- Three files are launched by path and therefore import nothing of ours — `app/foundation/envpath.py`,
+  which runs before any environment exists, and `app/agents/ptyhost.py` and `app/agents/turn_hook.py`,
+  which the containment and the vendors' hooks start. Keep them that way. Everything else is a
+  module: `python -m app.interfaces.cli`, `python -m app.interfaces.worker`,
+  `python -m app.interfaces.workbench.server`.
 - Tests before behaviour: a defect gets a failing test that fails for the real reason first.
   `bash run-tests.sh` on WSL or Linux, and the host suite on Windows — both are in
-  [tests/README.md](tests/README.md).
+  [tests/README.md](tests/README.md). The suite mirrors the packages: a concern's tests live in
+  the folder named after it.
 - Documentation has one owner per fact. `docs/architecture/` owns the architecture; a README routes
   to it rather than restating it.
 - Prefer what the platform already provides over new machinery, and leave nothing behind that has no
