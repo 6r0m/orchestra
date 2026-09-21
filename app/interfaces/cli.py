@@ -1,8 +1,10 @@
-"""Operator entrypoint: a Temporal client for runs. Four forms, and the worktree view:
+"""Operator entrypoint: a Temporal client for runs. Six forms, and the worktree view:
 
     orchestrate "<task>" [--auto-proceed] [--repo NAME|PATH]
     orchestrate --resume <run-id> --answer "<answer>" [--confirm]
     orchestrate --continue <run-id>
+    orchestrate --stop <run-id>
+    orchestrate --force-terminate <run-id>
     orchestrate --show <run-id>
     orchestrate --worktrees [--repo NAME|PATH]
 
@@ -188,6 +190,35 @@ async def _answer(client, run_id, text, confirm, tele, check, only=None):
     return _report(status, run_id, _trace_url(tele, status["state"]))
 
 
+async def _stop(client, run_id, tele):
+    """Stop the run and follow it until it ends; 0 once it has, whatever git decided on the way."""
+    status = await runs.status(client, run_id)
+    if status is None:
+        print("error: no run %r — refusing" % run_id, file=sys.stderr)
+        return 3
+    try:
+        await runs.stop(client, run_id)
+    except runs.NotWaiting as error:
+        print("error: %s — refusing" % error, file=sys.stderr)
+        return 3
+    print("stopping %s" % run_id, flush=True)
+    handle = client.get_workflow_handle(run_id)
+    stop = status["stop"]
+    status = await follow(handle, printed=len(status["lines"]), answered=stop and stop["id"])
+    code = _report(status, run_id, _trace_url(tele, status["state"]))
+    return 0 if (await handle.describe()).close_time is not None else code
+
+
+async def _force_terminate(client, run_id):
+    try:
+        await runs.force_terminate(client, run_id, "force terminated from the command line")
+    except runs.NotWaiting as error:
+        print("error: %s — refusing" % error, file=sys.stderr)
+        return 3
+    print("terminated %s: its worktree and branch are left as they are" % run_id)
+    return 0
+
+
 def _elapsed(previous, current):
     """Wall time between two timeline entries, or '-' when it cannot be computed."""
     if not previous or not current:
@@ -262,13 +293,17 @@ def parse_args(argv):
     parser.add_argument("--confirm", action="store_true", help="confirm a discard")
     parser.add_argument("--continue", dest="continue_", metavar="RUN_ID",
                         help="run a failed stage again once you have fixed its cause")
+    parser.add_argument("--stop", metavar="RUN_ID", help="stop this run, keeping its worktree and branch")
+    parser.add_argument("--force-terminate", metavar="RUN_ID",
+                        help="end this run at once, with no cleanup: for a run a stop cannot finish")
     parser.add_argument("--show", metavar="RUN_ID", help="print this run's history and stop")
     parser.add_argument("--worktrees", action="store_true", help="list the repository's worktrees")
     parser.add_argument("--policy", metavar="PATH")
     args = parser.parse_args(argv)
-    if sum(map(bool, (args.task, args.resume, args.continue_, args.show, args.worktrees))) != 1:
-        parser.error("give exactly one of: a task, --resume <run-id>, --continue <run-id>, --show <run-id>, "
-                     "--worktrees")
+    if sum(map(bool, (args.task, args.resume, args.continue_, args.stop, args.force_terminate, args.show,
+                      args.worktrees))) != 1:
+        parser.error("give exactly one of: a task, --resume <run-id>, --continue <run-id>, --stop <run-id>, "
+                     "--force-terminate <run-id>, --show <run-id>, --worktrees")
     if args.resume and args.answer is None:
         parser.error("--resume requires --answer")
     if not args.resume and args.answer is not None:
@@ -282,12 +317,16 @@ async def run(argv=None, client=None, tele=None, check=True):
     try:
         if client is None:
             client = await runs.connect()
-        if tele is None and check and not args.show and not args.worktrees:
+        if tele is None and check and not args.show and not args.worktrees and not args.force_terminate:
             tele = telemetry.resolve()
         if args.show:
             return await _show(client, args.show)
         if args.worktrees:
             return await _worktrees(client, args, check)
+        if args.stop:
+            return await _stop(client, args.stop, tele)
+        if args.force_terminate:
+            return await _force_terminate(client, args.force_terminate)
         if args.resume:
             return await _answer(client, args.resume, args.answer, args.confirm, tele, check)
         if args.continue_:

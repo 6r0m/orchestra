@@ -67,6 +67,7 @@ function now(view) {
   const since = view.since ? " · for " + elapsed(view.since) : "";
   let text = view.status || "";
   if (view.state === "running") text = [view.stage, view.role].filter(Boolean).join(" · ") + since;
+  if (view.state === "stopping") text = "stopping" + (view.stage ? ": " + view.stage : "") + since;
   if (view.state === "waiting") text = "waiting for you: " + view.stop.reason + since;
   if (view.state === "failed") text = "failed: " + (view.failure || "").split("\n")[0] + since;
   const blocked = view.blocked_by.map((host) => "the " + (HOSTS[host] || host) + " is down");
@@ -109,7 +110,8 @@ async function refreshRuns() {
   const list = page.runs.concat(older.filter((run) => !seen.has(run.run_id)));
   const groups = { "runs-waiting": [], "runs-running": [], "runs-finished": [] };
   for (const run of list) {
-    const group = { waiting: "runs-waiting", failed: "runs-waiting", running: "runs-running" }[run.state];
+    const group = { waiting: "runs-waiting", failed: "runs-waiting", running: "runs-running",
+      stopping: "runs-running" }[run.state];
     groups[group || "runs-finished"].push(run);
   }
   for (const [id, runs] of Object.entries(groups)) {
@@ -213,6 +215,7 @@ function select(runId) {
   $("diff-summary").textContent = "";
   $("diff-patch").textContent = "";
   $("diff-more").hidden = true;
+  $("run-control-result").textContent = "";
   diffRead = { snapshot: null, total: 0, bytes: 0 };
   refreshRun();
   refreshRuns();
@@ -239,6 +242,8 @@ async function refreshRun() {
   const shown = now(view);
   $("run-now").replaceChildren(el("span", shown.text), el("span", shown.blocked ? " · " + shown.blocked : "",
     "blocked"));
+  $("run-controls").hidden = !runActive;
+  $("run-stop").disabled = view.state === "stopping";
   $("link-temporal").href = status.links.temporal;
   $("link-trace").hidden = !status.links.trace;
   if (status.links.trace) $("link-trace").href = status.links.trace;
@@ -301,6 +306,32 @@ async function answer(stop, action) {
   refreshRun();
   refreshRuns();
 }
+
+// A run's lifecycle, beside its stop's answers: Stop ends it from whatever it is doing and keeps its
+// work; force terminate is for a run a Stop cannot finish, and says what it leaves.
+const LIFECYCLE = {
+  stop: { ask: "Stop this run? Its worktree and branch stay as they are.", said: "stopping" },
+  terminate: { ask: "Force terminate ends the run at once, with no cleanup. Left as they are: its worktree " +
+    "and branch; an agent at work stops at its turn's next heartbeat, and the run's terminals stay until " +
+    "its host's worker restarts. Force terminate?", said: "terminated", body: { confirm: true } },
+};
+
+async function lifecycle(kind) {
+  const control = LIFECYCLE[kind];
+  if (!window.confirm(control.ask)) return;
+  $("run-control-result").textContent = "sending…";
+  try {
+    await api("/api/runs/" + encodeURIComponent(selected) + "/" + kind, control.body || {});
+    $("run-control-result").textContent = control.said;
+  } catch (error) {
+    $("run-control-result").textContent = "not accepted: " + error.message;
+    return;
+  }
+  refreshRun();
+  refreshRuns();
+}
+$("run-stop").onclick = () => lifecycle("stop");
+$("run-terminate").onclick = () => lifecycle("terminate");
 
 function renderTimeline(timeline) {
   const root = $("timeline");

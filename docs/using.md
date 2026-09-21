@@ -28,6 +28,12 @@ each verdict and its feedback, the change, and links to its Temporal and (if con
 pages. Each terminal is the vendor's own CLI: press Esc to interrupt a working agent, type to steer
 it. A large change is read in parts, a press each.
 
+*Stop run* ends a run from whatever it is doing — an agent at work, a stop waiting, a failed stage,
+the final gate, a host whose worker is down — and keeps its worktree and branch as they are. A
+merge or discard already running is let finish first, and decides how the run ends. *Force
+terminate* is for a run a Stop cannot finish: it ends the run at once with no cleanup, and its
+confirmation says what that leaves.
+
 *Worktrees* lists any repository's worktrees and which of them are still unmerged.
 
 ## The command line
@@ -41,6 +47,8 @@ $O "<task>"                        # a run on this repository
 $O "<task>" --repo webapp          # a run on a repository named in repos.json
 $O --resume <run-id> --answer yes  # answer the stop the run waits at
 $O --continue <run-id>             # run a failed stage again, after you fixed its cause
+$O --stop <run-id>                 # end a run from whatever it is doing, keeping its worktree and branch
+$O --force-terminate <run-id>      # end a run a stop cannot finish, at once and with no cleanup
 $O --show <run-id>                 # the stage table and the architect's words
 $O --worktrees --repo webapp       # every worktree, and whether its work is merged
 ```
@@ -49,7 +57,8 @@ Each stop prints what it asks and the answers it takes: `yes`, `revise <feedback
 plan's approval; your guidance or `abort` at a blocker or an exhausted budget; `continue` or `abort`
 after a failed stage. At `READY_FOR_HUMAN` the run waits for `merge`, `revise engineer <feedback>`,
 `revise architect <feedback>`, or `discard` with `--confirm`. Nothing is committed, merged or removed
-before your `merge` or `discard`. A stopped run waits indefinitely, and any process may answer it.
+before your `merge` or `discard`. A run waiting at a stop waits indefinitely, and any process may
+answer it.
 
 ## Where to look when something is wrong
 

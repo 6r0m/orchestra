@@ -7,7 +7,7 @@ do so deterministically, so Temporal can replay the decision and reach the same 
 
 ## Owns
 
-- `workflow` — the run: `plan → assess → build → verify`, the stops and their named answers, the final gate, and the `status` query — which also says what the run is doing now and since when.
+- `workflow` — the run: `plan → assess → build → verify`, the stops and their named answers, the final gate, what a Stop does to it, and the `status` query — which also says what the run is doing now and since when.
 - `routing` — which stop a verdict asks for and where it sends the run: two pure functions with no dependencies at all.
 
 ## Does not own
@@ -43,6 +43,7 @@ the queue; what the activity does is the other side's.
 
 - **The workflow is deterministic (D25).** A change to what it commands goes behind `workflow.patched(...)`, or the recorded histories in `tests/histories/` stop replaying — `tests/orchestration/test_replay.py` is the guard, with a control.
 - **A stop waits here and nowhere else (D6).** Each stop publishes the actions it takes, a revise at the final gate named per role, and its answer arrives as an Update carrying one of them, with the stable id `answer:<stop-id>`, so an answer sent twice is applied once. No activity ever waits for a human.
+- **A Stop is Temporal's cancellation, heard wherever the run waits (D31).** It ends the run `STOPPED` and runs no git; a git side effect already running lands first and decides how the run ends; the cleanup waits a bounded time, so a host whose worker is gone never holds it.
 - **Only architect verdicts route (D4).** An engineer's blocker reaches a human only through the architect.
 - **There is no state machine layer**, deliberately. Do not re-derive one; the reasoning is in [the project's structure document](../../../../docs/architecture/structure.md).
 

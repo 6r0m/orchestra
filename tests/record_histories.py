@@ -2,13 +2,16 @@
 
 Rerun only when the workflow changes on purpose, and then behind `workflow.patched`,
 so the histories recorded before the change still replay:
-`python tests/record_histories.py`.
+`python tests/record_histories.py [name ...]` — the named histories only, every one when none is
+named. A new history is recorded by its name alone, so the ones older code wrote stay as they were.
 """
 import base64
 import json
 import os
 import re
 import sys
+import threading
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PKG = os.path.abspath(os.path.join(HERE, os.pardir))
@@ -81,8 +84,7 @@ def save(name, run):
     print("recorded %s: %d events, %d identities replaced" % (name, len(history.events), replaced))
 
 
-def main():
-    os.makedirs(HISTORIES, exist_ok=True)
+def patch_loop_approval_merge():
     a1, _ = codex_review_first("PATCH", "fix A")
     E.host([("plan-e1-1", 0, "p\n"), ("assess-e1-1", 0, a1),
             ("plan-e1-2", 0, "p2\n"), ("assess-e1-2", 0, codex_review_resumed("PASS", "Direction: A.")),
@@ -90,8 +92,10 @@ def main():
     run = E.Run()
     run.answer("yes")
     run.answer("merge")
-    save("patch_loop_approval_merge", run)
+    return run
 
+
+def blocker_guidance_failure_continue_discard():
     b1, _ = codex_review_first("BLOCKER", "premise wrong")
     E.host([("plan-e1-1", 0, "p\n"), ("assess-e1-1", 0, b1),
             ("plan-e2-1", 1, "usage limit\n"), ("plan-e2-1", 0, "p2\n"),
@@ -102,8 +106,10 @@ def main():
     run.answer("continue")
     run.answer("yes")
     run.answer("discard", confirm=True)
-    save("blocker_guidance_failure_continue_discard", run)
+    return run
 
+
+def final_revise_conflict_merge():
     a1, _ = codex_review_first("PASS")
     E.host([("plan-e1-1", 0, "p\n"), ("assess-e1-1", 0, a1),
             ("build-e2-1", 0, "b\n"), ("verify-e2-1", 0, codex_review_resumed("PASS")),
@@ -114,8 +120,54 @@ def main():
     run.answer("revise architect re-check the error path")
     run.answer("merge")
     run.answer("merge")
-    save("final_revise_conflict_merge", run)
+    return run
+
+
+def approval_stop():
+    a1, _ = codex_review_first("PASS")
+    E.host([("plan-e1-1", 0, "p\n"), ("assess-e1-1", 0, a1)])
+    run = E.Run()
+    E.run(run.handle.cancel())
+    E.run(E.cli.follow(run.handle, answered=run.stop["id"]))
+    return run
+
+
+def final_merge_stop_lands():
+    """A Stop while the merge runs: the run shows it, waits for the merge, and ends merged."""
+    merging, land = threading.Event(), threading.Event()
+
+    class Held(FakeWorktrees):
+        def merge(self, *args):
+            merging.set()
+            land.wait(60)
+            return super().merge(*args)
+    a1, _ = codex_review_first("PASS")
+    E.host([("plan-e1-1", 0, "p\n"), ("assess-e1-1", 0, a1),
+            ("build-e2-1", 0, "b\n"), ("verify-e2-1", 0, codex_review_resumed("PASS"))], git=Held())
+    run = E.Run(auto=True)
+    E.run(E.cli.runs.answer(E.client(), run.run_id, {"stop": run.stop["id"], "action": "merge"}, check=False))
+    merging.wait(30)
+    E.run(run.handle.cancel())
+    while E.run(run.handle.query("status"))["state"]["status"] != "STOPPING":
+        time.sleep(0.2)
+    land.set()
+    E.run(E.cli.follow(run.handle, answered=run.stop["id"]))
+    return run
+
+
+RECORDINGS = (patch_loop_approval_merge, blocker_guidance_failure_continue_discard, final_revise_conflict_merge,
+              approval_stop, final_merge_stop_lands)
+
+
+def main(names):
+    os.makedirs(HISTORIES, exist_ok=True)
+    known = {record.__name__: record for record in RECORDINGS}
+    unknown = [name for name in names if name not in known]
+    if unknown:
+        sys.exit("no such history: %s (known: %s)" % (", ".join(unknown), ", ".join(known)))
+    for name in names or known:
+        save(name, known[name]())
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

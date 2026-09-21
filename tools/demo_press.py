@@ -1,12 +1,12 @@
 """Press one of the Workbench's own buttons in a headless browser, as the operator would.
 
-    python tools/demo_press.py <workbench url> <run id> <button label> <expected action>
+    python tools/demo_press.py <workbench url> <run id> <button label> <what the page should say>
 
 The Windows side of `make demo` (WSL cannot reach Windows' loopback, and Windows reaches the
 Workbench's): headless Edge, driven over the DevTools protocol, opens the page, selects the run,
-presses the stop's button with that label — the page's own confirmation accepted — and waits for
-the page to report the answer. Its exit code says whether the page sent the expected action and the
-workflow took it. Nothing is shown on screen.
+presses the run's button with that label — an answer to its stop, or Stop run or Force terminate,
+the page's own confirmation accepted — and waits for the page to report what came of it. Its exit
+code says whether the page said what was expected. Nothing is shown on screen.
 """
 import json
 import os
@@ -57,11 +57,17 @@ class Page:
 
 
 def button(label):
-    return "[...document.querySelectorAll('#stop-actions button')].find((b) => b.textContent === %s)" % (
-        json.dumps(label))
+    """The run's button with that label, once it is shown and enabled."""
+    return ("[...document.querySelectorAll('#run button')].find((b) => b.textContent === %s && !b.disabled"
+            " && b.offsetParent !== null)" % json.dumps(label))
 
 
-def main(url, run_id, label, action):
+# What the page said of the press, in the result line of the button's own card: `answered: ...` for
+# an answer, `stopping` or `terminated` for a run's lifecycle, `not accepted: ...` for a refusal.
+SAID = "(t => t && t !== 'sending…' ? t : '')(document.getElementById(%s).textContent)"
+
+
+def main(url, run_id, label, said):
     profile = tempfile.mkdtemp(prefix="orch-demo-edge-")
     edge = subprocess.Popen([EDGE, "--headless=new", "--disable-gpu", "--no-first-run", "--remote-debugging-port=0",
                              "--user-data-dir=" + profile, "about:blank"],
@@ -80,10 +86,9 @@ def main(url, run_id, label, action):
             # The page asks before an answer that lands or removes work; the operator says yes.
             page.value("window.confirm = () => true; select(%s); true" % json.dumps(run_id))
             wait(lambda: page.value(button(label) + " !== undefined"), 60, "the %r button" % label)
+            line = page.value("(b => b.closest('.card').querySelector('[id$=\"-result\"]').id)(%s)" % button(label))
             page.value(button(label) + ".click(); true")
-            said = wait(lambda: page.value(
-                "(t => t.startsWith('answered') || t.startsWith('not accepted') ? t : '')"
-                "(document.getElementById('stop-result').textContent)"), 60, "the page's answer")
+            shown = wait(lambda: page.value(SAID % json.dumps(line)), 60, "the page's word on it")
     finally:
         edge.terminate()
         try:
@@ -91,8 +96,8 @@ def main(url, run_id, label, action):
         except subprocess.TimeoutExpired:
             edge.kill()
         shutil.rmtree(profile, ignore_errors=True)
-    print("pressed %r in the Workbench: the page said %r" % (label, said))
-    return 0 if said == "answered: " + action else 1
+    print("pressed %r in the Workbench: the page said %r" % (label, shown))
+    return 0 if shown == said else 1
 
 
 if __name__ == "__main__":

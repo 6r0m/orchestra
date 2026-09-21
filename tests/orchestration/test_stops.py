@@ -5,9 +5,13 @@
 - A role runs only on its target host's queue.
 - A refused repository creates no worktree.
 - The final gate: merge, revise to either role, a confirmed discard, a conflict handed back.
+- A Stop ends a run from any open state and runs no git; a git side effect already running lands first.
 """
+import contextlib
+import io
 import json
 import os
+import shutil
 import sys
 import threading
 import time
@@ -21,12 +25,13 @@ PKG = os.path.abspath(os.path.join(HERE, os.pardir))
 sys.path[:0] = [PKG, HERE]
 
 from temporalio.api.enums.v1 import EventType  # noqa: E402
-from temporalio.client import WorkflowUpdateFailedError  # noqa: E402
+from temporalio.client import WorkflowFailureError, WorkflowUpdateFailedError  # noqa: E402
 
 import temporal_env as E  # noqa: E402
 from fakes import FakeRepos, FakeWorktrees, codex_review_first, codex_review_resumed  # noqa: E402
 from tests.orchestration.test_workflow import Scenario  # noqa: E402
 import control_workflows  # noqa: E402
+from app.agents import terminal  # noqa: E402
 from app.orchestration import workflow as WF  # noqa: E402
 
 ACCEPTED = EventType.EVENT_TYPE_WORKFLOW_EXECUTION_UPDATE_ACCEPTED
@@ -296,6 +301,199 @@ class FinalGate(Scenario):
         self.assertEqual(run.stop["reason"], "failed")
         run.answer("abort")
         self.assertEqual(run.state["status"], "ABORTED")
+
+
+class Lifecycle(Scenario):
+    """Runs ended from outside them, as the Workbench and the command line end them."""
+
+    def setUp(self):
+        self.release = threading.Event()
+        self.addCleanup(self.release.set)
+
+    def policy(self):
+        # A working role hears of the Stop at its next heartbeat; a short one keeps the test short.
+        return dict(E.POLICY, heartbeat_seconds=2)
+
+    def start(self, **kwargs):
+        """A run started and not followed: its stage does not finish by itself."""
+        run_id = uuid.uuid4().hex[:12]
+        handle = E.run(E.client().start_workflow(WF.FeatureRun.run, E.start_input(run_id, **kwargs),
+                                                 id=run_id, task_queue=WF.TASK_QUEUE))
+        self.addCleanup(shutil.rmtree, E.A.run_dir(run_id), True)
+        self.addCleanup(self.close, handle)
+        return handle
+
+    @staticmethod
+    def close(handle):
+        """Whatever a failing test left open ends here, so its stage never runs on a later test's fakes."""
+        if E.run(handle.describe()).close_time is None:
+            E.run(handle.terminate("the test is over"))
+
+    def stopped(self, handle, answered=None):
+        """Stop the run as the Workbench does, and follow it until it ends."""
+        E.run(handle.cancel())
+        status = E.run(E.cli.follow(handle, answered=answered))
+        self.assertIsNotNone(E.run(handle.describe()).close_time, "the run ended: %s" % status["stop"])
+        return status
+
+    def until(self, handle, reached, seconds=60):
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            status = E.run(handle.query(WF.FeatureRun.status))
+            if reached(status):
+                return status
+            time.sleep(0.2)
+        self.fail("the run never reached the expected state: %s" % status["state"].get("status"))
+
+    def working(self, started, ended):
+        """An agent at work: its turn heartbeats and honours a cancellation, as a real turn does."""
+        def runner(worktree, argv, rdir, name, prompt, timeout, env, *, brain):
+            started.set()
+            try:
+                while not self.release.is_set():
+                    terminal._activity_tick(name)
+                    time.sleep(0.1)
+                return 1, ""
+            finally:
+                ended.set()
+        return runner
+
+    def gated(self, merge_results=None):
+        """At the final gate, with a merge that runs until the test lets it land."""
+        merging, land = threading.Event(), threading.Event()
+        self.addCleanup(land.set)
+
+        class Held(FakeWorktrees):
+            def merge(self, *args):
+                merging.set()
+                land.wait(60)
+                return super().merge(*args)
+        self.git = Held(merge_results)
+        run = self.drive(to_ready(), git=self.git, auto=True)
+        self.assertEqual(run.stop["reason"], "final")
+        return run, merging, land
+
+    def git_run(self):
+        return [call[0] for call in self.git.calls]
+
+
+class Stop(Lifecycle):
+    """A Stop — Temporal's cancellation of the run — ends it from any open state, stopped, and runs no
+    git: its worktree and branch stay as they are. A git side effect already running is let land, and
+    what git did decides how the run ends."""
+
+    def test_a_run_waiting_at_a_stop_ends_stopped(self):
+        a1, _ = codex_review_first("PASS")
+        self.git = FakeWorktrees()
+        run = self.drive([("plan-e1-1", 0, "p\n"), ("assess-e1-1", 0, a1)], git=self.git)
+        self.assertEqual(run.stop["reason"], "approval")
+        status = self.stopped(run.handle, answered=run.stop["id"])
+        self.assertEqual((status["state"]["status"], status["stop"]), ("STOPPED", None))
+        self.assertEqual(self.git_run(), ["create"], "the Stop ran no git: the worktree and branch stay")
+        self.assertEqual(E.run(run.handle.describe()).status.name, "CANCELED", "Temporal's own record of it")
+
+    def test_a_run_at_a_failed_stage_ends_stopped(self):
+        self.git = FakeWorktrees()
+        run = self.drive([("plan-e1-1", 1, "boom\n")], git=self.git)
+        self.assertEqual(run.stop["reason"], "failed")
+        status = self.stopped(run.handle, answered=run.stop["id"])
+        self.assertEqual(status["state"]["status"], "STOPPED")
+        self.assertEqual(self.git_run(), ["create"])
+
+    def test_a_run_at_its_final_gate_ends_stopped_with_nothing_merged_or_discarded(self):
+        self.git = FakeWorktrees()
+        run = self.drive(to_ready(), git=self.git, auto=True)
+        self.assertEqual(run.stop["reason"], "final")
+        status = self.stopped(run.handle, answered=run.stop["id"])
+        self.assertEqual(status["state"]["status"], "STOPPED")
+        self.assertEqual(self.git_run(), ["create"])
+
+    def test_a_run_whose_agent_works_ends_stopped_and_its_agent_with_it(self):
+        started, ended = threading.Event(), threading.Event()
+        self.git = FakeWorktrees()
+        self.host, self.agent = E.host([], git=self.git)
+        self.host.runner = self.working(started, ended)
+        handle = self.start(policy=self.policy())
+        self.assertTrue(started.wait(60), "the engineer is at work")
+        status = self.stopped(handle)
+        self.assertEqual(status["state"]["status"], "STOPPED")
+        self.assertTrue(ended.wait(30), "its agent ended, and nothing of it runs on")
+        self.assertEqual(self.git_run(), ["create"])
+
+    def test_a_run_whose_host_has_no_worker_ends_stopped_without_waiting_for_one(self):
+        # No worker polls this host's queue: the run waits for it from its first step.
+        handle = self.start(target="windows", queue="target:windows:gone")
+        E.run(handle.cancel())
+        with self.assertRaises(WorkflowFailureError, msg="Temporal records the run cancelled"):
+            E.run(handle.result())
+        status = E.run(handle.query(WF.FeatureRun.status))
+        self.assertEqual(status["state"]["status"], "STOPPED")
+        self.assertIn("the windows host's cleanup did not run", "\n".join(status["lines"]))
+
+    def test_a_stop_during_a_merge_lets_it_land_and_the_run_ends_merged(self):
+        run, merging, land = self.gated()
+        E.run(E.cli.runs.answer(E.client(), run.run_id, {"stop": run.stop["id"], "action": "merge"}, check=False))
+        self.assertTrue(merging.wait(30), "the merge is running")
+        E.run(run.handle.cancel())
+        self.until(run.handle, lambda status: status["state"]["status"] == "STOPPING")
+        self.assertIsNone(E.run(run.handle.describe()).close_time, "not reported stopped while the merge can land")
+        land.set()
+        status = E.run(E.cli.follow(run.handle, answered=run.stop["id"]))
+        self.assertEqual(status["state"]["status"], "MERGED", "what git did decides how the run ends")
+        self.assertEqual(E.run(run.handle.describe()).status.name, "COMPLETED")
+
+    def test_a_stop_during_a_merge_git_refuses_ends_the_run_stopped(self):
+        run, merging, land = self.gated([{"result": "refused", "reason": "the worktree no longer matches"}])
+        E.run(E.cli.runs.answer(E.client(), run.run_id, {"stop": run.stop["id"], "action": "merge"}, check=False))
+        self.assertTrue(merging.wait(30), "the merge is running")
+        E.run(run.handle.cancel())
+        self.until(run.handle, lambda status: status["state"]["status"] == "STOPPING")
+        land.set()
+        status = E.run(E.cli.follow(run.handle, answered=run.stop["id"]))
+        self.assertEqual((status["state"]["status"], status["stop"]), ("STOPPED", None),
+                         "stopped, not back at its gate")
+
+    def test_the_command_line_stops_a_run_and_says_how_it_ended(self):
+        a1, _ = codex_review_first("PASS")
+        run = self.drive([("plan-e1-1", 0, "p\n"), ("assess-e1-1", 0, a1)], git=FakeWorktrees())
+        self.assertEqual(E.cli.parse_args(["--stop", run.run_id]).stop, run.run_id)
+        code, out = command(["--stop", run.run_id])
+        self.assertEqual(code, 0, out)
+        self.assertIn("finished: STOPPED", out)
+        code, out = command(["--stop", run.run_id])
+        self.assertEqual(code, 3, "a closed run is not stopped again: %s" % out)
+
+
+class ForceTerminate(Lifecycle):
+    """Force terminate — Temporal's termination — closes a run at once, with no cleanup of its own."""
+
+    def test_a_terminated_runs_working_agent_ends_at_its_next_heartbeat(self):
+        started, ended = threading.Event(), threading.Event()
+        self.host, self.agent = E.host([], git=FakeWorktrees())
+        self.host.runner = self.working(started, ended)
+        handle = self.start(policy=self.policy())
+        self.assertTrue(started.wait(60), "the engineer is at work")
+        self.assertFalse(ended.wait(3), "the control: an agent at work does not end by itself")
+        E.run(handle.terminate("force terminate"))
+        self.assertTrue(ended.wait(30), "its turn heard at its next heartbeat that the run is gone, and ended")
+
+    def test_the_command_line_force_terminates_a_run(self):
+        a1, _ = codex_review_first("PASS")
+        run = self.drive([("plan-e1-1", 0, "p\n"), ("assess-e1-1", 0, a1)], git=FakeWorktrees())
+        self.assertEqual(E.cli.parse_args(["--force-terminate", run.run_id]).force_terminate, run.run_id)
+        code, out = command(["--force-terminate", run.run_id])
+        self.assertEqual(code, 0, out)
+        self.assertEqual(E.run(run.handle.describe()).status.name, "TERMINATED")
+        code, out = command(["--force-terminate", run.run_id])
+        self.assertEqual(code, 3, "a closed run is not terminated again: %s" % out)
+
+
+def command(argv):
+    """The command line as the operator runs it, over the test server; its exit code and output."""
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+        code = E.run(E.cli.run(argv, client=E.client(), check=False))
+    return code, out.getvalue()
 
 
 if __name__ == "__main__":

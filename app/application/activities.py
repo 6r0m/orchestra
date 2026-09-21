@@ -278,8 +278,9 @@ class Activities:
     @activity.defn
     def finish_trace(self, args):
         state, client = args["state"], self.client()
-        if state.get("status") == "ABORTED":
-            # An aborted run keeps its worktree but no longer needs its live terminals.
+        if state.get("status") in ("ABORTED", "STOPPED"):
+            # A run ended here keeps its worktree but no longer needs its live terminals, and an agent
+            # still in one ends with it.
             terminal.close_run(state["run_id"])
         T.final_diff(client, state, W.review_diff)
         T.outcome_score(client, state)

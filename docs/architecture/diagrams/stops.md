@@ -30,3 +30,7 @@ graph TD
 
 Any stage, the worktree's creation, a merge or a discard that fails stops at a `failed` stop, whose
 `continue` runs that step once more and whose `abort` ends the run.
+
+A Stop ends the run `STOPPED` from any of these places and runs no git; a worktree's creation, a
+merge or a discard already running finishes first, and a merge or discard that landed ends the run
+as above. Force terminate ends it at once. Both are [structure D31](../structure.md).

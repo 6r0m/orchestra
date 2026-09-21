@@ -32,7 +32,7 @@ feature: ## Run one task through the workflow (usage: make feature TASK="fix X i
 	@test -n "$$TASK_SAFE" || { echo 'usage: make feature TASK="fix X in Y"' >&2; exit 2; }
 	@$(V) -m app.interfaces.cli "$$TASK_SAFE"
 
-demo: ## Watch a whole run in a Workbench of its own, with fake agents, then remove it (needs `make up`)
+demo: ## Watch runs answered, stopped and force-terminated in a Workbench of its own, with fake agents (needs `make up`)
 	@$(V) tools/demo.py
 
 test: ## Run the whole suite in this checkout's environment

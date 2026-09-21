@@ -1,8 +1,9 @@
 """The one client of runs, shared by the workbench and the command line.
 
 Start a run, list runs, read a run's status and what it is doing now, answer the stop it waits
-at, and read its change and its repository's worktrees — each through Temporal, so every write
-goes through the workflow's own start rules, Updates and validators. Nothing here prints.
+at, stop it or force it to terminate, and read its change and its repository's worktrees — each
+through Temporal, so every write goes through the workflow's own start rules, Updates and
+validators, or Temporal's own lifecycle. Nothing here prints.
 """
 import datetime
 import os
@@ -10,7 +11,7 @@ import os
 from temporalio.api.enums.v1 import TaskQueueType
 from temporalio.api.taskqueue.v1 import TaskQueue
 from temporalio.api.workflowservice.v1 import DescribeTaskQueueRequest
-from temporalio.client import Client, WorkflowUpdateFailedError
+from temporalio.client import Client, WorkflowExecutionStatus, WorkflowUpdateFailedError
 from temporalio.common import WorkflowIDConflictPolicy, WorkflowIDReusePolicy
 from temporalio.exceptions import WorkflowAlreadyStartedError
 from temporalio.service import RPCError, RPCStatusCode
@@ -35,7 +36,7 @@ class Refusal(RuntimeError):
 
 
 class NotWaiting(Refusal):
-    """The run does not exist, or waits at no stop this answer is for."""
+    """The run does not exist or has closed, or waits at no stop this answer is for."""
 
 
 class NotAccepted(Refusal):
@@ -115,14 +116,17 @@ def view(listed, status, health):
 
     `listed` is the run's execution as the listing or `execution` reads it, `status` its `status`
     query (None when it could not be read), `health` the stack's (`stack.health`). A run is closed
-    once Temporal no longer runs it, failed or waiting while it stops for the operator, and running
-    otherwise; it is blocked by each host it needs whose worker is down.
+    once Temporal no longer runs it, stopping from a Stop until then, failed or waiting while it
+    stops for the operator, and running otherwise; it is blocked by each host it needs whose worker
+    is down.
     """
     state = (status or {}).get("state") or {}
     stop = (status or {}).get("stop")
     closed = listed["execution"] not in (None, "RUNNING")
     if closed:
         kind = "closed"
+    elif state.get("status") == "STOPPING":
+        kind = "stopping"
     elif stop:
         kind = "failed" if stop["reason"] == "failed" else "waiting"
     else:
@@ -202,6 +206,34 @@ async def answer(client, run_id, answer, check=True, only=None):
             raise NotWaiting("run %s has closed and waits for no answer" % run_id) from error
         raise
     return stop
+
+
+async def stop(client, run_id):
+    """Stop a run, whatever it is doing: Temporal's cancellation, which the workflow ends `STOPPED`
+    with its worktree and branch as they are. Temporal takes it with no worker polling; the run ends
+    once its workflow worker reads it."""
+    await _while_open(client, run_id, lambda handle: handle.cancel())
+
+
+async def force_terminate(client, run_id, reason):
+    """End a run at once — Temporal's termination — for one a Stop cannot finish. Nothing of the run's
+    own runs: its worktree and branch stay, an agent at work stops at its turn's next heartbeat, and
+    the run's terminals stay until its host's worker restarts."""
+    await _while_open(client, run_id, lambda handle: handle.terminate(reason=reason))
+
+
+async def _while_open(client, run_id, end):
+    """End the run with `end(handle)` if it is still open; a closed one is refused, whether or not
+    Temporal would take the request — its test server takes a cancellation of a closed run."""
+    handle = client.get_workflow_handle(run_id)
+    try:
+        if (await handle.describe()).status != WorkflowExecutionStatus.RUNNING:
+            raise NotWaiting("run %s has closed" % run_id)
+        await end(handle)
+    except RPCError as error:
+        if error.status == RPCStatusCode.NOT_FOUND:
+            raise NotWaiting("run %s has closed, or never existed" % run_id) from error
+        raise
 
 
 ALL_RUNS = "WorkflowType = 'FeatureRun'"

@@ -1,14 +1,22 @@
-"""Watch a whole run in the Workbench, with fake agents: `make demo`.
+"""Watch whole runs in the Workbench, with fake agents: `make demo`.
 
-A real run on the live stack — the real workflow on the normal WSL worker, the real Workbench,
-the real live terminals — whose agents are fake CLIs that take a few watchable seconds a turn and
-call no model. The engineer plans, the architect sends the plan back once and passes it, the plan
-is approved by pressing the Workbench's own button in a headless browser, the engineer builds, the
-architect verifies, and the change is merged by pressing Merge. Then everything it made is removed.
+Real runs on the live stack — the real workflow on the normal WSL worker, the real Workbench, the
+real live terminals — whose agents are fake CLIs that take a few watchable seconds a turn and call
+no model, each answer and each lifecycle control pressed as the Workbench's own button in a headless
+browser. One run goes the whole way: the engineer plans, the architect sends the plan back once and
+passes it, the plan is approved, the engineer builds, the architect verifies, and the change is
+merged. One is stopped while its engineer works, and one while it waits for approval; each ends
+stopped with its worktree and branch as they were. One is force-terminated when its Stop cannot
+finish, because its merge is held in a git hook. Then everything it made is removed, its runs and
+the reads of their changes deleted from Temporal too: the Workbench lists every run Temporal retains.
+
+It proves the workflow code the live WSL worker loaded, and `make up` leaves a running worker as it
+is: after a change to the workflow, restart the workers onto it (`make down`, then `make up`) before
+a pass counts for that change.
 
 It is isolated by its own policy, never by a mode of the production code: a target queue of its
 own, polled only by this tool's activity worker, which carries the fakes and registers no workflow,
-so no real run can reach a fake agent and the demo run cannot reach a real one; a throwaway
+so no real run can reach a fake agent and the demo's runs cannot reach a real one; a throwaway
 repository; and a Workbench of its own on a spare port, whose URL it prints to watch. It needs the
 stack up (`make up`) and, for the button presses, Windows' headless Edge.
 
@@ -33,7 +41,10 @@ PKG = os.path.dirname(HERE)
 TESTS = os.path.join(PKG, "tests")
 sys.path[:0] = [PKG]
 
+from temporalio.api.common.v1 import WorkflowExecution  # noqa: E402
 from temporalio.api.enums.v1 import TaskQueueType  # noqa: E402
+from temporalio.api.workflowservice.v1 import DeleteWorkflowExecutionRequest  # noqa: E402
+from temporalio.service import RPCError, RPCStatusCode  # noqa: E402
 
 from app.agents import terminal, trust  # noqa: E402
 from app.application import client as runs  # noqa: E402
@@ -61,6 +72,10 @@ FAKE = textwrap.dedent("""\
         for line in lines:
             fake_cli.draw(line)
             time.sleep(1.5)
+
+    # A turn the demo holds at work, so that a Stop reaches an agent mid-turn.
+    while os.path.exists(os.path.join(state, "hold-turn")):
+        say("still working...")
 
     if brain == "codex":
         if "Independently assess" in prompt:
@@ -92,6 +107,13 @@ FAKE = textwrap.dedent("""\
     complete(message)
     time.sleep(0.2)
 """).replace("{{TESTS}}", TESTS)
+
+# The demo repository's one hook: the commit a merge makes waits here while the demo holds it, so a
+# Stop meets a git side effect it must not cut off.
+HOLD_MERGE = textwrap.dedent("""\
+    #!/bin/sh
+    while [ -e "$DEMO_STATE/hold-merge" ]; do sleep 1; done
+""")
 
 
 def step(text):
@@ -128,23 +150,28 @@ def wait(predicate, seconds, what):
     raise SystemExit("demo failed: %s did not happen within %ds" % (what, seconds))
 
 
+def closed(view):
+    return view["state"] == "closed"
+
+
 class Demo:
     def __init__(self):
         self.tmp = tempfile.mkdtemp(prefix="orch-demo-")
         self.repo = os.path.join(self.tmp, "demo-repository")
         self.bin = os.path.join(self.tmp, "bin")
         self.state = os.path.join(self.tmp, "state")
+        self.hooks = os.path.join(self.tmp, "hooks")
         self.processes = []
-        self.run_id = None
+        self.runs = []
+        self.forgotten = False
 
     def setup(self):
         worktrees = os.path.join(self.tmp, "worktrees")
-        for folder in (self.repo, self.bin, self.state, os.path.join(self.tmp, "no-hooks"),
-                       os.path.join(worktrees, "demo")):
+        for folder in (self.repo, self.bin, self.state, self.hooks, os.path.join(worktrees, "demo")):
             os.makedirs(folder)
         git(self.repo, "init", "-q", "-b", "develop")
         for key, value in (("user.name", "demo"), ("user.email", "demo@localhost"), ("commit.gpgsign", "false"),
-                           ("core.hooksPath", os.path.join(self.tmp, "no-hooks"))):
+                           ("core.hooksPath", self.hooks)):
             git(self.repo, "config", key, value)
         os.makedirs(os.path.join(self.repo, "todo", "done"))
         for name, body in (("README.md", "A throwaway repository for the Workbench demo.\n"),
@@ -153,10 +180,10 @@ class Demo:
                 fh.write(body)
         git(self.repo, "add", "-A")
         git(self.repo, "commit", "-q", "-m", "base")
-        for name in ("claude", "codex"):
-            path = os.path.join(self.bin, name)
+        for path, body in ((os.path.join(self.bin, "claude"), FAKE), (os.path.join(self.bin, "codex"), FAKE),
+                           (os.path.join(self.hooks, "pre-commit"), HOLD_MERGE)):
             with open(path, "w") as fh:
-                fh.write(FAKE)
+                fh.write(body)
             os.chmod(path, 0o755)
         # The deployment's own policy, with a host of the demo's own: its queue is polled by no
         # worker but this tool's, and its ports are free now.
@@ -191,6 +218,14 @@ class Demo:
         self.processes.append(process)
         return process
 
+    def hold(self, what, held=True):
+        """Hold, or let go of, what the fakes and the hook wait on: `hold-turn` or `hold-merge`."""
+        path = os.path.join(self.state, what)
+        if held:
+            open(path, "w").close()
+        elif os.path.exists(path):
+            os.remove(path)
+
     def api(self, path, body=None):
         request = urllib.request.Request(
             "http://127.0.0.1:%d%s" % (self.port, path), method="POST" if body is not None else "GET",
@@ -199,37 +234,56 @@ class Demo:
         with urllib.request.urlopen(request, timeout=60) as response:
             return json.loads(response.read())
 
-    def view(self):
-        return self.api("/api/runs/%s" % self.run_id)["view"]
+    def start(self):
+        run_id = self.api("/api/runs", {"task": TASK, "repo": "demo"})["run_id"]
+        self.runs.append(run_id)
+        check(bool(run_id), "the Workbench started run %s" % run_id)
+        return run_id
 
-    def until(self, reached, seconds, what):
+    def view(self, run_id):
+        return self.api("/api/runs/%s" % run_id)["view"]
+
+    def until(self, run_id, reached, seconds, what):
         """The run's view once `reached` holds of it, read once a second; a run that failed or
         ended instead fails the demo at once, with the run's own lines."""
         def probe():
-            view = self.view()
+            view = self.view(run_id)
             if reached(view):
                 return view
             if view["state"] in ("failed", "closed"):
-                lines = self.api("/api/runs/%s" % self.run_id)["lines"]
+                lines = self.api("/api/runs/%s" % run_id)["lines"]
                 raise SystemExit("demo failed: waiting for %s, the run is %s: %s\n  %s" % (
                     what, view["state"], view["failure"] or view["status"], "\n  ".join(lines[-12:])))
             return None
         return wait(probe, seconds, what)
 
-    def press(self, label, action):
-        """Press the run's button labelled `label` in headless Edge on Windows, as the operator would."""
+    def press(self, run_id, label, said):
+        """Press the run's button labelled `label` in headless Edge on Windows, as the operator would;
+        whether the page then said `said`."""
         script = subprocess.run(["wslpath", "-w", os.path.join(HERE, "demo_press.ps1")],
                                 capture_output=True, text=True, check=True).stdout.strip()
         pressed = subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script,
-                                  "http://127.0.0.1:%d/" % self.port, self.run_id, label, action],
+                                  "http://127.0.0.1:%d/" % self.port, run_id, label, said],
                                  capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=300)
         print("  " + (pressed.stdout + pressed.stderr).strip().replace("\n", "\n  "), flush=True)
         return pressed.returncode == 0
 
+    def kept(self, run_id, worktree):
+        """Whether the run's worktree and its branch are still there."""
+        listed = git(self.repo, "worktree", "list", "--porcelain").splitlines()
+        branch = subprocess.run(["git", "-C", self.repo, "rev-parse", "--verify", "--quiet", "refs/heads/" + run_id],
+                                capture_output=True).returncode == 0
+        return "worktree %s" % worktree in listed and branch
+
+    def agents(self):
+        """How many of the demo's fake agents are running."""
+        return len(subprocess.run(["pgrep", "-f", self.bin + os.sep], capture_output=True, text=True).stdout.split())
+
     async def ready(self):
         client = await runs.connect()
         workflows = await runs.polled(client, WF.TASK_QUEUE, TaskQueueType.TASK_QUEUE_TYPE_WORKFLOW)
-        check(workflows, "the normal WSL worker runs the workflows (`make up` starts it)")
+        check(workflows, "the normal WSL worker runs the workflows, with the code it loaded (`make up` starts it; "
+                         "after a workflow change, `make down` first)")
         deadline = time.monotonic() + 90
         while not await runs.polled(client, self.queue, TaskQueueType.TASK_QUEUE_TYPE_ACTIVITY):
             if time.monotonic() > deadline:
@@ -247,36 +301,138 @@ class Demo:
         print("  watch it: http://127.0.0.1:%d/" % self.port, flush=True)
 
         step("a run started from the Workbench, its agents working in live terminals")
-        self.run_id = self.api("/api/runs", {"task": TASK, "repo": "demo"})["run_id"]
-        check(bool(self.run_id), "the Workbench started run %s" % self.run_id)
-        view = self.until(lambda view: view["state"] == "waiting", 300, "the plan's approval")
-        timeline = self.api("/api/runs/%s" % self.run_id)["timeline"]
+        merged = self.start()
+        view = self.until(merged, lambda view: view["state"] == "waiting", 300, "the plan's approval")
+        timeline = self.api("/api/runs/%s" % merged)["timeline"]
         verdicts = [entry.get("verdict") for entry in timeline if entry.get("verdict")]
         check(verdicts == ["PATCH", "PASS"], "the architect sent the plan back once, then passed it: %s" % verdicts)
         check(view["stop"]["reason"] == "approval" and "approve" in view["actions"],
               "the run waits for approval, and says so")
 
         step("the plan approved by pressing the Workbench's own button")
-        check(self.press("Approve", "approve"), "the page sent the answer, and the workflow took it")
-        view = self.until(lambda view: view["state"] == "waiting" and view["stop"]["reason"] == "final", 300,
-                          "the final gate")
+        check(self.press(merged, "Approve", "answered: approve"), "the page sent the answer, and the workflow took it")
+        self.until(merged, lambda view: view["state"] == "waiting" and view["stop"]["reason"] == "final", 300,
+                   "the final gate")
         check(True, "the engineer built and the architect verified")
 
         step("the change merged by pressing Merge")
-        check(self.press("Merge", "merge"), "the page sent the answer, with its confirmation")
-        view = self.until(lambda view: view["state"] == "closed", 300, "the merge")
+        check(self.press(merged, "Merge", "answered: merge"), "the page sent the answer, with its confirmation")
+        view = self.until(merged, closed, 300, "the merge")
         check(view["status"] == "MERGED", "the run ended merged")
         check("greeting.txt" in git(self.repo, "ls-tree", "--name-only", "develop"),
               "the base branch holds the change")
 
-    def cleanup(self):
-        if self.run_id:
+        step("a run stopped while its engineer works")
+        self.hold("hold-turn")
+        working = self.start()
+        self.until(working, lambda view: view["state"] == "running" and view["stage"] == "plan", 120,
+                   "the engineer at work")
+        check(self.press(working, "Stop run", "stopping"), "the page sent the Stop, with its confirmation")
+        view = self.until(working, closed, 120, "the Stop")
+        self.hold("hold-turn", False)
+        check((view["status"], view["execution"]) == ("STOPPED", "CANCELED"),
+              "the run ended stopped, and Temporal says cancelled: %s, %s" % (view["status"], view["execution"]))
+        check(wait(lambda: self.agents() == 0, 30, "its agent ending"), "its agent ended with it")
+        check(self.kept(working, view["worktree"]), "its worktree and branch are as they were")
+
+        step("a run stopped while it waits for the operator")
+        waiting = self.start()
+        self.until(waiting, lambda view: view["state"] == "waiting", 300, "the plan's approval")
+        check(self.press(waiting, "Stop run", "stopping"), "the page sent the Stop")
+        view = self.until(waiting, closed, 120, "the Stop")
+        check(view["status"] == "STOPPED", "the run ended stopped")
+        check(self.kept(waiting, view["worktree"]), "its worktree and branch are as they were")
+
+        step("a run whose Stop cannot finish, force terminated")
+        self.hold("hold-merge")
+        stuck = self.start()
+        self.until(stuck, lambda view: view["state"] == "waiting", 300, "the plan's approval")
+        check(self.press(stuck, "Approve", "answered: approve"), "approved")
+        self.until(stuck, lambda view: view["state"] == "waiting" and view["stop"]["reason"] == "final", 300,
+                   "the final gate")
+        check(self.press(stuck, "Merge", "answered: merge"), "merge pressed; its commit is held in the hook")
+        check(self.press(stuck, "Stop run", "stopping"), "the page sent the Stop")
+        self.until(stuck, lambda view: view["state"] == "stopping", 60, "the Stop heard")
+        time.sleep(5)
+        view = self.view(stuck)
+        check((view["state"], view["stage"]) == ("stopping", "merge"),
+              "the Stop waits for the merge, which it never cuts off: %s, %s" % (view["state"], view["stage"]))
+        check(self.press(stuck, "Force terminate", "terminated"), "the page sent the force terminate, confirmed")
+        view = self.until(stuck, closed, 60, "the termination")
+        check(view["execution"] == "TERMINATED", "Temporal ended the run at once")
+        check(self.kept(stuck, view["worktree"]), "its worktree and branch are left, as the confirmation says")
+
+        step("the runs deleted from Temporal, so the Workbench no longer lists them")
+
+        def listed():
+            shown = {run["run_id"] for run in self.api("/api/runs")["runs"]}
+            return [run_id for run_id in self.runs if run_id in shown]
+        check(listed() == self.runs, "the Workbench lists the demo's %d finished runs" % len(self.runs))
+        removed, kept = asyncio.run(self.forget())
+        check(set(self.runs) <= set(removed), "Temporal held them and %d read(s) of their changes, and deleted them"
+              % (len(removed) - len(self.runs)))
+        check(not kept, "Temporal holds none of them now%s" % (": %s" % ", ".join(kept) if kept else ""))
+        check(wait(lambda: not listed(), 30, "the Workbench dropping them"), "the Workbench no longer lists them")
+
+    def made(self):
+        """The listing's query for every execution the demo made in Temporal: its runs, and each read of
+        a run's change the page started, which `client.review_diff` names after the run."""
+        return " OR ".join("WorkflowId = '%s' OR WorkflowId STARTS_WITH 'diff-%s-'" % (run_id, run_id)
+                           for run_id in self.runs)
+
+    async def forget(self):
+        """Delete every execution the demo made from Temporal — an open run is terminated by its
+        deletion, which Temporal completes on its own time — and wait up to a minute for it to finish.
+        Returns the ids deleted, and those Temporal still holds, by themselves or in its listing."""
+        client = await runs.connect()
+        found = {execution.id: execution.run_id async for execution in client.list_workflows(self.made())}
+        for run_id in self.runs:
             try:
-                if self.view()["state"] != "closed":
-                    asyncio.run(self._terminate())
-            except Exception:                        # noqa: BLE001 - the Workbench may be gone already
-                pass
-            shutil.rmtree(os.path.join(paths.RUNTIME_ROOT, self.run_id), ignore_errors=True)
+                # Each run by its own id as well: one that only just started may not be listed yet.
+                found.setdefault(run_id, (await client.get_workflow_handle(run_id).describe()).run_id)
+            except RPCError as error:
+                if error.status != RPCStatusCode.NOT_FOUND:
+                    raise
+        for workflow_id, execution in found.items():
+            try:
+                await client.workflow_service.delete_workflow_execution(DeleteWorkflowExecutionRequest(
+                    namespace=client.namespace,
+                    workflow_execution=WorkflowExecution(workflow_id=workflow_id, run_id=execution)))
+            except RPCError as error:
+                if error.status != RPCStatusCode.NOT_FOUND:
+                    raise
+        deadline = time.monotonic() + 60
+        while True:
+            kept = await self._held(client, found)
+            if not kept or time.monotonic() > deadline:
+                self.forgotten = not kept
+                return sorted(found), kept
+            await asyncio.sleep(1)
+
+    async def _held(self, client, ids):
+        listed = {execution.id async for execution in client.list_workflows(self.made())}
+        described = set()
+        for workflow_id in ids:
+            try:
+                await client.get_workflow_handle(workflow_id).describe()
+                described.add(workflow_id)
+            except RPCError as error:
+                if error.status != RPCStatusCode.NOT_FOUND:
+                    raise
+        return sorted(listed | described)
+
+    def cleanup(self):
+        """Remove whatever the demo made that is still there; returns what could not be removed."""
+        # It is bounded, and nothing may cut it short.
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        left = []
+        if self.runs and not self.forgotten:
+            try:
+                left += ["%s in Temporal" % workflow_id for workflow_id in asyncio.run(self.forget())[1]]
+            except Exception as error:              # noqa: BLE001 - reported as left behind
+                left.append("runs %s in Temporal (%s)" % (", ".join(self.runs), error))
+        # The worker goes before anything it holds: a held merge's git, and a turn still running, which
+        # writes into its run's folder.
         for process in reversed(self.processes):
             if process.poll() is None:
                 os.killpg(process.pid, signal.SIGINT)
@@ -285,13 +441,16 @@ class Demo:
                 except subprocess.TimeoutExpired:
                     os.killpg(process.pid, signal.SIGKILL)
                     process.wait()
+        for run_id in self.runs:
+            shutil.rmtree(os.path.join(paths.RUNTIME_ROOT, run_id), ignore_errors=True)
         trust.forget(self.repo, ["claude", "codex"])
         shutil.rmtree(self.tmp, ignore_errors=True)
-        print("\n  removed: the demo's worker, Workbench, repository and trust records", flush=True)
-
-    async def _terminate(self):
-        client = await runs.connect()
-        await client.get_workflow_handle(self.run_id).terminate("the demo ended before its run did")
+        if left:
+            print("\n  LEFT BEHIND: %s" % "; ".join(left), flush=True)
+        else:
+            print("\n  removed: the demo's %sworker, Workbench, repository and trust records"
+                  % ("runs from Temporal, its " if self.runs else ""), flush=True)
+        return left
 
 
 async def activity_worker():
@@ -305,17 +464,28 @@ async def activity_worker():
                  activity_executor=concurrent.futures.ThreadPoolExecutor(max_workers=8)).run()
 
 
+def interrupted(*_):
+    # The first Ctrl-C ends the demo; a second — pressed again, or passed on by `uv run`, whose child
+    # gets a process group's SIGINT twice (measured) — must not cut its cleanup short.
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    raise KeyboardInterrupt
+
+
 def main():
     if sys.argv[1:] == ["--worker"]:
         asyncio.run(activity_worker())
         return 0
+    signal.signal(signal.SIGINT, interrupted)
     demo = Demo()
     try:
         demo.run()
-        print("\nDEMO PASSED: run %s, watched in the Workbench and answered from its buttons" % demo.run_id)
-        return 0
     finally:
-        demo.cleanup()
+        left = demo.cleanup()
+    if left:
+        raise SystemExit("demo failed: it left behind %s" % "; ".join(left))
+    print("\nDEMO PASSED: runs %s — watched in the Workbench, answered, stopped and force-terminated from its "
+          "buttons, and removed" % ", ".join(demo.runs))
+    return 0
 
 
 if __name__ == "__main__":

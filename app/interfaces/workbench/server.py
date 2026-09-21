@@ -191,6 +191,15 @@ def make_handler(call, policy, token, links=None):
                         return self._send(HTTPStatus.BAD_REQUEST, {"error": "the answer names the stop it is for"})
                     stop = call(lambda client: runs.answer(client, parts[1], answer))
                     return self._send(HTTPStatus.OK, {"answered": stop["id"], "action": answer.get("action")})
+                if len(parts) == 3 and parts[0] == "runs" and RUN_ID.match(parts[1]) and parts[2] == "stop":
+                    call(lambda client: runs.stop(client, parts[1]))
+                    return self._send(HTTPStatus.OK, {"stopping": parts[1]})
+                if len(parts) == 3 and parts[0] == "runs" and RUN_ID.match(parts[1]) and parts[2] == "terminate":
+                    if body.get("confirm") is not True:
+                        return self._send(HTTPStatus.BAD_REQUEST, {"error": "force terminate ends the run with no "
+                                                                            "cleanup, so it must be confirmed"})
+                    call(lambda client: runs.force_terminate(client, parts[1], "force terminated from the Workbench"))
+                    return self._send(HTTPStatus.OK, {"terminated": parts[1]})
                 return self._send(HTTPStatus.NOT_FOUND, {"error": "not found"})
             except runs.NotAccepted as exc:
                 return self._send(HTTPStatus.UNPROCESSABLE_ENTITY, {"error": str(exc)})

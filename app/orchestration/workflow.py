@@ -8,12 +8,17 @@ every effect is an activity on the run's target host, and every route comes from
 A stop waits for an Update carrying one of that stop's named actions, with the stable id
 `answer:<stop-id>`, so a repeated answer is applied once. The run's
 state, its console lines and its timeline are read through the `status` query.
+
+A Stop is Temporal's cancellation of the run, heard wherever the run waits: it ends the run
+`STOPPED` after a bounded cleanup and runs no git, except that a git side effect already running
+lands first and decides how the run ends.
 """
+import asyncio
 from datetime import timedelta
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
-from temporalio.exceptions import ActivityError, TimeoutError
+from temporalio.exceptions import ActivityError, TimeoutError, is_cancelled_exception
 
 with workflow.unsafe.imports_passed_through():
     from app.foundation import policy as P
@@ -28,6 +33,9 @@ ONCE = RetryPolicy(maximum_attempts=1)
 READS = RetryPolicy(maximum_attempts=3)
 GIT_TIMEOUT = timedelta(hours=2)
 SHORT_TIMEOUT = timedelta(minutes=10)
+# A Stop's cleanup — the run's terminals and trace, on its target host — is best-effort, and waits
+# this long at most, so a host whose worker is gone never holds a Stop.
+STOP_CLEANUP = timedelta(minutes=1)
 
 # What each stop takes, published with it, so a client shows the stop's own actions. A revise at
 # the final gate goes to the role the operator names, and each role is an action of its own:
@@ -60,6 +68,13 @@ def _message(error):
     return str(getattr(cause, "message", None) or cause)
 
 
+def _heard():
+    """A Stop's cancellation has been caught: let the next await run, as the SDK's own awaits do."""
+    task = asyncio.current_task()
+    if task is not None:
+        task.uncancel()
+
+
 @workflow.defn
 class FeatureRun:
     def __init__(self):
@@ -71,9 +86,21 @@ class FeatureRun:
         self.stops = 0
         self.lines = []
         self.timeline = []
+        self.stopping = False
 
     @workflow.run
     async def run(self, start):
+        try:
+            return await self._run(start)
+        except (asyncio.CancelledError, ActivityError) as error:
+            if not is_cancelled_exception(error):
+                raise
+            _heard()
+            await self._stopped()
+            # Temporal's own record of the run says it was cancelled, as the Stop asked.
+            raise asyncio.CancelledError() from error
+
+    async def _run(self, start):
         self.policy, self.queue = start["policy"], start["queue"]
         repository = start["repository"]
         s = self.state = {"run_id": start["run_id"], "task": start["task"], "label": start["label"],
@@ -83,12 +110,13 @@ class FeatureRun:
             s.update(await self._activity("prepare", {"repository": repository, "policy": self.policy},
                                           READS, SHORT_TIMEOUT))
         except ActivityError as error:
+            if is_cancelled_exception(error):
+                raise
             s.update(status="REFUSED", refusal=_message(error))
             self._line("refused: %s" % s["refusal"])
             return s
         self._doing("setup")
-        created = await self._until_done("setup", lambda: self._activity(
-            "create_worktree", {"state": s}, ONCE, GIT_TIMEOUT))
+        created = await self._until_done("setup", lambda: self._git("create_worktree", {"state": s}))
         if created is None:
             return await self._end("ABORTED")
         s.update(created)
@@ -143,6 +171,7 @@ class FeatureRun:
         """Run one stage to a result, stopping for the operator on each failure. False when aborted."""
         s = self.state
         label = "[%s e%d r%d]" % (stage, s["episode"], s["round"] + 1)
+        self._unless_stopping()
         self._line("%s %s started" % (label, stages.STAGE_ROLE[stage]))
         self._doing(stage, stages.STAGE_ROLE[stage])
         result = await self._until_done(label, lambda: workflow.execute_activity(
@@ -179,6 +208,8 @@ class FeatureRun:
             try:
                 return await attempt()
             except ActivityError as error:
+                if is_cancelled_exception(error):
+                    raise
                 s["error"] = _message(error)
                 self._line("%s failed: %s" % (label, s["error"]))
                 answer = await self._stop("failed")
@@ -229,8 +260,7 @@ class FeatureRun:
             s.pop("merge_refusal", None)
             if answer["action"] == "discard":
                 self._doing("discard")
-                if await self._until_done("discard", lambda: self._activity(
-                        "discard", {"state": s}, ONCE, GIT_TIMEOUT)) is None:
+                if await self._until_done("discard", lambda: self._git("discard", {"state": s})) is None:
                     continue
                 s["status"] = "DISCARDED"
                 self._line("DISCARDED")
@@ -241,8 +271,7 @@ class FeatureRun:
                          episode=s["episode"] + 1)
                 return "review" if answer["role"] == "architect" else "build"
             self._doing("merge")
-            merged = await self._until_done("merge", lambda: self._activity(
-                "merge", {"state": s}, ONCE, GIT_TIMEOUT))
+            merged = await self._until_done("merge", lambda: self._git("merge", {"state": s}))
             if merged is None:
                 continue
             if merged["result"] == "merged":
@@ -263,6 +292,7 @@ class FeatureRun:
 
     async def _stop(self, reason):
         s = self.state
+        self._unless_stopping()
         self.stops += 1
         feedback = {"failed": s.get("error"), "final": s.get("merge_refusal")}.get(reason, s.get("feedback"))
         self.stop = {"id": "%s:%d" % (s["run_id"], self.stops), "reason": reason, "phase": s.get("phase"),
@@ -291,6 +321,7 @@ class FeatureRun:
         self.state["current"] = {"stage": stage, "role": role, "since": workflow.now().isoformat()}
 
     async def _activity(self, name, args, retry, timeout):
+        self._unless_stopping()
         return await workflow.execute_activity(name, args, task_queue=self.queue,
                                                start_to_close_timeout=timeout, retry_policy=retry)
 
@@ -298,8 +329,57 @@ class FeatureRun:
         """A trace write: best-effort, so its failure costs a row and never the run."""
         try:
             return await self._activity(name, args, ONCE, SHORT_TIMEOUT)
-        except ActivityError:
+        except ActivityError as error:
+            if is_cancelled_exception(error):
+                raise
             return None
+
+    async def _git(self, name, args):
+        """A git side effect, which a Stop never cuts off: the run shows the Stop as requested, waits for
+        what git did, and returns it — a merge or discard that landed ends the run as it always does,
+        and anything else meets the Stop at the run's next step."""
+        self._unless_stopping()
+        effect = workflow.start_activity(name, args, task_queue=self.queue, start_to_close_timeout=GIT_TIMEOUT,
+                                         retry_policy=ONCE)
+        try:
+            return await asyncio.shield(effect)
+        except asyncio.CancelledError:
+            _heard()
+            self._stopping()
+        try:
+            return await effect
+        except ActivityError as error:
+            # Git's own failure, not the Stop's: the Stop still ends the run.
+            self._line("%s failed: %s" % (name, _message(error)))
+            raise asyncio.CancelledError() from error
+
+    def _unless_stopping(self):
+        """Once a Stop is requested nothing more starts: the next thing the run would wait on is the Stop."""
+        if self.stopping:
+            raise asyncio.CancelledError()
+
+    def _stopping(self):
+        """The Stop is heard: the run says so and waits at no stop — again after a git result that
+        would have sent it on."""
+        if not self.stopping:
+            self._line("stopping")
+        self.stopping, self.stop = True, None
+        self.state["status"] = "STOPPING"
+
+    async def _stopped(self):
+        """End the run stopped, its worktree and branch as they are. Its terminals and its trace close on
+        its target host, within a bound: a host whose worker is gone never holds a Stop."""
+        s = self.state
+        self._stopping()
+        self._doing("cleanup")
+        try:
+            await workflow.execute_activity("finish_trace", {"state": dict(s, status="STOPPED")},
+                                            task_queue=self.queue, schedule_to_close_timeout=STOP_CLEANUP,
+                                            retry_policy=ONCE)
+        except ActivityError as error:
+            self._line("the %s host's cleanup did not run: %s" % (s["target"], _message(error)))
+        s["status"] = "STOPPED"
+        self._line("STOPPED")
 
     @workflow.update
     def answer(self, answer):

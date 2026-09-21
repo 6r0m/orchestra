@@ -187,6 +187,17 @@ class Listing(unittest.TestCase):
         self.assertEqual(sorted(seen), sorted(run.id for run in newer + [waiting]), "and none is missing")
 
 
+class View(unittest.TestCase):
+    """What a run is now, read from the facts the workflow and Temporal hold."""
+
+    def test_a_run_that_is_stopping_says_so_and_takes_no_answer(self):
+        listed = {"run_id": "r", "execution": "RUNNING", "started": None, "closed": None}
+        status = {"state": {"status": "STOPPING", "current": {"stage": "merge", "role": None, "since": "t"}},
+                  "stop": None, "queue": "target:wsl:host"}
+        view = runs.view(listed, status, {"hosts": {"wsl": "up"}})
+        self.assertEqual((view["state"], view["stage"], view["actions"]), ("stopping", "merge", []))
+
+
 @unittest.skipIf(sys.platform.startswith("win"), "the workbench runs on WSL, where repos.json's paths are")
 class Runs(Scenario):
     """A run seen, reviewed and answered through the workbench, exactly as the workflow allows."""
@@ -344,6 +355,42 @@ class Runs(Scenario):
         closed = self.wait_for(run_id, lambda body: body["state"]["status"] == "MERGED")
         self.assertEqual((closed["view"]["state"], closed["view"]["status"]), ("closed", "MERGED"))
         self.assertEqual(request("GET", "/api/runs/no-such-run")[0], 404)
+
+    def test_stop_ends_a_run_and_a_closed_run_refuses_it(self):
+        a1, _ = codex_review_first("PASS", "Direction: A.")
+        git = FakeWorktrees()
+        self.host, self.agent = E.host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)], git=git)
+        run_id = self.start("a run to stop")
+        self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "approval")
+        status, body = request("POST", "/api/runs/%s/stop" % run_id, {})
+        self.assertEqual(status, 200, body)
+        closed = self.wait_for(run_id, lambda body: body["view"]["state"] == "closed")["view"]
+        self.assertEqual((closed["status"], closed["execution"]), ("STOPPED", "CANCELED"))
+        self.assertEqual([call[0] for call in git.calls], ["create"], "a Stop runs no git")
+        status, body = request("POST", "/api/runs/%s/stop" % run_id, {})
+        self.assertEqual(status, 409, body)
+
+    def test_force_terminate_asks_for_its_confirmation_and_ends_a_run_at_once(self):
+        release = threading.Event()
+        self.addCleanup(release.set)
+        self.host, self.agent = E.host([], git=FakeWorktrees())
+
+        def working(worktree, argv, rdir, name, prompt, timeout, env, *, brain):
+            release.wait(60)
+            return 1, ""
+        self.host.runner = working
+        run_id = self.start("a run to terminate")
+        self.wait_for(run_id, lambda body: body["view"]["stage"] == "plan")
+        status, body = request("POST", "/api/runs/%s/terminate" % run_id, {})
+        self.assertEqual(status, 400, body)
+        self.assertIn("confirm", body["error"])
+        self.assertEqual(E.run(E.client().get_workflow_handle(run_id).describe()).status.name, "RUNNING",
+                         "unconfirmed, nothing happened")
+        status, body = request("POST", "/api/runs/%s/terminate" % run_id, {"confirm": True})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(E.run(E.client().get_workflow_handle(run_id).describe()).status.name, "TERMINATED")
+        status, body = request("POST", "/api/runs/%s/terminate" % run_id, {"confirm": True})
+        self.assertEqual(status, 409, body)
 
     def test_an_answer_to_a_run_that_has_closed_is_refused_as_not_waiting(self):
         """A closed run still answers its status query with the stop it closed at, from its

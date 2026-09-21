@@ -305,9 +305,10 @@ still lands on a checkout.
   the stop it waits at or the failure it stopped on — since when, and which host's worker it is
   blocked by when one is down; above them the page shows whether Temporal answers and whether each
   host's worker polls, the reading `make check` prints. It also shows any repository's worktrees
-  and which of them are merged. It starts runs. It holds no state: every read is Temporal's or a worker's, and every write is a
-  start or an answer Update through `client.py`, which the command line uses too, so the page can
-  do nothing the workflow's own rules and validators do not allow. A change is read in bounded
+  and which of them are merged. It starts runs, and stops or force-terminates them (D31). It holds no state: every read is Temporal's or a worker's, and every write is a
+  start, an answer Update, a Stop or a force terminate through `client.py`, which the command line
+  uses too, so the page can do nothing the workflow's own rules and validators, or Temporal's own
+  lifecycle, do not allow. A change is read in bounded
   parts, because Temporal refuses a payload past its own limit and a review that cannot be read is
   worse than one read in two presses; each part carries the identity of the change it came from, so
   parts of two changes — the terminals stay writable at the gate — are never shown as one. Its API and the workers' terminal sockets accept only the
@@ -367,6 +368,23 @@ still lands on a checkout.
   pointed to. After fixing the cause the operator continues the same run with
   `orchestrate --continue <run-id>`, which runs that stage once more; every
   stage that completed stays completed. **No automatic retry, no retry ledger.**
+- **D31** **A run is ended from outside through Temporal's own lifecycle.** *Stop* is
+  Temporal's cancellation of the run, valid in every open state — an agent working, a
+  stop waiting, a failed stage, the final gate, a host whose worker is gone — and
+  Temporal takes it with no worker polling. The workflow hears it wherever the run
+  waits and ends it `STOPPED`, which Temporal records as cancelled: it runs no git, so
+  the worktree and branch stay as they are, and its cleanup — the run's terminals and
+  trace, closed on its target host — waits a minute at most, so a host whose worker is
+  gone never holds a Stop. A working role's turn hears the Stop at its next heartbeat,
+  and the terminals' close ends its agent sooner. A git side effect already running —
+  the worktree's creation, a merge, a discard — is never cut off: the run shows
+  `STOPPING`, waits for what git did, and a merge or discard that landed ends the run
+  as it always does, while anything else ends it stopped. *Force terminate* is
+  Temporal's termination, for a run a Stop cannot finish: nothing of the run's own
+  runs, so its worktree and branch stay, an agent at work stops at its turn's next
+  heartbeat, and its terminals stay until its host's worker restarts; the workbench
+  asks for it to be confirmed and says so. Both are the workbench's and the command
+  line's (`--stop`, `--force-terminate`), through `client.py`.
 - **D18b** **A rehydrated session is bootstrapped from zero**:
   any prompt built for a session being born carries task, persona, the
   **current stage ask**, and the latest findings/guidance — never a delta
@@ -426,7 +444,7 @@ constrains.
 | D9 no chat-UI automation on critical accounts, D11 agents never stage, commit or push | [Does not own](#does-not-own) |
 | D2 two roles and four stages, D13 config versus code, D22 environments, D30 source organised by concern | [Composition](#composition) |
 | D4 verdict routing, D7 sessions, D17 execution seam, D18 model as configuration, D20 observability owners, D21 provider session stores, D23 a task queue per host, D24 worktree lifecycle and final gate, D29 the workbench | [Relationships and dependency direction](#relationships-and-dependency-direction) |
-| D3, D6, D10, D14, D15, D16, D18b, D19, D25 determinism, D26 repository facts, D27 controller-only git | [Invariants](#invariants) |
+| D3, D6, D10, D14, D15, D16, D31 Stop and force terminate, D18b, D19, D25 determinism, D26 repository facts, D27 controller-only git | [Invariants](#invariants) |
 | D28 containment, live-terminal and plugin-build limits | [Risks and technical debt](#risks-and-technical-debt) |
 
 The superseded founding register — 77 decisions and the full reviewer journey — is in git history

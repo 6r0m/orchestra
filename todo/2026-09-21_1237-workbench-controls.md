@@ -354,13 +354,13 @@ Step 1 — see:
 
 Step 2 — Stop and force terminate:
 
-- [ ] **6.** Red first: a Stop ends the run stopped, with its worktree and branch untouched, from each
+- [x] **6.** Red first: a Stop ends the run stopped, with its worktree and branch untouched, from each
       state — an agent working (its agent ended, nothing of it left running), a stop waiting, a failed
       stage, the final gate, and a target host with no worker (the Stop completes; the host's cleanup
       is skipped within its bound). A Stop during a merge shows as requested, lets the merge land, and
       the run ends merged. Then `client.stop` (Temporal's cancellation), the workflow's handling of it,
       **Stop run** on every open run in the Workbench, and `--stop` on the command line.
-- [ ] **7.** Force terminate: `client` through Temporal's termination with its reason; in the
+- [x] **7.** Force terminate: `client` through Temporal's termination with its reason; in the
       Workbench behind a danger confirmation naming what may be left — the worktree, the branch, a live
       terminal until its worker next restarts; `--force-terminate` on the command line. Verify, rather
       than assume, that a terminated run's working role turn ends its agent at its next heartbeat.
@@ -385,7 +385,10 @@ Step 3 — stack control:
       down, and the start that brings it back, shown in the health panel and on every run it blocks.
 
 Step 4: **11.** `abort` leaves the published actions behind `workflow.patched`, its handling kept for
-the recorded histories; structure D6 and D24 and `docs/using.md` updated.
+the recorded histories; structure D6 and D24 and `docs/using.md` updated. The trace's
+`final_verify_pass` records 0 for an aborted run and nothing for a stopped one — a run stopped at its
+final gate keeps the 1 it scored there — so what a stopped run scores is decided here, with the
+trace contract.
 
 Step 5: **12.** A stopped run's worktree and branch removed from the Workbench's *Worktrees*, through
 the target host's own git as a discard removes them.
@@ -412,7 +415,9 @@ the target host's own git as a discard removes them.
 
 The cases above; `bash run-tests.sh` (WSL) and `run-tests.ps1` (Windows host suite), one after the
 other; the recorded histories replaying; `make demo` passing its journey as it stands at each step,
-D12's in full by the end of step 3; `make public-check`.
+D12's in full by the end of step 3; `make public-check`. `make demo` proves the workflow code the live
+WSL worker loaded, and `make up` leaves a running worker as it is: a step that changes the workflow
+restarts the workers onto it (`make down`, then `make up`) before the demo counts for that step.
 
 ## Documentation plan
 
@@ -583,3 +588,74 @@ journey passes from the Workbench on the live stack with fake agents and no term
   Merge pressed in headless Edge with the page reporting each answer, the run merged and its change on
   the base branch — with no window opened and focus never moved, as sampled throughout; afterwards
   no demo process, temporary folder, run folder, trust record or browser remained.
+
+### 2026-09-21 — review of step 1: PATCH on the demo's cleanup
+
+- **Accepted:** `make demo` left its run in Temporal — terminated when still open, never deleted —
+  and the namespace keeps a closed run for 90 days (`temporal/setup.sh`), so each demo added a
+  finished fake run to the Workbench's list. The demo now deletes that exact execution and proves it
+  gone: the Workbench lists the finished run, Temporal holds it and deletes it, and then neither
+  Temporal — the execution itself or its listing — nor the Workbench's list has it. Recorded beside
+  it: `make demo` proves the workflow code the live WSL worker loaded, and `make up` leaves a running
+  worker as it is (the demo's docstring and first check, `tools/README.md`, the green evidence above).
+- **Found while proving it, and fixed:** at the final gate the page reads the run's change on its
+  own, and each read is a `ReviewDiff` workflow named after the run, retained like the run — the demo
+  deletes those too. A Ctrl-C reached the demo twice — `uv run`'s child gets a process group's SIGINT
+  twice (measured) — and the second cut its cleanup short, leaving its worker, Workbench, folders and
+  trust records; the first Ctrl-C now ends the demo, and the cleanup, which is bounded, ignores any
+  further one. The cleanup stopped the demo's worker only after removing the run's folder, which a
+  turn still running could write again; the worker now stops first. Whatever the cleanup cannot
+  remove is named, and fails the demo.
+- **Found, not in this patch, reported to the operator:** `tests/acceptance_restart.py` leaves its
+  runs in Temporal the same way — they are all 16 runs the live Temporal holds, with 17 reads of
+  their changes. Four `orch-claude-settings-*` folders from earlier runs remain in WSL's temporary
+  folder, each with a stage's trace settings, which carry the trace store's key: `run_role` removes
+  them when a stage ends, so a worker stopped mid-stage leaves them.
+- **Verification:** `make demo` passed on the live stack with the removal step, and a separate read
+  of Temporal found neither the run nor its change's read — by id, in the listing, or in the
+  Workbench's run list — while an earlier demo run, the control, was found by all three. `make demo`
+  interrupted as a terminal's Ctrl-C interrupts it, with the engineer's agent mid-turn: the run
+  deleted from Temporal and nothing else left — no process, agent scope, temporary folder, run folder
+  or trust record. The four runs earlier demo attempts left, and one read of a change, were listed by
+  every demo marker and deleted. `make public-check` and the architecture tests pass.
+
+### 2026-09-21 — step 2, tasks 6 and 7: Stop and force terminate
+
+- **Change:** a Stop is Temporal's cancellation of the run (`client.stop`), heard wherever the run
+  waits — the SDK delivers it as an `ActivityError` with a cancelled cause at an activity and as a
+  `CancelledError` at a stop, so each handler that turned an activity's failure into a failed stop,
+  a refusal or a skipped trace row now lets a cancellation through. The run ends `STOPPED`, which
+  Temporal records as cancelled: no git runs, the stop it waited at is cleared, and `finish_trace`
+  closes its terminals and trace on its host under a one-minute schedule-to-close bound. The three
+  git side effects run shielded: a Stop during one shows `STOPPING` and waits for what git did; a
+  merge or discard that landed ends the run as always, and after anything else the next thing the
+  run would wait on raises the Stop. Force terminate is Temporal's termination
+  (`client.force_terminate`). Both refuse a closed run up front, because Temporal's test server takes
+  a cancellation of one. The Workbench has *Stop run* and *Force terminate* on every open run, the
+  second behind a confirmation the server also requires; the command line has `--stop` and
+  `--force-terminate`; the run view gains `stopping`. Structure D31 is new, and D29, `docs/using.md`,
+  the stops diagram and the workflow's own architecture page say what changed.
+- **Red first:** the seven workflow cases failed for the reason they exist — a Stop at a stop left the
+  run cancelled with its status `RUNNING` and its stop still offered; at work it became a failed stage
+  whose error read `Cancelled`; with no worker the run read `REFUSED`; during a merge nothing said
+  `STOPPING`. Against the committed code, in a copy made by `git archive`, both new routes answered
+  404, the view read `running`, and both command-line forms were refused.
+- **Verified, not assumed (task 7):** a terminated run's working turn ends its agent at its next
+  heartbeat, and the test's control shows the agent does not end by itself. Force terminate therefore
+  leaves the worktree, the branch and the run's terminals until its host's worker restarts, but no
+  agent past its next heartbeat — not "a live terminal", as task 7 assumed; the confirmation says so.
+- **Found while building it:** the history recorder rewrote every history each time it ran, which
+  would have replaced those older code wrote; it now records a history by its name, and two new ones
+  — a Stop at the approval, a Stop during a merge that then lands — guard the Stop's path, because the
+  Workbench queries closed runs and a query replays. A stopped run gets no trace score; task 11
+  decides it.
+- **Demonstration:** `make demo` grew to step 2's part of D12's journey, every control pressed in
+  headless Edge — a run stopped while its engineer is held at work, which ends it and its agent; one
+  stopped at its approval; one whose merge a git hook holds, whose Stop waits at `STOPPING` because
+  it never cuts a merge off, force-terminated; each keeping its worktree and branch. The live stack
+  was restarted onto this code first (`make down`, `make up`), as the green evidence requires.
+- **Verification:** the WSL suite (308 tests) and the Windows host suite (231) pass; the five
+  recorded histories replay and the control fails each; `make demo` passed on the restarted stack,
+  with no window opened and focus unmoved as sampled throughout, and afterwards no demo process,
+  agent scope, held git hook, temporary folder, run folder, trust record, browser or Temporal
+  execution remained.
