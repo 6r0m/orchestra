@@ -18,8 +18,9 @@ import re
 from app.foundation import paths
 from app.foundation import stages
 
-# The deployment's own policy file. `ORCH_POLICY` names another, and a role's prompt is
-# resolved against the directory of the file actually loaded, not against this one.
+# The deployment's own policy file. `ORCH_POLICY` names another for everything on this host
+# that loads one, and a role's prompt is resolved against the directory of the file actually
+# loaded, not against this one.
 POLICY_FILE = os.path.join(paths.REPO, "policy.json")
 
 ROLES = ("engineer", "architect")
@@ -45,8 +46,8 @@ class InvalidPolicy(ValueError):
 
 
 def load(path=None):
-    if path is None:
-        path = POLICY_FILE
+    """This host's policy: `path`, else the file `ORCH_POLICY` names, else the checkout's own."""
+    path = path or os.environ.get("ORCH_POLICY") or POLICY_FILE
     with open(path, encoding="utf-8") as fh:
         raw = json.load(fh)
     raw["_policy_path"] = origin(path)
@@ -81,7 +82,7 @@ def prompt_path(policy, role_name, policy_file=None):
     """The role's persona file as *this* host sees it. The one resolver.
 
     A policy crosses hosts as data. The directory a relative `prompt` resolves against is,
-    in order: the policy file this host was given itself (its own `ORCH_POLICY`); the
+    in order: this host's own copy of the policy (`policy_file`, its `ORCH_POLICY`); the
     policy's origin read against this checkout, when it came from inside one; its origin as
     it stands, when that is an absolute path on this host; and this checkout, for a policy
     that names no origin. An origin written by the other host is refused rather than
@@ -94,6 +95,7 @@ def prompt_path(policy, role_name, policy_file=None):
         resolved = prompt
     else:
         if policy_file:
+            _same_policy(policy, policy_file)
             base = os.path.dirname(os.path.abspath(policy_file))
         elif not named:
             base = paths.REPO
@@ -112,6 +114,33 @@ def prompt_path(policy, role_name, policy_file=None):
     if not os.path.isfile(resolved):
         raise InvalidPolicy("role %r: prompt file missing: %s" % (role_name, resolved))
     return resolved
+
+
+# Where a policy was read, which each host spells for itself, and what an older run's policy
+# still carries from before the persona path was left to the host running the role.
+DERIVED = ("_policy_path", "prompt_path")
+
+
+def _semantic(policy):
+    kept = {key: value for key, value in policy.items() if key not in DERIVED}
+    kept["roles"] = {name: {key: value for key, value in role.items() if key not in DERIVED}
+                     for name, role in policy["roles"].items()}
+    return kept
+
+
+def _same_policy(policy, policy_file):
+    """Refuse this host's copy of a run's policy unless it says what the run's policy says.
+
+    A host's `ORCH_POLICY` is where it keeps the run's policy, not a second policy: a copy
+    that differs — another persona, another budget — would change a run the workflow has
+    already started, on one host only. Only where each copy was read may differ.
+    """
+    runs, mine = _semantic(policy), _semantic(load(policy_file))
+    differ = sorted(key for key in set(runs) | set(mine) if runs.get(key) != mine.get(key))
+    if differ:
+        raise InvalidPolicy(
+            "this host's policy %s differs from the run's in %s; a host's ORCH_POLICY must be "
+            "a copy of the policy the run was started with" % (policy_file, ", ".join(differ)))
 
 
 def validate(raw):
@@ -133,7 +162,7 @@ def validate(raw):
     if not isinstance(roles, dict) or set(roles) != set(ROLES):
         raise InvalidPolicy("roles must define exactly %s" % (ROLES,))
     for name, role in roles.items():
-        unknown = set(role) - ROLE_KEYS - {"prompt_path"}
+        unknown = set(role) - ROLE_KEYS
         if unknown:
             raise InvalidPolicy("role %r: unknown keys: %s"
                                 % (name, ", ".join(sorted(unknown))))
@@ -166,7 +195,9 @@ def validate(raw):
     for name, role in roles.items():
         if not isinstance(role.get("prompt"), str) or not role["prompt"]:
             raise InvalidPolicy("role %r needs a prompt file link" % name)
-        role["prompt_path"] = prompt_path(raw, name)
+        # Resolved to prove the persona is there, and not stored: the policy crosses hosts,
+        # and the resolved path is only ever this host's. The host running the role resolves it.
+        prompt_path(raw, name)
 
     rounds = raw.get("max_rounds")
     if not isinstance(rounds, dict) or set(rounds) != set(stages.PHASES):

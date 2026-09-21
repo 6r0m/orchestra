@@ -40,7 +40,7 @@ handed, and never learns how git reads one.
 - **A role-run and every git side effect are single-attempt (D5).** A failure stops the run for the operator; there is no automatic retry and no retry ledger (D16).
 - **Every write goes through the workflow's own start rules, Updates and validators**, so the page can do nothing the workflow does not allow.
 - **An activity never waits for a human** (D6).
-- **A persona file is resolved by `foundation.policy.prompt_path` and nowhere else**, on the host that runs the role and inside the step, so a policy that host cannot read fails the step before an agent starts.
+- **A persona file is resolved by `foundation.policy.prompt_path` and nowhere else**, on the host that runs the role and inside the step, so a policy that host cannot read, or a host copy that differs from the run's, fails the step before an agent starts.
 
 ## Accepted decisions
 

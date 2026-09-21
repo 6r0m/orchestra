@@ -10,7 +10,7 @@ what the four stages of a run are.
 
 - `paths` — the one derivation of the checkout root, the runtime root a run writes under, and the directory this deployment keeps credentials in.
 - `envpath` — where each checkout's uv-managed environment lives on this host, and its guarded removal.
-- `policy` — the validated policy: roles, brains, budgets, access, target hosts, the queue each target polls, and the one resolver for a role's persona file.
+- `policy` — this host's validated policy (the file `ORCH_POLICY` names, else the checkout's own): roles, brains, budgets, access, target hosts, the queue each target polls, and the one resolver for a role's persona file.
 - `stages` — the four stages, which role runs each, what each asks its role for, and the verdicts a review may answer with.
 
 ## Does not own
@@ -49,7 +49,7 @@ edge to the graph without separating an owner.
 
 - **One authority per fact, refusing when there is none (D26).** `paths.REPO` is the only derivation of the checkout root; every other root path is built from it.
 - **Policy validation is strict (D18).** An unknown top-level or role key is rejected, so a typo cannot silently do nothing.
-- **A role's persona file has one resolver, and what crosses hosts is readable on both.** `policy.prompt_path` answers for validation and for whichever host runs the role. A policy crosses hosts as data, so it carries its origin relative to the checkout when it came from inside one, and each host reads that against its own checkout; the target's own `ORCH_POLICY` decides over it. An origin only the other host can spell, and a persona file that is not there, are refused before an agent starts — never replaced by another file.
+- **A role's persona file has one resolver, and what crosses hosts is readable on both.** `policy.prompt_path` answers for validation and for whichever host runs the role. A policy crosses hosts as data, so it carries no path resolved on either host: only its origin, relative to the checkout when it came from inside one, which each host reads against its own checkout. A host's `ORCH_POLICY` is its copy of the run's policy — where to find the personas, never a second policy — and a copy that says anything else is refused. An origin only the other host can spell, and a persona file that is not there, are refused before an agent starts — never replaced by another file.
 - **Stage asks are code, never configuration (D13).** Each ask names the artifact its stage produces or judges, and a new stage is a change to the workflow.
 - **A worktree's environment is removed only** when the derived path lies under this host's environment root, crosses no link or reparse point, and holds `pyvenv.cfg` (D22).
 

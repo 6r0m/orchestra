@@ -154,10 +154,11 @@ Running it day to day — the page, the command line, and where to look when som
 [docs/using.md](docs/using.md). What is being worked on right now is in [todo/](todo/README.md).
 
 If you have your own engineering skills for your CLI, bind them per stage with `stage_skills` in a
-policy of your own (`ORCH_POLICY`): the bound skill leads that stage's prompt. Orchestra ships none,
-and its role files say enough to work without one. Keep that policy inside the checkout, or give each
-host's worker its own `ORCH_POLICY` too: a policy path only the other host can spell is refused
-rather than read from the wrong place.
+policy of your own, named by `ORCH_POLICY`: the page, the command line and the workers all load the
+policy it names, and the bound skill leads that stage's prompt. Orchestra ships none, and its role
+files say enough to work without one. A policy inside the checkout needs nothing more. One outside it
+is copied to each host, with that host's worker's `ORCH_POLICY` naming its copy; a copy that differs
+from the policy a run started with is refused rather than used.
 
 ## License
 

@@ -32,7 +32,7 @@ def pid_file(target):
 
 
 async def main(target):
-    policy = P.load(os.environ.get("ORCH_POLICY"))
+    policy = P.load()
     client = await runs.connect()
     queue = P.queue(policy, target)
     host = activities.Activities()
@@ -65,7 +65,7 @@ async def check():
     except runs.Refusal as exc:
         print(exc)
         return 1
-    policy = P.load(os.environ.get("ORCH_POLICY"))
+    policy = P.load()
     queues = [(WF.TASK_QUEUE, TaskQueueType.TASK_QUEUE_TYPE_WORKFLOW)] + [
         (P.queue(policy, target), TaskQueueType.TASK_QUEUE_TYPE_ACTIVITY) for target in P.TARGETS]
     missing = 0

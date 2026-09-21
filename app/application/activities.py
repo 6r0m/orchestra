@@ -189,8 +189,8 @@ class Activities:
         settings = None
         try:
             # The persona file as this host sees it, from the one resolver: the policy crossed
-            # from the client as data, and the client's own path to it is the client's. A policy
-            # this host cannot map fails the step here, before an agent starts.
+            # from the client as data, and this host's own ORCH_POLICY may only be a copy of it. A
+            # policy this host cannot map, or a copy that differs, fails the step before an agent starts.
             role["prompt_path"] = P.prompt_path(policy, role_name, os.environ.get("ORCH_POLICY"))
             # Holds the trace store's secret, so it exists only while this stage runs.
             settings = T.harness_settings(role, span)

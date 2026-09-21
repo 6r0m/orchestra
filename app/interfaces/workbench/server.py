@@ -267,7 +267,7 @@ def pid_file(port):
 
 
 def main():
-    policy = P.load(os.environ.get("ORCH_POLICY"))
+    policy = P.load()
     server = serve(policy, Loop().call, trace_links())
     os.makedirs(paths.RUNTIME_ROOT, exist_ok=True)
     with open(pid_file(policy["workbench_port"]), "w", encoding="utf-8") as fh:

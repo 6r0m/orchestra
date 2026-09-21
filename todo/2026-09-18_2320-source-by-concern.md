@@ -1,7 +1,7 @@
 # Source organised by concern — D30
 
-**Status:** the move is done; a second review (PATCH) is answered in the working tree, unstaged,
-and awaits its review. What is left is the operator's.
+**Status:** the move is done; the second and third reviews (PATCH, PATCH) are answered in the
+working tree, unstaged, and await review. What is left is the operator's.
 
 ## Goal
 
@@ -79,15 +79,35 @@ Each finding checked against the code; the fixes are unstaged, beside the staged
    a gate is answered. Without the real-time change the module failed 1 in 30 runs; with it,
    none in 60.
 
+## Third review — PATCH, answered
+
+The reviewer accepted the refutation of point 2: `stages` stays in `foundation`, which stays
+dependency-free and holds only small shared contracts and facts.
+
+1. **Accepted — a resolved persona path still crossed hosts.** Validation stored each role's
+   resolved `prompt_path` in the policy the client sends; the target ignored it, but the value was
+   still there. Validation now only proves the persona exists, and the one resolved path is the
+   target's, made inside the step.
+2. **Accepted, and it was worse than stated.** A target's `ORCH_POLICY` lent only its directory,
+   so a copy naming other personas would have been read silently. It is now a copy of the run's
+   policy by contract: anything but where it was read must match, or the step fails before an
+   agent starts. Checking that exposed a real defect: `load()` never read `ORCH_POLICY`, so a run
+   started from the page, or from the command line without `--policy`, carried `policy.json` even
+   where `ORCH_POLICY` bound its stage skills. `load()` now reads it, for every entry point.
+3. **Accepted — the proof now sits at the activity boundary.** A client's policy, decoded as
+   Temporal carries it, goes through `Activities.run_role` with the runner seam as the agent, on
+   each host's suite: the prompt the agent receives carries that host's persona, and an unreadable
+   origin or a differing copy starts no agent. Mutations — storing the path again, skipping the
+   copy check — each fail two of the new tests.
+
 ## Left for the operator
 
 1. **The index and the commit.** The move is staged; the second review's fixes are not. Nothing
    was committed, and neither the commit nor the branch is an agent's to make.
 2. **One acceptance run from before this work is still open,** holding its worktree and branch. A
    discard is the operator's (D24).
-3. **A WSL-to-Windows role turn with real agents.** The resolver's crossing was proven on both
-   hosts with the real policy; a live turn on the Windows worker would spend model usage, so it
-   was not run here.
+3. **A WSL-to-Windows role turn with real agents,** if wanted: the activity boundary is proven on
+   the Windows host suite with a fake agent, and the vendor CLIs' own transport by the terminal tests.
 
 ## Optional
 
@@ -96,7 +116,7 @@ Each finding checked against the code; the fixes are unstaged, beside the staged
 
 ## Verification
 
-Of the second review's fixes, on the working tree: the full WSL suite (274 tests) and the Windows
+Of the second and third reviews' fixes, on the working tree: the full WSL suite (280 tests) and the Windows
 host suite, `tests.foundation.test_policy` included, green; the recorded histories replay; the
 workbench module 60 times in a row without a failure; each new guard failing on a violation
 injected into the real tree — a README skipping a level, an arrow missing from the main view, a
