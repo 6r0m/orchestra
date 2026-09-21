@@ -659,3 +659,47 @@ journey passes from the Workbench on the live stack with fake agents and no term
   with no window opened and focus unmoved as sampled throughout, and afterwards no demo process,
   agent scope, held git hook, temporary folder, run folder, trust record, browser or Temporal
   execution remained.
+
+### 2026-09-21 — review of step 2: Stop PASS, force terminate PATCH, two cleanups before step 3
+
+- **Accepted — force terminate promised too much.** Termination closes a run but cannot stop an
+  activity already running, and the three git side effects do not heartbeat: a worktree's creation,
+  a merge or a discard in flight goes on after a force terminate and may change the repository. The
+  record above says force terminate leaves the worktree and branch; that is wrong. D31,
+  `client.force_terminate`, the Workbench's confirmation, the command line's help and message,
+  `docs/using.md` and the stops diagram now say what termination does, and a terminated run reads
+  "terminated" in the Workbench rather than the status termination found it at. The guard:
+  `ForceTerminate.test_a_git_side_effect_already_running_goes_on_after_a_force_terminate`, which
+  passes on the code before this patch too — it pins Temporal's behaviour, and the worker logged the
+  merge's late completion refused ("Completed workflow"). `make demo` now lets the held merge go after
+  the force terminate, its worker still running, and proves the merge lands on the base branch and its
+  own cleanup takes the worktree and branch. No primitive that stops git mid-write is built.
+- **Accepted — a worker killed mid-stage leaves the stage's settings, with the trace store's key.**
+  They are private already (a 0700 directory, the file created 0600 and exclusive). Each settings
+  directory is now named after the process that made it, and a worker removes, as it starts, those
+  whose process is gone — never one a stage still uses: sweeping every such directory would take the
+  settings of a stage running in the demo's or the acceptance's worker on the same host. Red first:
+  the worker's own entry point, started after a stage killed mid-run as a restart starts it, left that
+  stage's settings (`test_stale_settings`, on both hosts). The seven such directories found — four on
+  WSL, three days-old ones on Windows — were removed by hand.
+- **Accepted — the acceptance's leftovers, and more than the review counted.** Beside its 16 runs and
+  17 reads in Temporal it left 16 run folders and a pid file for every worker it killed. It now records
+  each run as soon as its id is known — the second run's from the command line still following it,
+  should the acceptance fail first — and afterwards deletes its runs and their reads from Temporal,
+  proving them gone, removes their folders and its killed workers' pid files, and fails on anything
+  left. `tests/temporal_cleanup.py` is the one helper it and `make demo` share. What earlier
+  acceptances left was listed by the acceptance's own queue and repository and deleted: Temporal holds
+  no test run now.
+- **Accepted — `alive()`.** A `/proc/<pid>/stat` opened before its process is reaped raises
+  `ProcessLookupError` when read (reproduced deterministically); both copies — the terminal tests' and
+  the acceptance's — now take that as gone.
+- **Simplified:** the review's "terminate if needed" before deleting — Temporal's deletion terminates
+  an open execution itself.
+- **Step 3's precondition:** a worker stopped or restarted from the Workbench now leaves no secret
+  behind for long: the next worker to start on that host removes it.
+- **Verification:** the WSL suite (311 tests) and the Windows host suite (234) pass. One earlier full
+  Windows run passed every test, then hung at exit, with a thread asleep and the main thread waiting
+  to join it; it was stopped, and the next full run and the two new modules alone exited normally —
+  the cause is not found. `make demo` passed with the held merge landing after the force terminate,
+  and the live acceptance passed, its last check that it left nothing on the host or in Temporal;
+  afterwards Temporal held no run, and neither host a settings directory. `make public-check`.

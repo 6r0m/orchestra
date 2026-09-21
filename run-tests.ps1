@@ -11,7 +11,8 @@ $hostTests = @(
     "tests.agents.test_launch", "tests.agents.test_terminal", "tests.agents.test_trust",
     "tests.workspace.test_repos", "tests.workspace.test_worktrees",
     "tests.orchestration.test_workflow", "tests.orchestration.test_stops", "tests.orchestration.test_replay",
-    "tests.observability.test_trace_parity", "tests.foundation.test_policy", "tests.test_architecture"
+    "tests.observability.test_trace_parity", "tests.observability.test_stale_settings", "tests.foundation.test_policy",
+    "tests.test_architecture"
 )
 if (-not $Tests) { $Tests = $hostTests }
 

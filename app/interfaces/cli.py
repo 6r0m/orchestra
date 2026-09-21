@@ -215,7 +215,8 @@ async def _force_terminate(client, run_id):
     except runs.NotWaiting as error:
         print("error: %s — refusing" % error, file=sys.stderr)
         return 3
-    print("terminated %s: its worktree and branch are left as they are" % run_id)
+    print("terminated %s — anything its host was already doing goes on: a merge or discard already running "
+          "may still change the repository" % run_id)
     return 0
 
 
@@ -295,7 +296,8 @@ def parse_args(argv):
                         help="run a failed stage again once you have fixed its cause")
     parser.add_argument("--stop", metavar="RUN_ID", help="stop this run, keeping its worktree and branch")
     parser.add_argument("--force-terminate", metavar="RUN_ID",
-                        help="end this run at once, with no cleanup: for a run a stop cannot finish")
+                        help="close this run at once, with no cleanup, for a run a stop cannot finish; what its "
+                             "host is already doing goes on, and a merge or discard running may still land")
     parser.add_argument("--show", metavar="RUN_ID", help="print this run's history and stop")
     parser.add_argument("--worktrees", action="store_true", help="list the repository's worktrees")
     parser.add_argument("--policy", metavar="PATH")

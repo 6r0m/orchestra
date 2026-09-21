@@ -5,7 +5,7 @@ the test suite.
 
 | file | what it is for |
 |---|---|
-| [demo.py](demo.py) | `make demo`: watch runs in a Workbench of its own, with fake agents that take a few watchable seconds a turn and call no model, every answer and control pressed as the operator presses it — one run the whole way, the architect sending the plan back once, approved and merged; one stopped while its engineer works and one while it waits, each keeping its worktree and branch; one force-terminated when its Stop cannot finish, its merge held in a git hook — on the live stack, isolated by a policy and a target queue of its own that only its activity worker polls, and removed afterwards, its runs deleted from Temporal too. It needs `make up`, proves the workflow code the live WSL worker loaded — after a workflow change, `make down` and `make up` first — and prints the URL to watch |
+| [demo.py](demo.py) | `make demo`: watch runs in a Workbench of its own, with fake agents that take a few watchable seconds a turn and call no model, every answer and control pressed as the operator presses it — one run the whole way, the architect sending the plan back once, approved and merged; one stopped while its engineer works and one while it waits, each keeping its worktree and branch; one force-terminated when its Stop cannot finish, its merge held in a git hook, which once let go still lands — termination cannot stop what a host is already doing — on the live stack, isolated by a policy and a target queue of its own that only its activity worker polls, and removed afterwards, its runs deleted from Temporal too. It needs `make up`, proves the workflow code the live WSL worker loaded — after a workflow change, `make down` and `make up` first — and prints the URL to watch |
 | [demo_press.py](demo_press.py) · [demo_press.ps1](demo_press.ps1) | the demo's Windows side: press one of a run's buttons in the Workbench in headless Edge, over the DevTools protocol, and report what the page said — WSL cannot reach Windows' loopback, and Windows reaches the Workbench's |
 | [ui_fixture.py](ui_fixture.py) | emit one complete work item — both roles, a round sent back, a lost session rehydrated, a blocker answered with guidance, the approval with its summary, a failed build attempt continued, and a final diff — to the trace UI in seconds, through the real workflow on Temporal's time-skipping test server and without calling a model, so the operator view can be judged without spending a real run |
 | [trust_probe.py](trust_probe.py) | check on this host that a repository recorded by [`trust.py`](../app/agents/trust.py) raises no trust dialog in a worktree of it: it makes a throwaway repository and worktree under `tmp/`, records it as a run does, starts the real CLI there, reports whether the dialog appeared — then removes the worktree, the files and the records it made. Run it per CLI after either vendor is upgraded |
@@ -67,7 +67,9 @@ and supplies both keys and the base URL. The file is created readable by its
 owner only, in a directory of its own on the machine's temporary filesystem
 rather than the repository's drive, whose mount ignores file modes; nothing
 secret reaches the command line; and the stage deletes both when its role-run
-ends, on failure too.
+ends, on failure too. A stage whose worker died first cannot, so each directory
+is named after the process that made it, and a worker, as it starts, removes
+those whose process is gone — never one a stage still running uses.
 
 Do not configure the plugin with `/plugin configure`: that stores the secret
 again and re-opens tracing for every session that has the plugin enabled.

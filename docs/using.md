@@ -31,8 +31,9 @@ it. A large change is read in parts, a press each.
 *Stop run* ends a run from whatever it is doing — an agent at work, a stop waiting, a failed stage,
 the final gate, a host whose worker is down — and keeps its worktree and branch as they are. A
 merge or discard already running is let finish first, and decides how the run ends. *Force
-terminate* is for a run a Stop cannot finish: it ends the run at once with no cleanup, and its
-confirmation says what that leaves.
+terminate* is for a run a Stop cannot finish: it closes the run at once with no cleanup, but cannot
+stop what the run's host is already doing — a worktree's creation, a merge or a discard already
+running goes on and may still change the repository — and its confirmation says so.
 
 *Worktrees* lists any repository's worktrees and which of them are still unmerged.
 
@@ -48,7 +49,7 @@ $O "<task>" --repo webapp          # a run on a repository named in repos.json
 $O --resume <run-id> --answer yes  # answer the stop the run waits at
 $O --continue <run-id>             # run a failed stage again, after you fixed its cause
 $O --stop <run-id>                 # end a run from whatever it is doing, keeping its worktree and branch
-$O --force-terminate <run-id>      # end a run a stop cannot finish, at once and with no cleanup
+$O --force-terminate <run-id>      # close a run a stop cannot finish, at once; git already running goes on
 $O --show <run-id>                 # the stage table and the architect's words
 $O --worktrees --repo webapp       # every worktree, and whether its work is merged
 ```

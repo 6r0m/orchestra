@@ -6,8 +6,10 @@ a discard through real workers and real git.
 
 It never touches a real repository or agent. A throwaway repository, fake `claude` and
 `codex` executables, and a dedicated `accept` host whose queue only this script's worker
-polls; the stops it answers are its own run's. Needs the stack and both workers up
-(`make orchestration-up`), and restarts all three:
+polls; the stops it answers are its own run's. Afterwards it takes back all it made: its runs
+and the reads of their changes from Temporal — the Workbench lists every run Temporal retains —
+their folders, its workers' pid files and its trust records. Needs the stack and both workers up
+(`make up`), and restarts all three:
 
     uv run --locked python tests/acceptance_restart.py
 """
@@ -35,6 +37,7 @@ from app.application import client as runs  # noqa: E402
 from app.foundation import policy as P  # noqa: E402
 from app.agents import trust  # noqa: E402
 from app.orchestration import workflow as WF  # noqa: E402
+import temporal_cleanup  # noqa: E402
 
 RUNTIME = os.path.join(REPO, "tmp", "orchestration")
 
@@ -92,7 +95,8 @@ def alive(pid):
     try:
         with open("/proc/%d/stat" % pid) as fh:
             return fh.read().rsplit(")", 1)[1].split()[0] != "Z"
-    except (FileNotFoundError, ValueError):
+    except (FileNotFoundError, ProcessLookupError, ValueError):
+        # A process reaped between the open and the read answers ESRCH.
         return False
 
 
@@ -104,6 +108,11 @@ class Acceptance:
         self.bin = os.path.join(self.tmp, "bin")
         self.hang = os.path.join(self.tmp, "hang")
         self.worker = None
+        # What the cleanup takes back: each run as soon as its id is known, the command line still
+        # following one whose id it has printed, and every worker this script started.
+        self.runs = []
+        self.follower = None
+        self.worker_pids = []
 
     def setup(self):
         os.makedirs(self.repo)
@@ -149,6 +158,7 @@ class Acceptance:
         log = open(os.path.join(self.tmp, "worker.log"), "a")
         self.worker = subprocess.Popen([sys.executable, "-m", "app.interfaces.worker", "wsl"], cwd=PKG,
                                        env=self.env(), stdout=log, stderr=log, start_new_session=True)
+        self.worker_pids.append(self.worker.pid)
 
     def kill_worker(self):
         if self.worker and self.worker.poll() is None:
@@ -196,6 +206,7 @@ class Acceptance:
         code, out = self.cli("acceptance change", "--repo", "sample", "--policy", self.policy)
         check(code == 2 and "reason:   approval" in out, "the run stopped for approval (rc %s)" % code)
         run1 = re.search(r"run-id: ([\w-]+)", out).group(1)
+        self.runs.append(run1)
         handle = client.get_workflow_handle(run1)
         status = await handle.query(WF.FeatureRun.status)
         before = await self.events(handle)
@@ -273,9 +284,9 @@ class Acceptance:
 
         step("a worker killed while its role runs takes the role's whole tree with it")
         open(self.hang, "w").close()
-        proc = subprocess.Popen([sys.executable, "-m", "app.interfaces.cli", "second change", "--repo", "sample",
-                                 "--policy", self.policy, "--auto-proceed"], cwd=PKG, env=self.env(),
-                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        proc = self.follower = subprocess.Popen(
+            [sys.executable, "-m", "app.interfaces.cli", "second change", "--repo", "sample", "--policy", self.policy,
+             "--auto-proceed"], cwd=PKG, env=self.env(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         deadline = time.monotonic() + 300
         while not os.path.exists(self.hang + ".grandchild") and time.monotonic() < deadline:
             time.sleep(1)
@@ -287,7 +298,9 @@ class Acceptance:
             time.sleep(0.1)
         check(not alive(grandchild), "killing the worker ended the grandchild within 5 s, before any timeout")
         out = proc.communicate(timeout=300)[0]
+        self.follower = None
         run2 = re.search(r"run-id: ([\w-]+)", out).group(1)
+        self.runs.append(run2)
         check("reason:   failed" in out and "heartbeat" in out.lower(),
               "after the heartbeat timeout the run stopped for the operator")
         os.remove(self.hang)
@@ -322,15 +335,42 @@ class Acceptance:
         return run1, run2
 
     def cleanup(self):
-        """Take back everything this acceptance left on the host; returns what would not go."""
+        """Take back everything this acceptance made, on the host and in Temporal; returns what would not go."""
         self.kill_worker()
+        left = []
+        if self.follower is not None:
+            # The command line still following a run the acceptance never saw end: it printed the run's id.
+            if self.follower.poll() is None:
+                self.follower.kill()
+            printed = re.search(r"run-id: ([\w-]+)", self.follower.communicate()[0] or "")
+            if printed:
+                self.runs.append(printed.group(1))
+        try:
+            left += ["%s in Temporal" % workflow_id for workflow_id in asyncio.run(self.forget())[1]]
+        except Exception as exc:                   # noqa: BLE001 - reported below, never raised here
+            left.append("runs %s in Temporal (%r)" % (", ".join(self.runs), exc))
+        for run_id in self.runs:
+            shutil.rmtree(os.path.join(RUNTIME, run_id), ignore_errors=True)
+        for pid in self.worker_pids:
+            # Its workers run under a policy of their own, so each named its pid file after itself, and
+            # a killed one could not take it back.
+            try:
+                os.remove(os.path.join(RUNTIME, "worker-wsl-%d.pid" % pid))
+            except FileNotFoundError:
+                pass
+        left += [name for name in os.listdir(RUNTIME)
+                 if name in self.runs or any(name.endswith("-%d.pid" % pid) for pid in self.worker_pids)]
         try:
             trust.forget(self.repo, [role["brain"] for role in P.load(self.policy)["roles"].values()])
         except Exception as exc:                   # noqa: BLE001 - reported below, never raised here
             print("  trust.forget failed: %r" % (exc,))
-        left = self.trust_left()
+        left += ["its %s trust record" % brain for brain in self.trust_left()]
         shutil.rmtree(self.tmp, ignore_errors=True)
         return left
+
+    async def forget(self):
+        """Delete its runs, and the reads of their changes, from Temporal: what is still held."""
+        return await temporal_cleanup.delete_runs(await self.connect(30), self.runs)
 
     def trust_left(self):
         """Which CLIs still hold a record of this throwaway repository — read, not taken on trust."""
@@ -357,9 +397,10 @@ if __name__ == "__main__":
         runs_done = asyncio.run(acceptance.run())
     except BaseException as exc:                    # noqa: BLE001 - reported after the cleanup runs
         failure = exc
-    print("\n== nothing of this acceptance stays on the host", flush=True)
+    print("\n== nothing of this acceptance stays, on the host or in Temporal", flush=True)
     remaining = acceptance.cleanup()
     if failure is not None:
         raise failure
-    check(not remaining, "no trust record of its repository is left with either CLI")
+    check(not remaining, "its runs, their reads, folders and pid files, and its trust records are gone%s"
+          % (": %s left" % "; ".join(remaining) if remaining else ""))
     print("\nACCEPTANCE PASSED: runs %s and %s" % runs_done)

@@ -261,7 +261,8 @@ still lands on a checkout.
   working key — neither Claude's settings nor its credential store, whose secret outranks any a
   run supplies — so this component takes the keys from `secrets/langfuse.env`, the one file holding every
   Langfuse credential, and a traced Claude role-run receives them in its own settings file for as long as it
-  runs. The setup, on both hosts, is in [tools/README.md](../../tools/README.md).
+  runs; one a stage left when its worker died first is removed by the next worker to start on that
+  host. The setup, on both hosts, is in [tools/README.md](../../tools/README.md).
 - **D23** **Each target host has its own task queue**, `target:<os>:<host>`,
   polled only by that host's worker, and every activity of a run goes to its
   target's queue. The WSL worker also runs the workflows on the `orchestration`
@@ -380,11 +381,16 @@ still lands on a checkout.
   the worktree's creation, a merge, a discard — is never cut off: the run shows
   `STOPPING`, waits for what git did, and a merge or discard that landed ends the run
   as it always does, while anything else ends it stopped. *Force terminate* is
-  Temporal's termination, for a run a Stop cannot finish: nothing of the run's own
-  runs, so its worktree and branch stay, an agent at work stops at its turn's next
-  heartbeat, and its terminals stay until its host's worker restarts; the workbench
-  asks for it to be confirmed and says so. Both are the workbench's and the command
-  line's (`--stop`, `--force-terminate`), through `client.py`.
+  Temporal's termination, for a run a Stop cannot finish: the run closes at once and
+  none of its own cleanup runs, but termination cannot stop what the run's host is
+  already doing. A working role's turn hears it at its next heartbeat and ends its
+  agent; a git side effect already running — the worktree's creation, a merge, a
+  discard — does not heartbeat, so it runs to its end and may change the repository
+  after the run has closed. Nothing is promised of the worktree and branch, the run's
+  terminals stay until its host's worker restarts, and nothing stops a git side effect
+  mid-write. The workbench asks for force terminate to be confirmed and says all of
+  this. Both are the workbench's and the command line's (`--stop`,
+  `--force-terminate`), through `client.py`.
 - **D18b** **A rehydrated session is bootstrapped from zero**:
   any prompt built for a session being born carries task, persona, the
   **current stage ask**, and the latest findings/guidance — never a delta

@@ -216,9 +216,10 @@ async def stop(client, run_id):
 
 
 async def force_terminate(client, run_id, reason):
-    """End a run at once — Temporal's termination — for one a Stop cannot finish. Nothing of the run's
-    own runs: its worktree and branch stay, an agent at work stops at its turn's next heartbeat, and
-    the run's terminals stay until its host's worker restarts."""
+    """Close a run at once — Temporal's termination — for one a Stop cannot finish. None of the run's
+    own cleanup runs, and termination cannot stop what its host is already doing: an agent at work
+    ends at its turn's next heartbeat, but a git side effect already running goes on to its end and
+    may still change the repository."""
     await _while_open(client, run_id, lambda handle: handle.terminate(reason=reason))
 
 

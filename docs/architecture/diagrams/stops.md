@@ -33,4 +33,5 @@ Any stage, the worktree's creation, a merge or a discard that fails stops at a `
 
 A Stop ends the run `STOPPED` from any of these places and runs no git; a worktree's creation, a
 merge or a discard already running finishes first, and a merge or discard that landed ends the run
-as above. Force terminate ends it at once. Both are [structure D31](../structure.md).
+as above. Force terminate closes it at once, and a git side effect already running goes on
+regardless. Both are [structure D31](../structure.md).

@@ -641,7 +641,10 @@ def harness_settings(role, span):
     }
     path = None
     try:
-        path = os.path.join(tempfile.mkdtemp(prefix=SETTINGS_DIR_PREFIX), SETTINGS_FILE)
+        # Named after this process, so a worker that starts later can tell the directory of a stage
+        # whose worker died from one still running (`discard_stale_settings`).
+        directory = tempfile.mkdtemp(prefix="%s%d-" % (SETTINGS_DIR_PREFIX, os.getpid()))
+        path = os.path.join(directory, SETTINGS_FILE)
         with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600),
                        "w", encoding="utf-8") as fh:
             json.dump(settings, fh)
@@ -673,6 +676,68 @@ def discard_settings(path):
             pass
         except OSError as exc:
             _warn_once("claude settings cleanup", exc)
+
+
+def discard_stale_settings():
+    """Remove the settings a role-run left when the process running it died first — a worker killed
+    mid-stage, as a restart may do — so the trace store's key does not outlive it. Returns the
+    directories removed. Never raises.
+
+    Only a directory whose maker is gone: `harness_settings` names each after its process, and a
+    stage still running in another worker on this host keeps its own. A name that says no process,
+    or a process that cannot be asked about, is left as it is.
+    """
+    import shutil
+    import tempfile
+    root = tempfile.gettempdir()
+    removed = []
+    try:
+        names = os.listdir(root)
+    except OSError as exc:
+        _warn_once("claude settings sweep", exc)
+        return removed
+    for name in names:
+        owner = name[len(SETTINGS_DIR_PREFIX):].split("-", 1)[0] if name.startswith(SETTINGS_DIR_PREFIX) else ""
+        if not owner.isdigit() or _alive(int(owner)):
+            continue
+        path = os.path.join(root, name)
+        shutil.rmtree(path, ignore_errors=True)
+        if os.path.exists(path):
+            _warn_once("claude settings sweep", OSError("could not remove %s" % path))
+        else:
+            removed.append(path)
+    return removed
+
+
+def _alive(pid):
+    """Whether process `pid` still runs. Unsure counts as running: the sweep leaves a directory
+    rather than take one from a live stage."""
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        kernel32.GetExitCodeProcess.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+        kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+        handle = kernel32.OpenProcess(0x1000, False, pid)           # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return ctypes.get_last_error() != 87                     # ERROR_INVALID_PARAMETER: no such process
+        try:
+            code = wintypes.DWORD()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return True
+            return code.value == 259                                 # STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        # A zombie has exited: only its parent has yet to collect it.
+        with open("/proc/%d/stat" % pid, encoding="utf-8") as fh:
+            return fh.read().rsplit(")", 1)[1].split()[0] != "Z"
+    except (FileNotFoundError, ProcessLookupError):
+        return False
+    except (OSError, IndexError):
+        return True
 
 
 # The vendor's own uploader, built with the changes this trace needs, kept under the

@@ -66,6 +66,8 @@ function elapsed(since) {
 function now(view) {
   const since = view.since ? " · for " + elapsed(view.since) : "";
   let text = view.status || "";
+  // A terminated run's own status is wherever termination found it; how it ended is Temporal's.
+  if (view.execution === "TERMINATED") text = "terminated";
   if (view.state === "running") text = [view.stage, view.role].filter(Boolean).join(" · ") + since;
   if (view.state === "stopping") text = "stopping" + (view.stage ? ": " + view.stage : "") + since;
   if (view.state === "waiting") text = "waiting for you: " + view.stop.reason + since;
@@ -308,12 +310,14 @@ async function answer(stop, action) {
 }
 
 // A run's lifecycle, beside its stop's answers: Stop ends it from whatever it is doing and keeps its
-// work; force terminate is for a run a Stop cannot finish, and says what it leaves.
+// work; force terminate is for a run a Stop cannot finish, and says what it cannot stop.
 const LIFECYCLE = {
   stop: { ask: "Stop this run? Its worktree and branch stay as they are.", said: "stopping" },
-  terminate: { ask: "Force terminate ends the run at once, with no cleanup. Left as they are: its worktree " +
-    "and branch; an agent at work stops at its turn's next heartbeat, and the run's terminals stay until " +
-    "its host's worker restarts. Force terminate?", said: "terminated", body: { confirm: true } },
+  terminate: { ask: "Force terminate closes the run at once, with no cleanup, but cannot stop what its host " +
+    "is already doing. An agent at work ends at its turn's next heartbeat; a worktree's creation, a merge " +
+    "or a discard already running goes on, and may still change the repository afterwards. The run's " +
+    "terminals stay until its host's worker restarts. Force terminate?", said: "terminated",
+  body: { confirm: true } },
 };
 
 async function lifecycle(kind) {

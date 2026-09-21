@@ -6,6 +6,7 @@
 - A refused repository creates no worktree.
 - The final gate: merge, revise to either role, a confirmed discard, a conflict handed back.
 - A Stop ends a run from any open state and runs no git; a git side effect already running lands first.
+- Force terminate closes a run at once, and cannot stop what its host is already doing.
 """
 import contextlib
 import io
@@ -465,7 +466,8 @@ class Stop(Lifecycle):
 
 
 class ForceTerminate(Lifecycle):
-    """Force terminate — Temporal's termination — closes a run at once, with no cleanup of its own."""
+    """Force terminate — Temporal's termination — closes a run at once, with no cleanup of its own, and
+    cannot stop what the run's host is already doing."""
 
     def test_a_terminated_runs_working_agent_ends_at_its_next_heartbeat(self):
         started, ended = threading.Event(), threading.Event()
@@ -476,6 +478,21 @@ class ForceTerminate(Lifecycle):
         self.assertFalse(ended.wait(3), "the control: an agent at work does not end by itself")
         E.run(handle.terminate("force terminate"))
         self.assertTrue(ended.wait(30), "its turn heard at its next heartbeat that the run is gone, and ended")
+
+    def test_a_git_side_effect_already_running_goes_on_after_a_force_terminate(self):
+        """Termination closes the run but cannot stop an activity already running: a merge, which does
+        not heartbeat, finishes on its host afterwards — what the Workbench's confirmation warns of."""
+        run, merging, land = self.gated()
+        E.run(E.cli.runs.answer(E.client(), run.run_id, {"stop": run.stop["id"], "action": "merge"}, check=False))
+        self.assertTrue(merging.wait(30), "the merge is running")
+        E.run(E.cli.runs.force_terminate(E.client(), run.run_id, "the test"))
+        self.assertEqual(E.run(run.handle.describe()).status.name, "TERMINATED")
+        self.assertNotIn("merge", self.git_run(), "the control: nothing had merged when the run closed")
+        land.set()
+        deadline = time.monotonic() + 30
+        while "merge" not in self.git_run() and time.monotonic() < deadline:
+            time.sleep(0.2)
+        self.assertIn("merge", self.git_run(), "the merge went on to its end after the run was closed")
 
     def test_the_command_line_force_terminates_a_run(self):
         a1, _ = codex_review_first("PASS")

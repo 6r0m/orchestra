@@ -21,6 +21,7 @@ from app.application import stack
 from app.foundation import policy as P
 from app.foundation import paths
 from app.agents import terminal
+from app.observability import telemetry
 from app.orchestration import workflow as WF
 
 
@@ -34,6 +35,10 @@ def pid_file(target):
 
 async def main(target):
     policy = P.load()
+    # A worker stopped mid-stage never removed that stage's settings, which hold the trace store's
+    # key; what a dead worker left goes before this one starts.
+    for stale in telemetry.discard_stale_settings():
+        print("removed the settings a dead worker's stage left: %s" % stale, flush=True)
     client = await runs.connect()
     queue = P.queue(policy, target)
     host = activities.Activities()
