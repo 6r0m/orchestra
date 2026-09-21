@@ -1,27 +1,36 @@
-# The workbench as the one place the operator controls Orchestra from
+# The Workbench: Orchestra's operator console
 
 **Status:** REVIEW REQUIRED
-**Scope:** the operator's page (`app/interfaces/workbench`), the client both surfaces share
-(`app/application/client.py`), and — only where a gate below allows — the workflow's answers
-(`app/orchestration/workflow.py`) and the stack's lifecycle scripts (`workers.sh`, `workers.ps1`)
-**Stable documentation owner:** [structure.md](../docs/architecture/structure.md) (D29, the page; D6,
-the answers; D24, the final gate) and [docs/using.md](../docs/using.md) (the operator's procedures)
+**Scope:** the Workbench (`app/interfaces/workbench`); the shared application control API — the run
+client (`app/application/client.py`) and one stack lifecycle owner beside it; the workflow's handling
+of a Stop (`app/orchestration/workflow.py`); the stack's process scripts (`workers.sh`,
+`workers.ps1`) and the `Makefile`
+**Stable documentation owner:** [structure.md](../docs/architecture/structure.md) — structure D29
+(the Workbench), structure D6 and D24 (a stop's decisions, the final gate), a new decision for Stop
+and force terminate — and [docs/using.md](../docs/using.md) (operating Orchestra)
 
 ## Contents
 
 - Goal · Authority register · Non-goals
 - Verified evidence · Current architecture · Problem
 - Decision (KISS gate, alternatives) · Required invariants
-- Implementation tasks · Test-first and verification plan
+- Implementation tasks, by step · Test-first and verification plan
 - Documentation plan · Completion criteria · Review record
 
 ## Goal
 
-The operator controls Orchestra from the page, with no terminal, for everything they do day to day
-with runs and the stack — seeing whether the stack can move a run, answering and closing any run,
-and stopping one — delivered in small steps, each proven before the next.
+The Workbench is Orchestra's operator console. From it alone the operator starts, watches, steers,
+stops and finishes every run, and starts, stops and restarts the stack that runs them — seeing at any
+moment what each run is doing and, when it is not moving, why.
+
+```
+Operator -> Workbench -> shared application control API -> Temporal / workers / Git
+```
 
 ## Authority register
+
+`D<n>` here are this todo's own. The project's architecture decisions are cited as *structure D<n>*,
+from [structure.md](../docs/architecture/structure.md).
 
 ### Operator decisions
 
@@ -45,199 +54,265 @@ and stopping one — delivered in small steps, each proven before the next.
   - Reason: not stated
   - Date/source: 2026-09-21, operator: *"need proper design decision with /architect something global
     and best pattern decoupling"*
+- **D4** The Workbench is Orchestra's primary operator control plane. There is one operator, on
+  loopback, inside the Workbench's security boundary, so no operation is kept out of the UI for being
+  lifecycle, Temporal, stack or administrative: a normal operation needed to operate Orchestra belongs
+  in the Workbench. The command line stays for tests, automation and emergency fallback.
+  - Effect: supersedes structure D29's limit that every Workbench write is a start or an answer
+    Update; the architecture is Operator → Workbench → shared application control API → Temporal,
+    workers, Git.
+  - Reason: *"ofcourse ui could cancel or etc since int only operator flow"*
+  - Date/source: 2026-09-21, operator
+- **D5** The Workbench controls every run's lifecycle: start; approve, revise, guide, continue, merge,
+  discard; **Stop** from any open state, through Temporal's workflow cancellation; **force terminate**,
+  through Temporal's termination, when a graceful Stop cannot finish — behind an explicit danger
+  confirmation that says what may be left, and mirrored on the command line as the break glass;
+  watching and typing into the live agent terminals; inspecting a run, its worktree, change, history
+  and status. No lifecycle operation is command-line-only.
+  - Effect: closes Q1 and Q4; Stop and force terminate are Workbench operations.
+  - Reason: not stated
+  - Date/source: 2026-09-21, operator
+- **D6** The Workbench controls the Orchestra stack: the health of Temporal, the workers and every
+  required component; starting, stopping and restarting the managed stack and each component; exactly
+  what is down and why a run cannot progress. Where the Workbench can perform an operation, telling
+  the operator to run `make up` is not the answer. The Workbench's own process is outside the stack it
+  controls and stays up while the workers and Temporal are stopped — stopping Orchestra never stops the
+  console. The Workbench is the bootstrap boundary: it does not manage its own process, a simple login
+  or autostart mechanism makes it available, and no orchestration framework is built for that.
+  - Effect: closes Q2.
+  - Reason: *"q2 ui should contorl all such it's operator"*
+  - Date/source: 2026-09-21, operator
+- **D7** One global **Stop run** for every open run — an agent working, a wait for approval or
+  guidance, a failed stage, the final gate, a target worker unavailable. Stop keeps the worktree and
+  branch and mutates no git. `abort` is legacy duplication and retires once Stop is proven, with
+  Temporal history compatibility kept.
+  - Effect: closes Q3 and Q4; replaces the final-gate `abort` and any Stop Update.
+  - Reason: not stated
+  - Date/source: 2026-09-21, operator
+- **D8** A Stop's correctness never depends on cleanup. Cleanup after a Stop is best-effort and
+  bounded, and a dead target worker never makes a Stop hang. A git side effect already in flight is a
+  critical section: the Stop shows as requested, the run is not reported stopped while a merge or a
+  discard can still land, and the real outcome decides how the run ends. No generic shielding or
+  cancellation subsystem.
+  - Effect: constrains task 6.
+  - Reason: not stated
+  - Date/source: 2026-09-21, operator
+- **D9** One narrow application-level owner of the stack's lifecycle — status, start, stop, restart —
+  called alike by the Workbench, the Make targets and the command line, reusing the existing scripts
+  and process mechanisms underneath; that logic is never duplicated in JavaScript or in server
+  handlers.
+  - Effect: constrains tasks 1, 8 and 10.
+  - Reason: not stated
+  - Date/source: 2026-09-21, operator
+- **D10** For every run the Workbench shows at once: its goal and title; repository, worktree and
+  host; current stage and role, and how long it has been there; the live engineer and reviewer
+  terminals; the stop or question it waits at; its failure; the missing or down component when it is
+  blocked; and the operator actions available right now — derived from the workflow's state and the
+  stack's health, with no separate stuck detector.
+  - Effect: extends D2; constrains task 2.
+  - Reason: not stated
+  - Date/source: 2026-09-21, operator
+- **D11** Task 4's answer design stands: the workflow publishes action IDs and validates their
+  meaning; the UI owns labels, layout and confirmation dialogs; the command line owns typing
+  shortcuts; no server-driven form or schema protocol.
+  - Effect: task 4 is not reopened.
+  - Reason: not stated
+  - Date/source: 2026-09-21, operator
+- **D12** Acceptance demonstrates the product, with fake agents over the real Temporal workflow, the
+  real Workbench and the real live-terminal path. From the Workbench: start a run; watch the engineer
+  and the reviewer iterate; answer a stop; Stop a working run; Stop a waiting or final run; force
+  terminate a deliberately stuck run; see a worker go down and why a run cannot progress; restart that
+  worker or the stack; carry on without opening a terminal.
+  - Effect: task 3's demonstration grows to this journey by the end of step 3.
+  - Reason: not stated
+  - Date/source: 2026-09-21, operator
 
 ### Operator gates
 
-- **Q1 [OPEN - BLOCKING]:** May the page write anything other than a run start or an answer Update?
-  Accepted decision D29 says every page write is one of those two, through `client.py`, "so the page
-  can do nothing the workflow's own rules and validators do not allow". Terminating a run in
-  Temporal, or starting and stopping processes, would cross it. - gates: tasks 6–8; default while
-  open: A2.
-- **Q2 [OPEN - BLOCKING]:** Should the page start and stop the stack itself? The page is served by
-  the workbench that `make up` starts, so it can never start the stack from nothing; it could restart
-  workers, or the workbench could become a service that runs without the stack. - gates: task 8.
-- **Q3 [OPEN - BLOCKING]:** Should the final gate offer `abort` — close the run, keep its worktree
-  and branch — beside `merge`, `revise` and `discard`? Today a run at its final gate can end only by
-  merge or discard, and both need a worker on the run's target host and its repository. - gates:
-  task 6.
-- **Q4 [OPEN - NON-BLOCKING]:** Should the page stop a run while a stage is working, not only at a
-  stop? - default while open: not in this change's first step (A3).
-- **Q5 [OPEN - NON-BLOCKING]:** Should the page remove a closed run's leftover worktree? An aborted
-  run keeps its worktree and branch today. - default while open: not in this change (A4).
+- **Q1 [CLOSED by D4, D5]:** May the page write anything other than a run start or an answer Update?
+- **Q2 [CLOSED by D6]:** Should the page start and stop the stack itself?
+- **Q3 [CLOSED by D7]:** Should the final gate offer `abort` — close the run, keep its worktree and
+  branch — beside `merge`, `revise` and `discard`?
+- **Q4 [CLOSED by D5, D7]:** Should the page stop a run while a stage is working, not only at a stop?
+- **Q5 [CLOSED by D4]:** Should the page remove a closed run's leftover worktree? — it is a normal
+  operation: task 12.
+- **Q6 [OPEN - NON-BLOCKING]:** Which login mechanism makes the Workbench available? - default while
+  open: A5.
 
 ### Working assumptions
 
-- **A1 [ACTIVE]:** "All things" means the operator's actions on runs and on the stack's health. Test
-  and acceptance tooling, `make public-check`, and editing `policy.json` or `repos.json` stay outside.
-- **A2 [ACTIVE]:** Until Q1 is answered, D29 stands: new controls reach runs only as a start or an
-  answer Update, and new reads are Temporal's or a worker's.
-- **A3 [ACTIVE]:** Stopping a working run is a later step; Esc in a role's terminal remains how a
+- **A1 [RESOLVED by D4]:** "All things" means the operator's actions on runs and on the stack's health.
+  Test and acceptance tooling, `make public-check`, and editing `policy.json` or `repos.json` stay outside.
+- **A2 [RESOLVED by D4]:** Until Q1 is answered, D29 stands: new controls reach runs only as a start or
+  an answer Update, and new reads are Temporal's or a worker's.
+- **A3 [RESOLVED by D7]:** Stopping a working run is a later step; Esc in a role's terminal remains how a
   working agent is interrupted.
-- **A4 [ACTIVE]:** Leftover worktrees stay visible in *Worktrees* and are removed by hand.
+- **A4 [RESOLVED by D4]:** Leftover worktrees stay visible in *Worktrees* and are removed by hand.
+- **A5 [ACTIVE]:** The Workbench starts at Windows logon from a hidden Task Scheduler entry that runs it
+  in WSL — where the stack's controls already run — installed and removed by one Make target. A WSL
+  systemd user unit was not chosen: nothing starts WSL at logon to run it.
+- **A6 [ACTIVE]:** The stack owner sits in `app/application` beside `client.py`; the process mechanics
+  stay in `workers.sh` and `workers.ps1`, split per component; the Make targets call the command line,
+  which calls the owner.
 
 ## Non-goals
 
-- Test, acceptance, public-check and release tooling on the page.
-- Editing configuration from the page.
-- Anything past loopback: the page's token, origin and host checks stay exactly as D29 states them.
+- A supervisor or orchestration framework for the Workbench's own process (D6).
+- A stuck detector, a server-driven form protocol, a generic cancellation or shielding subsystem
+  (D8, D10, D11).
+- A JavaScript test harness: the page's own requests are proven by the demonstration pressing its
+  buttons (D12).
+- Anything past loopback: the Workbench's token, origin and host checks stay as they are.
+- Test, public-check and release tooling in the Workbench.
 
 ## Verified evidence
 
 **Verified facts**
 
-- The page's API has seven routes, all in
-  [server.py](../app/interfaces/workbench/server.py): the run list, one run's status, its change in
-  parts, a repository's worktrees, the repositories, starting a run, and answering the run's stop.
-- The command line's forms ([cli.py](../app/interfaces/cli.py) `parse_args`) — start, answer,
-  continue, show, worktrees — each have a page equivalent. Its one extra, `--policy`, picks a policy
-  per run; since `policy.load` reads `ORCH_POLICY` for every entry point, the page starts runs with
-  the host's policy.
-- The page's stop buttons come from its own table, `ANSWERS` in
-  [app.js](../app/interfaces/workbench/static/app.js), keyed by stop reason. The workflow publishes
-  each stop's actions itself (`ACTIONS` in [workflow.py](../app/orchestration/workflow.py), carried in
-  `stop["actions"]`). The two agree today; a new action would reach the page only if both were edited.
-- `abort` is offered at the approval, blocker, exhausted and failed stops, never at the final gate
-  (`ACTIONS`). An aborted run ends `ABORTED` through `_end`, which runs no git: its worktree and
-  branch stay.
-- A final-gate `discard` is an activity on the run's target queue. `client.answer` preflights the
-  run's queues and refuses when no worker polls one, so the page shows that refusal instead of
-  hanging.
-- Measured today: an acceptance run from 2026-09-18 waited at its final gate on a queue only an
-  acceptance polls, with its repository and worktree deleted. No answer could close it — discard
-  was refused by the preflight — and it was closed by terminating it in Temporal, outside the page.
-- The refusal tells the operator to run `make orchestration-up`, which no Makefile target is named:
-  the target is `make up` (`START_WORKERS` in [client.py](../app/application/client.py); the
-  [Makefile](../Makefile)).
-- Whether each queue is polled is read by `worker.check` in [worker.py](../app/interfaces/worker.py)
-  through `client.preflight`; `make check` prints it. The page shows none of it: a run whose host
-  has no worker lists as running, and the operator learns why only when an answer is refused.
-- A role turn already honours activity cancellation: the turn loop heartbeats and raises on cancel
-  (`terminal.py`, around `activity.is_cancelled`), and `run_role` ends the agent on any failure.
-  The workflow has no path that requests it.
-- The installed SDK (temporalio 1.33) has both lifecycle operations on `WorkflowHandle`: `cancel()`,
-  a request the workflow's own code receives and may clean up after, and `terminate()`, which closes
-  the run with no workflow code run. An activity the workflow awaits is cancelled with it, by default
-  `ActivityCancellationType.TRY_CANCEL`: the workflow goes on without waiting for the activity to stop.
-- Every activity the workflow starts (`_activity`) carries a start-to-close timeout and nothing else,
-  so one on a queue no worker polls waits for a poller indefinitely — the trace writes (`_trace`)
-  included. The git activities (`create_worktree`, `merge`, `discard`) do not heartbeat, so a
-  cancellation cannot reach one that is running.
+- The Workbench's API has seven routes, all in [server.py](../app/interfaces/workbench/server.py): the
+  run list, one run's status, its change in parts, a repository's worktrees, the repositories,
+  starting a run, and answering its stop. Every command-line form ([cli.py](../app/interfaces/cli.py))
+  has a Workbench equivalent.
+- A stop publishes its action IDs and the page and the command line render them (task 4, D11).
+- `abort` is offered at the approval, blocker, exhausted and failed stops, never at the final gate; an
+  aborted run ends `ABORTED` with no git run (`_end`), keeping its worktree and branch.
+- A final-gate discard needs a worker on the run's target host; `client.answer` refuses when no worker
+  polls the run's queues. On 2026-09-21 a run at its final gate, on a queue only an acceptance polls and
+  with its repository deleted, could be closed only by terminating it by hand in Temporal.
+- `workers.sh up` starts Temporal (`docker compose`), the WSL worker, the Windows worker
+  (`workers.ps1`, through WMI, hidden) and the Workbench, and `down` stops the Workbench first, then the
+  workers, then Temporal: stopping the stack stops the console. Each component already has start and
+  stop code of its own in the script.
+- The refusal when no worker polls names `make orchestration-up` (`START_WORKERS` in
+  [client.py](../app/application/client.py)); the [Makefile](../Makefile) target is `make up`.
+- Whether each queue is polled is read by `worker.check` ([worker.py](../app/interfaces/worker.py))
+  through `client.preflight`, and printed by `make check`; the Workbench shows none of it.
+- The installed SDK (temporalio 1.33) has `WorkflowHandle.cancel()` — a request the workflow's own code
+  receives and may clean up after — and `WorkflowHandle.terminate()`, which closes the run with no
+  workflow code run. An activity the workflow awaits is cancelled with it, by default `TRY_CANCEL`: the
+  workflow goes on without waiting for the activity to stop.
+- Every activity the workflow starts (`_activity`) carries only a start-to-close timeout, so one on a
+  queue no worker polls waits indefinitely — the trace writes (`_trace`) included. The git activities
+  (`create_worktree`, `merge`, `discard`) do not heartbeat, so a cancellation cannot reach one running.
+- A role turn honours activity cancellation — the turn loop heartbeats and raises on cancel
+  (`terminal.py`) — and `run_role` ends the agent on any failure.
 
 **Inferences**
 
-- A graceful Stop would hang in its own cleanup on a host with no worker unless every target-host
-  activity it starts is bounded by a schedule-to-close timeout (or not awaited); and a Stop arriving
-  during a merge would let the workflow end while the merge still lands, unless git side effects in
-  flight are shielded from the cancellation.
+- A graceful Stop's cleanup must be bounded, and a git side effect in flight must be awaited for its
+  real outcome, or D8 does not hold (see the two facts above).
 
 **Refuted**
 
-- That stopping a working run needs an Update of Orchestra's own. Temporal's workflow cancellation
-  reaches the workflow's code whether or not a stop is pending, and reaches a heartbeating role turn
-  through the cancellation `terminal.py` already honours; a custom Update would only re-implement it.
+- That stopping a working run needs an Update of Orchestra's own: Temporal's cancellation reaches the
+  workflow whether or not a stop is pending, and a heartbeating role turn through the cancellation
+  `terminal.py` already honours.
 
 **Assumptions / unverified areas**
 
-- A1–A4. Whether Temporal's time-skipping test server reports pollers for `describe_task_queue` is
-  unverified; the page tests already replace the preflight for that reason (`tests/interfaces/test_workbench.py`).
+- A5, A6. Whether Temporal's time-skipping test server reports pollers (the page tests replace the
+  preflight for that reason). Whether a terminated run's working role turn ends its agent at its next
+  heartbeat — verified in task 7, not assumed.
 
 ## Current architecture and source of truth
 
-D29 owns the page: it holds no state, every read is Temporal's or a worker's, and every write goes
-through `client.py`. D6 owns the answers each stop takes, D24 the final gate, D16 manual recovery
-(`continue`), D10 that every run is human-triggered. `client.py` is the one client for the page and
-the command line; the workflow's validator decides which answers exist.
+Structure D29 owns the Workbench, and its write-path limit is superseded by D4; D6, D24, D16 and D10
+of the structure own a stop's decisions, the final gate, manual recovery and human-triggered runs.
+`client.py` is the one client of runs for every surface. `workers.sh` and `workers.ps1` own how each
+host's processes start and stop; the `Makefile` fronts them.
 
 ## Problem
 
-Four capability gaps, with evidence above:
-
-1. The page cannot say whether the stack can move a run: Temporal reachable, which queues a worker
-   polls, and which runs are waiting on a host with no worker.
-2. The page's answer buttons are a second copy of the workflow's answer set.
-3. A run at its final gate whose target host or repository is gone cannot be closed from anywhere
-   but Temporal itself.
-4. A working run cannot be stopped from the page, and the stack cannot be started or stopped from it.
-
-Gaps 3 and 4 are one gap: there is no way to end a run, from any state, that keeps its work and needs
-nothing but Temporal to accept.
+1. The Workbench cannot say why a run is not moving: the stack's health, a run's stage and how long it
+   has been there, the component it waits on.
+2. A run cannot be stopped from any state: not while an agent works, not at the final gate when its
+   host or repository is gone.
+3. Force terminate exists only by hand in Temporal.
+4. The stack is controlled only from a terminal, and stopping it stops the Workbench.
+5. `abort` duplicates what Stop will do.
+6. A stopped run's worktree and branch are removed only by hand.
 
 ## Decision
 
-Deliver in steps; each is reviewed and merged before the next begins.
+The shared application control API is `client.py` for runs — start, answer, stop, force terminate,
+and the run's view — and one stack owner beside it for components — status, start, stop, restart. The
+Workbench's server and the command line are thin callers of both; the Make targets call the command
+line. Temporal's own lifecycle carries a run's end: Stop is `cancel()`, force terminate is
+`terminate()`. The workflow answers a cancellation by ending `STOPPED` after a bounded, best-effort
+cleanup — or, when a git side effect is in flight, by awaiting its outcome and ending as it decides.
+The Workbench leaves the stack it controls, and starts at logon.
 
-**Step 1 — within D29, no workflow change (tasks 1–5).** The page shows the stack's health from the
-same reading `make check` uses, moved into `client.py` so both surfaces share one owner; flags a run
-whose queues no worker polls; renders each stop's buttons from the stop's own `actions`, keeping on
-the page only how an action is presented; and the refusal names `make up`.
+Steps, each reviewed and merged before the next, each extending the demonstration (task 3):
 
-**Step 2 — Stop, gated by Q1 (tasks 6–7).** Ending a run is Temporal's lifecycle, not an answer: one
-**Stop run** for every open run — an agent working, a stop waiting, a failure, the final gate, a host
-with no worker — sent as Temporal's workflow cancellation through `client.py`. The workflow receives
-it, ends `STOPPED` with its worktree and branch untouched, closes the run's terminals and finishes its
-trace through target-host activities bounded so that a host with no worker cannot hold it, and lets a
-git side effect already in flight finish rather than cutting it off — if that side effect lands, it
-decides how the run ends. **Force terminate** is Temporal's termination, from the command line only:
-the break-glass way out when the workflow itself cannot process a Stop, saying what it may leave
-behind.
-
-**Step 3 — `abort` retired (task 8).** Once Stop is proven from every state, `abort` leaves the
-published actions behind `workflow.patched`, its handling kept for the recorded histories: a stop's
-actions are then decisions only — approve, revise, guide, continue, merge, discard.
-
-**Step 4 — gated by Q2 (task 9).** Only if Q2 asks for more than the health view of step 1.
+1. **See** (tasks 1–5): the stack's health and each run's view in the Workbench, and the demonstration
+   run. Reads only; no workflow command changes.
+2. **Stop and force terminate** (tasks 6–7).
+3. **Stack control** (tasks 8–10): per-component control through the stack owner, the Workbench outside
+   the stack, and its logon start.
+4. **`abort` retires** (task 11).
+5. **Leftovers** (task 12): a stopped run's worktree and branch removed from the Workbench.
 
 ### Premise / KISS gate
 
-- **Owner.** Temporal and the workflow own every run; `client.py` owns how any surface talks to
-  them; `worker.check`'s reading already owns "is the stack able to move a run". Step 1 moves that
-  reading into `client.py` and adds one read route — no new process, port, protocol or credential.
-- **Removed.** The page's own copy of the answer set, and a Makefile target name that does not exist.
-- **Added.** One read route and its panel; for Stop, a call to the lifecycle operation Temporal
-  already has, and the workflow's handling of it — no Update, answer or protocol of Orchestra's own.
-- **Given up.** Terminating a run from the page — termination skips every cleanup, so it stays a
-  command-line break glass — and starting the stack from the page (Q2).
+- **Owners.** Temporal owns a run's lifecycle; the workflow owns what a Stop means for a run;
+  `client.py` owns every run operation for every surface; the stack owner owns each component's
+  lifecycle; `workers.sh` and `workers.ps1` own the process mechanics on each host.
+- **Removed.** `abort`, once Stop is proven; the Workbench's place inside the stack it controls; runs
+  closed by hand in Temporal; the operator's need for a terminal.
+- **Added.** Two calls to Temporal's lifecycle and the workflow's handling of one; one stack owner over
+  the existing scripts; one run view assembled from facts that exist; a logon entry; a demonstration
+  command.
+- **Given up.** The Workbench restarting itself — it is the bootstrap boundary — and a Stop that cuts a
+  git side effect off mid-write.
 
 ### Alternatives considered
 
-- **Stop as an Update, or a final-gate `abort`.** An answer of Orchestra's own that must also work
-  when no stop is pending, and a second concept beside the one Temporal provides. Rejected by the
-  review of 2026-09-21 in favour of cancellation.
-- **Terminate from the page.** One call closes any run, including one whose workflow worker is gone,
-  but ends it with no final state, no trace and live terminals left behind. Kept to the command line
-  as the break glass.
-- **The page drives `make up` and `make down`.** The page cannot start the stack it is served by, and
-  `down` would stop the page mid-answer. Q2 decides between restarting workers only and an
-  always-on workbench.
+- **Stop as an Update, or a final-gate `abort`.** An answer of Orchestra's own that must also work when
+  no stop is pending, beside the primitive Temporal provides.
+- **Stack control in the Workbench's handlers.** A second copy of what `make` does; D9 gives the Make
+  targets, the command line and the Workbench one owner.
+- **A supervisor for the whole stack, the Workbench included.** A framework to solve the bootstrap,
+  which D6 settles by keeping the Workbench outside.
+- **A WSL systemd user unit for the logon start.** WSL is not running at logon until something starts
+  it; a Windows logon task starts it (A5).
 
 ## Required invariants
 
-1. D29's write path holds: every page write is a start or an answer Update through `client.py`;
-   if Q1 is resolved as the review proposes, a Stop — Temporal's cancellation — is the third, and
-   termination is never a page write.
-2. The workflow's `ACTIONS` is the only owner of which answers a stop takes; the page decides only
-   presentation.
-3. No answer is ever read as another: the validator still rejects anything a stop does not offer (D6).
-4. The recorded histories in `tests/histories/` still replay: any change to what the workflow
-   commands goes behind `workflow.patched`.
-5. A health read changes nothing; a run whose host has no worker is shown as such, never as moving.
-6. The page's token, origin and loopback-host checks are unchanged.
-7. A Stop runs no git: the worktree and branch stay as they are.
-8. A Stop is accepted by Temporal without the target host's worker, and nothing the workflow does in
-   response waits on that worker without a bound.
-9. A git side effect in flight is never cut off by a Stop; one that lands decides how the run ends.
-10. Force terminate exists only on the command line and says what it may have left behind.
+1. Every Workbench operation goes through the shared application control API — `client.py` and the
+   stack owner. No run or stack logic lives in the Workbench's handlers or JavaScript.
+2. The workflow's `ACTIONS` own which decisions a stop takes; clients own presentation (D11).
+3. The validator still rejects anything a stop does not publish (structure D6).
+4. The recorded histories in `tests/histories/` still replay; a change to what the workflow commands
+   goes behind `workflow.patched`.
+5. A Stop runs no git: the worktree and branch stay as they are.
+6. Temporal accepts a Stop without the target host's worker, and nothing done in response waits on that
+   worker without a bound.
+7. A git side effect in flight is never cut off by a Stop; the run is not reported stopped while it can
+   land, and its outcome decides how the run ends.
+8. Force terminate asks for an explicit danger confirmation in the Workbench and says what may be left.
+9. Stopping the stack never stops the Workbench, and the Workbench never manages its own process.
+10. A health read changes nothing; a run blocked by a down component is shown as blocked by it.
+11. The Workbench's token, origin and loopback-host checks are unchanged.
 
 ## Implementation tasks
 
-Step 1:
+Step 1 — see:
 
-- [ ] **1.** Red: a page API test for a health route that reports Temporal reachable and each queue
-      polled or not, and flags a run on an unpolled queue — 404 today.
-- [ ] **2.** Move the queue reading `worker.check` does into `client.py`, one owner for both; `make
-      check` prints exactly what it prints today.
-- [ ] **3.** The health route and its panel; a run on an unpolled queue says which host's worker is
-      missing.
+- [ ] **1.** Red first: a Workbench API test for the stack's health — Temporal reachable, each queue
+      polled, each managed component up — which is 404 today. Then the stack owner's `status`,
+      carrying the reading `worker.check` does, so `make check` prints what it prints today, and the
+      Workbench's health panel.
+- [ ] **2.** Red first: a Workbench API test that a run parked at a stop, one working, and one whose
+      host's worker is down each report what D10 lists. Then the run's view in `client.py` — goal,
+      repository, worktree, host, state (running, waiting, failed, stopping, closed), stage, role,
+      since, the stop, the failure, the component it is blocked by, the actions available now —
+      assembled from the status query, Temporal's description and the stack's health. The workflow
+      records when its current stage began (`workflow.now()`, state only). The Workbench shows it at
+      the head of every run.
+- [ ] **3.** `make demo`: a real run on the live stack with the suite's fake CLIs, through both loops
+      in live terminals, answering one stop by pressing its button in a headless browser — so the body
+      the page sends is proven — and removing everything it made. It grows with each step to D12's
+      journey.
 - [x] **4.** (D3; design after the review of 2026-09-21.) A stop publishes its allowed action IDs
       (`stop["actions"]`), and a revise at the final gate is one ID per role — `revise:engineer`,
       `revise:architect` — so the role rule is derived from what the gate published, not written
@@ -246,33 +321,39 @@ Step 1:
       answer is typed; `client.py` turns a role-named ID into the answer the workflow has always
       taken. The workflow keeps the guards D6 and D24 name — a note for guide and revise, a
       confirmed discard — and describes no form.
-- [ ] **5.** `START_WORKERS` names `make up`; `tests/acceptance_restart.py`'s docstring too.
-- [ ] **5a.** (D2) The run view says what the run is doing now and why it is not moving: the stage
-      and role at work and since when, the stop it waits at, its failure, or the host whose worker
-      is missing.
-- [ ] **5b.** (D2) A mock run to watch: a real run on the live stack whose agents are the suite's fake
-      CLIs, working visibly in both terminals through both loops, started by one command and
-      removed by it afterwards; no model is called. It answers one stop by pressing its button in a
-      headless browser, so the body the page sends is proven, not only the API behind it.
+- [ ] **5.** The refusal when a worker is missing says which, and the Workbench offers to start it; on
+      the command line it names `make up`.
 
-Step 2 (Q1):
+Step 2 — Stop and force terminate:
 
-- [ ] **6.** Red first: a Stop ends the run `STOPPED` with its worktree and branch untouched from each
-      state — an agent working (the agent ended, nothing of it left running), waiting at a stop, a
-      failed stage, the final gate, and a target host with no worker (the Stop completes; the
-      target-host cleanup is skipped within its bound); a Stop during a merge lets the merge finish
-      and the run end `MERGED`. Then `client.stop`, the workflow's cancellation handling, the page's
-      Stop button on every open run and the command line's `--stop`; a run whose Stop the workflow
-      has not yet processed is shown as such.
-- [ ] **7.** `--force-terminate <run>` on the command line only, through Temporal's termination with
-      its reason, printing what may be left: the worktree, the branch, a live terminal until its
-      worker next restarts. Verify, rather than assume, that a terminated run's working role turn
-      ends its agent when its heartbeat finds the run gone.
+- [ ] **6.** Red first: a Stop ends the run stopped, with its worktree and branch untouched, from each
+      state — an agent working (its agent ended, nothing of it left running), a stop waiting, a failed
+      stage, the final gate, and a target host with no worker (the Stop completes; the host's cleanup
+      is skipped within its bound). A Stop during a merge shows as requested, lets the merge land, and
+      the run ends merged. Then `client.stop` (Temporal's cancellation), the workflow's handling of it,
+      **Stop run** on every open run in the Workbench, and `--stop` on the command line.
+- [ ] **7.** Force terminate: `client` through Temporal's termination with its reason; in the
+      Workbench behind a danger confirmation naming what may be left — the worktree, the branch, a live
+      terminal until its worker next restarts; `--force-terminate` on the command line. Verify, rather
+      than assume, that a terminated run's working role turn ends its agent at its next heartbeat.
 
-Step 3: **8.** Retire `abort` from the published actions behind `workflow.patched`, keeping its
-handling for the recorded histories; D6, D24 and `docs/using.md` updated.
+Step 3 — stack control:
 
-Step 4 (Q2): **9.** Designed only if Q2 asks for more than step 1's health view.
+- [ ] **8.** `workers.sh` and `workers.ps1` split per component — Temporal, the WSL worker, the Windows
+      worker — each with start, stop and status; the stack owner orders them (Temporal before the
+      workers on start, after them on stop) and restarts one. `make up`, `make down` and `make check`
+      call the command line, which calls the owner.
+- [ ] **9.** The Workbench leaves the stack: it starts and stops on its own (`make workbench`), `make
+      down` no longer touches it, and a Windows logon entry (A5) starts it, installed and removed by
+      one Make target.
+- [ ] **10.** The Workbench controls the stack: start, stop and restart it all or one component; what is
+      down, and the start that brings it back, shown in the health panel and on every run it blocks.
+
+Step 4: **11.** `abort` leaves the published actions behind `workflow.patched`, its handling kept for
+the recorded histories; structure D6 and D24 and `docs/using.md` updated.
+
+Step 5: **12.** A stopped run's worktree and branch removed from the Workbench's *Worktrees*, through
+the target host's own git as a discard removes them.
 
 ## Test-first and verification plan
 
@@ -280,38 +361,40 @@ Step 4 (Q2): **9.** Designed only if Q2 asks for more than step 1's health view.
 
 | case | kind | wrong today |
 |---|---|---|
-| the page reports Temporal and every queue's pollers | permanent guard | no such route (404) |
-| a run on a queue no worker polls is flagged on the page | permanent guard | listed as running |
-| the refusal names a real make target | permanent guard | names `make orchestration-up` |
-| buttons come from the stop's own actions; an unknown action still renders | reviewer-checked (plain JS, no build step), and a headless-browser render | a second table keyed by stop |
-| (step 2) a Stop from each open state ends `STOPPED` and runs no git | permanent guard | no way to do it but a stop's `abort` |
-| (step 2) a Stop with the target host's worker gone completes | permanent guard | its cleanup would wait forever |
-| (step 2) a Stop during a merge lets it land and the run end `MERGED` | permanent guard | the merge would land after the run said it stopped |
-| (step 2) force terminate closes any run and says what is left | acceptance (live stack) | only by hand in Temporal |
+| the Workbench reports Temporal, each queue and each component | permanent guard | no such route |
+| a run's view: stage, role, since, stop, failure, blocking component, actions | permanent guard | only raw status |
+| a Stop from each open state ends it stopped and runs no git | permanent guard | no Stop; `abort` only at some stops |
+| a Stop with the target host's worker gone completes | permanent guard | its cleanup would wait forever |
+| a Stop during a merge lets it land and the run end merged | permanent guard | a merge could land after "stopped" |
+| force terminate closes any run and says what is left | acceptance (demonstration) | only by hand in Temporal |
+| stopping the stack leaves the Workbench serving | acceptance (demonstration) | `down` stops it first |
+| a component stopped and started again from the Workbench | acceptance (demonstration) | only `make` |
+| the page's own request body when a button is pressed | acceptance (demonstration) | proven by inspection only |
 
 ### Green evidence
 
 The cases above; `bash run-tests.sh` (WSL) and `run-tests.ps1` (Windows host suite), one after the
-other; the recorded histories replaying; the live acceptance with a Stop and a force terminate
-for steps 2 and 3; the page rendered
-headless against the live stack, every asset and API call answering 200; `make public-check`.
+other; the recorded histories replaying; `make demo` passing its journey as it stands at each step,
+D12's in full by the end of step 3; `make public-check`.
 
 ## Documentation plan
 
-- **Authoritative stable owner:** `docs/architecture/structure.md` — D29 for what the page shows and
-  writes, a decision beside D16 for Stop and force terminate, and D6 and D24 when `abort` retires.
-- **Router / TOC update:** none; `docs/using.md` gains the page's health panel in *The page* and
-  loses nothing else; the mock run's command goes in `tools/README.md`.
-- **Duplication avoided:** the answer set lives in `ACTIONS` only; the docs name answers as D6 does.
+- **Authoritative stable owner:** `docs/architecture/structure.md`. Structure D29 is rewritten for the
+  Workbench as the console as each step lands — a stable document states what is true, so it changes
+  with the code, not ahead of it. A new decision beside structure D16 carries Stop and force
+  terminate (step 2); structure D6 and D24 change when `abort` retires (step 4).
+- **Router / TOC update:** `docs/using.md` leads with the Workbench — its logon start, its health
+  panel, Stop and force terminate — with the command line as the fallback; `tools/README.md` gains
+  `make demo`.
+- **Duplication avoided:** a stop's decisions live in `ACTIONS` only; the stack's components and their
+  order live in the stack owner only.
 - Stable docs, code, comments, tests and configuration never reference this todo.
 
 ## Completion criteria
 
-Step 1 is complete when tasks 1–5 are green on both hosts, `make check` prints what it did, the page
-shows the stack's health and flags an unpolled run against the live stack, and D29 and
-`docs/using.md` describe it. Step 2 is complete when every Stop case above is green on both hosts,
-the live acceptance stops one working run and force-terminates another, and D29 and the new decision
-say what each does. Step 3 when no stop publishes `abort` and the recorded histories still replay.
+Each step is complete when its tasks are green on both hosts, `make demo` passes its journey as it
+stands, and the stable documents say what the step made true. The change is complete when D12's
+journey passes from the Workbench on the live stack with fake agents and no terminal opened.
 
 ## Review record
 
@@ -393,3 +476,15 @@ say what each does. Step 3 when no stop publishes `abort` and the recorded histo
   termination stays off the page; Q2 — (a); Q3 and Q4 — one Stop, step 2. None binds until confirmed.
 - **Authority:** steps 2–4, tasks 6–9, invariants 1 and 7–10 rewritten; Q1–Q5 unchanged.
 
+### 2026-09-21 — the operator's decisions: the Workbench is the console
+
+- **Trigger:** the operator, on the gates: *"ofcourse ui could cancel or etc since int only operator
+  flow"*, *"q2 ui should contorl all such it's operator"*, and instructions to rewrite the plan around
+  the Workbench as the primary operator control plane.
+- **Root cause of the loop:** the plan treated the Workbench as a restricted client of a
+  command-line system, so every capability became a question of whether the UI was allowed it.
+- **Authority:** D4–D12 added. Q1–Q5 closed by them; Q6 added (the logon mechanism), with A5 as its
+  default. A1–A4 resolved; A5 and A6 added. Structure D29's write-path limit is superseded by D4; the
+  stable document changes as each step lands, because it states what is true now.
+- **Plan:** rewritten around the end state. Steps: see; Stop and force terminate; stack control with
+  the Workbench outside the stack; `abort` retires; leftovers. Task 4 stands (D11).
