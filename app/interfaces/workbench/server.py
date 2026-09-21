@@ -37,7 +37,7 @@ STATIC = {"/": ("index.html", "text/html; charset=utf-8"), "/app.js": ("app.js",
           "/vendor/xterm.css": ("vendor/xterm/xterm.css", "text/css; charset=utf-8")}
 RUN_ID = re.compile(r"^[\w-]{1,64}$")
 MAX_BODY = 1 << 20
-ANSWER_KEYS = {"stop", "action", "text", "role", "confirm"}
+ANSWER_KEYS = {"stop", "action", "text", "confirm"}
 
 
 class Loop:

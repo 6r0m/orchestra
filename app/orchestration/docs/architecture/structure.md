@@ -42,7 +42,7 @@ the queue; what the activity does is the other side's.
 ## Invariants
 
 - **The workflow is deterministic (D25).** A change to what it commands goes behind `workflow.patched(...)`, or the recorded histories in `tests/histories/` stop replaying — `tests/orchestration/test_replay.py` is the guard, with a control.
-- **A stop waits here and nowhere else (D6).** Its answer arrives as an Update carrying one of that stop's named actions, with the stable id `answer:<stop-id>`, so an answer sent twice is applied once. No activity ever waits for a human.
+- **A stop waits here and nowhere else (D6).** Each stop publishes the actions it takes, a revise at the final gate named per role, and its answer arrives as an Update carrying one of them, with the stable id `answer:<stop-id>`, so an answer sent twice is applied once. No activity ever waits for a human.
 - **Only architect verdicts route (D4).** An engineer's blocker reaches a human only through the architect.
 - **There is no state machine layer**, deliberately. Do not re-derive one; the reasoning is in [the project's structure document](../../../../docs/architecture/structure.md).
 

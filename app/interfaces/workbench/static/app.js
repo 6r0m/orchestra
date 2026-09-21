@@ -4,14 +4,15 @@
 
 const CONFIG = JSON.parse(document.getElementById("config").textContent);
 const ROLES = ["engineer", "architect"];
-const ANSWERS = {
-  approval: [["approve", "Approve"], ["revise", "Revise the plan", "note"], ["abort", "Abort", "danger"]],
-  blocker: [["guide", "Guide", "note"], ["abort", "Abort", "danger"]],
-  exhausted: [["guide", "Guide", "note"], ["abort", "Abort", "danger"]],
-  failed: [["continue", "Continue"], ["abort", "Abort", "danger"]],
-  final: [["merge", "Merge"], ["revise:engineer", "Revise — engineer", "note"],
-          ["revise:architect", "Revise — architect", "note"], ["discard", "Discard", "danger"]],
-};
+// How an answer is shown. Which answers a stop takes comes with the stop, and whether one is accepted
+// is the workflow's; an action named here only by the stop still gets its button.
+const LABELS = { approve: "Approve", revise: "Revise", "revise:engineer": "Revise — engineer",
+  "revise:architect": "Revise — architect", guide: "Guide", continue: "Continue", abort: "Abort",
+  merge: "Merge", discard: "Discard" };
+const DANGER = new Set(["abort", "discard"]);
+// A second look before an answer that lands or removes the work.
+const ASK = { merge: "Merge the verified change into the base branch?",
+  discard: "Discard deletes the worktree and its branch. Discard?" };
 const TITLES = { approval: "Approve the plan", blocker: "The architect found a blocker",
   exhausted: "The review budget is used up", failed: "A stage failed", final: "Ready to merge" };
 
@@ -228,28 +229,24 @@ function renderStop(stop) {
   $("stop-result").textContent = "";
   const actions = $("stop-actions");
   actions.replaceChildren();
-  for (const [key, label, kind] of ANSWERS[stop.reason] || []) {
-    const button = el("button", label, kind === "danger" ? "danger" : "");
+  for (const action of stop.actions || []) {
+    const button = el("button", LABELS[action] || action, DANGER.has(action) ? "danger" : "");
     button.type = "button";
-    button.onclick = () => answer(stop, key, kind === "note");
+    button.onclick = () => answer(stop, action);
     actions.appendChild(button);
   }
 }
 
-async function answer(stop, key, needsNote) {
-  const [action, role] = key.split(":");
+// The action as the stop published it, and the note: what an answer needs is the workflow's to refuse.
+async function answer(stop, action) {
   const text = $("stop-note").value.trim();
-  if (needsNote && !text) {
-    $("stop-result").textContent = "this answer needs your note";
-    return;
-  }
-  const body = { stop: stop.id, action: action, text: text || action };
-  if (role) body.role = role;
-  if (action === "discard") {
-    if (!window.confirm("Discard deletes the worktree and its branch. Discard?")) return;
+  const body = { stop: stop.id, action: action };
+  // Only words you wrote: an empty note must reach the workflow empty, for it to refuse.
+  if (text) body.text = text;
+  if (ASK[action]) {
+    if (!window.confirm(ASK[action])) return;
     body.confirm = true;
   }
-  if (action === "merge" && !window.confirm("Merge the verified change into the base branch?")) return;
   for (const button of $("stop-actions").children) button.disabled = true;
   $("stop-result").textContent = "sending…";
   try {

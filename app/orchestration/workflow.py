@@ -29,12 +29,15 @@ READS = RetryPolicy(maximum_attempts=3)
 GIT_TIMEOUT = timedelta(hours=2)
 SHORT_TIMEOUT = timedelta(minutes=10)
 
+# What each stop takes, published with it, so a client shows the stop's own actions. A revise at
+# the final gate goes to the role the operator names, and each role is an action of its own:
+# `revise:<role>` arrives as the answer's action and role.
 ACTIONS = {
     "approval": ("approve", "revise", "abort"),
     "blocker": ("guide", "abort"),
     "exhausted": ("guide", "abort"),
     "failed": ("continue", "abort"),
-    "final": ("merge", "revise", "discard"),
+    "final": ("merge", "revise:engineer", "revise:architect", "discard"),
 }
 HINTS = {
     "approval": "approve to start implementation, revise with feedback for a new plan, or abort",
@@ -301,13 +304,12 @@ class FeatureRun:
         if stop is None or self.answer_given is not None or answer.get("stop") != stop["id"]:
             raise ValueError("run %s is not waiting at stop %s" % (self.state.get("run_id"), answer.get("stop")))
         action = answer.get("action")
-        if action not in stop["actions"]:
+        named = "%s:%s" % (action, answer["role"]) if answer.get("role") else action
+        if named not in stop["actions"]:
             raise ValueError("%r does not answer this stop; answer one of: %s"
-                             % (action, ", ".join(stop["actions"])))
+                             % (named, ", ".join(stop["actions"])))
         if action in ("guide", "revise") and not (answer.get("text") or "").strip():
             raise ValueError("%s needs the feedback to act on" % action)
-        if stop["reason"] == "final" and action == "revise" and answer.get("role") not in ("engineer", "architect"):
-            raise ValueError("revise at the final gate names the role: engineer or architect")
         if action == "discard" and answer.get("confirm") is not True:
             raise ValueError("discard deletes the worktree and its branch, so it must be confirmed")
 

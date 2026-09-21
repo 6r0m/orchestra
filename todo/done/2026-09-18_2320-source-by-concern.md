@@ -120,9 +120,9 @@ windows and focus changes ran beside them.
 
 ## Left open
 
-1. **An acceptance run from before this work,** still open at its final gate. It is leftover state
-   from a fake-agent acceptance, not evidence about this change; discarding it is the operator's
-   (D24).
+1. **An acceptance run from before this work** was closed on the operator's word. Its
+   throwaway repository and worktree were already gone and no worker polls its queue, so a discard
+   could not run; it was terminated in Temporal, leaving nothing behind.
 2. **A WSL-to-Windows role turn with real agents** was not run: the activity boundary is proven on
    the Windows host suite with a fake agent, and the vendor CLIs' own transport by the terminal tests.
 

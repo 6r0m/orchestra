@@ -330,12 +330,16 @@ still lands on a checkout.
   is given and cannot resolve them: two different names that alias to the same
   weights pass it, so naming two genuinely different models is the operator's
   part of this invariant.
-- **D6** **A stop waits in the workflow and nowhere else.** Its answer arrives as
-  an Update carrying one of that stop's named actions — approve, revise or abort
-  at the plan approval; guide or abort at a blocker or an exhausted budget;
-  continue or abort after a failed stage; merge, revise or discard at the final
-  gate — and a validator rejects anything else before it reaches history, so no
-  unrecognised answer is ever read as abort or discard. The Update's id is
+- **D6** **A stop waits in the workflow and nowhere else.** Each stop publishes
+  the actions it takes — approve, revise or abort at the plan approval; guide or
+  abort at a blocker or an exhausted budget; continue or abort after a failed
+  stage; merge, `revise:engineer`, `revise:architect` or discard at the final
+  gate, where a revise names the role it goes to — and the page and the command
+  line offer exactly those, owning only how each is labelled and typed. Its
+  answer arrives as an Update carrying one of them, and a validator rejects
+  anything else before it reaches history, so no unrecognised answer is ever read
+  as abort or discard; guide and revise carry the operator's words, and a discard
+  must be confirmed. The Update's id is
   `answer:<stop-id>`, so an answer sent twice is applied once. No activity ever
   waits for a human.
 - **D10** **Account safety:** human-triggered only (no scheduler may start an

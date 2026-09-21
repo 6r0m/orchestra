@@ -127,6 +127,11 @@ async def answer(client, run_id, answer, check=True, only=None):
     if check:
         await preflight(client, queues(current["queue"]))
     answer = dict(answer, stop=stop["id"])
+    # An action is named as the stop publishes it; `revise:engineer` travels as the action and the
+    # role the workflow's answer has always carried.
+    action, _, role = (answer.get("action") or "").partition(":")
+    if role:
+        answer.update(action=action, role=role)
     try:
         await client.get_workflow_handle(run_id).execute_update(
             WF.FeatureRun.answer, answer, id="answer:%s" % stop["id"])

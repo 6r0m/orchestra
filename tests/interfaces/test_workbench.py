@@ -247,6 +247,10 @@ class Runs(Scenario):
         final = body["stop"]["id"]
         self.assertEqual(request("POST", "/api/runs/%s/answer" % run_id,
                                  {"stop": final, "action": "discard", "confirm": False})[0], 422)
+        # As the page sends it: the action the stop published, and no words when none were written.
+        status, refused = request("POST", "/api/runs/%s/answer" % run_id, {"stop": final, "action": "revise:architect"})
+        self.assertEqual(status, 422, refused)
+        self.assertIn("needs the feedback", refused["error"], "the role-named action reached the workflow's check")
         status, _ = request("POST", "/api/runs/%s/answer" % run_id, {"stop": final, "action": "merge", "text": "merge"})
         self.assertEqual(status, 200)
         self.wait_for(run_id, lambda body: body["state"]["status"] == "MERGED")

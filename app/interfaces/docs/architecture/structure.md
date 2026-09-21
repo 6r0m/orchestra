@@ -43,6 +43,7 @@ terminal record directly, and an indirection to hide that would buy nothing.
 
 - **Nothing imports an entry point**, enforced by `tests/test_architecture.py`. That is what keeps argparse and console output out of the worker and the workbench.
 - **The workbench holds no state (D29).** Every read is Temporal's or a worker's, and every write is a start or an answer Update.
+- **A stop's answers are the ones it publishes (D6).** The page and the command line offer exactly the actions a stop publishes; the page owns their labels, colours and dialogs, the command line their shorthands and how each is typed, and neither keeps its own list.
 - **Everything listens on `127.0.0.1`**, and the API and the terminal sockets accept only the page's token, from the page's own origin. The terminal sockets take that token in the handshake's own header, never in a URL.
 - **Agent text reaches the page as terminal bytes or as text, never as markup.**
 

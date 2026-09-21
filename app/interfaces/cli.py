@@ -29,50 +29,52 @@ from app.application.client import Refusal, preflight, work_item_label  # noqa: 
 # The longest a follower waits between looks at a run when no history event wakes it.
 FOLLOW_SECONDS = 2
 
-# How the operator answers each stop, shown when a run stops.
-ANSWERS = {
-    "approval": ('"yes"', '"revise <feedback>"', '"abort"'),
-    "blocker": ('"<your guidance>"', '"abort"'),
-    "exhausted": ('"<your guidance>"', '"abort"'),
-    "failed": ('"continue" (or --continue)', '"abort"'),
-    "final": ('"merge"', '"revise engineer <feedback>"', '"revise architect <feedback>"',
-              '"discard" --confirm'),
-}
+# How an answer is typed here. Which answers a stop takes comes with the stop, and whether one is
+# accepted is the workflow's; the command line owns only its shorthands, which answers are followed
+# by your words, and which ask for --confirm.
+SHORTHANDS = {"yes": "approve", "y": "approve"}
+TAKES_WORDS = ("guide", "revise")
+CONFIRMED = ("discard",)
 
 
 def parse_answer(stop, text, confirm=False):
-    """The operator's typed answer as one of the stop's named actions; None when it names none.
+    """The operator's typed answer as one of the stop's published actions; None when it names none.
 
-    Parsing is this client's convenience only: the workflow's validator decides what
-    it accepts.
+    `yes` approves; an action that takes your words is followed by them, a revise's role first when
+    the stop publishes one per role; any other action is typed alone. At a stop that takes guidance,
+    anything else typed is that guidance.
     """
     words = (text or "").strip()
     head, _, rest = words.partition(" ")
-    lowered, rest = head.lower(), rest.strip()
-    reason = stop["reason"]
-    if reason == "approval":
-        if words.lower() in ("yes", "y", "approve"):
-            return {"action": "approve", "text": words}
-        if words.lower() == "abort":
-            return {"action": "abort", "text": words}
-        if lowered == "revise" and rest:
-            return {"action": "revise", "text": rest}
-        return None
-    if reason in ("blocker", "exhausted"):
-        if words.lower() == "abort":
-            return {"action": "abort", "text": words}
-        return {"action": "guide", "text": words} if words else None
-    if reason == "failed":
-        return {"action": words.lower(), "text": words} if words.lower() in ("continue", "abort") else None
-    if reason == "final":
-        if words.lower() == "merge":
-            return {"action": "merge", "text": words}
-        if words.lower() == "discard":
-            return {"action": "discard", "text": words, "confirm": bool(confirm)}
-        role, _, feedback = rest.partition(" ")
-        if lowered == "revise" and role in ("engineer", "architect") and feedback.strip():
-            return {"action": "revise", "role": role, "text": feedback.strip()}
-    return None
+    offered = stop["actions"]
+    name = SHORTHANDS.get(head.lower(), head.lower())
+    role, _, after = rest.strip().partition(" ")
+    answer = None
+    if "%s:%s" % (name, role.lower()) in offered and after.strip():
+        answer = {"action": "%s:%s" % (name, role.lower()), "text": after.strip()}
+    elif name in offered and name in TAKES_WORDS:
+        answer = {"action": name, "text": rest.strip()} if rest.strip() else None
+    elif name in offered and not rest.strip():
+        answer = {"action": name, "text": words}
+    elif "guide" in offered and words:
+        answer = {"action": "guide", "text": words}
+    if answer is not None and confirm:
+        answer["confirm"] = True
+    return answer
+
+
+def answer_line(stop):
+    """The stop's answers as they are typed here."""
+    def typed(action):
+        if action == "approve":
+            return '"yes"'
+        if action == "guide":
+            return '"<your guidance>"'
+        spelled = action.replace(":", " ")
+        if action.partition(":")[0] in TAKES_WORDS:
+            spelled += " <feedback>"
+        return '"%s"%s' % (spelled, " --confirm" if action in CONFIRMED else "")
+    return " | ".join(typed(action) for action in stop["actions"])
 
 
 async def follow(handle, printed=0, answered=None):
@@ -130,7 +132,7 @@ def _report(status, run_id, trace_url):
                            (label, stop["feedback"]), ("hint", stop["hint"])):
             if value:
                 print("%-9s %s" % (key + ":", value))
-        print("\nanswer with: orchestrate --resume %s --answer %s" % (run_id, " | ".join(ANSWERS[stop["reason"]])))
+        print("\nanswer with: orchestrate --resume %s --answer %s" % (run_id, answer_line(stop)))
         return 0 if final else 2
     status_name = state.get("status", "?")
     print("\n== run %s finished: %s ==" % (run_id, status_name))
@@ -169,7 +171,7 @@ async def _answer(client, run_id, text, confirm, tele, check, only=None):
         return 3
     answer = parse_answer(stop, text, confirm)
     if answer is None:
-        print("error: %r does not answer a %s stop; answer %s" % (text, stop["reason"], " | ".join(ANSWERS[stop["reason"]])),
+        print("error: %r does not answer a %s stop; answer %s" % (text, stop["reason"], answer_line(stop)),
               file=sys.stderr)
         return 2
     answer["stop"] = stop["id"]

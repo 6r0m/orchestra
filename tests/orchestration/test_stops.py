@@ -104,6 +104,30 @@ class NamedAnswers(Scenario):
         self.assertEqual([e.event_type for e in history(handle)].count(ACCEPTED), 2)
 
 
+class AnswersAsPublished(unittest.TestCase):
+    """The validator checks an answer against the actions its stop published, the role included."""
+
+    @staticmethod
+    def at(reason):
+        run = WF.FeatureRun()
+        run.state = {"run_id": "r"}
+        run.stop = {"id": "r:1", "reason": reason, "actions": list(WF.ACTIONS[reason])}
+        return run
+
+    def test_a_revise_at_the_final_gate_names_a_role_the_gate_published(self):
+        final = self.at("final")
+        final._validate_answer({"stop": "r:1", "action": "revise", "role": "engineer", "text": "fix it"})
+        for role in (None, "someone"):
+            with self.assertRaises(ValueError, msg=role):
+                final._validate_answer({"stop": "r:1", "action": "revise", "role": role, "text": "fix it"})
+
+    def test_a_revise_at_the_plan_approval_names_no_role(self):
+        approval = self.at("approval")
+        approval._validate_answer({"stop": "r:1", "action": "revise", "text": "plan it again"})
+        with self.assertRaises(ValueError):
+            approval._validate_answer({"stop": "r:1", "action": "revise", "role": "engineer", "text": "x"})
+
+
 class SingleAttempt(Scenario):
     """A role whose activity is lost is not launched again; Continue launches one more."""
 
@@ -215,6 +239,19 @@ class FinalGate(Scenario):
         run.answer("revise architect re-check the error path")
         run.status = E.run(E.cli.follow(run.handle))
         self.assertEqual(run.stop["reason"], "final")
+        self.assertEqual([c["name"] for c in self.agent.calls][-1], "verify-e3-1")
+        self.assertIn("re-check the error path", self.agent.calls[-1]["prompt"])
+
+    def test_the_final_gate_publishes_a_revise_for_each_role(self):
+        """A client shows what a stop publishes; the role a revise goes to is part of its name."""
+        run = self.ready()
+        self.assertEqual(run.stop["actions"], ["merge", "revise:engineer", "revise:architect", "discard"])
+
+    def test_a_revise_named_as_published_reaches_its_role_through_the_shared_client(self):
+        run = self.ready([("verify-e3-1", 0, codex_review_resumed("PASS"))])
+        E.run(E.cli.runs.answer(E.client(), run.run_id, {"stop": run.stop["id"], "action": "revise:architect",
+                                                         "text": "re-check the error path"}, check=False))
+        run.status = E.run(E.cli.follow(run.handle))
         self.assertEqual([c["name"] for c in self.agent.calls][-1], "verify-e3-1")
         self.assertIn("re-check the error path", self.agent.calls[-1]["prompt"])
 
