@@ -332,11 +332,15 @@ Step 1 — see:
       since, the stop, the failure, the component it is blocked by, the actions available now —
       assembled from the status query, Temporal's description and the stack's health. The workflow
       records when its current stage began (`workflow.now()`, state only). The Workbench shows it at
-      the head of every run.
-- [ ] **3.** `make demo`: a real run on the live stack with the suite's fake CLIs, through both loops
+      the head of every run. The *stopping* state comes with Stop, in task 6.
+- [x] **3.** `make demo`: a real run on the live stack with the suite's fake CLIs, through both loops
       in live terminals, answering one stop by pressing its button in a headless browser — so the body
       the page sends is proven — and removing everything it made. It grows with each step to D12's
-      journey.
+      journey. Isolated by its own policy, never by a mode in production code: a unique target queue,
+      polled only by a demo activity worker that carries the fake CLIs — it registers no workflow, so
+      the normal WSL worker runs the demo's workflow and no real run can reach a fake agent, nor the
+      demo run a real one — a temporary repository, and a demo Workbench on a spare port. The fake
+      turns take a few watchable seconds; every delay lives in the demo's own fakes.
 - [x] **4.** (D3; design after the review of 2026-09-21.) A stop publishes its allowed action IDs
       (`stop["actions"]`), and a revise at the final gate is one ID per role — `revise:engineer`,
       `revise:architect` — so the role rule is derived from what the gate published, not written
@@ -345,8 +349,8 @@ Step 1 — see:
       answer is typed; `client.py` turns a role-named ID into the answer the workflow has always
       taken. The workflow keeps the guards D6 and D24 name — a note for guide and revise, a
       confirmed discard — and describes no form.
-- [x] **5.** The refusal when a worker is missing says which, and the Workbench offers to start it; on
-      the command line it names `make up`.
+- [x] **5.** The refusal when a worker is missing names the host whose worker it is, and `make up`.
+      The Workbench's own Start for a missing worker is task 10.
 
 Step 2 — Stop and force terminate:
 
@@ -368,10 +372,15 @@ Step 3 — stack control:
       workers on start, after them on stop) and restarts one. `make up`, `make down` and `make check`
       call the command line, which calls the owner.
 - [ ] **9.** The Workbench leaves the stack as `orchestra-workbench.service`, a systemd user unit
-      (D13, A7): `After=network.target`, `Restart=on-failure`, `WantedBy=default.target`, started with
-      this checkout's own environment; one Make target renders, installs and enables it, and
-      `workbench-start|stop|status` wrap `systemctl --user` for maintenance. `make up` and `make down`
-      no longer touch the Workbench, and its pid file goes — systemd owns its process.
+      (D13, A7): `Restart=on-failure`, `RestartSec=2`, `WantedBy=default.target`, and no network
+      ordering — a user manager has no network target, and a loopback Workbench waits for none; started
+      with this checkout's own environment, whose absolute paths the one Make target renders when it
+      installs and enables the unit; `workbench-start|stop|status` wrap `systemctl --user` for
+      maintenance. `make up` and `make down` no longer touch the Workbench, and its pid file goes —
+      systemd owns its process. Live acceptance, once: after `wsl --shutdown` and the operator starting
+      WSL, the service is active, `:8390` answers, and the Windows worker's status and control path
+      runs from the service's own context — interop measured there, not assumed from a shell; only a
+      concrete readiness dependency it exposes is fixed, and never with a delay.
 - [ ] **10.** The Workbench controls the stack: start, stop and restart it all or one component; what is
       down, and the start that brings it back, shown in the health panel and on every run it blocks.
 
@@ -395,6 +404,7 @@ the target host's own git as a discard removes them.
 | force terminate closes any run and says what is left | acceptance (demonstration) | only by hand in Temporal |
 | stopping the stack leaves the Workbench serving | acceptance (demonstration) | `down` stops it first |
 | the Workbench comes back when WSL restarts, and after it is killed | acceptance (live, once) | started by `make up` only |
+| the Windows worker's control path runs from the Workbench service's context | acceptance (live, once) | never run outside a shell |
 | a component stopped and started again from the Workbench | acceptance (demonstration) | only `make` |
 | the page's own request body when a button is pressed | acceptance (demonstration) | proven by inspection only |
 
@@ -547,3 +557,29 @@ journey passes from the Workbench on the live stack with fake agents and no term
   refusal named `make orchestration-up`.
 - **Found while verifying:** a test comparing two runs' final states skipped the fields that differ
   between runs; `current` carries a time, so it joined them.
+
+### 2026-09-21 — review of step 1 and of the demo's design: PATCH
+
+- **Accepted:** the demo is isolated by its own policy and queue — the acceptance's way of starting
+  its worker, the normal entry point, would also register on the global workflow queue, so the demo
+  runs only an activity worker on its unique queue; task 5 and task 2 no longer claim what task 10
+  and task 6 own; the user unit drops `After=network.target`; task 9 gains one live acceptance of
+  WSL-to-Windows interop from the service's own context.
+- **Authority:** tasks 2, 3, 5 and 9 corrected; no decision changed.
+
+### 2026-09-21 — step 1, task 3: `make demo`
+
+- **Change:** `tools/demo.py` runs a demo stack beside the live one — an activity worker of its own on
+  a unique target queue, carrying fake CLIs and registering no workflow; a Workbench of its own on a
+  spare port; a throwaway repository named in a descriptor of its own — starts a run from that
+  Workbench, and answers the approval and the merge by pressing the page's own buttons in headless
+  Edge (`tools/demo_press.py`, run on Windows by `tools/demo_press.ps1`, because WSL cannot reach
+  Windows' loopback here — measured). It fails at once, with the run's own lines, when the run
+  fails or ends instead of reaching what it waits for, and removes everything it made.
+- **Found while running it:** the demo's own worktree folder had to exist, and a repository given only
+  by path infers its worktree folder from a layout a throwaway repository lacks — so the demo names
+  its repository in a descriptor with an explicit worktree root, as the acceptance does.
+- **Verification:** `make demo` passed on the live stack — the architect's PATCH then PASS, Approve and
+  Merge pressed in headless Edge with the page reporting each answer, the run merged and its change on
+  the base branch — with no window opened and focus never moved, as sampled throughout; afterwards
+  no demo process, temporary folder, run folder, trust record or browser remained.

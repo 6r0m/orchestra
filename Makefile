@@ -14,7 +14,7 @@ export TASK_SAFE
 V = UV_PROJECT_ENVIRONMENT="$$(uv run --no-project --managed-python --python 3.13 python app/foundation/envpath.py $(CURDIR))" \
     uv run --locked python
 
-.PHONY: help up check down feature test public-check
+.PHONY: help up check down feature demo test public-check
 
 help: ## Show these targets
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -31,6 +31,9 @@ down: ## Stop the workbench, both workers and the stack; its data stays on its v
 feature: ## Run one task through the workflow (usage: make feature TASK="fix X in Y")
 	@test -n "$$TASK_SAFE" || { echo 'usage: make feature TASK="fix X in Y"' >&2; exit 2; }
 	@$(V) -m app.interfaces.cli "$$TASK_SAFE"
+
+demo: ## Watch a whole run in a Workbench of its own, with fake agents, then remove it (needs `make up`)
+	@$(V) tools/demo.py
 
 test: ## Run the whole suite in this checkout's environment
 	@bash run-tests.sh
