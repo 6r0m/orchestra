@@ -4,6 +4,6 @@ The run itself: its stages, the routes between them, the stops it waits at and t
 
 | concern | owner |
 |---|---|
-| current architecture | [docs/architecture/README.md](docs/architecture/README.md) |
+| durable documentation: the architecture, its structure and its views | [docs/README.md](docs/README.md) |
 
 Nothing here is started directly. Temporal runs `workflow.FeatureRun`; the worker that registers it is [interfaces](../interfaces/README.md).

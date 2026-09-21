@@ -61,9 +61,11 @@ machine. A turn is the vendor's real interactive CLI in a real PTY (ConPTY on Wi
 that the worker's death is the agent's death, including anything it started.
 
 The source is organised the same way: one package per concern under [app/](app/README.md), whose
-README routes to each and says what it owns, what it may import, and the invariants it keeps.
+README routes to each, and each states at its own level what it owns, what it may import, and the
+invariants it keeps.
 
-Read [docs/architecture/structure.md](docs/architecture/structure.md) for what owns what, and
+Every durable document — running it, the architecture, how it came to be — is reached from
+[docs/README.md](docs/README.md). Read [docs/architecture/structure.md](docs/architecture/structure.md) for what owns what, and
 [docs/architecture/diagrams/main.md](docs/architecture/diagrams/main.md) for the parts and the
 processes they run in.
 
@@ -153,7 +155,9 @@ Running it day to day — the page, the command line, and where to look when som
 
 If you have your own engineering skills for your CLI, bind them per stage with `stage_skills` in a
 policy of your own (`ORCH_POLICY`): the bound skill leads that stage's prompt. Orchestra ships none,
-and its role files say enough to work without one.
+and its role files say enough to work without one. Keep that policy inside the checkout, or give each
+host's worker its own `ORCH_POLICY` too: a policy path only the other host can spell is refused
+rather than read from the wrong place.
 
 ## License
 

@@ -40,11 +40,16 @@ This package reads nothing of ours, and that is the invariant the whole graph re
 every other concern reads this one, so a single import outward would make the graph a
 cycle. `tests/test_architecture.py` enforces it.
 
+The stage contract is here, beside the policy, because the policy is validated against it —
+which stages a skill may lead, which phases have a round budget — and every concern that reads
+the stages reads the policy too. A package of its own would sit below the policy and add an
+edge to the graph without separating an owner.
+
 ## Invariants
 
 - **One authority per fact, refusing when there is none (D26).** `paths.REPO` is the only derivation of the checkout root; every other root path is built from it.
 - **Policy validation is strict (D18).** An unknown top-level or role key is rejected, so a typo cannot silently do nothing.
-- **A role's persona file has one resolver.** `policy.prompt_path` answers for validation and for whichever host runs the role; a policy crosses hosts as data and an absolute path from the other host means nothing here.
+- **A role's persona file has one resolver, and what crosses hosts is readable on both.** `policy.prompt_path` answers for validation and for whichever host runs the role. A policy crosses hosts as data, so it carries its origin relative to the checkout when it came from inside one, and each host reads that against its own checkout; the target's own `ORCH_POLICY` decides over it. An origin only the other host can spell, and a persona file that is not there, are refused before an agent starts — never replaced by another file.
 - **Stage asks are code, never configuration (D13).** Each ask names the artifact its stage produces or judges, and a new stage is a change to the workflow.
 - **A worktree's environment is removed only** when the derived path lies under this host's environment root, crosses no link or reparse point, and holds `pyvenv.cfg` (D22).
 

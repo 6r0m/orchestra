@@ -132,6 +132,13 @@ async def answer(client, run_id, answer, check=True, only=None):
             WF.FeatureRun.answer, answer, id="answer:%s" % stop["id"])
     except WorkflowUpdateFailedError as error:
         raise NotAccepted(error.cause.message if error.cause else str(error))
+    except RPCError as error:
+        # A closed run still answers the status query from its history, with the stop it closed
+        # at, so the stop was read; it is the Update that finds no open run. Only that is a
+        # refusal — any other RPC failure is the page's to report.
+        if error.status == RPCStatusCode.NOT_FOUND:
+            raise NotWaiting("run %s has closed and waits for no answer" % run_id) from error
+        raise
     return stop
 
 

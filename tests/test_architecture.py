@@ -22,6 +22,7 @@ The determinism boundary is Temporal's to enforce at runtime; this owns the rest
 """
 import ast
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -36,7 +37,7 @@ SOURCE = os.path.join(REPO, PACKAGE)
 # value means nothing may import it. Derived from the imports that exist, not from a
 # diagram: no indirection exists here only to satisfy this table.
 ALLOWED = {
-    # Host and deployment facts, and their validation. Reads nothing of ours.
+    # The contract every package reads: the checkout, the policy, the stages. Reads nothing of ours.
     "foundation": frozenset(),
     # The run: its stages, its routes, its stops. Deterministic under Temporal.
     "orchestration": frozenset({"foundation"}),
@@ -84,12 +85,13 @@ def _imported_packages(tree, own_package):
             if node.level:
                 # `from . import x` stays in this package; each extra dot climbs one out.
                 base = own_package[:len(own_package) - (node.level - 1)]
-                tail = node.module.split(".") if node.module else []
-                names = [".".join(base + tail)]
-            elif node.module:
-                names = [node.module]
+                module = ".".join(base + (node.module.split(".") if node.module else []))
             else:
-                continue
+                module = node.module
+            # What is imported is the module *and* each name taken from it, which may itself be a
+            # package: `from .. import high` and `from app import high` both import `app.high`.
+            names = [module] + ["%s.%s" % (module, alias.name) for alias in node.names
+                                if alias.name != "*"]
         else:
             continue
         for name in names:
@@ -123,6 +125,32 @@ def crossing_imports(source, allowed):
     return sorted(set(found))
 
 
+def package_imports(source):
+    """Every (importer, imported) pair of distinct packages some module under `source` makes."""
+    found = set()
+    for path in source_files(source):
+        mine = _package_of(path, source)
+        if mine is None:
+            continue
+        with open(path, encoding="utf-8") as handle:
+            tree = ast.parse(handle.read(), filename=path)
+        found.update((mine, package) for package, _ in _imported_packages(tree, _own_package(path, source))
+                     if package != mine)
+    return found
+
+
+# A Mermaid edge `a -->|"label"| b`, or `a --> b`. `<-->` and `-.->` are a participant's traffic
+# and a trace's, never an import, so neither matches.
+EDGE = re.compile(r"^\s*(\w+)\s+-->(?:\|[^|]*\|)?\s*(\w+)\s*$")
+
+
+def drawn_imports(view, packages):
+    """Every arrow the view draws between two of `packages`, as (from, to)."""
+    with open(view, encoding="utf-8") as handle:
+        edges = (EDGE.match(line) for line in handle)
+        return {m.groups() for m in edges if m and m.group(1) in packages and m.group(2) in packages}
+
+
 def unplaced_modules(source, allowed):
     """Every module under `source` that no package in the table claims, as relative paths."""
     found = []
@@ -138,31 +166,46 @@ def unplaced_modules(source, allowed):
 
 
 # The address every architecture-owning scope here uses, so a reader routes to it without
-# looking. One hop per level: a concern's README reaches its docs, which reach its architecture,
-# which reaches its structure and its views.
-ADDRESS = ("README.md",
-           os.path.join("docs", "README.md"),
-           os.path.join("docs", "architecture", "README.md"),
-           os.path.join("docs", "architecture", "structure.md"),
-           os.path.join("docs", "architecture", "diagrams", "README.md"),
-           os.path.join("docs", "architecture", "diagrams", "main.md"))
+# looking, as the hops that reach it. One hop per level: a scope's README routes to its docs,
+# which route to its architecture, which routes to its structure and to its views.
+ROUTE = (("README.md", "docs/README.md"),
+         ("docs/README.md", "docs/architecture/README.md"),
+         ("docs/architecture/README.md", "docs/architecture/structure.md"),
+         ("docs/architecture/README.md", "docs/architecture/diagrams/README.md"),
+         ("docs/architecture/diagrams/README.md", "docs/architecture/diagrams/main.md"))
+LINK = re.compile(r"\]\(([^)\s#]+)")
 
 
-def missing_address(source, packages):
-    """Every file of the architecture address a package does not have, as `<package>/<path>`."""
+def links(path):
+    """Every local file `path` links to, as a normalised absolute path."""
+    with open(path, encoding="utf-8") as handle:
+        targets = LINK.findall(handle.read())
+    base = os.path.dirname(path)
+    return {os.path.normpath(os.path.join(base, *t.split("/"))) for t in targets if "://" not in t}
+
+
+def broken_routes(scope):
+    """Every hop of the architecture address that `scope` does not walk, as `from -> to`.
+
+    Each hop must exist as a file *and* as a link from the router one level up: a file that
+    exists and that nothing routes to is unreachable by traversal, and so is every file below it.
+    """
     found = []
-    for package in sorted(packages):
-        for part in ADDRESS:
-            if not os.path.isfile(os.path.join(source, package, part)):
-                found.append("%s/%s" % (package, part.replace(os.sep, "/")))
+    for source, target in ROUTE:
+        router = os.path.join(scope, *source.split("/"))
+        routed = os.path.join(scope, *target.split("/"))
+        if not os.path.isfile(routed):
+            found.append("%s is missing" % target)
+        elif not os.path.isfile(router) or routed not in links(router):
+            found.append("%s -> %s" % (source, target))
     return found
 
 
-def unrouted_packages(source, packages):
-    """Every package its parent's router does not link, which is where a branch goes dark."""
-    with open(os.path.join(source, "README.md"), encoding="utf-8") as handle:
-        router = handle.read()
-    return sorted(p for p in packages if "(%s/README.md)" % p not in router)
+def unrouted(router, children):
+    """Every child directory whose README `router` does not link, which is where a branch goes dark."""
+    linked = links(router)
+    base = os.path.dirname(router)
+    return sorted(c for c in children if os.path.join(base, c, "README.md") not in linked)
 
 
 def is_checkout(path):
@@ -195,6 +238,18 @@ class PackageBoundaries(unittest.TestCase):
         self.assertEqual(on_disk - set(ALLOWED), set(), "a package no rule claims")
         self.assertEqual(set(ALLOWED) - on_disk, set(), "a rule names a package that is gone")
 
+    def test_every_allowed_import_is_one_the_source_makes(self):
+        """The table records the imports that exist, so a permission nothing uses is stale."""
+        allowed = {(p, q) for p, may in ALLOWED.items() for q in may}
+        self.assertEqual(allowed - package_imports(SOURCE), set())
+
+    def test_the_main_view_draws_exactly_the_allowed_imports(self):
+        view = os.path.join(REPO, "docs", "architecture", "diagrams", "main.md")
+        allowed = {(p, q) for p, may in ALLOWED.items() for q in may}
+        drawn = drawn_imports(view, ALLOWED)
+        self.assertEqual((allowed - drawn, drawn - allowed), (set(), set()),
+                         "(allowed but not drawn, drawn but not allowed)")
+
     def test_nothing_imports_an_entry_point(self):
         importers = [package for package, may in ALLOWED.items() if "interfaces" in may]
         self.assertEqual(importers, [], "an entry point is imported by %s" % importers)
@@ -203,11 +258,15 @@ class PackageBoundaries(unittest.TestCase):
 class EveryConcernIsReachable(unittest.TestCase):
     """A concern nothing routes to is unreachable by traversal, whatever else points at it."""
 
-    def test_every_package_carries_the_architecture_address(self):
-        self.assertEqual(missing_address(SOURCE, ALLOWED), [])
+    def test_the_project_and_every_package_walk_the_architecture_address(self):
+        scopes = {"the project": REPO}
+        scopes.update(("app/" + p, os.path.join(SOURCE, p)) for p in ALLOWED)
+        broken = {name: broken_routes(path) for name, path in scopes.items()}
+        self.assertEqual({name: hops for name, hops in broken.items() if hops}, {})
 
     def test_every_package_is_linked_from_its_parents_router(self):
-        self.assertEqual(unrouted_packages(SOURCE, ALLOWED), [])
+        self.assertEqual(unrouted(os.path.join(REPO, "README.md"), [PACKAGE]), [])
+        self.assertEqual(unrouted(os.path.join(SOURCE, "README.md"), ALLOWED), [])
 
 
 class TheCheckoutRootIsStillTheCheckout(unittest.TestCase):
@@ -316,13 +375,17 @@ class TheCheckersCanFail(unittest.TestCase):
                              [("low", "high", "low/x.py", 1)])
 
     def test_it_sees_a_bare_relative_climb(self):
-        """`from .. import high` names no module and is the same crossing."""
+        """`from .. import high` names no module, and imports the package `app.high` all the same."""
         with tempfile.TemporaryDirectory() as root:
             _tree(root, {"low/x.py": "from .. import high\n", "high/y.py": "z = 1\n"})
-            self.assertEqual(crossing_imports(root, self.LAYERS), [])
-            # It reaches the source root, not a package: what must be caught is the
-            # attribute use, which no import checker sees. The climb into a *named*
-            # package above is the case this checker owns.
+            self.assertEqual(crossing_imports(root, self.LAYERS),
+                             [("low", "high", "low/x.py", 1)])
+
+    def test_it_sees_a_package_taken_from_the_root_by_name(self):
+        with tempfile.TemporaryDirectory() as root:
+            _tree(root, {"low/x.py": "from app import high\n", "high/y.py": "z = 1\n"})
+            self.assertEqual(crossing_imports(root, self.LAYERS),
+                             [("low", "high", "low/x.py", 1)])
 
     def test_it_accepts_a_relative_import_inside_one_package(self):
         with tempfile.TemporaryDirectory() as root:
@@ -359,18 +422,56 @@ class TheCheckersCanFail(unittest.TestCase):
         self.assertFalse(under(root, os.path.join("E:", os.sep, "repos", "orchestra2", "x")))
         self.assertFalse(under(root, os.path.join("E:", os.sep, "repos")))
 
+    def test_it_reads_the_imports_a_tree_makes(self):
+        with tempfile.TemporaryDirectory() as root:
+            _tree(root, {"high/y.py": "from app.low import x\nfrom . import w\n",
+                         "high/w.py": "", "low/x.py": ""})
+            self.assertEqual(package_imports(root), {("high", "low")})
+
+    def test_it_reads_only_the_arrows_between_parts(self):
+        with tempfile.TemporaryDirectory() as root:
+            _tree(root, {"main.md": "```mermaid\nflowchart TD\n"
+                                    '    high -->|"a label"| low\n'
+                                    "    high --> low2\n"
+                                    '    high <-->|"traffic"| low\n'
+                                    '    low -.->|"rows"| high\n'
+                                    '    high -->|"argv"| clis[("claude")]\n```\n'})
+            self.assertEqual(drawn_imports(os.path.join(root, "main.md"), {"high", "low", "low2"}),
+                             {("high", "low"), ("high", "low2")})
+
+    WALKED = {"README.md": "[docs](docs/README.md)\n",
+              "docs/README.md": "[a](architecture/README.md#top)\n",
+              "docs/architecture/README.md": "[s](structure.md) [d](diagrams/README.md)\n",
+              "docs/architecture/structure.md": "",
+              "docs/architecture/diagrams/README.md": "[m](main.md)\n",
+              "docs/architecture/diagrams/main.md": ""}
+
+    def test_it_accepts_a_scope_that_walks_every_hop(self):
+        with tempfile.TemporaryDirectory() as root:
+            _tree(root, self.WALKED)
+            self.assertEqual(broken_routes(root), [])
+
+    def test_it_sees_a_hop_whose_link_is_gone_though_every_file_is_there(self):
+        """The case an existence check passes: the router skips a level, so the route is broken."""
+        with tempfile.TemporaryDirectory() as root:
+            _tree(root, dict(self.WALKED, **{"README.md": "[a](docs/architecture/README.md)\n",
+                                             "docs/architecture/README.md": "[s](structure.md)\n"}))
+            self.assertEqual(broken_routes(root), [
+                "README.md -> docs/README.md",
+                "docs/architecture/README.md -> docs/architecture/diagrams/README.md"])
+
     def test_it_sees_a_concern_missing_its_architecture(self):
         with tempfile.TemporaryDirectory() as root:
-            _tree(root, {"low/README.md": "", "low/docs/README.md": ""})
-            missing = missing_address(root, ["low"])
-            self.assertIn("low/docs/architecture/structure.md", missing)
-            self.assertIn("low/docs/architecture/diagrams/main.md", missing)
-            self.assertNotIn("low/README.md", missing)
+            _tree(root, {"README.md": "[docs](docs/README.md)\n", "docs/README.md": ""})
+            missing = broken_routes(root)
+            self.assertIn("docs/architecture/structure.md is missing", missing)
+            self.assertIn("docs/architecture/diagrams/main.md is missing", missing)
+            self.assertNotIn("README.md -> docs/README.md", missing)
 
     def test_it_sees_a_concern_its_parent_does_not_route_to(self):
         with tempfile.TemporaryDirectory() as root:
             _tree(root, {"README.md": "| x | [low/README.md](low/README.md) |\n"})
-            self.assertEqual(unrouted_packages(root, ["low", "high"]), ["high"])
+            self.assertEqual(unrouted(os.path.join(root, "README.md"), ["low", "high"]), ["high"])
 
     def test_it_sees_a_directory_that_is_not_a_checkout(self):
         with tempfile.TemporaryDirectory() as root:

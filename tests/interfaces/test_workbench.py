@@ -166,6 +166,13 @@ class Runs(Scenario):
             return None
         runs.preflight = no_preflight
         self.addCleanup(setattr, runs, "preflight", saved)
+        # The page reads a change by awaiting a workflow's result, and on the time-skipping server
+        # that lets time jump to the next timer — for a run parked at a gate, the test server's
+        # default ten-year run timeout, which closes the run under the test. A person answers a gate
+        # in real time, so these scenarios run in it.
+        skipping = E.env().auto_time_skipping_disabled()
+        skipping.__enter__()
+        self.addCleanup(skipping.__exit__, None, None, None)
         # A repository of this test's own, on a path this host runs: where the checkout happens to
         # live must not decide which worker the page's run waits for.
         self.repo = tempfile.mkdtemp(prefix="orch-page-")
@@ -235,6 +242,8 @@ class Runs(Scenario):
                          [("one", "unmerged"), ("two", "merged")], "D2: the worktrees and their merge state")
         self.assertEqual(view["base_branch"], "develop")
 
+        described = E.run(E.client().get_workflow_handle(run_id).describe())
+        self.assertEqual(described.status.name, "RUNNING", "reading the change left the run at its gate")
         final = body["stop"]["id"]
         self.assertEqual(request("POST", "/api/runs/%s/answer" % run_id,
                                  {"stop": final, "action": "discard", "confirm": False})[0], 422)
@@ -242,6 +251,25 @@ class Runs(Scenario):
         self.assertEqual(status, 200)
         self.wait_for(run_id, lambda body: body["state"]["status"] == "MERGED")
         self.assertEqual(request("GET", "/api/runs/no-such-run")[0], 404)
+
+    def test_an_answer_to_a_run_that_has_closed_is_refused_as_not_waiting(self):
+        """A closed run still answers its status query with the stop it closed at, from its
+        history, so the page offers the answer; the Update then finds no open run. That is a
+        refusal, not a failure of the page."""
+        a1, _ = codex_review_first("PASS", "Direction: A.")
+        self.host, self.agent = E.host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)],
+                                       git=FakeWorktrees())
+        status, started = request("POST", "/api/runs", {"task": "a run closed at its gate", "repo": self.repo})
+        self.assertEqual(status, 200, started)
+        run_id = started["run_id"]
+        self.addCleanup(lambda: E.Run.cleanup(type("R", (), {"run_id": run_id})()))
+        stop = self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "approval")["stop"]
+        E.run(E.client().get_workflow_handle(run_id).terminate("closed by the test"))
+
+        self.assertEqual(request("GET", "/api/runs/%s" % run_id)[1]["stop"]["id"], stop["id"],
+                         "the precondition: the closed run still shows the stop it closed at")
+        status, body = request("POST", "/api/runs/%s/answer" % run_id, {"stop": stop["id"], "action": "approve"})
+        self.assertEqual(status, 409, body)
 
 
 if __name__ == "__main__":

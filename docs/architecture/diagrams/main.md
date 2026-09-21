@@ -23,6 +23,13 @@ flowchart TD
     application -->|"a role turn"| agents
     application -->|"the run's worktree"| workspace
     application -->|"trace rows for a run"| observability
+    application -->|"the policy, the stage contract, the checkout root"| foundation
+
+    interfaces -->|"the workflows a worker registers, the status query"| orchestration
+    interfaces -->|"the repositories a run may start on"| workspace
+    interfaces -->|"the terminal server a worker hosts, the page's token"| agents
+    interfaces -->|"the trace link"| observability
+    interfaces -->|"the policy, the checkout root"| foundation
 
     orchestration -->|"the stage contract"| foundation
     agents -->|"the stage's ask, and the policy"| foundation
@@ -36,9 +43,11 @@ flowchart TD
     observability -.->|"trace rows, never read back"| langfuse[("Langfuse")]
 ```
 
-Every arrow between two parts inside the box is an import the boundary check enforces; the table
-it enforces is in [structure.md](../structure.md#relationships-and-dependency-direction), and
-`tests/test_architecture.py` fails on an import this picture does not show.
+The arrows between two parts inside the box are exactly the imports the boundary check allows,
+each one in use; the table it enforces is in
+[structure.md](../structure.md#relationships-and-dependency-direction). `tests/test_architecture.py`
+fails on an import this picture does not show, on an arrow no import stands behind, and on an
+allowed import nothing makes.
 
 | part | its own architecture |
 |---|---|

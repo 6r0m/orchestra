@@ -143,7 +143,8 @@ in is drawn once, in [the main view](diagrams/main.md), and is not restated here
 That direction is not a convention: `tests/test_architecture.py` reads `app/`, resolves every
 import — relative ones included — and fails on one that crosses a boundary the table does not
 allow, with controls that prove each check can reject a violation. The table records the
-imports that exist; no indirection exists here to satisfy it, and nothing imports an entry
+imports that exist — an allowed import nothing makes fails too — and the main view draws
+exactly that table; no indirection exists here to satisfy it, and nothing imports an entry
 point, which is what keeps argparse and console output out of the worker and the workbench.
 
 Where a run may put files, where this checkout is, and which agent a turn is each have exactly one

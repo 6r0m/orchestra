@@ -19,7 +19,7 @@ from app.foundation import paths
 from app.foundation import stages
 
 # The deployment's own policy file. `ORCH_POLICY` names another, and a role's prompt is
-# always resolved against the directory of the file actually loaded, not against this one.
+# resolved against the directory of the file actually loaded, not against this one.
 POLICY_FILE = os.path.join(paths.REPO, "policy.json")
 
 ROLES = ("engineer", "architect")
@@ -49,28 +49,69 @@ def load(path=None):
         path = POLICY_FILE
     with open(path, encoding="utf-8") as fh:
         raw = json.load(fh)
-    raw["_policy_path"] = os.path.abspath(path)
+    raw["_policy_path"] = origin(path)
     return validate(raw)
+
+
+def origin(path):
+    """Where a policy came from, in a form that survives the crossing to the other host.
+
+    The hosts spell one checkout differently (`/mnt/e/...` and `E:\\...`), so a file inside
+    the checkout is named relative to it, with forward slashes, and each host reads that
+    against its own checkout. A file outside the checkout keeps its absolute path, which
+    only the host that loaded it can read.
+    """
+    absolute = os.path.abspath(path)
+    try:
+        relative = os.path.relpath(absolute, paths.REPO)
+    except ValueError:
+        # Another drive than the checkout's, on Windows.
+        return absolute
+    if relative.split(os.sep)[0] == os.pardir:
+        return absolute
+    return relative.replace(os.sep, "/")
+
+
+# An absolute path in either host's spelling: a drive, a UNC share or a POSIX root. One that
+# is not absolute to *this* host was written by the other.
+ABSOLUTE_ANYWHERE = re.compile(r"[A-Za-z]:[\\/]|[\\/]")
 
 
 def prompt_path(policy, role_name, policy_file=None):
     """The role's persona file as *this* host sees it. The one resolver.
 
-    A policy crosses hosts as data, and the two hosts spell the same checkout
-    differently, so an absolute path resolved on the other one means nothing here: a
-    relative `prompt` is resolved again, against the directory of the policy file this
-    host was given and against this checkout when it was given none. Validation and the
-    host that runs the role therefore name the same file for the same policy, which
-    they did not while each built the path itself.
+    A policy crosses hosts as data. The directory a relative `prompt` resolves against is,
+    in order: the policy file this host was given itself (its own `ORCH_POLICY`); the
+    policy's origin read against this checkout, when it came from inside one; its origin as
+    it stands, when that is an absolute path on this host; and this checkout, for a policy
+    that names no origin. An origin written by the other host is refused rather than
+    guessed at, and so is a persona file that is not there: a role never runs on a persona
+    other than the one its policy names.
     """
     prompt = policy["roles"][role_name]["prompt"]
+    named = policy.get("_policy_path")
     if os.path.isabs(prompt):
-        return prompt
-    named = policy_file or policy.get("_policy_path")
-    base = os.path.dirname(os.path.abspath(named)) if named else paths.REPO
-    # A prompt is written with forward slashes, as JSON; normalise so the one answer reads
-    # the same in a refusal on either host.
-    return os.path.normpath(os.path.join(base, prompt))
+        resolved = prompt
+    else:
+        if policy_file:
+            base = os.path.dirname(os.path.abspath(policy_file))
+        elif not named:
+            base = paths.REPO
+        elif os.path.isabs(named):
+            base = os.path.dirname(named)
+        elif ABSOLUTE_ANYWHERE.match(named):
+            raise InvalidPolicy(
+                "role %r: the policy was loaded from %s, outside the checkout and on the other "
+                "host, so this host cannot read its persona files; give this host's worker "
+                "ORCH_POLICY naming its own copy" % (role_name, named))
+        else:
+            base = os.path.join(paths.REPO, *named.split("/")[:-1])
+        # A prompt is written with forward slashes, as JSON; normalise so the one answer reads
+        # the same in a refusal on either host.
+        resolved = os.path.normpath(os.path.join(base, prompt))
+    if not os.path.isfile(resolved):
+        raise InvalidPolicy("role %r: prompt file missing: %s" % (role_name, resolved))
+    return resolved
 
 
 def validate(raw):
@@ -126,9 +167,6 @@ def validate(raw):
         if not isinstance(role.get("prompt"), str) or not role["prompt"]:
             raise InvalidPolicy("role %r needs a prompt file link" % name)
         role["prompt_path"] = prompt_path(raw, name)
-        if not os.path.isfile(role["prompt_path"]):
-            raise InvalidPolicy("role %r: prompt file missing: %s"
-                                % (name, role["prompt_path"]))
 
     rounds = raw.get("max_rounds")
     if not isinstance(rounds, dict) or set(rounds) != set(stages.PHASES):

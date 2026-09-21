@@ -5,7 +5,7 @@ each concern states its own boundaries, parts and invariants at its own level.
 
 | concern | owner |
 |---|---|
-| the host and deployment facts every other package reads | [foundation/README.md](foundation/README.md) |
+| the contract every other package reads: the checkout, the policy, the stages of a run | [foundation/README.md](foundation/README.md) |
 | the run itself — its stages, routes, stops and final gate | [orchestration/README.md](orchestration/README.md) |
 | the repositories a run operates on, and its worktree | [workspace/README.md](workspace/README.md) |
 | a role's agent: its terminal, containment, prompt and answer | [agents/README.md](agents/README.md) |

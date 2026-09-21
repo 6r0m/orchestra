@@ -170,11 +170,6 @@ class Activities:
         state, stage, policy = args["state"], args["stage"], args["policy"]
         role_name = stages.STAGE_ROLE[stage]
         role = dict(policy["roles"][role_name])
-        # The persona file as this host sees it. `policy.prompt_path` is the one
-        # resolver; this host's own ORCH_POLICY names the directory a relative prompt
-        # resolves against, because the client's absolute path is the client's.
-        role["prompt_path"] = P.prompt_path(policy, role_name,
-                                            os.environ.get("ORCH_POLICY"))
         is_reviewer = role["workspace_access"] == "read"
         resume_id = (state.get("agent_sessions") or {}).get(role_name)
         rdir = run_dir(state["run_id"])
@@ -193,6 +188,10 @@ class Activities:
                        log=os.path.relpath(os.path.join(rdir, "logs", name), paths.REPO))
         settings = None
         try:
+            # The persona file as this host sees it, from the one resolver: the policy crossed
+            # from the client as data, and the client's own path to it is the client's. A policy
+            # this host cannot map fails the step here, before an agent starts.
+            role["prompt_path"] = P.prompt_path(policy, role_name, os.environ.get("ORCH_POLICY"))
             # Holds the trace store's secret, so it exists only while this stage runs.
             settings = T.harness_settings(role, span)
             env = agent_env(T.harness_env(role, span, state, stage, role_name))

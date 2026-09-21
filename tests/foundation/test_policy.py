@@ -2,8 +2,9 @@
 
 The policy crosses hosts as data: the client validates it, and the target host runs the role.
 While each built the path itself, an external policy was validated against its own directory
-and then read from the checkout — two files, one name. These prove there is one resolver and
-that the run-time call and validation agree.
+and then read from the checkout — two files, one name. With one resolver, what crosses is the
+policy's origin, so it must be a name the target host can read: relative to the checkout when
+the file is inside it, and refused when it is a path only the other host can spell.
 """
 import ast
 import os
@@ -38,8 +39,8 @@ POLICY = """{
 
 
 def external_policy(root):
-    """A policy outside the checkout, whose role prompts are relative to itself."""
-    os.makedirs(os.path.join(root, "roles"))
+    """A policy file under `root`, whose role prompts are relative to itself."""
+    os.makedirs(os.path.join(root, "roles"), exist_ok=True)
     for role in ("engineer", "architect"):
         with open(os.path.join(root, "roles", "%s.md" % role), "w", encoding="utf-8") as fh:
             fh.write("# the %s of this other policy\n" % role)
@@ -47,6 +48,11 @@ def external_policy(root):
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(POLICY)
     return path
+
+
+# How the other host spells an absolute path: what a policy loaded there would carry across.
+OTHER_HOSTS_PATH = ("/mnt/e/elsewhere/policy.json" if sys.platform.startswith("win")
+                    else "E:\\elsewhere\\policy.json")
 
 
 class OneResolver(unittest.TestCase):
@@ -58,7 +64,8 @@ class OneResolver(unittest.TestCase):
             # What validation stored, and what the host running the role asks for.
             self.assertEqual(loaded["roles"]["engineer"]["prompt_path"], mine)
             self.assertEqual(P.prompt_path(loaded, "engineer", path), mine)
-            self.assertTrue(os.path.isfile(mine))
+            self.assertEqual(P.prompt_path(loaded, "engineer"), mine,
+                             "on the host that loaded it, its absolute origin is readable as it stands")
             # The defect this test exists for: the checkout's own file is a different one.
             self.assertNotEqual(mine, os.path.join(paths.REPO, "roles", "engineer.md"))
 
@@ -72,9 +79,8 @@ class OneResolver(unittest.TestCase):
     def test_the_base_it_is_given_is_the_base_it_uses(self):
         """The control: a resolver that ignored its base would pass the two tests above."""
         with tempfile.TemporaryDirectory() as root:
-            path = external_policy(root)
-            loaded = P.load(path)
-            elsewhere = os.path.join(root, "moved", "policy.json")
+            loaded = P.load(external_policy(root))
+            elsewhere = external_policy(os.path.join(root, "moved"))
             self.assertEqual(
                 P.prompt_path(loaded, "engineer", elsewhere),
                 os.path.normpath(os.path.join(root, "moved", "roles", "engineer.md")))
@@ -86,6 +92,54 @@ class OneResolver(unittest.TestCase):
             absolute = os.path.abspath(os.path.join(root, "roles", "architect.md"))
             loaded["roles"]["architect"]["prompt"] = absolute
             self.assertEqual(P.prompt_path(loaded, "architect", path), absolute)
+
+    def test_a_persona_that_is_not_there_is_refused_where_the_role_would_run(self):
+        loaded = P.load()
+        loaded["roles"]["engineer"] = dict(loaded["roles"]["engineer"], prompt="roles/nobody.md")
+        with self.assertRaises(P.InvalidPolicy) as raised:
+            P.prompt_path(loaded, "engineer")
+        self.assertIn("nobody.md", str(raised.exception))
+
+
+class TheOriginCrossesHosts(unittest.TestCase):
+    """What the client's policy carries must be readable on the host that runs the role."""
+
+    def test_a_policy_inside_the_checkout_carries_a_name_relative_to_it(self):
+        loaded = P.load()
+        self.assertEqual(loaded["_policy_path"], "policy.json")
+        # Neither host's spelling of the checkout crosses: that was the defect.
+        self.assertIsNone(P.ABSOLUTE_ANYWHERE.match(loaded["_policy_path"]))
+
+    def test_a_relative_origin_is_read_against_this_hosts_checkout(self):
+        """What the target host does with a policy the other host loaded from its checkout."""
+        os.makedirs(paths.RUNTIME_ROOT, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=paths.RUNTIME_ROOT) as root:
+            external_policy(root)
+            loaded = P.load(os.path.join(root, "policy.json"))
+            relative = os.path.relpath(root, paths.REPO).replace(os.sep, "/")
+            self.assertEqual(loaded["_policy_path"], relative + "/policy.json")
+            self.assertEqual(P.prompt_path(loaded, "engineer"),
+                             os.path.normpath(os.path.join(root, "roles", "engineer.md")))
+            # The control: the checkout's own persona is another file, so a resolver that fell
+            # back to it would fail here.
+            self.assertNotEqual(P.prompt_path(loaded, "engineer"),
+                                P.prompt_path(P.load(), "engineer"))
+
+    def test_an_origin_only_the_other_host_can_read_is_refused(self):
+        loaded = P.load()
+        loaded["_policy_path"] = OTHER_HOSTS_PATH
+        with self.assertRaises(P.InvalidPolicy) as raised:
+            P.prompt_path(loaded, "engineer")
+        self.assertIn("ORCH_POLICY", str(raised.exception))
+
+    def test_this_hosts_own_policy_file_decides_over_the_origin(self):
+        """A target given ORCH_POLICY reads its own copy, whatever the client carried."""
+        with tempfile.TemporaryDirectory() as root:
+            mine = external_policy(root)
+            loaded = P.load()
+            loaded["_policy_path"] = OTHER_HOSTS_PATH
+            self.assertEqual(P.prompt_path(loaded, "engineer", mine),
+                             os.path.normpath(os.path.join(root, "roles", "engineer.md")))
 
 
 def prompt_path_writers(root):
