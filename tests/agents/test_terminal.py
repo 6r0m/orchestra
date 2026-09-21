@@ -247,7 +247,9 @@ OWNER = textwrap.dedent("""
         # The control: the same descendant started outside any terminal's tree.
         import subprocess
         code = "import os, sys, time\\nopen(sys.argv[1], 'w').write(str(os.getpid()))\\ntime.sleep(600)\\n"
-        flags = {"creationflags": 0x00000208} if sys.platform.startswith("win") else {"start_new_session": True}
+        # As fake_cli.detach does: a console of its own with no window, never none, which would be shown.
+        flags = ({"creationflags": subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP}
+                 if sys.platform.startswith("win") else {"start_new_session": True})
         subprocess.Popen([sys.executable, "-c", code, pid_file], **flags)
         while not os.path.exists(pid_file) or not open(pid_file).read():
             time.sleep(0.05)

@@ -76,7 +76,10 @@ def detach(pid_file):
     """A process of its own session or group that writes its pid and outlives this one."""
     code = "import os, sys, time\nopen(sys.argv[1], 'w').write(str(os.getpid()))\ntime.sleep(600)\n"
     if WINDOWS:
-        subprocess.Popen([sys.executable, "-c", code, pid_file], creationflags=0x00000008 | 0x00000200)
+        # Its own group, and a console of its own that has no window. With no console at all, the
+        # interpreter a venv's python.exe launches would be given a new one — shown, and taking focus.
+        subprocess.Popen([sys.executable, "-c", code, pid_file], creationflags=subprocess.CREATE_NO_WINDOW
+                         | subprocess.CREATE_NEW_PROCESS_GROUP)
     else:
         subprocess.Popen([sys.executable, "-c", code, pid_file], stdin=subprocess.DEVNULL,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)

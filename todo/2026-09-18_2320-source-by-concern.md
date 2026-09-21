@@ -1,6 +1,6 @@
 # Source organised by concern — D30
 
-**Status:** the move is done; the second and third reviews (PATCH, PATCH) are answered in the
+**Status:** the move is done; the second and third reviews (PATCH, PATCH) and the third's follow-up are answered in the
 working tree, unstaged, and await review. What is left is the operator's.
 
 ## Goal
@@ -99,6 +99,25 @@ dependency-free and holds only small shared contracts and facts.
    each host's suite: the prompt the agent receives carries that host's persona, and an unreadable
    origin or a differing copy starts no agent. Mutations — storing the path again, skipping the
    copy check — each fail two of the new tests.
+4. **Accepted, from its follow-up — the copy check skipped an absolute prompt.** It ran only where
+   a relative prompt was resolved; it now runs first, whatever the prompt. A regression at the
+   activity boundary — an absolute prompt with a differing copy — failed first and starts no agent.
+
+## Found while verifying — windows taking focus
+
+Checks are run in the background through the repository's own scripts, and a sampler of new
+windows and focus changes ran beside them.
+
+- **The Windows worker's console was shown.** `workers.ps1` created it through WMI with no startup
+  information, and Windows Terminal — this host's default console — opened it in a window that
+  took focus and whose closing would have ended the worker. It now starts hidden: no window across
+  a stop and start of the stack.
+- **Two tests opened three windows a run.** Their "detached" helper had no console at all, and the
+  interpreter a venv's `python.exe` launches was then given a new, shown one. The helpers now get a
+  console of their own with no window — still outside the parent's console and group. No window
+  across both suites.
+- **The Windows host suite has a script of its own,** `run-tests.ps1`, which owns the list of the
+  modules that exercise a host; it had been a command typed from `tests/README.md`.
 
 ## Left for the operator
 

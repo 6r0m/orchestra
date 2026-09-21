@@ -93,7 +93,7 @@ class OneResolver(unittest.TestCase):
             loaded = P.load(path)
             absolute = os.path.abspath(os.path.join(root, "roles", "architect.md"))
             loaded["roles"]["architect"]["prompt"] = absolute
-            self.assertEqual(P.prompt_path(loaded, "architect", path), absolute)
+            self.assertEqual(P.prompt_path(loaded, "architect"), absolute)
 
     def test_a_persona_that_is_not_there_is_refused_where_the_role_would_run(self):
         loaded = P.load(P.POLICY_FILE)
@@ -232,6 +232,18 @@ class TheTargetOpensItsOwnPersona(unittest.TestCase):
             os.environ["ORCH_POLICY"] = mine
             with self.assertRaises(Exception) as raised:
                 self.run_plan(P.load(P.POLICY_FILE))
+        self.assertIn("differs from the run's", str(raised.exception))
+        self.assertEqual(self.prompts, [], "no agent started")
+
+    def test_a_host_copy_that_differs_starts_no_agent_for_an_absolute_prompt_either(self):
+        """The copy is checked whatever the prompt: an absolute one resolves nothing, and is no exception."""
+        with tempfile.TemporaryDirectory() as root:
+            sent = P.load(P.POLICY_FILE)
+            sent["roles"]["engineer"] = dict(sent["roles"]["engineer"],
+                                             prompt=os.path.join(paths.REPO, "roles", "engineer.md"))
+            os.environ["ORCH_POLICY"] = external_policy(root)
+            with self.assertRaises(Exception) as raised:
+                self.run_plan(sent)
         self.assertIn("differs from the run's", str(raised.exception))
         self.assertEqual(self.prompts, [], "no agent started")
 

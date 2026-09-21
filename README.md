@@ -133,6 +133,7 @@ diffs through Temporal's payload limit, and the operator's page.
 ```bash
 bash run-tests.sh                       # the whole suite, in this checkout's environment
 python tests/acceptance_restart.py      # live acceptance: real Temporal and workers, fake agents
+powershell -NoProfile -ExecutionPolicy Bypass -File run-tests.ps1   # on Windows: the host suite
 ```
 
 The live acceptance restarts the server and the workers mid-run, kills a worker while a role is

@@ -33,8 +33,11 @@ if ($Action -eq "up") {
                # However the worker ends — including killed from outside, which leaves no output of its own —
                # the log gains a line with when and with what exit code; `call` expands the values then.
                " & call echo worker exited at %^DATE% %^TIME% rc=%^ERRORLEVEL% >> `"$runtime\worker-windows.log`""
+    # Hidden: the worker is a service, and a console WMI creates is otherwise shown — handed to Windows
+    # Terminal where that is the default — taking focus, and closing that window would end the worker.
+    $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }
     $created = Invoke-CimMethod -ClassName Win32_Process -MethodName Create `
-        -Arguments @{ CommandLine = $command; CurrentDirectory = $here }
+        -Arguments @{ CommandLine = $command; CurrentDirectory = $here; ProcessStartupInformation = $startup }
     if ($created.ReturnValue -ne 0) { throw "starting the windows worker failed: $($created.ReturnValue)" }
     "windows worker started; log: $runtime\worker-windows.log"
 } else {

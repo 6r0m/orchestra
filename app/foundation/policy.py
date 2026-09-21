@@ -89,13 +89,15 @@ def prompt_path(policy, role_name, policy_file=None):
     guessed at, and so is a persona file that is not there: a role never runs on a persona
     other than the one its policy names.
     """
+    # Before anything is resolved: a copy that differs is refused whatever the prompt is.
+    if policy_file:
+        _same_policy(policy, policy_file)
     prompt = policy["roles"][role_name]["prompt"]
     named = policy.get("_policy_path")
     if os.path.isabs(prompt):
         resolved = prompt
     else:
         if policy_file:
-            _same_policy(policy, policy_file)
             base = os.path.dirname(os.path.abspath(policy_file))
         elif not named:
             base = paths.REPO
