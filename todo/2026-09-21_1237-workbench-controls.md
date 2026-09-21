@@ -114,12 +114,27 @@ and stopping one — delivered in small steps, each proven before the next.
 - A role turn already honours activity cancellation: the turn loop heartbeats and raises on cancel
   (`terminal.py`, around `activity.is_cancelled`), and `run_role` ends the agent on any failure.
   The workflow has no path that requests it.
+- The installed SDK (temporalio 1.33) has both lifecycle operations on `WorkflowHandle`: `cancel()`,
+  a request the workflow's own code receives and may clean up after, and `terminate()`, which closes
+  the run with no workflow code run. An activity the workflow awaits is cancelled with it, by default
+  `ActivityCancellationType.TRY_CANCEL`: the workflow goes on without waiting for the activity to stop.
+- Every activity the workflow starts (`_activity`) carries a start-to-close timeout and nothing else,
+  so one on a queue no worker polls waits for a poller indefinitely — the trace writes (`_trace`)
+  included. The git activities (`create_worktree`, `merge`, `discard`) do not heartbeat, so a
+  cancellation cannot reach one that is running.
 
 **Inferences**
 
-- Stopping a working run needs the workflow to cancel its own current activity and end `ABORTED`, as
-  an Update the validator accepts when no stop is pending — a workflow change behind
-  `workflow.patched`.
+- A graceful Stop would hang in its own cleanup on a host with no worker unless every target-host
+  activity it starts is bounded by a schedule-to-close timeout (or not awaited); and a Stop arriving
+  during a merge would let the workflow end while the merge still lands, unless git side effects in
+  flight are shielded from the cancellation.
+
+**Refuted**
+
+- That stopping a working run needs an Update of Orchestra's own. Temporal's workflow cancellation
+  reaches the workflow's code whether or not a stop is pending, and reaches a heartbeating role turn
+  through the cancellation `terminal.py` already honours; a custom Update would only re-implement it.
 
 **Assumptions / unverified areas**
 
@@ -144,6 +159,9 @@ Four capability gaps, with evidence above:
    but Temporal itself.
 4. A working run cannot be stopped from the page, and the stack cannot be started or stopped from it.
 
+Gaps 3 and 4 are one gap: there is no way to end a run, from any state, that keeps its work and needs
+nothing but Temporal to accept.
+
 ## Decision
 
 Deliver in steps; each is reviewed and merged before the next begins.
@@ -153,14 +171,21 @@ same reading `make check` uses, moved into `client.py` so both surfaces share on
 whose queues no worker polls; renders each stop's buttons from the stop's own `actions`, keeping on
 the page only how an action is presented; and the refusal names `make up`.
 
-**Step 2 — gated by Q3 (task 6).** `abort` at the final gate: an answer through the existing Update
-and validator, ending `ABORTED` with the worktree and branch kept, behind `workflow.patched`.
+**Step 2 — Stop, gated by Q1 (tasks 6–7).** Ending a run is Temporal's lifecycle, not an answer: one
+**Stop run** for every open run — an agent working, a stop waiting, a failure, the final gate, a host
+with no worker — sent as Temporal's workflow cancellation through `client.py`. The workflow receives
+it, ends `STOPPED` with its worktree and branch untouched, closes the run's terminals and finishes its
+trace through target-host activities bounded so that a host with no worker cannot hold it, and lets a
+git side effect already in flight finish rather than cutting it off — if that side effect lands, it
+decides how the run ends. **Force terminate** is Temporal's termination, from the command line only:
+the break-glass way out when the workflow itself cannot process a Stop, saying what it may leave
+behind.
 
-**Step 3 — gated by Q4 (task 7).** Stopping a working run: an Update the validator accepts only
-while no stop is pending, cancelling the current activity and ending `ABORTED`.
+**Step 3 — `abort` retired (task 8).** Once Stop is proven from every state, `abort` leaves the
+published actions behind `workflow.patched`, its handling kept for the recorded histories: a stop's
+actions are then decisions only — approve, revise, guide, continue, merge, discard.
 
-**Step 4 — gated by Q1 and Q2 (task 8).** Stack lifecycle from the page, in whatever form those
-answers allow.
+**Step 4 — gated by Q2 (task 9).** Only if Q2 asks for more than the health view of step 1.
 
 ### Premise / KISS gate
 
@@ -168,24 +193,28 @@ answers allow.
   them; `worker.check`'s reading already owns "is the stack able to move a run". Step 1 moves that
   reading into `client.py` and adds one read route — no new process, port, protocol or credential.
 - **Removed.** The page's own copy of the answer set, and a Makefile target name that does not exist.
-- **Added.** One read route and its panel. Steps 2 and 3 add an answer and an Update to the workflow
-  that already owns them, not a second writer.
-- **Given up.** Terminating a run from the page, and starting the stack from the page: both cross
-  D29, so they wait for Q1 and Q2 rather than being designed in.
+- **Added.** One read route and its panel; for Stop, a call to the lifecycle operation Temporal
+  already has, and the workflow's handling of it — no Update, answer or protocol of Orchestra's own.
+- **Given up.** Terminating a run from the page — termination skips every cleanup, so it stays a
+  command-line break glass — and starting the stack from the page (Q2).
 
 ### Alternatives considered
 
-- **Terminate from the page.** One call closes any run, including one whose workflow worker is gone.
-  Not recommended while D29 stands: it bypasses the workflow's rules, ends the run with no final
-  state or trace, and is the one write the validator cannot see. Q1 decides.
+- **Stop as an Update, or a final-gate `abort`.** An answer of Orchestra's own that must also work
+  when no stop is pending, and a second concept beside the one Temporal provides. Rejected by the
+  review of 2026-09-21 in favour of cancellation.
+- **Terminate from the page.** One call closes any run, including one whose workflow worker is gone,
+  but ends it with no final state, no trace and live terminals left behind. Kept to the command line
+  as the break glass.
 - **The page drives `make up` and `make down`.** The page cannot start the stack it is served by, and
   `down` would stop the page mid-answer. Q2 decides between restarting workers only and an
   always-on workbench.
 
 ## Required invariants
 
-1. D29's write path holds: every page write is a start or an answer Update through `client.py`,
-   unless Q1 is answered otherwise.
+1. D29's write path holds: every page write is a start or an answer Update through `client.py`;
+   if Q1 is resolved as the review proposes, a Stop — Temporal's cancellation — is the third, and
+   termination is never a page write.
 2. The workflow's `ACTIONS` is the only owner of which answers a stop takes; the page decides only
    presentation.
 3. No answer is ever read as another: the validator still rejects anything a stop does not offer (D6).
@@ -193,6 +222,11 @@ answers allow.
    commands goes behind `workflow.patched`.
 5. A health read changes nothing; a run whose host has no worker is shown as such, never as moving.
 6. The page's token, origin and loopback-host checks are unchanged.
+7. A Stop runs no git: the worktree and branch stay as they are.
+8. A Stop is accepted by Temporal without the target host's worker, and nothing the workflow does in
+   response waits on that worker without a bound.
+9. A git side effect in flight is never cut off by a Stop; one that lands decides how the run ends.
+10. Force terminate exists only on the command line and says what it may have left behind.
 
 ## Implementation tasks
 
@@ -218,17 +252,27 @@ Step 1:
       is missing.
 - [ ] **5b.** (D2) A mock run to watch: a real run on the live stack whose agents are the suite's fake
       CLIs, working visibly in both terminals through both loops, started by one command and
-      removed by it afterwards; no model is called.
+      removed by it afterwards; no model is called. It answers one stop by pressing its button in a
+      headless browser, so the body the page sends is proven, not only the API behind it.
 
-Step 2 (Q3): **6.** Red first in `tests/orchestration/test_stops.py`: `abort` at the final gate
-ends `ABORTED` with the worktree and branch untouched, and the validator accepts it only there as
-listed; then the answer behind `workflow.patched`, the recorded histories replaying, and D6, D24 and
-`docs/using.md` updated.
+Step 2 (Q1):
 
-Step 3 (Q4): **7.** Red first: a working run stopped from the page ends `ABORTED` with its agent ended
-and nothing left running; the Update is refused while a stop is pending.
+- [ ] **6.** Red first: a Stop ends the run `STOPPED` with its worktree and branch untouched from each
+      state — an agent working (the agent ended, nothing of it left running), waiting at a stop, a
+      failed stage, the final gate, and a target host with no worker (the Stop completes; the
+      target-host cleanup is skipped within its bound); a Stop during a merge lets the merge finish
+      and the run end `MERGED`. Then `client.stop`, the workflow's cancellation handling, the page's
+      Stop button on every open run and the command line's `--stop`; a run whose Stop the workflow
+      has not yet processed is shown as such.
+- [ ] **7.** `--force-terminate <run>` on the command line only, through Temporal's termination with
+      its reason, printing what may be left: the worktree, the branch, a live terminal until its
+      worker next restarts. Verify, rather than assume, that a terminated run's working role turn
+      ends its agent when its heartbeat finds the run gone.
 
-Step 4 (Q1, Q2): **8.** Designed only after those answers.
+Step 3: **8.** Retire `abort` from the published actions behind `workflow.patched`, keeping its
+handling for the recorded histories; D6, D24 and `docs/using.md` updated.
+
+Step 4 (Q2): **9.** Designed only if Q2 asks for more than step 1's health view.
 
 ## Test-first and verification plan
 
@@ -240,19 +284,22 @@ Step 4 (Q1, Q2): **8.** Designed only after those answers.
 | a run on a queue no worker polls is flagged on the page | permanent guard | listed as running |
 | the refusal names a real make target | permanent guard | names `make orchestration-up` |
 | buttons come from the stop's own actions; an unknown action still renders | reviewer-checked (plain JS, no build step), and a headless-browser render | a second table keyed by stop |
-| (step 2) final-gate `abort` keeps the worktree and branch | permanent guard | not an answer the validator accepts |
-| (step 3) stopping a working run ends it and its agent | permanent guard | no way to do it |
+| (step 2) a Stop from each open state ends `STOPPED` and runs no git | permanent guard | no way to do it but a stop's `abort` |
+| (step 2) a Stop with the target host's worker gone completes | permanent guard | its cleanup would wait forever |
+| (step 2) a Stop during a merge lets it land and the run end `MERGED` | permanent guard | the merge would land after the run said it stopped |
+| (step 2) force terminate closes any run and says what is left | acceptance (live stack) | only by hand in Temporal |
 
 ### Green evidence
 
 The cases above; `bash run-tests.sh` (WSL) and `run-tests.ps1` (Windows host suite), one after the
-other; the recorded histories replaying; the live acceptance for steps 2 and 3; the page rendered
+other; the recorded histories replaying; the live acceptance with a Stop and a force terminate
+for steps 2 and 3; the page rendered
 headless against the live stack, every asset and API call answering 200; `make public-check`.
 
 ## Documentation plan
 
-- **Authoritative stable owner:** `docs/architecture/structure.md` — D29 for what the page shows,
-  D6 and D24 when step 2 lands.
+- **Authoritative stable owner:** `docs/architecture/structure.md` — D29 for what the page shows and
+  writes, a decision beside D16 for Stop and force terminate, and D6 and D24 when `abort` retires.
 - **Router / TOC update:** none; `docs/using.md` gains the page's health panel in *The page* and
   loses nothing else; the mock run's command goes in `tools/README.md`.
 - **Duplication avoided:** the answer set lives in `ACTIONS` only; the docs name answers as D6 does.
@@ -262,7 +309,9 @@ headless against the live stack, every asset and API call answering 200; `make p
 
 Step 1 is complete when tasks 1–5 are green on both hosts, `make check` prints what it did, the page
 shows the stack's health and flags an unpolled run against the live stack, and D29 and
-`docs/using.md` describe it. Later steps each carry their own completion under their gate.
+`docs/using.md` describe it. Step 2 is complete when every Stop case above is green on both hosts,
+the live acceptance stops one working run and force-terminates another, and D29 and the new decision
+say what each does. Step 3 when no stop publishes `abort` and the recorded histories still replay.
 
 ## Review record
 
@@ -329,4 +378,18 @@ shows the stack's health and flags an unpolled run against the live stack, and D
 - **Verification:** the answer-related modules on WSL (133 tests); the full WSL suite (290), the
   Windows host suite (221) and the live acceptance, all passing; the recorded histories replay, so
   no `workflow.patched` was needed — the change is to what a stop publishes, not to any command.
+
+### 2026-09-21 — review of the lifecycle design: PATCH (task 4 PASS)
+
+- **Accepted:** Stop is Temporal's workflow cancellation and force terminate its termination —
+  lifecycle beside Start, not an answer beside Approve; one Stop for every open run replaces the
+  final-gate `abort` and the Stop Update, so Q3 and Q4 collapse into step 2; `abort` retires from the
+  published actions afterwards; the review's test-gap note — the page's own request body — is covered
+  by pressing a button in the mock run (task 5b), not by a JavaScript test harness.
+- **Corrected against the code:** the review's "activities already fit this model" holds for the role
+  turn, which heartbeats, and not for the git activities, which do not; and a graceful Stop's own
+  cleanup runs on the target host with no bound. Invariants 8 and 9 and task 6 carry both.
+- **Proposed, awaiting the operator:** Q1 — D29's write path gains the Stop (cancellation), and
+  termination stays off the page; Q2 — (a); Q3 and Q4 — one Stop, step 2. None binds until confirmed.
+- **Authority:** steps 2–4, tasks 6–9, invariants 1 and 7–10 rewritten; Q1–Q5 unchanged.
 
