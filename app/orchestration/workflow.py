@@ -86,6 +86,7 @@ class FeatureRun:
             s.update(status="REFUSED", refusal=_message(error))
             self._line("refused: %s" % s["refusal"])
             return s
+        self._doing("setup")
         created = await self._until_done("setup", lambda: self._activity(
             "create_worktree", {"state": s}, ONCE, GIT_TIMEOUT))
         if created is None:
@@ -143,6 +144,7 @@ class FeatureRun:
         s = self.state
         label = "[%s e%d r%d]" % (stage, s["episode"], s["round"] + 1)
         self._line("%s %s started" % (label, stages.STAGE_ROLE[stage]))
+        self._doing(stage, stages.STAGE_ROLE[stage])
         result = await self._until_done(label, lambda: workflow.execute_activity(
             "run_role", {"stage": stage, "state": s, "policy": self.policy}, task_queue=self.queue,
             start_to_close_timeout=timedelta(seconds=self.policy["timeout_seconds"] + 600),
@@ -226,6 +228,7 @@ class FeatureRun:
             answer = await self._stop("final")
             s.pop("merge_refusal", None)
             if answer["action"] == "discard":
+                self._doing("discard")
                 if await self._until_done("discard", lambda: self._activity(
                         "discard", {"state": s}, ONCE, GIT_TIMEOUT)) is None:
                     continue
@@ -237,6 +240,7 @@ class FeatureRun:
                 s.update(status="RUNNING", guidance=answer["text"], round=0, gate_reason="",
                          episode=s["episode"] + 1)
                 return "review" if answer["role"] == "architect" else "build"
+            self._doing("merge")
             merged = await self._until_done("merge", lambda: self._activity(
                 "merge", {"state": s}, ONCE, GIT_TIMEOUT))
             if merged is None:
@@ -263,7 +267,7 @@ class FeatureRun:
         feedback = {"failed": s.get("error"), "final": s.get("merge_refusal")}.get(reason, s.get("feedback"))
         self.stop = {"id": "%s:%d" % (s["run_id"], self.stops), "reason": reason, "phase": s.get("phase"),
                      "todo": s.get("todo_path"), "feedback": feedback or "", "hint": HINTS[reason],
-                     "actions": list(ACTIONS[reason])}
+                     "actions": list(ACTIONS[reason]), "since": workflow.now().isoformat()}
         self._line("stopped: %s" % reason)
         if reason in TRACED_STOPS:
             await self._trace("record_stop", {"state": s, "stop": self.stop})
@@ -281,6 +285,10 @@ class FeatureRun:
 
     def _line(self, text):
         self.lines.append(text)
+
+    def _doing(self, stage, role=None):
+        """What the run is doing now, and since when — for whoever shows it; nothing reads it here."""
+        self.state["current"] = {"stage": stage, "role": role, "since": workflow.now().isoformat()}
 
     async def _activity(self, name, args, retry, timeout):
         return await workflow.execute_activity(name, args, task_queue=self.queue,

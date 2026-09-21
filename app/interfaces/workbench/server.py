@@ -2,8 +2,9 @@
 
     python -m app.interfaces.workbench.server
 
-It serves `static/` beside it and a small JSON API over `app.application.client` on `http://127.0.0.1:<workbench_port>`:
-the runs, a run's status and timeline, its change, starting a run and answering its stop. The
+It serves `static/` beside it and a small JSON API over `app.application` on `http://127.0.0.1:<workbench_port>`:
+the stack's health, the runs and what each is doing now, a run's status and timeline, its change,
+starting a run and answering its stop. The
 page opens each run's agent terminals directly on the worker of the run's host (`app.agents.terminal`).
 It holds no state of its own: stopping it changes no run.
 
@@ -23,6 +24,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from app.application import client as runs
+from app.application import stack
 from app.foundation import paths
 from app.foundation import policy as P
 from app.workspace import repos
@@ -66,17 +68,6 @@ def trace_links():
     if langfuse is None:
         return None
     return lambda trace_id: telemetry.trace_url(langfuse, trace_id)
-
-
-def summary(run, status):
-    """What the run list shows of one run."""
-    state = (status or {}).get("state") or {}
-    stop = (status or {}).get("stop")
-    return {"run_id": run["run_id"], "execution": run["execution"], "started": run["started"],
-            "closed": run["closed"], "task": state.get("task"), "repo": state.get("repo"),
-            "target": state.get("target"), "status": state.get("status"), "phase": state.get("phase"),
-            "round": state.get("round"), "episode": state.get("episode"),
-            "stop": stop and {"reason": stop["reason"], "id": stop["id"]}}
 
 
 def make_handler(call, policy, token, links=None):
@@ -144,6 +135,8 @@ def make_handler(call, policy, token, links=None):
                 return self._send(HTTPStatus.OK, data, kind)
             parts = [part for part in path.split("/") if part][1:]
             try:
+                if parts == ["health"]:
+                    return self._send(HTTPStatus.OK, self._health())
                 if parts == ["runs"]:
                     query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
                     return self._send(HTTPStatus.OK, self._run_page((query.get("cursor") or [None])[0]))
@@ -204,6 +197,13 @@ def make_handler(call, policy, token, links=None):
             except Exception as exc:                # noqa: BLE001 - every failure is answered
                 return self._error(exc)
 
+        def _health(self):
+            """The stack's health — and, when Temporal cannot be reached, that reading says so."""
+            try:
+                return call(lambda client: stack.health(client, policy))
+            except runs.Refusal as exc:
+                return stack.unreachable(policy, str(exc))
+
         def _run_page(self, cursor):
             """One page of runs with each one's state, and the cursor for the page of older runs."""
             try:
@@ -217,14 +217,15 @@ def make_handler(call, policy, token, links=None):
 
             async def read(client):
                 listed, older = await runs.runs(client, cursor=token)
+                health = await stack.health(client, policy)
 
                 async def one(run):
                     if run["run_id"] in finished:
                         return finished[run["run_id"]]   # a finished run's state never changes again
                     try:
-                        shown = summary(run, await runs.status(client, run["run_id"]))
+                        shown = runs.view(run, await runs.status(client, run["run_id"]), health)
                     except Exception:               # noqa: BLE001 - a run whose status fails still lists
-                        shown = summary(run, None)
+                        shown = runs.view(run, None, health)
                     if run["execution"] != "RUNNING":
                         finished[run["run_id"]] = shown
                     return shown
@@ -239,9 +240,14 @@ def make_handler(call, policy, token, links=None):
             return {"repo": selected["id"], "base_branch": view["base_branch"], "rows": view["rows"]}
 
         def _run(self, run_id):
-            status = call(lambda client: runs.status(client, run_id))
+            async def read(client):
+                return (await runs.status(client, run_id), await runs.execution(client, run_id),
+                        await stack.health(client, policy))
+            status, execution, health = call(read)
             if status is None:
                 return HTTPStatus.NOT_FOUND, {"error": "no run %r" % run_id}
+            status["view"] = runs.view(execution or {"run_id": run_id, "execution": None, "started": None,
+                                                     "closed": None}, status, health)
             trace_id = status["state"].get("trace_id")
             status["links"] = {"temporal": "%s/namespaces/%s/workflows/%s" % (TEMPORAL_UI, runs.NAMESPACE, run_id),
                                "trace": links(trace_id) if links and trace_id else None}

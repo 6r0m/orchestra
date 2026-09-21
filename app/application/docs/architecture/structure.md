@@ -3,12 +3,13 @@
 ## Purpose
 
 Put the concerns together: carry out on a target host what the workflow commanded, and
-give the operator's two surfaces one way to start, read and answer a run.
+give the operator's two surfaces one way to start, read and answer a run, and to read the stack.
 
 ## Owns
 
 - `activities` — everything a run does on its target host: resolve the repository, make the worktree, record trust, run a role turn, merge, discard, read the change for review, write the trace.
-- `client` — the one client of runs: start, list, status, answer, the change and the worktrees, shared by the page and the command line.
+- `client` — the one client of runs: start, list, status, what a run is doing now, answer, the change and the worktrees, shared by the page and the command line.
+- `stack` — the stack's health: whether Temporal answers, and whether each host's worker polls its queues.
 
 ## Does not own
 
@@ -23,13 +24,15 @@ mechanism of its own: every concern this composes is owned by the package it cam
 |---|---|
 | `activities.py` | what a run does on its target host, one activity at a time |
 | `client.py` | the one client of runs, for the page and the command line alike |
+| `stack.py` | the one reading of the stack's health, printed by `make check` and shown by the page |
 
 ## Relationships
 
 This package's relationships are drawn once, in [the main view](diagrams/main.md).
 
 Through an activity name and its payload: what the workflow commanded. Through Temporal's
-client API: a start, an Update carrying an answer, and the `status` query.
+client API: a start, an Update carrying an answer, the `status` query, a run's description, and
+whether a worker polls each task queue.
 
 Composition belongs here rather than inside a concern. `telemetry.final_diff(client, state,
 worktrees.review_diff)` is written that way on purpose: the trace records a change it is

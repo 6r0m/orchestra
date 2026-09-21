@@ -17,6 +17,7 @@ from temporalio.worker import Worker
 
 from app.application import activities
 from app.application import client as runs
+from app.application import stack
 from app.foundation import policy as P
 from app.foundation import paths
 from app.agents import terminal
@@ -41,13 +42,14 @@ async def main(target):
     # Role-runs are sequential by policy; the pool only keeps a long one from blocking the trace writes.
     workers = [Worker(client, task_queue=queue, activities=host.all(),
                       activity_executor=concurrent.futures.ThreadPoolExecutor(max_workers=8))]
-    if target == "wsl":
+    if target == runs.WORKFLOW_HOST:
         workers.append(Worker(client, task_queue=WF.TASK_QUEUE,
                               workflows=[WF.FeatureRun, WF.WorktreeView, WF.ReviewDiff]))
     os.makedirs(paths.RUNTIME_ROOT, exist_ok=True)
     with open(pid_file(target), "w", encoding="utf-8") as fh:
         fh.write(str(os.getpid()))
-    print("worker for %s polling %s%s" % (target, queue, " and %s" % WF.TASK_QUEUE if target == "wsl" else ""),
+    print("worker for %s polling %s%s" % (target, queue,
+                                          " and %s" % WF.TASK_QUEUE if target == runs.WORKFLOW_HOST else ""),
           flush=True)
     try:
         await asyncio.gather(*(worker.run() for worker in workers))
@@ -59,24 +61,15 @@ async def main(target):
 
 
 async def check():
-    from temporalio.api.enums.v1 import TaskQueueType
     try:
         client = await runs.connect()
     except runs.Refusal as exc:
         print(exc)
         return 1
-    policy = P.load()
-    queues = [(WF.TASK_QUEUE, TaskQueueType.TASK_QUEUE_TYPE_WORKFLOW)] + [
-        (P.queue(policy, target), TaskQueueType.TASK_QUEUE_TYPE_ACTIVITY) for target in P.TARGETS]
-    missing = 0
-    for name, kind in queues:
-        try:
-            await runs.preflight(client, [(name, kind)])
-            print("%-22s polled" % name)
-        except runs.Refusal:
-            print("%-22s NO WORKER" % name)
-            missing += 1
-    return 1 if missing else 0
+    reading = await stack.health(client, P.load())
+    for row in reading["queues"]:
+        print("%-22s %s" % (row["queue"], "polled" if row["polled"] else "NO WORKER"))
+    return 0 if all(row["polled"] for row in reading["queues"]) else 1
 
 
 if __name__ == "__main__":

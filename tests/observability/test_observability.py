@@ -195,6 +195,9 @@ class Preflight(unittest.TestCase):
         code, out = captured(cli.run(["toy task", "--repo", repo], client=Client(), tele=object()))
         self.assertEqual(code, 4, out)
         self.assertIn("no worker is polling", out)
+        self.assertIn("the wsl worker", out)
+        self.assertIn("make up", out)
+        self.assertNotIn("orchestration-up", out)
         self.assertEqual(Client.started, [])
 
 
@@ -514,7 +517,7 @@ class CorrelationId(Scenario):
         self.assertEqual(set(with_root.get("trace_phases") or {}), {"plan", "build"})
         self.assertEqual(calls_with, calls_without)
         ignore = ("trace_id", "trace_root", "trace_phases", "label", "agent_sessions", "run_id", "worktree",
-                  "worktree_path", "todo_path", "plan")
+                  "worktree_path", "todo_path", "plan", "current")
         self.assertEqual({k: v for k, v in with_root.items() if k not in ignore},
                          {k: v for k, v in without.items() if k not in ignore})
 

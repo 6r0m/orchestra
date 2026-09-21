@@ -7,7 +7,7 @@ do so deterministically, so Temporal can replay the decision and reach the same 
 
 ## Owns
 
-- `workflow` — the run: `plan → assess → build → verify`, the stops and their named answers, the final gate, and the `status` query.
+- `workflow` — the run: `plan → assess → build → verify`, the stops and their named answers, the final gate, and the `status` query — which also says what the run is doing now and since when.
 - `routing` — which stop a verdict asks for and where it sends the run: two pure functions with no dependencies at all.
 
 ## Does not own

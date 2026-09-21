@@ -19,6 +19,10 @@ listening at all".
 Open the URL `make check` prints. Runs are grouped by whether they need you, are running, or are
 finished; older finished runs are a page away, so nothing Temporal still retains is out of reach.
 
+The line at the top says whether Temporal answers and whether each host's worker is up. Each run
+says what it is doing now and for how long — the stage and the agent at work, the question it waits
+on, the failure it stopped on — and, when a host's worker is down, that it is blocked by it.
+
 A run shows its stop with that stop's answers as buttons, both roles' terminals, the rounds with
 each verdict and its feedback, the change, and links to its Temporal and (if configured) Langfuse
 pages. Each terminal is the vendor's own CLI: press Esc to interrupt a working agent, type to steer

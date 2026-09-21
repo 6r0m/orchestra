@@ -22,6 +22,7 @@ PKG = os.path.abspath(os.path.join(HERE, os.pardir))
 sys.path[:0] = [PKG, HERE]
 
 from app.application import client as runs  # noqa: E402
+from app.orchestration import workflow as WF  # noqa: E402
 import temporal_env as E  # noqa: E402
 from app.agents import terminal  # noqa: E402
 from app.interfaces.workbench import server as workbench  # noqa: E402
@@ -89,6 +90,38 @@ class Access(unittest.TestCase):
         self.assertIn("frame-ancestors 'none'", response.getheader("Content-Security-Policy"))
         for path in ("/app.js", "/style.css", "/vendor/xterm.js", "/vendor/xterm.css"):
             self.assertEqual(request("GET", path, token=False)[0], 200, path)
+
+
+class Health(unittest.TestCase):
+    """What the stack can do now — Temporal and each host's worker — as its one owner reads it."""
+
+    def workers_down(self, *hosts):
+        polled_before = getattr(runs, "polled", None)
+
+        async def polled(client, name, kind):
+            return runs.host_of(name) not in hosts
+        runs.polled = polled
+        self.addCleanup(setattr, runs, "polled", polled_before)
+
+    def test_it_reports_temporal_and_each_hosts_worker(self):
+        self.workers_down("windows")
+        status, health = request("GET", "/api/health")
+        self.assertEqual(status, 200, health)
+        self.assertEqual((health["temporal"], health["hosts"]), ("up", {"wsl": "up", "windows": "down"}))
+        self.assertIn({"queue": WF.TASK_QUEUE, "host": "wsl", "polled": True}, health["queues"])
+
+    def test_temporal_out_of_reach_is_reported_not_failed(self):
+        from app.application import stack
+        health_before = stack.health
+
+        async def unreachable(client, policy):
+            raise runs.Refusal("Temporal is not reachable at localhost:7233")
+        stack.health = unreachable
+        self.addCleanup(setattr, stack, "health", health_before)
+        status, health = request("GET", "/api/health")
+        self.assertEqual((status, health["temporal"]), (200, "down"))
+        self.assertIn("not reachable", health["error"])
+        self.assertEqual(health["hosts"], {"wsl": "unknown", "windows": "unknown"})
 
 
 class Listing(unittest.TestCase):
@@ -166,6 +199,7 @@ class Runs(Scenario):
             return None
         runs.preflight = no_preflight
         self.addCleanup(setattr, runs, "preflight", saved)
+        self.workers_down()
         # The page reads a change by awaiting a workflow's result, and on the time-skipping server
         # that lets time jump to the next timer — for a run parked at a gate, the test server's
         # default ten-year run timeout, which closes the run under the test. A person answers a gate
@@ -177,6 +211,60 @@ class Runs(Scenario):
         # live must not decide which worker the page's run waits for.
         self.repo = tempfile.mkdtemp(prefix="orch-page-")
         self.addCleanup(shutil.rmtree, self.repo, True)
+
+    def workers_down(self, *hosts):
+        """Which hosts' workers read as down; the test server itself describes no pollers."""
+        polled_before = getattr(runs, "polled", None)
+
+        async def polled(client, name, kind):
+            return runs.host_of(name) not in hosts
+        runs.polled = polled
+        self.addCleanup(setattr, runs, "polled", polled_before)
+
+    def start(self, task):
+        status, started = request("POST", "/api/runs", {"task": task, "repo": self.repo})
+        self.assertEqual(status, 200, started)
+        run_id = started["run_id"]
+        self.addCleanup(lambda: E.Run.cleanup(type("R", (), {"run_id": run_id})()))
+        return run_id
+
+    def test_a_waiting_run_says_what_it_waits_at_since_when_and_what_it_takes(self):
+        a1, _ = codex_review_first("PASS", "Direction: A.")
+        self.host, self.agent = E.host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)], git=FakeWorktrees())
+        run_id = self.start("a run that waits")
+        view = self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "approval")["view"]
+        self.assertEqual((view["state"], view["goal"], view["host"]), ("waiting", "a run that waits", "wsl"))
+        self.assertEqual(view["stop"]["reason"], "approval")
+        self.assertEqual(view["actions"], ["approve", "revise", "abort"])
+        self.assertTrue(datetime.datetime.fromisoformat(view["since"]), "since when it waits")
+        self.assertEqual(view["blocked_by"], [])
+        self.assertTrue(view["worktree"], "where its work is")
+
+    def test_a_working_run_says_its_stage_its_role_and_since_when(self):
+        release = threading.Event()
+        self.addCleanup(release.set)
+        self.host, self.agent = E.host([], git=FakeWorktrees())
+
+        def working(worktree, argv, rdir, name, prompt, timeout, env, *, brain):
+            release.wait(60)
+            return 1, ""
+        self.host.runner = working
+        run_id = self.start("a run at work")
+        # Ended before its agent is released, so its stage can never run on a later test's fakes.
+        self.addCleanup(lambda: E.run(E.client().get_workflow_handle(run_id).terminate("the test is over")))
+        view = self.wait_for(run_id, lambda body: body["view"]["stage"] == "plan")["view"]
+        self.assertEqual((view["state"], view["stage"], view["role"]), ("running", "plan", "engineer"))
+        self.assertTrue(datetime.datetime.fromisoformat(view["since"]), "since when it works")
+        self.assertEqual(view["actions"], [], "nothing to answer while it works")
+
+    def test_a_run_whose_hosts_worker_is_down_says_which(self):
+        a1, _ = codex_review_first("PASS", "Direction: A.")
+        self.host, self.agent = E.host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)], git=FakeWorktrees())
+        run_id = self.start("a run on a host with no worker")
+        self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "approval")
+        self.workers_down("wsl")
+        view = request("GET", "/api/runs/%s" % run_id)[1]["view"]
+        self.assertEqual(view["blocked_by"], ["wsl"])
 
     def wait_for(self, run_id, check, seconds=120):
         deadline = time.monotonic() + seconds
@@ -212,8 +300,8 @@ class Runs(Scenario):
         page = request("GET", "/api/runs")[1]
         self.assertIsNone(page["cursor"], "no older page when the listing ended")
         listed = [run for run in page["runs"] if run["run_id"] == run_id]
-        self.assertEqual(listed[0]["stop"]["reason"], "approval")
-        self.assertEqual(listed[0]["task"], "a workbench run")
+        self.assertEqual((listed[0]["state"], listed[0]["stop"]["reason"]), ("waiting", "approval"))
+        self.assertEqual(listed[0]["goal"], "a workbench run")
 
         approval = body["stop"]["id"]
         self.assertEqual(request("POST", "/api/runs/%s/answer" % run_id, {"stop": approval, "action": "merge"})[0], 422,
@@ -253,7 +341,8 @@ class Runs(Scenario):
         self.assertIn("needs the feedback", refused["error"], "the role-named action reached the workflow's check")
         status, _ = request("POST", "/api/runs/%s/answer" % run_id, {"stop": final, "action": "merge", "text": "merge"})
         self.assertEqual(status, 200)
-        self.wait_for(run_id, lambda body: body["state"]["status"] == "MERGED")
+        closed = self.wait_for(run_id, lambda body: body["state"]["status"] == "MERGED")
+        self.assertEqual((closed["view"]["state"], closed["view"]["status"]), ("closed", "MERGED"))
         self.assertEqual(request("GET", "/api/runs/no-such-run")[0], 404)
 
     def test_an_answer_to_a_run_that_has_closed_is_refused_as_not_waiting(self):

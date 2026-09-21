@@ -1,8 +1,8 @@
 """The one client of runs, shared by the workbench and the command line.
 
-Start a run, list runs, read a run's status, answer the stop it waits at, and read its
-change and its repository's worktrees — each through Temporal, so every write goes
-through the workflow's own start rules, Updates and validators. Nothing here prints.
+Start a run, list runs, read a run's status and what it is doing now, answer the stop it waits
+at, and read its change and its repository's worktrees — each through Temporal, so every write
+goes through the workflow's own start rules, Updates and validators. Nothing here prints.
 """
 import datetime
 import os
@@ -22,7 +22,10 @@ from app.workspace import worktrees
 
 ADDRESS = os.environ.get("TEMPORAL_ADDRESS", "localhost:7233")
 NAMESPACE = os.environ.get("TEMPORAL_NAMESPACE", WF.NAMESPACE)
-START_WORKERS = "start them with `make orchestration-up`"
+START_WORKERS = "start it with `make up`"
+# The workflows run on the WSL host's worker, which polls their queue beside its own; every other
+# host's worker polls only its own target queue.
+WORKFLOW_HOST = "wsl"
 # A readable run id's random tail can meet a run still retained; a start draws again this often.
 START_ATTEMPTS = 3
 
@@ -63,6 +66,18 @@ def queues(target_queue):
             (target_queue, TaskQueueType.TASK_QUEUE_TYPE_ACTIVITY)]
 
 
+def host_of(queue):
+    """The host whose worker polls `queue`: a target queue is named `target:<host>:<name>`."""
+    return WORKFLOW_HOST if queue == WF.TASK_QUEUE else queue.split(":")[1]
+
+
+async def polled(client, name, kind):
+    """Whether any worker polls the task queue `name` now."""
+    reply = await client.workflow_service.describe_task_queue(DescribeTaskQueueRequest(
+        namespace=client.namespace, task_queue=TaskQueue(name=name), task_queue_type=kind))
+    return bool(reply.pollers)
+
+
 async def preflight(client, needed):
     """Refuse before any work unless a worker polls each queue the run needs.
 
@@ -70,10 +85,9 @@ async def preflight(client, needed):
     the Windows worker.
     """
     for name, kind in needed:
-        reply = await client.workflow_service.describe_task_queue(DescribeTaskQueueRequest(
-            namespace=client.namespace, task_queue=TaskQueue(name=name), task_queue_type=kind))
-        if not reply.pollers:
-            raise Refusal("no worker is polling %s — %s" % (name, START_WORKERS))
+        if not await polled(client, name, kind):
+            raise Refusal("no worker is polling %s — the %s worker is not running; %s"
+                          % (name, host_of(name), START_WORKERS))
 
 
 async def status(client, run_id):
@@ -84,6 +98,49 @@ async def status(client, run_id):
         if error.status == RPCStatusCode.NOT_FOUND:
             return None
         raise
+
+
+async def execution(client, run_id):
+    """One run's execution as the listing reads it, or None when Temporal holds no such run."""
+    try:
+        return _listed(await client.get_workflow_handle(run_id).describe())
+    except RPCError as error:
+        if error.status == RPCStatusCode.NOT_FOUND:
+            return None
+        raise
+
+
+def view(listed, status, health):
+    """What a run is now — the one reading every surface shows, derived from facts that exist.
+
+    `listed` is the run's execution as the listing or `execution` reads it, `status` its `status`
+    query (None when it could not be read), `health` the stack's (`stack.health`). A run is closed
+    once Temporal no longer runs it, failed or waiting while it stops for the operator, and running
+    otherwise; it is blocked by each host it needs whose worker is down.
+    """
+    state = (status or {}).get("state") or {}
+    stop = (status or {}).get("stop")
+    closed = listed["execution"] not in (None, "RUNNING")
+    if closed:
+        kind = "closed"
+    elif stop:
+        kind = "failed" if stop["reason"] == "failed" else "waiting"
+    else:
+        kind = "running"
+    working = {} if closed or stop else (state.get("current") or {})
+    queue = (status or {}).get("queue")
+    needed = {WORKFLOW_HOST, host_of(queue)} if queue else {WORKFLOW_HOST}
+    return {"run_id": listed["run_id"], "execution": listed["execution"], "started": listed["started"],
+            "closed": listed["closed"], "goal": state.get("task"), "repo": state.get("repo"),
+            "host": state.get("target"), "worktree": state.get("worktree_path"), "state": kind,
+            "status": state.get("status"), "phase": state.get("phase"), "round": state.get("round"),
+            "episode": state.get("episode"), "stage": working.get("stage"), "role": working.get("role"),
+            "since": stop.get("since") if stop else working.get("since"),
+            "stop": stop and {key: stop.get(key) for key in ("id", "reason", "hint", "feedback", "todo")},
+            "failure": stop["feedback"] if kind == "failed" else None,
+            "blocked_by": [] if closed else sorted(host for host in needed
+                                                   if health["hosts"].get(host) == "down"),
+            "actions": list(stop["actions"]) if stop and not closed else []}
 
 
 async def start(client, task, repo=None, auto_proceed=False, policy_path=None, check=True):

@@ -11,6 +11,9 @@ h3 { font-size: 13px; margin: 0 0 6px; }
 @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; margin-bottom: 12px; }
 .muted { color: var(--muted); }
+.health span { margin-right: 12px; }
+.up { color: var(--ok); }
+.down, .blocked { color: var(--bad); }
 label { display: block; margin: 6px 0; }
 label.inline { display: flex; gap: 6px; align-items: center; }
 textarea, select, input[type="text"] { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line);

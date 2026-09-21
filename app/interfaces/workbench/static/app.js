@@ -50,6 +50,44 @@ function el(tag, text, className) {
   return node;
 }
 
+// ---- what the stack and each run are doing now ----------------------------------------------
+
+const HOSTS = { wsl: "WSL worker", windows: "Windows worker" };
+
+// How long since an ISO time, as minutes and seconds, or hours and minutes past an hour.
+function elapsed(since) {
+  const seconds = Math.max(0, Math.floor((Date.now() - Date.parse(since)) / 1000));
+  if (Number.isNaN(seconds)) return "";
+  const [h, m, s] = [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, seconds % 60];
+  return h ? h + "h " + String(m).padStart(2, "0") + "m" : m + ":" + String(s).padStart(2, "0");
+}
+
+// One line saying what a run is doing now and, when it is not moving, why — from its view.
+function now(view) {
+  const since = view.since ? " · for " + elapsed(view.since) : "";
+  let text = view.status || "";
+  if (view.state === "running") text = [view.stage, view.role].filter(Boolean).join(" · ") + since;
+  if (view.state === "waiting") text = "waiting for you: " + view.stop.reason + since;
+  if (view.state === "failed") text = "failed: " + (view.failure || "").split("\n")[0] + since;
+  const blocked = view.blocked_by.map((host) => "the " + (HOSTS[host] || host) + " is down");
+  return { text: text, blocked: blocked.length ? "blocked: " + blocked.join(", ") : "" };
+}
+
+async function refreshHealth() {
+  let health;
+  try {
+    health = await api("/api/health");
+  } catch (error) {
+    return;
+  }
+  const line = $("health");
+  line.replaceChildren(el("span", "Temporal " + health.temporal, health.temporal));
+  for (const [host, state] of Object.entries(health.hosts)) {
+    line.appendChild(el("span", (HOSTS[host] || host) + " " + state, state));
+  }
+  line.title = health.error || "";
+}
+
 // ---- the run list -------------------------------------------------------------------------
 
 async function refreshRuns() {
@@ -71,19 +109,18 @@ async function refreshRuns() {
   const list = page.runs.concat(older.filter((run) => !seen.has(run.run_id)));
   const groups = { "runs-waiting": [], "runs-running": [], "runs-finished": [] };
   for (const run of list) {
-    // A run Temporal no longer runs is finished, whatever stop it last reported: it can take no answer.
-    const group = run.execution !== "RUNNING" ? "runs-finished" : run.stop ? "runs-waiting" : "runs-running";
-    groups[group].push(run);
+    const group = { waiting: "runs-waiting", failed: "runs-waiting", running: "runs-running" }[run.state];
+    groups[group || "runs-finished"].push(run);
   }
   for (const [id, runs] of Object.entries(groups)) {
     const ul = $(id);
     ul.replaceChildren();
     for (const run of runs) {
       const li = el("li");
-      li.appendChild(el("span", run.task || run.run_id, "task"));
-      const detail = [run.repo, run.target, run.stop ? "waiting: " + run.stop.reason : run.status, run.phase]
-        .filter(Boolean).join(" · ");
-      li.appendChild(el("span", detail, "muted"));
+      li.appendChild(el("span", run.goal || run.run_id, "task"));
+      const shown = now(run);
+      li.appendChild(el("span", [run.repo, run.host, shown.text].filter(Boolean).join(" · "), "muted"));
+      if (shown.blocked) li.appendChild(el("span", shown.blocked, "blocked"));
       if (run.run_id === selected) li.classList.add("selected");
       li.onclick = () => select(run.run_id);
       ul.appendChild(li);
@@ -193,11 +230,15 @@ async function refreshRun() {
   }
   if (runId !== selected) return;
   const state = status.state;
-  runActive = !["MERGED", "DISCARDED", "ABORTED", "REFUSED"].includes(state.status);
-  $("run-task").textContent = state.task || runId;
-  $("run-meta").textContent = [runId, state.repo + " on " + state.target, state.status,
-    state.phase && "phase " + state.phase + ", round " + (state.round || 0), state.worktree_path]
+  const view = status.view;
+  runActive = view.state !== "closed";
+  $("run-task").textContent = view.goal || runId;
+  $("run-meta").textContent = [runId, view.repo + " on " + view.host,
+    view.phase && "phase " + view.phase + ", round " + (view.round || 0), view.worktree]
     .filter(Boolean).join(" · ");
+  const shown = now(view);
+  $("run-now").replaceChildren(el("span", shown.text), el("span", shown.blocked ? " · " + shown.blocked : "",
+    "blocked"));
   $("link-temporal").href = status.links.temporal;
   $("link-trace").hidden = !status.links.trace;
   if (status.links.trace) $("link-trace").href = status.links.trace;
@@ -375,6 +416,8 @@ function closeTerminal(role) {
 }
 
 loadRepos().catch((error) => { $("start-result").textContent = error.message; });
+refreshHealth();
 refreshRuns();
+setInterval(refreshHealth, 5000);
 setInterval(refreshRuns, 5000);
 setInterval(refreshRun, 2500);

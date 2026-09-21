@@ -126,6 +126,20 @@ from [structure.md](../docs/architecture/structure.md).
   - Effect: task 3's demonstration grows to this journey by the end of step 3.
   - Reason: not stated
   - Date/source: 2026-09-21, operator
+- **D13** The operator starts WSL; Orchestra neither starts WSL nor starts at Windows logon. The
+  lifetime boundary is: the operator starts WSL → WSL's systemd starts the Workbench → the Workbench
+  controls Orchestra. One ordinary enabled systemd service inside WSL runs the Workbench: it starts
+  whenever this WSL distro starts, restarts on failure, and dies when WSL shuts down. No Windows Task
+  Scheduler, no Windows logon hooks, no arbitrary startup delays, no other supervisor, no Workbench
+  logic that starts WSL. Startup is dependency-based and does not wait for an external network; a
+  Windows-interop readiness problem, if one is measured, is gated on that dependency with a bounded
+  check. `make up` and `make down` control Orchestra's components only; `make workbench-start`,
+  `workbench-stop` and `workbench-status` may wrap `systemctl` for maintenance, outside the normal
+  operator flow.
+  - Effect: settles D6's start mechanism; closes Q6; A5 not adopted; constrains task 9.
+  - Reason: *"you own Windows/WSL lifetime; systemd owns Workbench lifetime; Workbench owns Orchestra
+    operation"*
+  - Date/source: 2026-09-21, operator
 
 ### Operator gates
 
@@ -136,8 +150,7 @@ from [structure.md](../docs/architecture/structure.md).
 - **Q4 [CLOSED by D5, D7]:** Should the page stop a run while a stage is working, not only at a stop?
 - **Q5 [CLOSED by D4]:** Should the page remove a closed run's leftover worktree? — it is a normal
   operation: task 12.
-- **Q6 [OPEN - NON-BLOCKING]:** Which login mechanism makes the Workbench available? - default while
-  open: A5.
+- **Q6 [CLOSED by D13]:** Which login mechanism makes the Workbench available?
 
 ### Working assumptions
 
@@ -148,16 +161,25 @@ from [structure.md](../docs/architecture/structure.md).
 - **A3 [RESOLVED by D7]:** Stopping a working run is a later step; Esc in a role's terminal remains how a
   working agent is interrupted.
 - **A4 [RESOLVED by D4]:** Leftover worktrees stay visible in *Worktrees* and are removed by hand.
-- **A5 [ACTIVE]:** The Workbench starts at Windows logon from a hidden Task Scheduler entry that runs it
-  in WSL — where the stack's controls already run — installed and removed by one Make target. A WSL
-  systemd user unit was not chosen: nothing starts WSL at logon to run it.
+- **A5 [RESOLVED by D13 — not adopted]:** The Workbench starts at Windows logon from a hidden Task
+  Scheduler entry that runs it in WSL — where the stack's controls already run — installed and removed
+  by one Make target. A WSL systemd user unit was not chosen: nothing starts WSL at logon to run it.
 - **A6 [ACTIVE]:** The stack owner sits in `app/application` beside `client.py`; the process mechanics
   stay in `workers.sh` and `workers.ps1`, split per component; the Make targets call the command line,
   which calls the owner.
+- **A7 [ACTIVE]:** D13's service is a *user* unit of the WSL user's systemd manager
+  (`WantedBy=default.target`), not a system unit with `User=`. Agents are contained through
+  `systemd-run --user` (`launch.py`), which needs that user's manager and bus, and a system unit's
+  processes are outside the user's session. The user manager starts when the distro boots because
+  lingering is enabled for this user (measured: `loginctl show-user` reports `Linger=yes`, PID 1 is
+  systemd, `systemctl --user is-system-running` answers `running`). The repository ships the unit as a
+  template; installing renders it with this checkout's path and environment (`envpath.py`), neither of
+  which is committed.
 
 ## Non-goals
 
-- A supervisor or orchestration framework for the Workbench's own process (D6).
+- A supervisor or orchestration framework for the Workbench's own process (D6); a Windows logon task,
+  logon hook or startup delay (D13).
 - A stuck detector, a server-driven form protocol, a generic cancellation or shielding subsystem
   (D8, D10, D11).
 - A JavaScript test harness: the page's own requests are proven by the demonstration pressing its
@@ -240,15 +262,16 @@ Workbench's server and the command line are thin callers of both; the Make targe
 line. Temporal's own lifecycle carries a run's end: Stop is `cancel()`, force terminate is
 `terminate()`. The workflow answers a cancellation by ending `STOPPED` after a bounded, best-effort
 cleanup — or, when a git side effect is in flight, by awaiting its outcome and ending as it decides.
-The Workbench leaves the stack it controls, and starts at logon.
+The Workbench leaves the stack it controls and runs as a systemd user service in WSL, so it is there
+whenever WSL is (D13).
 
 Steps, each reviewed and merged before the next, each extending the demonstration (task 3):
 
 1. **See** (tasks 1–5): the stack's health and each run's view in the Workbench, and the demonstration
    run. Reads only; no workflow command changes.
 2. **Stop and force terminate** (tasks 6–7).
-3. **Stack control** (tasks 8–10): per-component control through the stack owner, the Workbench outside
-   the stack, and its logon start.
+3. **Stack control** (tasks 8–10): per-component control through the stack owner, and the Workbench
+   outside the stack as its own systemd user service.
 4. **`abort` retires** (task 11).
 5. **Leftovers** (task 12): a stopped run's worktree and branch removed from the Workbench.
 
@@ -260,8 +283,8 @@ Steps, each reviewed and merged before the next, each extending the demonstratio
 - **Removed.** `abort`, once Stop is proven; the Workbench's place inside the stack it controls; runs
   closed by hand in Temporal; the operator's need for a terminal.
 - **Added.** Two calls to Temporal's lifecycle and the workflow's handling of one; one stack owner over
-  the existing scripts; one run view assembled from facts that exist; a logon entry; a demonstration
-  command.
+  the existing scripts; one run view assembled from facts that exist; one systemd user unit; a
+  demonstration command.
 - **Given up.** The Workbench restarting itself — it is the bootstrap boundary — and a Stop that cuts a
   git side effect off mid-write.
 
@@ -273,8 +296,9 @@ Steps, each reviewed and merged before the next, each extending the demonstratio
   targets, the command line and the Workbench one owner.
 - **A supervisor for the whole stack, the Workbench included.** A framework to solve the bootstrap,
   which D6 settles by keeping the Workbench outside.
-- **A WSL systemd user unit for the logon start.** WSL is not running at logon until something starts
-  it; a Windows logon task starts it (A5).
+- **A Windows logon task.** Not needed: the operator starts WSL, and systemd inside it owns the
+  Workbench's lifetime (D13).
+- **A system unit with `User=`.** Loses the user's systemd manager that agent containment needs (A7).
 
 ## Required invariants
 
@@ -298,11 +322,11 @@ Steps, each reviewed and merged before the next, each extending the demonstratio
 
 Step 1 — see:
 
-- [ ] **1.** Red first: a Workbench API test for the stack's health — Temporal reachable, each queue
+- [x] **1.** Red first: a Workbench API test for the stack's health — Temporal reachable, each queue
       polled, each managed component up — which is 404 today. Then the stack owner's `status`,
       carrying the reading `worker.check` does, so `make check` prints what it prints today, and the
       Workbench's health panel.
-- [ ] **2.** Red first: a Workbench API test that a run parked at a stop, one working, and one whose
+- [x] **2.** Red first: a Workbench API test that a run parked at a stop, one working, and one whose
       host's worker is down each report what D10 lists. Then the run's view in `client.py` — goal,
       repository, worktree, host, state (running, waiting, failed, stopping, closed), stage, role,
       since, the stop, the failure, the component it is blocked by, the actions available now —
@@ -321,7 +345,7 @@ Step 1 — see:
       answer is typed; `client.py` turns a role-named ID into the answer the workflow has always
       taken. The workflow keeps the guards D6 and D24 name — a note for guide and revise, a
       confirmed discard — and describes no form.
-- [ ] **5.** The refusal when a worker is missing says which, and the Workbench offers to start it; on
+- [x] **5.** The refusal when a worker is missing says which, and the Workbench offers to start it; on
       the command line it names `make up`.
 
 Step 2 — Stop and force terminate:
@@ -343,9 +367,11 @@ Step 3 — stack control:
       worker — each with start, stop and status; the stack owner orders them (Temporal before the
       workers on start, after them on stop) and restarts one. `make up`, `make down` and `make check`
       call the command line, which calls the owner.
-- [ ] **9.** The Workbench leaves the stack: it starts and stops on its own (`make workbench`), `make
-      down` no longer touches it, and a Windows logon entry (A5) starts it, installed and removed by
-      one Make target.
+- [ ] **9.** The Workbench leaves the stack as `orchestra-workbench.service`, a systemd user unit
+      (D13, A7): `After=network.target`, `Restart=on-failure`, `WantedBy=default.target`, started with
+      this checkout's own environment; one Make target renders, installs and enables it, and
+      `workbench-start|stop|status` wrap `systemctl --user` for maintenance. `make up` and `make down`
+      no longer touch the Workbench, and its pid file goes — systemd owns its process.
 - [ ] **10.** The Workbench controls the stack: start, stop and restart it all or one component; what is
       down, and the start that brings it back, shown in the health panel and on every run it blocks.
 
@@ -368,6 +394,7 @@ the target host's own git as a discard removes them.
 | a Stop during a merge lets it land and the run end merged | permanent guard | a merge could land after "stopped" |
 | force terminate closes any run and says what is left | acceptance (demonstration) | only by hand in Temporal |
 | stopping the stack leaves the Workbench serving | acceptance (demonstration) | `down` stops it first |
+| the Workbench comes back when WSL restarts, and after it is killed | acceptance (live, once) | started by `make up` only |
 | a component stopped and started again from the Workbench | acceptance (demonstration) | only `make` |
 | the page's own request body when a button is pressed | acceptance (demonstration) | proven by inspection only |
 
@@ -488,3 +515,35 @@ journey passes from the Workbench on the live stack with fake agents and no term
   stable document changes as each step lands, because it states what is true now.
 - **Plan:** rewritten around the end state. Steps: see; Stop and force terminate; stack control with
   the Workbench outside the stack; `abort` retires; leftovers. Task 4 stands (D11).
+
+### 2026-09-21 — the Workbench's lifetime: systemd inside WSL
+
+- **Trigger:** the operator, *"drop Windows Task Scheduler entirely"* — the operator starts WSL, so
+  the lifetime boundary is the WSL distro.
+- **Checked against the machine:** systemd is PID 1 in WSL with lingering enabled for the user, so a
+  user service starts with the distro; the review's sample unit was a system unit with `User=` and an
+  `ExecStart` in the checkout's `.venv`. Agent containment needs the user's systemd manager
+  (`systemd-run --user`), which a system unit's processes are outside of, and this checkout's
+  environment lives outside it (`envpath.py`) — so the unit is a user unit, rendered at install
+  (A7).
+- **Authority:** D13 added; Q6 closed; A5 not adopted; A7 added; task 9 rewritten.
+
+### 2026-09-21 — step 1, tasks 1, 2 and 5 implemented
+
+- **Change:** `app/application/stack.py` owns the stack's health — Temporal answering, each queue
+  and whether a worker polls it, each host's worker up or down — and `make check` prints it through
+  that owner; the Workbench serves it at `/api/health` and shows it in its header, and says
+  "down" rather than failing when Temporal is out of reach. `client.view` is the one reading of what
+  a run is now: closed, failed, waiting or running; the stage and role at work or the stop it waits
+  at, since when; its failure; the hosts whose worker it needs and is missing; the actions it takes.
+  The run list and each run carry it, and the page shows it on every run. The workflow records what
+  it is doing and since when (`state["current"]`, and each stop's `since`), from `workflow.now()`,
+  with no new command. The refusal names the host whose worker is missing and `make up`; which host
+  runs the workflows is one constant the worker and the client share.
+- **Scope kept:** a host's worker reads as up while it polls its queues. The status of each managed
+  process — Temporal's containers, each worker's process — joins the stack owner with its start and
+  stop in step 3, where it is needed; task 5's "the Workbench offers to start it" is task 10.
+- **Red first:** the health route answered 404, no run carried a view, the list had no state, and the
+  refusal named `make orchestration-up`.
+- **Found while verifying:** a test comparing two runs' final states skipped the fields that differ
+  between runs; `current` carries a time, so it joined them.

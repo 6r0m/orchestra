@@ -301,8 +301,11 @@ still lands on a checkout.
   run waiting for an answer is never off the list and everything Temporal still retains is reachable; a run shows its stop with that stop's answers as
   buttons, both roles' live terminals from their host's worker, its plan and build rounds with each
   verdict and its feedback, its change as its target host's git reads it, and links to its Temporal
-  and Langfuse pages. It also shows any repository's worktrees and which of them are merged. It
-  starts runs. It holds no state: every read is Temporal's or a worker's, and every write is a
+  and Langfuse pages. Each run also says what it is doing now — the stage and role at work, or
+  the stop it waits at or the failure it stopped on — since when, and which host's worker it is
+  blocked by when one is down; above them the page shows whether Temporal answers and whether each
+  host's worker polls, the reading `make check` prints. It also shows any repository's worktrees
+  and which of them are merged. It starts runs. It holds no state: every read is Temporal's or a worker's, and every write is a
   start or an answer Update through `client.py`, which the command line uses too, so the page can
   do nothing the workflow's own rules and validators do not allow. A change is read in bounded
   parts, because Temporal refuses a payload past its own limit and a review that cannot be read is
