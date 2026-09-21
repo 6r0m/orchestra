@@ -17,6 +17,7 @@ from temporalio.exceptions import ActivityError, TimeoutError
 
 with workflow.unsafe.imports_passed_through():
     from app.foundation import policy as P
+    from app.foundation import stages
     from app.orchestration import routing
 
 NAMESPACE = "orchestration"
@@ -138,7 +139,7 @@ class FeatureRun:
         """Run one stage to a result, stopping for the operator on each failure. False when aborted."""
         s = self.state
         label = "[%s e%d r%d]" % (stage, s["episode"], s["round"] + 1)
-        self._line("%s %s started" % (label, P.STAGE_ROLE[stage]))
+        self._line("%s %s started" % (label, stages.STAGE_ROLE[stage]))
         result = await self._until_done(label, lambda: workflow.execute_activity(
             "run_role", {"stage": stage, "state": s, "policy": self.policy}, task_queue=self.queue,
             start_to_close_timeout=timedelta(seconds=self.policy["timeout_seconds"] + 600),

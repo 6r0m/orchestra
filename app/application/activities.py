@@ -18,6 +18,7 @@ from temporalio.exceptions import ApplicationError
 from app.agents import nodes as N
 from app.foundation import paths
 from app.foundation import policy as P
+from app.foundation import stages
 from app.workspace import repos
 from app.orchestration import routing
 from app.observability import telemetry as T
@@ -167,10 +168,13 @@ class Activities:
     def run_role(self, args):
         """One stage: its role's agent launched once, its explicit result returned."""
         state, stage, policy = args["state"], args["stage"], args["policy"]
-        role_name = P.STAGE_ROLE[stage]
+        role_name = stages.STAGE_ROLE[stage]
         role = dict(policy["roles"][role_name])
-        # The persona file as this host sees it.
-        role["prompt_path"] = os.path.join(paths.REPO, role["prompt"])
+        # The persona file as this host sees it. `policy.prompt_path` is the one
+        # resolver; this host's own ORCH_POLICY names the directory a relative prompt
+        # resolves against, because the client's absolute path is the client's.
+        role["prompt_path"] = P.prompt_path(policy, role_name,
+                                            os.environ.get("ORCH_POLICY"))
         is_reviewer = role["workspace_access"] == "read"
         resume_id = (state.get("agent_sessions") or {}).get(role_name)
         rdir = run_dir(state["run_id"])

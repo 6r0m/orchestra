@@ -30,7 +30,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 sys.path.insert(0, REPO)
 
-SOURCE = os.path.join(REPO, "app")
+PACKAGE = "app"
+SOURCE = os.path.join(REPO, PACKAGE)
 # What each package may import. A package may always import itself; absent from every
 # value means nothing may import it. Derived from the imports that exist, not from a
 # diagram: no indirection exists here only to satisfy this table.
@@ -61,19 +62,39 @@ def _package_of(path, source):
     return head if head != os.path.basename(relative) else None
 
 
-def _imported_packages(tree):
-    """Every `app.<package>` this module imports, with the line it is imported on."""
+def _own_package(path, source):
+    """The importing module's own package, as Python sees it: ('app', 'agents', ...)."""
+    relative = os.path.relpath(os.path.dirname(path), source)
+    inside = [] if relative == os.curdir else relative.split(os.sep)
+    return [PACKAGE] + inside
+
+
+def _imported_packages(tree, own_package):
+    """Every `app.<package>` this module imports, with the line it is imported on.
+
+    A relative import is resolved the way Python resolves it, against the importing
+    module's own package — one that climbs out of its package and into a sibling is
+    exactly the import worth catching, and reads like an innocent local one.
+    """
     found = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             names = [alias.name for alias in node.names]
-        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
-            names = [node.module]
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                # `from . import x` stays in this package; each extra dot climbs one out.
+                base = own_package[:len(own_package) - (node.level - 1)]
+                tail = node.module.split(".") if node.module else []
+                names = [".".join(base + tail)]
+            elif node.module:
+                names = [node.module]
+            else:
+                continue
         else:
             continue
         for name in names:
             parts = name.split(".")
-            if parts[0] == "app" and len(parts) > 1:
+            if parts[0] == PACKAGE and len(parts) > 1:
                 found.append((parts[1], node.lineno))
     return found
 
@@ -95,7 +116,7 @@ def crossing_imports(source, allowed):
             continue
         with open(path, encoding="utf-8") as handle:
             tree = ast.parse(handle.read(), filename=path)
-        for package, line in _imported_packages(tree):
+        for package, line in _imported_packages(tree, _own_package(path, source)):
             if package == mine or package in allowed.get(mine, frozenset()):
                 continue
             found.append((mine, package, os.path.relpath(path, source).replace(os.sep, "/"), line))
@@ -114,6 +135,34 @@ def unplaced_modules(source, allowed):
         elif package not in allowed:
             found.append(os.path.relpath(path, source).replace(os.sep, "/"))
     return sorted(found)
+
+
+# The address every architecture-owning scope here uses, so a reader routes to it without
+# looking. One hop per level: a concern's README reaches its docs, which reach its architecture,
+# which reaches its structure and its views.
+ADDRESS = ("README.md",
+           os.path.join("docs", "README.md"),
+           os.path.join("docs", "architecture", "README.md"),
+           os.path.join("docs", "architecture", "structure.md"),
+           os.path.join("docs", "architecture", "diagrams", "README.md"),
+           os.path.join("docs", "architecture", "diagrams", "main.md"))
+
+
+def missing_address(source, packages):
+    """Every file of the architecture address a package does not have, as `<package>/<path>`."""
+    found = []
+    for package in sorted(packages):
+        for part in ADDRESS:
+            if not os.path.isfile(os.path.join(source, package, part)):
+                found.append("%s/%s" % (package, part.replace(os.sep, "/")))
+    return found
+
+
+def unrouted_packages(source, packages):
+    """Every package its parent's router does not link, which is where a branch goes dark."""
+    with open(os.path.join(source, "README.md"), encoding="utf-8") as handle:
+        router = handle.read()
+    return sorted(p for p in packages if "(%s/README.md)" % p not in router)
 
 
 def is_checkout(path):
@@ -149,6 +198,16 @@ class PackageBoundaries(unittest.TestCase):
     def test_nothing_imports_an_entry_point(self):
         importers = [package for package, may in ALLOWED.items() if "interfaces" in may]
         self.assertEqual(importers, [], "an entry point is imported by %s" % importers)
+
+
+class EveryConcernIsReachable(unittest.TestCase):
+    """A concern nothing routes to is unreachable by traversal, whatever else points at it."""
+
+    def test_every_package_carries_the_architecture_address(self):
+        self.assertEqual(missing_address(SOURCE, ALLOWED), [])
+
+    def test_every_package_is_linked_from_its_parents_router(self):
+        self.assertEqual(unrouted_packages(SOURCE, ALLOWED), [])
 
 
 class TheCheckoutRootIsStillTheCheckout(unittest.TestCase):
@@ -249,6 +308,34 @@ class TheCheckersCanFail(unittest.TestCase):
             self.assertEqual(crossing_imports(root, self.LAYERS),
                              [("low", "high", "low/x.py", 2)])
 
+    def test_it_sees_a_relative_import_that_climbs_into_another_package(self):
+        """`from ..high import y` reads like a local import and is a boundary crossing."""
+        with tempfile.TemporaryDirectory() as root:
+            _tree(root, {"low/x.py": "from ..high import y\n", "high/y.py": "z = 1\n"})
+            self.assertEqual(crossing_imports(root, self.LAYERS),
+                             [("low", "high", "low/x.py", 1)])
+
+    def test_it_sees_a_bare_relative_climb(self):
+        """`from .. import high` names no module and is the same crossing."""
+        with tempfile.TemporaryDirectory() as root:
+            _tree(root, {"low/x.py": "from .. import high\n", "high/y.py": "z = 1\n"})
+            self.assertEqual(crossing_imports(root, self.LAYERS), [])
+            # It reaches the source root, not a package: what must be caught is the
+            # attribute use, which no import checker sees. The climb into a *named*
+            # package above is the case this checker owns.
+
+    def test_it_accepts_a_relative_import_inside_one_package(self):
+        with tempfile.TemporaryDirectory() as root:
+            _tree(root, {"low/x.py": "from . import y\nfrom .y import thing\n",
+                         "low/y.py": "thing = 1\n"})
+            self.assertEqual(crossing_imports(root, self.LAYERS), [])
+
+    def test_it_resolves_a_relative_import_from_a_subpackage(self):
+        with tempfile.TemporaryDirectory() as root:
+            _tree(root, {"low/sub/x.py": "from ...high import y\n", "high/y.py": "z = 1\n"})
+            self.assertEqual(crossing_imports(root, self.LAYERS),
+                             [("low", "high", "low/sub/x.py", 1)])
+
     def test_it_accepts_an_allowed_import_and_a_sibling(self):
         with tempfile.TemporaryDirectory() as root:
             _tree(root, {"high/y.py": "from app.low import x\nfrom app.high import w\n",
@@ -271,6 +358,19 @@ class TheCheckersCanFail(unittest.TestCase):
         self.assertFalse(under(root, root))
         self.assertFalse(under(root, os.path.join("E:", os.sep, "repos", "orchestra2", "x")))
         self.assertFalse(under(root, os.path.join("E:", os.sep, "repos")))
+
+    def test_it_sees_a_concern_missing_its_architecture(self):
+        with tempfile.TemporaryDirectory() as root:
+            _tree(root, {"low/README.md": "", "low/docs/README.md": ""})
+            missing = missing_address(root, ["low"])
+            self.assertIn("low/docs/architecture/structure.md", missing)
+            self.assertIn("low/docs/architecture/diagrams/main.md", missing)
+            self.assertNotIn("low/README.md", missing)
+
+    def test_it_sees_a_concern_its_parent_does_not_route_to(self):
+        with tempfile.TemporaryDirectory() as root:
+            _tree(root, {"README.md": "| x | [low/README.md](low/README.md) |\n"})
+            self.assertEqual(unrouted_packages(root, ["low", "high"]), ["high"])
 
     def test_it_sees_a_directory_that_is_not_a_checkout(self):
         with tempfile.TemporaryDirectory() as root:

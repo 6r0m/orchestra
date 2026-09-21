@@ -20,7 +20,8 @@ change only when the operator says so.
 The workflow of a run and its durable state, routing between stages, the round budget, the stops
 and their answers, where a run's roles execute, the run's worktree from creation to merge or
 discard, and the commit and merge of an approved change. What each stage asks for is workflow
-contract and lives in `nodes.py`; what a role is lives in configuration.
+contract and lives in `app/foundation/stages.py`, which `app/agents/nodes.py` renders into a
+vendor prompt; what a role is lives in configuration.
 
 - **D1** **Temporal owns the workflow.** One workflow execution per run, its Workflow Id the run
   id; a start refuses an id that is open or still retained (`WorkflowIDConflictPolicy.FAIL`,
@@ -126,30 +127,24 @@ where the run was. Do not re-derive a `states/` layer here.
 
 ## Relationships and dependency direction
 
-The relationships between these parts, the Temporal service, the workers, the agents and git are
-drawn in [the main view](diagrams/main.md). Verdicts flow one way — architect to workflow — and
+Orchestra's parts and the participants outside it are drawn in
+[the main view](diagrams/main.md); which process each runs in is
+[the processes view](diagrams/processes.md), and every stop a run can reach is
+[the stops view](diagrams/stops.md). Verdicts flow one way — architect to workflow — and
 nothing else routes. Observability depends on the workflow and is never read back (D20). What
 each verdict means is in [the architect's own file](../../roles/architect.md); a host that binds its
 own methodology to a stage (`stage_skills`) owns it there instead.
 
 The source itself is organised by concern (D30): one package per concern under `app/`, and the
-folder is the ownership boundary. The packages depend in one direction —
+folder is the ownership boundary. Each concern states its own boundaries, parts and invariants
+at its own level, reached from [app/README.md](../../app/README.md); the direction they depend
+in is drawn once, in [the main view](diagrams/main.md), and is not restated here.
 
-```
-foundation     <- everything. Reads nothing of ours.
-orchestration  -> foundation
-workspace      -> foundation
-agents         -> foundation
-observability  -> foundation
-application    -> foundation, orchestration, workspace, agents, observability
-interfaces     -> all of the above
-```
-
-— and nothing imports `interfaces`, which is what keeps argparse and console output out of the
-worker and the workbench. Imports inside a package are that package's own business. That direction
-is not a convention here: `tests/test_architecture.py` reads `app/` and fails on an import that
-crosses a boundary the table does not allow, and its own controls prove each check can reject one.
-The table records the imports that exist; no indirection exists here to satisfy it.
+That direction is not a convention: `tests/test_architecture.py` reads `app/`, resolves every
+import — relative ones included — and fails on one that crosses a boundary the table does not
+allow, with controls that prove each check can reject a violation. The table records the
+imports that exist; no indirection exists here to satisfy it, and nothing imports an entry
+point, which is what keeps argparse and console output out of the worker and the workbench.
 
 Where a run may put files, where this checkout is, and which agent a turn is each have exactly one
 owner for the same reason — a second definition is equal only until someone moves a module. The
@@ -379,7 +374,7 @@ still lands on a checkout.
   to its skill, and adds only what the skill cannot know — session persistence
   across its two stages, and that the verdict is what routes (D4). It never
   restates the stance, so the two cannot drift. Each stage invokes its skill
-  as the prompt's first characters (`STAGE_SKILL` in `nodes.py`): the skills are
+  as the prompt's first characters (the `stage_skills` policy key): the skills are
   model-invocable, but an unattended run must not depend on the model choosing
   correctly every episode, and a mid-prompt invocation is inert. This does not
   widen D13 — the persona files stay configuration, and which skill a stage

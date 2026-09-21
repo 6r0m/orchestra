@@ -43,6 +43,13 @@ the PTY host are launched as scripts by path, and the tests put the directory on
 package layer would touch every import and every launch path to change nothing a user can see. The
 repository root *is* the package directory.
 
+*Superseded.* That held while the extraction was the only change in view. It stopped holding once
+Orchestra had to be read by people who had not watched it being built, and the source now lives in
+one package per concern under `app/`
+([D30](../architecture/structure.md#composition)); what changed the decision is in
+[decisions.md](decisions.md). The paragraph above is kept as the reasoning of the time, not as a
+description of the repository today.
+
 ## What moved, and what changed on the way
 
 | what | change |

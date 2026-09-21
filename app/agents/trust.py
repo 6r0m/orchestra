@@ -7,8 +7,9 @@ repository: a `repos.json` entry, or a path they typed into the workbench. So a 
 answer for the brains it will use, on the host it will use, before any agent starts.
 
 The record is per repository, not per run: both CLIs resolve a run's worktree to the repository it
-belongs to, so one record covers every later run of that repository on that host (measured on both
-CLIs and both hosts; see the todo's review record).
+belongs to, so one record covers every later run of that repository on that host — measured on
+both CLIs and both hosts, and checked on the installed CLIs by `tools/trust_probe.py` after either
+vendor is upgraded.
 
 Writing is best effort and never fails a run. A record that could not be written leaves the dialog
 exactly as it was, and the operator answers it once in the page.

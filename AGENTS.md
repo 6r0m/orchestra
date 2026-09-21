@@ -57,7 +57,12 @@ carries the accepted decisions and the invariants that must not be weakened. In 
   `bash run-tests.sh` on WSL or Linux, and the host suite on Windows — both are in
   [tests/README.md](tests/README.md). The suite mirrors the packages: a concern's tests live in
   the folder named after it.
-- Documentation has one owner per fact. `docs/architecture/` owns the architecture; a README routes
-  to it rather than restating it.
+- Documentation has one owner per fact. `docs/architecture/` owns the architecture and draws the
+  package graph once, in its main view; every README routes rather than restating, and each
+  concern under `app/` owns its own level in `app/<concern>/docs/architecture/`.
+- Work in flight lives in [todo/](todo/README.md), committed like everything else here — so a todo
+  carries steps, progress and open questions, never a secret, an absolute machine path, a private
+  repository's name or a run transcript. A fact still true after the change lands belongs to its
+  durable owner, not to the todo.
 - Prefer what the platform already provides over new machinery, and leave nothing behind that has no
   present need.

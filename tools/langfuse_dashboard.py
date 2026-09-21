@@ -18,13 +18,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
 from app.foundation import policy as P      # noqa: E402
+from app.foundation import stages
 from app.observability import telemetry as T   # noqa: E402
 
 NAME = "Orchestration Health"
 DESCRIPTION = ("How work items end, how often a phase passes at its first judgement, what the "
                "architect decides, how long each role step takes, what the models cost, and "
                "which rows failed or degraded.")
-STAGES = [T.stage_name(stage, role) for stage, role in P.STAGE_ROLE.items()]
+STAGES = [T.stage_name(stage, role) for stage, role in stages.STAGE_ROLE.items()]
 
 
 def _any(column, values):

@@ -16,16 +16,13 @@ import os
 import re
 
 from app.foundation import paths
+from app.foundation import stages
 
 # The deployment's own policy file. `ORCH_POLICY` names another, and a role's prompt is
 # always resolved against the directory of the file actually loaded, not against this one.
 POLICY_FILE = os.path.join(paths.REPO, "policy.json")
 
 ROLES = ("engineer", "architect")
-STAGES = ("plan", "assess", "build", "verify")
-STAGE_ROLE = {"plan": "engineer", "assess": "architect",
-              "build": "engineer", "verify": "architect"}
-PHASES = ("plan", "build")            # the two bounded loops
 KNOWN_BRAINS = ("claude", "codex")
 # Strict schemas: an unknown key is a typo, and a typo that silently does
 # nothing is the worst failure mode for a config-driven system.
@@ -56,6 +53,26 @@ def load(path=None):
     return validate(raw)
 
 
+def prompt_path(policy, role_name, policy_file=None):
+    """The role's persona file as *this* host sees it. The one resolver.
+
+    A policy crosses hosts as data, and the two hosts spell the same checkout
+    differently, so an absolute path resolved on the other one means nothing here: a
+    relative `prompt` is resolved again, against the directory of the policy file this
+    host was given and against this checkout when it was given none. Validation and the
+    host that runs the role therefore name the same file for the same policy, which
+    they did not while each built the path itself.
+    """
+    prompt = policy["roles"][role_name]["prompt"]
+    if os.path.isabs(prompt):
+        return prompt
+    named = policy_file or policy.get("_policy_path")
+    base = os.path.dirname(os.path.abspath(named)) if named else paths.REPO
+    # A prompt is written with forward slashes, as JSON; normalise so the one answer reads
+    # the same in a refusal on either host.
+    return os.path.normpath(os.path.join(base, prompt))
+
+
 def validate(raw):
     unknown = set(raw) - TOP_KEYS
     if unknown:
@@ -66,9 +83,9 @@ def validate(raw):
     if not isinstance(skills, dict):
         raise InvalidPolicy("stage_skills must map a stage to the skill that leads its prompt")
     for stage, skill in skills.items():
-        if stage not in STAGE_ROLE:
+        if stage not in stages.STAGE_ROLE:
             raise InvalidPolicy("stage_skills: %r is not a stage (%s)"
-                                % (stage, ", ".join(sorted(STAGE_ROLE))))
+                                % (stage, ", ".join(sorted(stages.STAGE_ROLE))))
         if not isinstance(skill, str) or not skill.startswith("/") or not skill[1:].strip():
             raise InvalidPolicy("stage_skills[%r] must be a skill invocation such as '/review'" % stage)
     roles = raw.get("roles")
@@ -105,18 +122,17 @@ def validate(raw):
     if roles["engineer"]["workspace_access"] != "write":
         raise InvalidPolicy("engineer must have write access")
 
-    base = os.path.dirname(os.path.abspath(raw.get("_policy_path", POLICY_FILE)))
     for name, role in roles.items():
         if not isinstance(role.get("prompt"), str) or not role["prompt"]:
             raise InvalidPolicy("role %r needs a prompt file link" % name)
-        role["prompt_path"] = os.path.join(base, role["prompt"])
+        role["prompt_path"] = prompt_path(raw, name)
         if not os.path.isfile(role["prompt_path"]):
             raise InvalidPolicy("role %r: prompt file missing: %s"
                                 % (name, role["prompt_path"]))
 
     rounds = raw.get("max_rounds")
-    if not isinstance(rounds, dict) or set(rounds) != set(PHASES):
-        raise InvalidPolicy("max_rounds must define exactly %s" % (PHASES,))
+    if not isinstance(rounds, dict) or set(rounds) != set(stages.PHASES):
+        raise InvalidPolicy("max_rounds must define exactly %s" % (stages.PHASES,))
     for phase, n in rounds.items():
         if not isinstance(n, int) or isinstance(n, bool) or n < 1:
             raise InvalidPolicy("max_rounds.%s must be an int >= 1" % phase)

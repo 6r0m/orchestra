@@ -35,6 +35,7 @@ import sys
 from app.foundation import envpath
 from app.foundation import paths
 from app.foundation import policy as P
+from app.foundation import stages
 # The change a human reviews is the worktree's; the trace only records it.
 
 REPO_ROOT = paths.REPO
@@ -299,7 +300,7 @@ def stage_name(stage, role_name):
 
 
 ROW_NAMES = ((RUN_NAME,) + tuple(PHASE_NAMES.values())
-             + tuple(stage_name(stage, role) for stage, role in P.STAGE_ROLE.items())
+             + tuple(stage_name(stage, role) for stage, role in stages.STAGE_ROLE.items())
              + (GATE_NAME, ANSWER_NAME, DIFF_NAME))
 
 

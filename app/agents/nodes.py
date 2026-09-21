@@ -19,19 +19,8 @@ import re
 import subprocess
 import uuid
 
-VERDICTS = ("PASS", "PATCH", "BLOCKER", "UNVERIFIED")
-_VERDICT_ASK = ("End your final message with exactly one JSON object and nothing after it: "
-                '{"verdict": "...", "feedback": "..."}, where verdict is one '
-                "of PASS, PATCH, BLOCKER, UNVERIFIED; feedback lists each "
-                "required finding with evidence and the smallest safe fix, or ")
-_PASS_CONFIRMATION = "is a short confirmation on PASS."
-# A plan's PASS stops the run for approval, and the operator approves from this
-# text alone, so it is written for that decision rather than as a confirmation.
-_PASS_PLAN_SUMMARY = ("on PASS is the summary a human reads before approving "
-                      "implementation: at most six short lines stating the chosen "
-                      "direction, the decision and why, the blast radius (what "
-                      "changes and what could break), and what is reused versus "
-                      "newly built.")
+from app.foundation import stages
+
 # What may follow the verdict object and still leave it the reviewer's last word.
 _ENDS_THERE = re.compile(r"\s*(?:```)?\s*")
 # Definitive "that session does not exist, nothing ran" signatures, as each
@@ -190,7 +179,7 @@ def parse_review(role, rc, out):
         payload = _verdict_object(out)
     if payload is None:
         raise ContentError("reviewer returned no parseable {verdict, feedback}")
-    if payload["verdict"] not in VERDICTS or not isinstance(payload["feedback"], str):
+    if payload["verdict"] not in stages.VERDICTS or not isinstance(payload["feedback"], str):
         raise ContentError("reviewer payload invalid: %r" % (payload,))
     return payload["verdict"], payload["feedback"]
 
@@ -255,7 +244,7 @@ def compose_prompt(stage, stage_cfg, is_architect, state, session_first,
     # this a session lost mid-loop would be rehydrated with a delta that
     # references findings and instructions it never received.
     if stage_first or session_first:
-        lines += [STAGE_ASK[stage].replace("{{TODO_PATH}}", todo).replace("{{LOGS}}", logs)]
+        lines += [stages.STAGE_ASK[stage].replace("{{TODO_PATH}}", todo).replace("{{LOGS}}", logs)]
         if state.get("feedback"):
             lines += ["",
                       "# Your prior findings on this artifact — re-check each"
@@ -276,28 +265,6 @@ def compose_prompt(stage, stage_cfg, is_architect, state, session_first,
     if state.get("guidance"):
         lines += ["", "# Operator guidance", state["guidance"]]
     return "\n".join(lines) + "\n"
-
-
-# What each stage demands is workflow contract (the todo path, the diff),
-# not personality — so it lives here, next to the workflow that depends on it.
-# The architect judges at the level of architecture — the todo, the diff, the engineer's
-# own reports and the web — and leaves running tests to the engineer, whose reports carry them.
-_ARCHITECT_EVIDENCE = ("Judge from the todo, the repository, `git diff`, the engineer's "
-                       "reports (its final messages, in {{LOGS}}/plan-*.out and build-*.out) "
-                       "and the web. Do not run tests or builds.\n")
-STAGE_ASK = {
-    "plan": ("Investigate the task in the "
-             "current repository and write the reviewable todo to exactly: "
-             "{{TODO_PATH}}\nDo not implement. Do not commit."),
-    "assess": ("Independently assess the todo at {{TODO_PATH}} against the "
-               "actual repository.\n" + _ARCHITECT_EVIDENCE + _VERDICT_ASK + _PASS_PLAN_SUMMARY),
-    "build": ("Implement the "
-              "approved todo at {{TODO_PATH}} in this worktree.\n"
-              "Never run git commit or git push."),
-    "verify": ("Independently verify the implementation in this worktree "
-               "(inspect `git diff` and `git status`) against the todo at "
-               "{{TODO_PATH}}.\n" + _ARCHITECT_EVIDENCE + _VERDICT_ASK + _PASS_CONFIRMATION),
-}
 
 
 def _template(role_cfg, todo_path):

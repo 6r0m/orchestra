@@ -149,7 +149,7 @@ file proves; [docs/history/](docs/history/) records how the system got here.
 | credentials and machine-specific values | `.env` — see [`.env.example`](.env.example) |
 
 Running it day to day — the page, the command line, and where to look when something is wrong — is
-[docs/using.md](docs/using.md).
+[docs/using.md](docs/using.md). What is being worked on right now is in [todo/](todo/README.md).
 
 If you have your own engineering skills for your CLI, bind them per stage with `stage_skills` in a
 policy of your own (`ORCH_POLICY`): the bound skill leads that stage's prompt. Orchestra ships none,

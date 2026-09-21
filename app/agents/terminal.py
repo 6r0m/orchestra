@@ -32,6 +32,7 @@ from http import HTTPStatus
 from app.agents import launch
 from app.foundation import paths
 from app.foundation import policy as P
+from app.foundation import stages
 
 # Both are launched by path, by us and by the vendors' own hooks, and neither imports
 # anything of ours: they are found beside this module, not through the checkout root.
@@ -394,7 +395,7 @@ def run_turn(worktree, argv, rdir, name, prompt, timeout, env, on_tick=None, *, 
     argv += ["--", prompt]
 
     run_id = os.path.basename(os.path.normpath(rdir))
-    role = P.STAGE_ROLE[name.split("-")[0]]
+    role = stages.STAGE_ROLE[name.split("-")[0]]
     terminal = open_terminal(run_id, role)
     tick = on_tick or (lambda: _activity_tick(name))
     agent = terminal.start(argv, worktree, env)

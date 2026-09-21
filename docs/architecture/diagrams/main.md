@@ -1,60 +1,51 @@
 # Main view
 
-The parts of Orchestra, the service and processes they run in, and the contract each
-relationship goes through. Topology only: what a stage asks for, what a verdict means and what an
-answer does are in [structure.md](../structure.md).
+Orchestra's parts at its own level — one box per concern under `app/`, each linked to its own
+architecture — and the participants outside it. Which process each part runs in is
+[the processes view](processes.md); the stops a run can reach are [the stops view](stops.md).
+Nothing inside a part is drawn here; that belongs to the part's own main view.
 
 ```mermaid
-graph LR
-    operator([operator]) -- "browser, 127.0.0.1" --> workbench[app/interfaces/workbench/<br/>server.py + static/ page]
-    operator -. "tests, automation" .-> cli[app/interfaces/cli.py]
-    workbench -- "application/client.py" --> temporal[(Temporal server<br/>orchestration namespace)]
-    cli -- "application/client.py: start · Update answer:&lt;stop-id&gt; · status query" --> temporal
-    operator -- "terminal WebSocket, token + origin" --> wslterm
-    ui([Temporal web UI]) -- reads --> temporal
-    temporal -- "workflow tasks, orchestration queue" --> wslworker[WSL worker<br/>orchestration/workflow.py + routing.py]
-    temporal -- "activities, target:wsl:host" --> wslhost[WSL worker<br/>application/activities.py]
-    temporal -- "activities, target:windows:host" --> winhost[Windows worker<br/>application/activities.py]
-    wslhost --- wslterm[WSL terminals<br/>agents/terminal.py]
-    winhost --- winterm[Windows terminals<br/>agents/terminal.py]
-    operator -- "terminal WebSocket, token + origin" --> winterm
-    wslterm -- "argv + prompt, PTY, contained tree" --> wslagents([claude · codex on WSL])
-    winterm -- "argv + prompt, ConPTY, contained tree" --> winagents([claude.exe · codex.exe])
-    wslagents -. "turn hooks: events file" .-> wslterm
-    winagents -. "turn hooks: events file" .-> winterm
-    wslhost -- "target git: worktree, guard, merge" --> wslrepo[(WSL-target repository)]
-    winhost -- "git.exe: worktree, guard, merge" --> winrepo[(Windows-target repository)]
-    wslhost -. "trace rows" .-> langfuse[(Langfuse)]
-    winhost -. "trace rows" .-> langfuse
-    wslagents -. "turns via tracing plugin" .-> langfuse
-    winagents -. "turns via tracing plugin" .-> langfuse
+flowchart TD
+    subgraph orchestra["Orchestra (app/)"]
+        interfaces["interfaces<br/><i>cli · worker · workbench</i>"]
+        application["application<br/><i>activities · client</i>"]
+        orchestration["orchestration<br/><i>workflow · routing</i>"]
+        agents["agents<br/><i>terminal · launch · nodes · trust</i>"]
+        workspace["workspace<br/><i>repos · worktrees</i>"]
+        observability["observability<br/><i>telemetry</i>"]
+        foundation["foundation<br/><i>paths · envpath · policy · stages</i>"]
+    end
+
+    operator([operator]) -->|"a browser on 127.0.0.1, or a terminal"| interfaces
+    interfaces -->|"the shared client"| application
+    application -->|"an activity the workflow named"| orchestration
+    application -->|"a role turn"| agents
+    application -->|"the run's worktree"| workspace
+    application -->|"trace rows for a run"| observability
+
+    orchestration -->|"the stage contract"| foundation
+    agents -->|"the stage's ask, and the policy"| foundation
+    workspace -->|"the checkout root"| foundation
+    observability -->|"the checkout root, and the policy"| foundation
+
+    orchestration <-->|"workflow tasks, Updates, the status query"| temporal[("Temporal server")]
+    application <-->|"start · answer · status"| temporal
+    workspace -->|"the target host's git"| git[("the run's repository")]
+    agents -->|"argv, a PTY, and the vendor's completion hook"| clis[("claude · codex")]
+    observability -.->|"trace rows, never read back"| langfuse[("Langfuse")]
 ```
 
-The workflow's stops, in the order a run can reach them:
+Every arrow between two parts inside the box is an import the boundary check enforces; the table
+it enforces is in [structure.md](../structure.md#relationships-and-dependency-direction), and
+`tests/test_architecture.py` fails on an import this picture does not show.
 
-```mermaid
-graph TD
-    start([start]) --> prepare[resolve repository on target] -->|refused| refused([REFUSED])
-    prepare --> worktree[create worktree] --> plan
-    plan --> assess
-    assess -. PATCH / UNVERIFIED .-> plan
-    assess -. "PASS, no approval" .-> build
-    assess -. "approval · blocker · exhausted" .-> stop1{{stop}}
-    stop1 -. approve .-> build
-    stop1 -. "revise · guide" .-> plan
-    stop1 -. abort .-> aborted([ABORTED])
-    build --> verify
-    verify -. PATCH / UNVERIFIED .-> build
-    verify -. "blocker · exhausted" .-> stop2{{stop}}
-    stop2 -. guide .-> build
-    stop2 -. abort .-> aborted
-    verify -. PASS .-> final{{final gate · READY_FOR_HUMAN}}
-    final -. "revise engineer" .-> build
-    final -. "revise architect" .-> verify
-    final -. "merge: conflict" .-> build
-    final -. "merge" .-> merged([MERGED])
-    final -. "discard, confirmed" .-> discarded([DISCARDED])
-```
-
-Any stage, the worktree's creation, a merge or a discard that fails stops at a `failed` stop, whose
-`continue` runs that step once more and whose `abort` ends the run.
+| part | its own architecture |
+|---|---|
+| foundation | [app/foundation](../../../app/foundation/docs/architecture/README.md) |
+| orchestration | [app/orchestration](../../../app/orchestration/docs/architecture/README.md) |
+| workspace | [app/workspace](../../../app/workspace/docs/architecture/README.md) |
+| agents | [app/agents](../../../app/agents/docs/architecture/README.md) |
+| observability | [app/observability](../../../app/observability/docs/architecture/README.md) |
+| application | [app/application](../../../app/application/docs/architecture/README.md) |
+| interfaces | [app/interfaces](../../../app/interfaces/docs/architecture/README.md) |
