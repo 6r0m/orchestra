@@ -1,7 +1,6 @@
 # Source organised by concern — D30
 
-**Status:** the move is done; the second and third reviews (PATCH, PATCH) and the third's follow-up are answered in the
-working tree, unstaged, and await review. What is left is the operator's.
+**Status:** PASS (implementation, after three reviews) 2026-09-21 — merged into `main`.
 
 ## Goal
 
@@ -16,13 +15,13 @@ than by a convention.
   concern-owned packages under `app/` with recursive README ownership, replace the flat module
   manifest with package-boundary tests, give Orchestra's own paths a neutral owner, mirror the
   concerns under `tests/`, and do not implement a proposed dependency table mechanically.
-  **Status: DONE.** Durable record: D30 in [structure.md](../docs/architecture/structure.md); the
-  reasoning in [decisions.md](../docs/history/decisions.md).
+  **Status: DONE.** Durable record: D30 in [structure.md](../../docs/architecture/structure.md); the
+  reasoning in [decisions.md](../../docs/history/decisions.md).
 - **D2** — Operator: a todo with no secrets, showing work in progress, is good for a public
-  repository. **Status: DONE** — this directory, and [its rules](README.md).
+  repository. **Status: DONE** — this directory, and [its rules](../README.md).
 - **D3** — Operator: every concern carries its own architecture address, with structure and
   diagrams, as black boxes reached by recursive routers. **Status: DONE** —
-  `app/<concern>/docs/architecture/`, routed from [app/README.md](../app/README.md).
+  `app/<concern>/docs/architecture/`, routed from [app/README.md](../../app/README.md).
 
 ## What landed
 
@@ -119,13 +118,12 @@ windows and focus changes ran beside them.
 - **The Windows host suite has a script of its own,** `run-tests.ps1`, which owns the list of the
   modules that exercise a host; it had been a command typed from `tests/README.md`.
 
-## Left for the operator
+## Left open
 
-1. **The index and the commit.** The move is staged; the second review's fixes are not. Nothing
-   was committed, and neither the commit nor the branch is an agent's to make.
-2. **One acceptance run from before this work is still open,** holding its worktree and branch. A
-   discard is the operator's (D24).
-3. **A WSL-to-Windows role turn with real agents,** if wanted: the activity boundary is proven on
+1. **An acceptance run from before this work,** still open at its final gate. It is leftover state
+   from a fake-agent acceptance, not evidence about this change; discarding it is the operator's
+   (D24).
+2. **A WSL-to-Windows role turn with real agents** was not run: the activity boundary is proven on
    the Windows host suite with a fake agent, and the vendor CLIs' own transport by the terminal tests.
 
 ## Optional
