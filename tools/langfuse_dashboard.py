@@ -45,8 +45,9 @@ TILES = [
              [_any("name", [T.RUN_NAME])], "BAR_TIME_SERIES"), (0, 0, 6, 5)),
     # The three outcomes are counted by true and false rather than shown as an average:
     # a number tile rounds, and a first-pass rate of one in two read as 1.
-    (_widget("Ended ready for human", "Ended work items: true reached READY_FOR_HUMAN, false was "
-             "aborted.", "scores-boolean", ["booleanValue"], [("count", "count")],
+    (_widget("Builds verified", "Work items whose build was verified: true reached READY_FOR_HUMAN; false "
+             "was ended by abort, which only older runs could be. A run ended by a Stop is not scored.",
+             "scores-boolean", ["booleanValue"], [("count", "count")],
              [_any("name", ["final_verify_pass"])], "HORIZONTAL_BAR"), (6, 0, 6, 5)),
     (_widget("Plan passed first time", "Plan phases: true when their first judgement was PASS.",
              "scores-boolean", ["booleanValue"], [("count", "count")], [_any("name", ["plan_first_pass"])],
@@ -106,7 +107,7 @@ def apply(client):
 def main():
     client = T.resolve()
     if client is None:
-        print("no Langfuse keys (secrets/langfuse.env) - nothing to apply", file=sys.stderr)
+        print("no Langfuse keys (.env) - nothing to apply", file=sys.stderr)
         return 1
     print("dashboard %r: %d widgets, id %s" % (NAME, len(TILES), apply(client)))
     return 0

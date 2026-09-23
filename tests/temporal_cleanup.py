@@ -1,9 +1,9 @@
 """Delete from Temporal the runs a check on the live stack made, and prove them gone.
 
 The Workbench lists every run Temporal retains, for 90 days, so `make demo` and the live
-acceptance take back what they started: each run, and each read of its change — a `ReviewDiff`
-workflow, which `client.review_diff` names after its run. Exact ids only, never a prefix a real
-run could share.
+acceptance take back what they started: each run, each read of its change — a `ReviewDiff`
+workflow, which `client.review_diff` names after its run — and the removal of what it kept, which
+`client.remove_worktree` names after it too. Exact ids only, never a prefix a real run could share.
 """
 import asyncio
 import time
@@ -14,12 +14,12 @@ from temporalio.service import RPCError, RPCStatusCode
 
 
 def query(run_ids):
-    """The listing's query for the runs and the reads of their changes."""
+    """The listing's query for the runs, the reads of their changes and the removals of their work."""
     for run_id in run_ids:
         if not run_id or "'" in run_id:
             raise ValueError("not a run id: %r" % run_id)
-    return " OR ".join("WorkflowId = '%s' OR WorkflowId STARTS_WITH 'diff-%s-'" % (run_id, run_id)
-                       for run_id in run_ids)
+    return " OR ".join("WorkflowId = '%s' OR WorkflowId STARTS_WITH 'diff-%s-' OR WorkflowId = 'remove-%s'"
+                       % (run_id, run_id, run_id) for run_id in run_ids)
 
 
 async def delete_runs(client, run_ids, seconds=60):

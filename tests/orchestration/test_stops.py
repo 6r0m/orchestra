@@ -8,7 +8,9 @@
 - A Stop ends a run from any open state and runs no git; a git side effect already running lands first.
 - Force terminate closes a run at once, and cannot stop what its host is already doing.
 """
+import asyncio
 import contextlib
+import datetime
 import io
 import json
 import os
@@ -94,12 +96,12 @@ class NamedAnswers(Scenario):
         code, out = run.answer("maybe later")
         self.assertEqual(code, 2)
         self.assertIn("does not answer", out)
-        self.assertEqual(run.stop["reason"], "approval", "never read as abort")
+        self.assertEqual(run.stop["reason"], "approval", "never read as another answer")
 
     def test_control_without_a_validator_or_with_fresh_ids_answers_are_written_and_applied_again(self):
         run_id = uuid.uuid4().hex[:12]
         handle = E.run(E.client().start_workflow(control_workflows.NoValidatorRun.run, {}, id=run_id,
-                                                 task_queue=WF.TASK_QUEUE))
+                                                 task_queue=E.WORKFLOW_QUEUE))
         nonsense = {"stop": "x:1", "action": "nonsense"}
         E.run(handle.execute_update("answer", nonsense, id="answer:x:1"))
         E.run(handle.execute_update("answer", nonsense, id="answer:x:1"))
@@ -173,7 +175,7 @@ class SingleAttempt(Scenario):
         handle = E.run(E.client().start_workflow(
             control_workflows.RetryControl.run,
             {"stage": "plan", "state": state, "policy": self.policy(), "queue": E.WSL_QUEUE},
-            id="retry-%s" % uuid.uuid4().hex[:8], task_queue=WF.TASK_QUEUE))
+            id="retry-%s" % uuid.uuid4().hex[:8], task_queue=E.WORKFLOW_QUEUE))
         self.addCleanup(lambda: E.run(handle.terminate("control done")))
         deadline = time.monotonic() + 60
         while len(launches) < 2 and time.monotonic() < deadline:
@@ -297,11 +299,12 @@ class FinalGate(Scenario):
         self.assertEqual(run.stop["reason"], "approval")
         self.assertIn("split the change in two", self.agent.calls[2]["prompt"])
 
-    def test_abort_at_a_failed_stage_ends_the_run(self):
+    def test_a_failed_stage_takes_continue_alone_and_an_abort_is_refused(self):
         run = self.drive([("plan-e1-1", 1, "boom\n")])
-        self.assertEqual(run.stop["reason"], "failed")
-        run.answer("abort")
-        self.assertEqual(run.state["status"], "ABORTED")
+        self.assertEqual((run.stop["reason"], run.stop["actions"]), ("failed", ["continue"]))
+        code, out = run.answer("abort")
+        self.assertEqual(code, 2, out)
+        self.assertFalse(run.closed(), "a Stop is what ends a run; an abort ends nothing")
 
 
 class Lifecycle(Scenario):
@@ -319,7 +322,7 @@ class Lifecycle(Scenario):
         """A run started and not followed: its stage does not finish by itself."""
         run_id = uuid.uuid4().hex[:12]
         handle = E.run(E.client().start_workflow(WF.FeatureRun.run, E.start_input(run_id, **kwargs),
-                                                 id=run_id, task_queue=WF.TASK_QUEUE))
+                                                 id=run_id, task_queue=E.WORKFLOW_QUEUE))
         self.addCleanup(shutil.rmtree, E.A.run_dir(run_id), True)
         self.addCleanup(self.close, handle)
         return handle
@@ -431,6 +434,69 @@ class Stop(Lifecycle):
         self.assertEqual(status["state"]["status"], "STOPPED")
         self.assertIn("the windows host's cleanup did not run", "\n".join(status["lines"]))
 
+    def merge_with_its_worker_gone(self, heartbeat_seconds=2):
+        """A run at its final gate on a host of the test's own, whose worker goes away just as the merge is
+        answered — the preflight still counts a worker dead for under a minute and a half as polling."""
+        queue = "target:wsl:gone-%s" % uuid.uuid4().hex[:8]
+        self.git = FakeWorktrees()
+        _, worker_goes = E.own_host(self, queue, to_ready(), git=self.git)
+        handle = self.start(queue=queue, auto=True, policy=dict(E.POLICY, heartbeat_seconds=heartbeat_seconds))
+        stop = self.until(handle, lambda status: status["stop"] and status["stop"]["reason"] == "final", 120)["stop"]
+        worker_goes()
+        E.run(E.cli.runs.answer(E.client(), handle.id, {"stop": stop["id"], "action": "merge"}, check=False))
+        self.until(handle, lambda status: (status["state"].get("current") or {}).get("stage") == "merge")
+        return queue, handle
+
+    def test_a_stop_while_a_git_step_waits_for_a_worker_that_is_gone_ends_the_run_stopped(self):
+        """The Stop ends the run stopped once the merge has waited a heartbeat interval for a worker — never
+        waiting for one to come back — and git never runs that merge, not even when a worker does come back."""
+        # Long enough that the Stop meets the merge still waiting, however loaded the host.
+        queue, handle = self.merge_with_its_worker_gone(heartbeat_seconds=15)
+        E.run(handle.cancel())
+        with self.assertRaises(WorkflowFailureError):
+            E.run(handle.result())
+        self.assertEqual(E.run(handle.describe()).status.name, "CANCELED", "ended by the Stop, not timed out")
+        status = E.run(handle.query(WF.FeatureRun.status))
+        self.assertEqual(status["state"]["status"], "STOPPED")
+        self.assertIn("no worker of the run's host took this step", "\n".join(status["lines"]))
+        self.assertNotIn("stopped: failed", status["lines"], "the Stop met the merge while it waited")
+        E.own_host(self, queue, [], git=self.git)
+        time.sleep(3)                               # a worker polling the queue again, for a while
+        self.assertNotIn("merge", self.git_run(), "git never ran it")
+
+    def test_a_merge_no_worker_took_stops_for_the_operator_and_continue_merges(self):
+        """Without a Stop the merge fails as any step does, saying no worker took it, and Continue merges
+        once a worker is back."""
+        queue, handle = self.merge_with_its_worker_gone()
+        failed = self.until(handle, lambda status: status["stop"] and status["stop"]["reason"] == "failed", 60)
+        self.assertIn("no worker of the run's host took this step", failed["stop"]["feedback"])
+        self.assertNotIn("merge", self.git_run())
+        E.own_host(self, queue, [], git=self.git)
+        E.run(E.cli.runs.answer(E.client(), handle.id, {"stop": failed["stop"]["id"], "action": "continue"},
+                                check=False))
+        merged = self.until(handle, lambda status: status["state"]["status"] == "MERGED", 60)
+        self.assertEqual(self.git_run().count("merge"), 1, "merged once, by the worker that came back")
+        self.assertIsNone(merged["stop"])
+
+    def test_a_stop_while_a_trace_write_runs_ends_the_run_stopped(self):
+        """A trace write is best-effort and never the Stop's to wait for: one still running is let go."""
+        writing, release = threading.Event(), threading.Event()
+        self.addCleanup(release.set)
+
+        def held(client, state, stop):
+            writing.set()
+            release.wait(60)
+        self.addCleanup(setattr, E.A.T, "gate_event", E.A.T.gate_event)
+        E.A.T.gate_event = held
+        a1, _ = codex_review_first("PASS")
+        self.git = FakeWorktrees()
+        run = self.drive([("plan-e1-1", 0, "p\n"), ("assess-e1-1", 0, a1)], git=self.git)
+        self.assertEqual(run.stop["reason"], "approval")
+        self.assertTrue(writing.wait(30), "the stop's trace row is being written")
+        E.run(run.handle.cancel())
+        status = self.until(run.handle, lambda status: status["state"]["status"] == "STOPPED", 30)
+        self.assertIsNone(status["stop"])
+
     def test_a_stop_during_a_merge_lets_it_land_and_the_run_ends_merged(self):
         run, merging, land = self.gated()
         E.run(E.cli.runs.answer(E.client(), run.run_id, {"stop": run.stop["id"], "action": "merge"}, check=False))
@@ -453,6 +519,53 @@ class Stop(Lifecycle):
         status = E.run(E.cli.follow(run.handle, answered=run.stop["id"]))
         self.assertEqual((status["state"]["status"], status["stop"]), ("STOPPED", None),
                          "stopped, not back at its gate")
+
+    def worker_gone(self):
+        """The run's workflow worker gone, as the command line meets it: no worker polls, and a query waits.
+        Returns the runs whose status was asked."""
+        asked = []
+
+        async def unanswered(client, run_id, timeout=None):
+            asked.append(run_id)
+            await asyncio.sleep(30)                 # as a query no worker answers waits
+
+        async def nobody(client, needed):
+            raise E.cli.runs.Refusal("no worker is polling %s — the wsl worker is not running" % needed[0][0])
+        for name, stand_in in (("status", unanswered), ("preflight", nobody)):
+            self.addCleanup(setattr, E.cli.runs, name, getattr(E.cli.runs, name))
+            setattr(E.cli.runs, name, stand_in)
+        return asked
+
+    def test_the_command_line_refuses_an_answer_at_once_while_no_worker_can_read_the_run(self):
+        a1, _ = codex_review_first("PASS")
+        run = self.drive([("plan-e1-1", 0, "p\n"), ("assess-e1-1", 0, a1)], git=FakeWorktrees())
+        asked = self.worker_gone()
+        out, began = io.StringIO(), time.monotonic()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            code = E.run(E.cli.run(["--resume", run.run_id, "--answer", "yes"], client=E.client(), tele=object()))
+        self.assertEqual(code, 4, out.getvalue())
+        self.assertIn("the wsl worker is not running", out.getvalue())
+        self.assertEqual(asked, [], "its status was never asked")
+        self.assertLess(time.monotonic() - began, 10)
+
+    def test_the_command_line_records_a_stop_at_once_while_no_worker_can_read_the_run(self):
+        """With the run's workflow worker gone the Stop is still Temporal's to take: the command line records
+        it first and says the run ends once a worker hears it — never waiting on a query no worker answers."""
+        a1, _ = codex_review_first("PASS")
+        run = self.drive([("plan-e1-1", 0, "p\n"), ("assess-e1-1", 0, a1)], git=FakeWorktrees())
+        asked = self.worker_gone()
+        out, began = io.StringIO(), time.monotonic()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            code = E.run(E.cli.run(["--stop", run.run_id], client=E.client(), tele=object()))
+        self.assertEqual(code, 2, out.getvalue())
+        self.assertIn("the Stop is recorded", out.getvalue())
+        self.assertIn("the wsl worker is not running", out.getvalue())
+        self.assertEqual(asked, [], "its status was never asked")
+        self.assertLess(time.monotonic() - began, 10)
+        deadline = time.monotonic() + 60
+        while E.run(run.handle.describe()).close_time is None and time.monotonic() < deadline:
+            time.sleep(0.2)
+        self.assertEqual(E.run(run.handle.describe()).status.name, "CANCELED", "the Stop it recorded ended the run")
 
     def test_the_command_line_stops_a_run_and_says_how_it_ended(self):
         a1, _ = codex_review_first("PASS")
@@ -493,6 +606,60 @@ class ForceTerminate(Lifecycle):
         while "merge" not in self.git_run() and time.monotonic() < deadline:
             time.sleep(0.2)
         self.assertIn("merge", self.git_run(), "the merge went on to its end after the run was closed")
+
+    def test_what_a_terminated_run_kept_is_not_removed_while_its_merge_still_runs(self):
+        """The merge a force terminate could not stop still changes the run's worktree on its host: a
+        removal is refused there, saying so, until the merge has landed."""
+        run, merging, land = self.gated()
+        E.run(E.cli.runs.answer(E.client(), run.run_id, {"stop": run.stop["id"], "action": "merge"}, check=False))
+        self.assertTrue(merging.wait(30), "the merge is running")
+        E.run(E.cli.runs.force_terminate(E.client(), run.run_id, "the test"))
+
+        async def polled(client, needed):
+            return None                             # the test server lists no pollers
+        self.addCleanup(setattr, E.cli.runs, "preflight", E.cli.runs.preflight)
+        E.cli.runs.preflight = polled
+        with E.env().auto_time_skipping_disabled():
+            with self.assertRaises(E.cli.runs.Refusal) as refused:
+                E.run(E.cli.runs.remove_worktree(E.client(), run.run_id))
+            self.assertIn("busy: its merge is still running", str(refused.exception))
+            self.assertNotIn("discard", self.git_run(), "nothing was removed under the merge")
+            land.set()
+            deadline = time.monotonic() + 30
+            while run.run_id in self.host._git_busy and time.monotonic() < deadline:
+                time.sleep(0.1)
+            self.assertIn("merge", self.git_run())
+            E.run(E.cli.runs.remove_worktree(E.client(), run.run_id))
+        self.assertEqual(self.git_run().count("discard"), 1, "once it had landed, the removal ran")
+
+    def test_a_removal_no_worker_of_its_host_takes_is_refused_within_its_bound_and_never_runs(self):
+        """A target host's worker dead for under a minute and a half still counts as polling: a removal it
+        never takes is refused once its bound is out, naming that host — never waited on for the page's
+        minutes — and git never removes anything, not even when a worker does come back."""
+        queue = "target:wsl:gone-%s" % uuid.uuid4().hex[:8]
+        self.git = FakeWorktrees()
+        _, worker_goes = E.own_host(self, queue, to_ready(), git=self.git)
+        handle = self.start(queue=queue, auto=True, policy=dict(E.POLICY, heartbeat_seconds=2))
+        self.until(handle, lambda status: status["stop"] and status["stop"]["reason"] == "final", 120)
+        E.run(handle.cancel())
+        with self.assertRaises(WorkflowFailureError):
+            E.run(handle.result())
+        worker_goes()
+
+        async def polled(client, needed):
+            return None                             # as the preflight counts a worker dead for under POLLING
+        for name, stand_in in (("preflight", polled), ("TAKEN", datetime.timedelta(seconds=2))):
+            self.addCleanup(setattr, E.cli.runs, name, getattr(E.cli.runs, name))
+            setattr(E.cli.runs, name, stand_in)
+        began = time.monotonic()
+        with E.env().auto_time_skipping_disabled():
+            with self.assertRaises(E.cli.runs.Refusal) as refused:
+                E.run(E.cli.runs.remove_worktree(E.client(), handle.id))
+        self.assertLess(time.monotonic() - began, 30, "refused once its bound was out")
+        self.assertIn("no wsl worker took the removal", str(refused.exception))
+        E.own_host(self, queue, [], git=self.git)
+        time.sleep(3)                               # a worker polling the queue again, for a while
+        self.assertNotIn("discard", self.git_run(), "nothing ran once a worker came back")
 
     def test_the_command_line_force_terminates_a_run(self):
         a1, _ = codex_review_first("PASS")

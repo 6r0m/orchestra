@@ -31,7 +31,10 @@ graph group rows by name. A run's own values are metadata.
 | final diff | the work item | the change as `gdiff -s` copies it, cut at a size cap |
 
 The work item opens and closes at setup, before any process that resumes the run exists, so it has
-no output: how the run ended is in the final diff and the scores. On a role step, the round, phase,
+no output. The trace records whether a run's build was verified — the final diff and the scores —
+not how the run ended: that is Temporal's (`structure.md` D20). A run ended by a Stop or a force
+terminate has no row of its own here; a role step a Stop cut short says only that the run was stopped,
+and one a force terminate cut short is `lost`. On a role step, the round, phase,
 stage and role are metadata, and so are the logs, the brain, the model, the reasoning effort and
 the provider's session id.
 
@@ -41,7 +44,7 @@ Under each role step, the agent's own tracing plugin nests its turns, model call
 
 | level | when |
 |---|---|
-| DEFAULT | the row recorded what happened |
+| DEFAULT | the row recorded what happened — a role step a Stop cut short included: its output says the run was stopped, and it has no error type, because the stage did not fail |
 | WARNING | the stage went on, degraded — `session_lost`: the session to resume did not exist, and a fresh one was given the whole task; `telemetry_degraded`: the architect's turns were not uploaded, so its step has none nested |
 | ERROR | the stage failed and the run stopped with its exception; or git could not read the final diff, `git_error` |
 
@@ -57,7 +60,8 @@ A failed stage's `error_type` is one of:
 | `agent_exit` | the agent CLI exited non-zero — quota, authentication, network or a crash, which nothing measured tells apart | read the role's `.err` log, fix the cause, then `--continue` |
 | `malformed_output` | the agent answered, but not in the shape its stage requires | read the role's `.out` log |
 | `executor` | the agent could not be launched on its host | install or repair that agent on the run's target host, then `--continue` |
-| `git_violation` | the role changed the worktree's HEAD, its branch or what is staged, which only the controller may | inspect the worktree, then `--continue` or `--resume <run-id> --answer abort` |
+| `git_violation` | the role changed the worktree's HEAD, its branch or what is staged, which only the controller may | inspect the worktree, then `--continue`, or stop the run |
+| `lost` | the step was cut short from outside, not by a Stop: its worker stopped under it, or Temporal no longer knew it — its run force-terminated, or the step unheard past its heartbeat timeout | whether the run was force-terminated, in Temporal; if not, its failed stage says which, and Continue runs it again |
 | `internal` | anything unclassified: a defect in this component | the status message and the traceback |
 
 No row's level marks its parent. A tool call that failed is ERROR on its own row while its role
@@ -71,10 +75,13 @@ Scores record judgements, never counts.
 |---|---|---|---|
 | `architect_verdict` | categorical: PASS, PATCH, BLOCKER, UNVERIFIED | the architect's role step | at every judgement |
 | `plan_first_pass`, `build_first_pass` | boolean | the work item | at the phase's first judgement: 1 when it was PASS |
-| `final_verify_pass` | boolean | the work item | when the run ends: 1 at `READY_FOR_HUMAN`, 0 when aborted |
+| `final_verify_pass` | boolean | the work item | when its build is verified: 1 at `READY_FOR_HUMAN`; 0 when a run ended by an `abort` answer, which no stop offers now |
 
 A work-item score has one id per work item, so a stage or a process run again after a crash replaces
-it instead of adding a second. A run stopped at a gate has not ended and has no `final_verify_pass`.
+it instead of adding a second. A run waiting at a stop has not ended and has no `final_verify_pass`.
+A run the operator ended with a Stop has none either: a Stop is not a judgement, and a 0 would read
+as a final verification that failed where none may have run. One stopped at its final gate keeps the
+1 it scored there, and the architect's own judgements are its `architect_verdict` scores.
 With *Show Scores* on, a verdict shows on its step in the trace tree.
 
 ## Dimensions
@@ -100,7 +107,7 @@ Sampling is 100%: every run is recorded.
 
 This component's client masks the input, output and metadata of every row it writes, and redacts
 status messages and the final diff itself: private keys, high-confidence token shapes, and the
-values of the secret entries in `secrets/langfuse.env`. A final diff that held a secret is marked
+values of the secret entries in this checkout's `.env`. A final diff that held a secret is marked
 `redacted`, because its copy is then not the exact change.
 
 The mask does not reach the plugins' rows — the agents' prompts, tool inputs and tool outputs — which

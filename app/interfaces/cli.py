@@ -1,4 +1,5 @@
-"""Operator entrypoint: a Temporal client for runs. Six forms, and the worktree view:
+"""Operator entrypoint: a Temporal client for runs, and the stack they run on. Six forms for a run,
+the worktree view, and the stack:
 
     orchestrate "<task>" [--auto-proceed] [--repo NAME|PATH]
     orchestrate --resume <run-id> --answer "<answer>" [--confirm]
@@ -7,11 +8,13 @@
     orchestrate --force-terminate <run-id>
     orchestrate --show <run-id>
     orchestrate --worktrees [--repo NAME|PATH]
+    orchestrate --stack status | start|stop|restart [temporal|wsl|windows]
 
 A new run prints its run id, which is its Workflow Id. The run lives in
 Temporal, so this process may exit at any stop and any later process answers it.
 Each form that moves a run follows it, one line per stage transition, until the run
-stops for the operator or ends.
+stops for the operator or ends. `--stack` goes through the stack's one owner, as `make up`,
+`make down`, `make check` and the Workbench do.
 """
 import argparse
 import asyncio
@@ -21,6 +24,7 @@ import sys
 import textwrap
 
 from app.application import client as runs
+from app.application import stack
 from app.foundation import policy as policy_mod
 from app.foundation import paths
 from app.workspace import repos
@@ -28,8 +32,8 @@ from app.observability import telemetry
 from app.orchestration import workflow as WF
 from app.application.client import Refusal, preflight, work_item_label  # noqa: F401 - the CLI's names for them
 
-# The longest a follower waits between looks at a run when no history event wakes it.
-FOLLOW_SECONDS = 2
+# How long a follower waits between looks at a run.
+FOLLOW_SECONDS = 1
 
 # How an answer is typed here. Which answers a stop takes comes with the stop, and whether one is
 # accepted is the workflow's; the command line owns only its shorthands, which answers are followed
@@ -82,19 +86,12 @@ def answer_line(stop):
 async def follow(handle, printed=0, answered=None):
     """Print the run's new lines until it stops for the operator or ends; return its status.
 
-    Woken by each new event in the run's history. A long poll that returns without one
-    — the time-skipping test server does — falls back to a fresh look every
-    FOLLOW_SECONDS, and whether the run has ended is asked of Temporal, never inferred
-    from the event stream ending.
+    It looks every FOLLOW_SECONDS, and whether the run has ended is asked of Temporal. Each call it
+    makes is answered before it goes on, so none is still in flight when it returns: the SDK's native
+    runtime answers a call even after its caller stopped waiting — a history long poll, say — and one
+    answered while the process exits needs the interpreter as it shuts down, which parks the runtime's
+    thread for good, and the process never exits.
     """
-    changed = asyncio.Event()
-
-    async def watch():
-        while True:
-            async for _ in handle.fetch_history_events(wait_new_event=True):
-                changed.set()
-            await asyncio.sleep(FOLLOW_SECONDS)
-
     async def show():
         nonlocal printed
         status = await handle.query(WF.FeatureRun.status)
@@ -103,21 +100,13 @@ async def follow(handle, printed=0, answered=None):
         printed = len(status["lines"])
         return status
 
-    watcher = asyncio.create_task(watch())
-    try:
-        while True:
-            changed.clear()
-            status = await show()
-            if status["stop"] is not None and status["stop"]["id"] != answered:
-                return status
-            if (await handle.describe()).close_time is not None:
-                return await show()
-            try:
-                await asyncio.wait_for(changed.wait(), timeout=FOLLOW_SECONDS)
-            except asyncio.TimeoutError:
-                pass
-    finally:
-        watcher.cancel()
+    while True:
+        status = await show()
+        if status["stop"] is not None and status["stop"]["id"] != answered:
+            return status
+        if (await handle.describe()).close_time is not None:
+            return await show()
+        await asyncio.sleep(FOLLOW_SECONDS)
 
 
 def _report(status, run_id, trace_url):
@@ -135,6 +124,7 @@ def _report(status, run_id, trace_url):
             if value:
                 print("%-9s %s" % (key + ":", value))
         print("\nanswer with: orchestrate --resume %s --answer %s" % (run_id, answer_line(stop)))
+        print("or end it:   orchestrate --stop %s" % run_id)
         return 0 if final else 2
     status_name = state.get("status", "?")
     print("\n== run %s finished: %s ==" % (run_id, status_name))
@@ -162,7 +152,8 @@ async def _start(client, args, tele, check):
 
 async def _answer(client, run_id, text, confirm, tele, check, only=None):
     handle = client.get_workflow_handle(run_id)
-    status = await runs.status(client, run_id)
+    # Read only once a worker can answer: with none the query would wait for one.
+    status = await (runs.readable_status(client, run_id) if check else runs.status(client, run_id))
     if status is None:
         print("error: no run %r — refusing" % run_id, file=sys.stderr)
         return 3
@@ -190,18 +181,21 @@ async def _answer(client, run_id, text, confirm, tele, check, only=None):
     return _report(status, run_id, _trace_url(tele, status["state"]))
 
 
-async def _stop(client, run_id, tele):
-    """Stop the run and follow it until it ends; 0 once it has, whatever git decided on the way."""
-    status = await runs.status(client, run_id)
-    if status is None:
-        print("error: no run %r — refusing" % run_id, file=sys.stderr)
-        return 3
+async def _stop(client, run_id, tele, check=True):
+    """Stop the run and follow it until it ends; 0 once it has, whatever git decided on the way. Temporal
+    records a Stop with no worker polling, so it is recorded first; while no worker of the run's workflow
+    queue polls to end the run, that is said, and 2."""
     try:
         await runs.stop(client, run_id)
     except runs.NotWaiting as error:
         print("error: %s — refusing" % error, file=sys.stderr)
         return 3
     print("stopping %s" % run_id, flush=True)
+    try:
+        status = await (runs.readable_status(client, run_id) if check else runs.status(client, run_id))
+    except Refusal as error:
+        print("the Stop is recorded, and the run ends once a worker hears it: %s" % error, flush=True)
+        return 2
     handle = client.get_workflow_handle(run_id)
     stop = status["stop"]
     status = await follow(handle, printed=len(status["lines"]), answered=stop and stop["id"])
@@ -284,6 +278,35 @@ async def _worktrees(client, args, check):
     return 0
 
 
+# How each part of the stack is named on the command line.
+PARTS = {"temporal": "temporal", "wsl": "wsl worker", "windows": "windows worker"}
+
+
+def _said(result):
+    print("%-16s %s — %s" % (PARTS[result["component"]], "done" if result["ok"] else "FAILED", result["said"]),
+          flush=True)
+
+
+def stack_command(words, policy_path=None):
+    """The stack's reading, or a start, stop or restart of it or one part, through its one owner.
+    0 when every part it manages is up, or every action did what it was asked."""
+    try:
+        policy = policy_mod.load(policy_path)
+        if words == ["status"]:
+            reading = asyncio.run(stack.read(policy))
+            for part in reading["components"]:
+                state = part["state"] if part["state"] == "up" else part["state"].upper()
+                detail = "; ".join(filter(None, ["pid %d" % part["pid"] if part["pid"] else "", part["detail"],
+                                                 "" if part["managed"] else "not this stack's to start or stop"]))
+                print("%-16s %s%s" % (PARTS[part["name"]], state, " — " + detail if detail else ""))
+            return 0 if all(part["state"] == "up" for part in reading["components"] if part["managed"]) else 1
+        results = stack.ACTIONS[words[0]](policy, words[1] if len(words) > 1 else None, progress=_said)
+        return 0 if all(result["ok"] for result in results) else 1
+    except (Refusal, policy_mod.InvalidPolicy) as exc:
+        print("error: %s" % exc, file=sys.stderr)
+        return 4
+
+
 def parse_args(argv):
     parser = argparse.ArgumentParser(prog="orchestrate")
     parser.add_argument("task", nargs="?", help="task description (new run)")
@@ -300,12 +323,17 @@ def parse_args(argv):
                              "host is already doing goes on, and a merge or discard running may still land")
     parser.add_argument("--show", metavar="RUN_ID", help="print this run's history and stop")
     parser.add_argument("--worktrees", action="store_true", help="list the repository's worktrees")
+    parser.add_argument("--stack", nargs="+", metavar="ACTION",
+                        help="the stack: `status`, or `start`, `stop` or `restart` — all of it, or one of "
+                             "temporal, wsl, windows")
     parser.add_argument("--policy", metavar="PATH")
     args = parser.parse_args(argv)
     if sum(map(bool, (args.task, args.resume, args.continue_, args.stop, args.force_terminate, args.show,
-                      args.worktrees))) != 1:
+                      args.worktrees, args.stack))) != 1:
         parser.error("give exactly one of: a task, --resume <run-id>, --continue <run-id>, --stop <run-id>, "
-                     "--force-terminate <run-id>, --show <run-id>, --worktrees")
+                     "--force-terminate <run-id>, --show <run-id>, --worktrees, --stack")
+    if args.stack and not (args.stack == ["status"] or (args.stack[0] in stack.ACTIONS and len(args.stack) <= 2)):
+        parser.error("--stack takes `status`, or start, stop or restart and at most one of temporal, wsl, windows")
     if args.resume and args.answer is None:
         parser.error("--resume requires --answer")
     if not args.resume and args.answer is not None:
@@ -316,6 +344,10 @@ def parse_args(argv):
 async def run(argv=None, client=None, tele=None, check=True):
     """The entry point's body. Tests pass their own client and switch the preflight off."""
     args = parse_args(argv)
+    if args.stack:
+        # The stack's forms are `main`'s, outside any event loop: its owner runs its own.
+        print("error: --stack runs as its own command, not inside another", file=sys.stderr)
+        return 4
     try:
         if client is None:
             client = await runs.connect()
@@ -326,7 +358,7 @@ async def run(argv=None, client=None, tele=None, check=True):
         if args.worktrees:
             return await _worktrees(client, args, check)
         if args.stop:
-            return await _stop(client, args.stop, tele)
+            return await _stop(client, args.stop, tele, check)
         if args.force_terminate:
             return await _force_terminate(client, args.force_terminate)
         if args.resume:
@@ -340,6 +372,10 @@ async def run(argv=None, client=None, tele=None, check=True):
 
 
 def main(argv=None):
+    args = parse_args(argv)
+    if args.stack:
+        # Not inside an event loop: the owner waits on the stack's components in its own.
+        return stack_command(args.stack, args.policy)
     return asyncio.run(run(argv))
 
 

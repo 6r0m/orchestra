@@ -3,7 +3,9 @@
 Rerun only when the workflow changes on purpose, and then behind `workflow.patched`,
 so the histories recorded before the change still replay:
 `python tests/record_histories.py [name ...]` — the named histories only, every one when none is
-named. A new history is recorded by its name alone, so the ones older code wrote stay as they were.
+named. A new history is recorded by its name alone, so the ones older code wrote stay as they were:
+`approval_abort` and `failed_abort` are runs ended by an `abort` answer, which no stop offers now, so
+they cannot be recorded again — they prove that runs which took one still replay.
 """
 import base64
 import json
@@ -155,8 +157,45 @@ def final_merge_stop_lands():
     return run
 
 
+class _Cleanups:
+    """What a test's cleanup would take back, for a recording made outside one."""
+
+    def __init__(self):
+        self.calls = []
+
+    def addCleanup(self, function, *args):
+        self.calls.append((function, args))
+
+    def run(self):
+        for function, args in reversed(self.calls):
+            function(*args)
+
+
+def final_merge_no_worker_continue():
+    """A merge answered as its host's worker went away waits that host's heartbeat interval for a worker,
+    fails saying no worker took it, and merges when continued once a worker is back: the git step's wait,
+    behind its patch, which every run started since carries from its first git step."""
+    cleanups = _Cleanups()
+    queue = "target:wsl:recorded"
+    git = FakeWorktrees()
+    a1, _ = codex_review_first("PASS")
+    try:
+        _, worker_goes = E.own_host(cleanups, queue, [("plan-e1-1", 0, "p\n"), ("assess-e1-1", 0, a1),
+                                                      ("build-e2-1", 0, "b\n"),
+                                                      ("verify-e2-1", 0, codex_review_resumed("PASS"))], git=git)
+        run = E.Run(auto=True, queue=queue, policy=dict(E.POLICY, heartbeat_seconds=2))
+        worker_goes()
+        E.run(E.cli.runs.answer(E.client(), run.run_id, {"stop": run.stop["id"], "action": "merge"}, check=False))
+        run.status = E.run(E.cli.follow(run.handle, answered=run.stop["id"]))
+        E.own_host(cleanups, queue, [], git=git)
+        run.answer("continue")
+    finally:
+        cleanups.run()
+    return run
+
+
 RECORDINGS = (patch_loop_approval_merge, blocker_guidance_failure_continue_discard, final_revise_conflict_merge,
-              approval_stop, final_merge_stop_lands)
+              approval_stop, final_merge_stop_lands, final_merge_no_worker_continue)
 
 
 def main(names):

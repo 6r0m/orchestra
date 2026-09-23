@@ -15,6 +15,7 @@ sys.path[:0] = [PKG, HERE]
 
 from app.foundation import paths  # noqa: E402
 from app.workspace import repos  # noqa: E402
+import folders  # noqa: E402
 
 WINDOWS = sys.platform.startswith("win")
 
@@ -28,7 +29,7 @@ class Layout(unittest.TestCase):
 
     def setUp(self):
         self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="orch-repos-"))
-        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.addCleanup(folders.remove, self.tmp)
         self.repo = os.path.join(self.tmp, "Projects", "tool")
         os.makedirs(self.repo)
         git(self.repo, "init", "-q", "-b", "main")
@@ -114,7 +115,7 @@ class Refusals(Layout):
 class Selection(unittest.TestCase):
     def setUp(self):
         self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="orch-select-"))
-        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.addCleanup(folders.remove, self.tmp)
 
     def test_a_named_entry_its_path_or_the_orchestrations_own_repository(self):
         descriptors = {"tool": {"path": self.tmp, "target": "wsl", "base_branch": "main"}}

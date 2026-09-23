@@ -19,6 +19,7 @@ from temporal_env import POLICY, Run, client, host  # noqa: E402
 import temporal_env  # noqa: E402
 from fakes import codex_first_out, codex_review_first, codex_review_resumed  # noqa: E402
 
+from app.application import client as runs  # noqa: E402
 from app.foundation import policy as policy_mod  # noqa: E402
 
 
@@ -122,12 +123,16 @@ class Routing(Scenario):
         run.answer("yes")
         self.assertEqual(self.names()[-2:], ["build-e3-1", "verify-e3-1"], "the approved plan is built")
 
-    def test_abort_at_gate_ends_run(self):
+    def test_no_stop_offers_abort_and_one_sent_is_refused(self):
+        """Ending a run is a Stop, from any state; no stop's answers include ending it."""
         a1, _ = codex_review_first("BLOCKER")
         run = self.drive([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)])
-        run.answer("abort")
-        self.assertEqual(run.state["status"], "ABORTED")
-        self.assertTrue(run.closed())
+        self.assertEqual((run.stop["reason"], run.stop["actions"]), ("blocker", ["guide"]))
+        with self.assertRaises(runs.NotAccepted):
+            temporal_env.run(runs.answer(client(), run.run_id, {"stop": run.stop["id"], "action": "abort"},
+                                         check=False))
+        self.assertFalse(run.closed(), "an abort sent anyway ended nothing")
+        self.assertEqual(run.stop["reason"], "blocker", "and the run still waits for guidance")
 
 
 class Sessions(Scenario):
@@ -400,6 +405,20 @@ class Policy(unittest.TestCase):
                 policy_mod.validate(raw)
         raw = self._raw()
         raw["roles"]["engineer"]["reasoning_effort"] = "medium"
+        policy_mod.validate(raw)
+
+    def test_the_workflow_queue_is_required_and_a_plain_token(self):
+        """No default: a policy that forgot its own would join the deployment's queue, and its runs."""
+        for bad in (None, "", "two words", "orchestration;x", 7):
+            raw = self._raw()
+            if bad is None:
+                raw.pop("workflow_queue")
+            else:
+                raw["workflow_queue"] = bad
+            with self.assertRaisesRegex(policy_mod.InvalidPolicy, "workflow_queue", msg=repr(bad)):
+                policy_mod.validate(raw)
+        raw = self._raw()
+        raw["workflow_queue"] = "orchestration:demo1a2b3c"
         policy_mod.validate(raw)
 
     def test_shipped_architect_pins_model_and_effort(self):

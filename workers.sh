@@ -1,105 +1,146 @@
 #!/usr/bin/env bash
-# Start, check or stop what a run needs: the Temporal stack, the WSL and Windows workers, and the workbench.
-#   bash workers.sh up | check | down
-# Invoke through `bash`: the Windows drive mounts without execute bits. Each worker
-# runs in its host's own uv-managed environment (app/foundation/envpath.py) and records its pid in
-# tmp/orchestration/worker-<host>.pid; the Windows side is workers.ps1.
+# The process mechanics of the Orchestra stack, one component at a time, for the stack owner
+# (app/application/stack.py), which orders them and proves each outcome: `make up|down|check`, the
+# command line and the Workbench all go through it. And the Workbench's own systemd user service,
+# which only the Make targets manage — the Workbench never manages itself.
+#   bash workers.sh temporal start|stop|status
+#   bash workers.sh wsl|windows start|stop|status|sweep <name> [the pid a sweep knows is gone]
+#   bash workers.sh workbench install|uninstall|start|stop|restart|status
+# <name> is the worker's name on this machine (stack.worker_name): its pid file and log in
+# tmp/orchestration, and its systemd scope. ORCH_POLICY, when set, is the policy the WSL worker runs.
+# The Windows side is workers.ps1. Invoke through `bash`: the Windows drive mounts without execute bits.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO="$HERE"
-RUNTIME="$REPO/tmp/orchestration"
-PID="$RUNTIME/worker-wsl.pid"
-WORKBENCH_PORT="$(sed -n 's/.*"workbench_port": *\([0-9]*\).*/\1/p' "$HERE/policy.json")"
-# One pid file per port: a workbench on another port is its own instance, and stopping this one
-# must never stop that one.
-WORKBENCH_PID="$RUNTIME/workbench-$WORKBENCH_PORT.pid"
-WORKBENCH_URL="http://127.0.0.1:$WORKBENCH_PORT"
-# The stack reads its own settings — the database password among them — from this checkout's .env.
-COMPOSE_ENV=""
-[ -f "$REPO/.env" ] && COMPOSE_ENV="--env-file $REPO/.env"
+RUNTIME="$HERE/tmp/orchestration"
+UNIT="orchestra-workbench.service"
+COMPONENT="${1:-}" ACTION="${2:-}" NAME="${3:-}" GONE="${4:-}"
 mkdir -p "$RUNTIME"
 
-UV_PROJECT_ENVIRONMENT="$(uv run --no-project --managed-python --python 3.13 python "$HERE/app/foundation/envpath.py" "$REPO")"
-export UV_PROJECT_ENVIRONMENT
-
-windows() {
-    # Into a file, never a pipe: the worker it starts inherits the pipe and would hold it open.
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w "$HERE/workers.ps1")" "$1" \
-        >"$RUNTIME/workers-windows.out" 2>&1 </dev/null
-    tr -d '\r' <"$RUNTIME/workers-windows.out"
+usage() {
+    echo "usage: bash workers.sh temporal start|stop|status" >&2
+    echo "       bash workers.sh wsl|windows start|stop|status|sweep <name> [pid]" >&2
+    echo "       bash workers.sh workbench install|uninstall|start|stop|restart|status" >&2
+    exit 2
 }
 
-wsl_alive() {
-    [ -f "$PID" ] && kill -0 "$(cat "$PID")" 2>/dev/null
+environment() {
+    # This checkout's uv-managed environment on this host (app/foundation/envpath.py).
+    UV_PROJECT_ENVIRONMENT="$(uv run --no-project --managed-python --python 3.13 python "$HERE/app/foundation/envpath.py" "$HERE")"
+    export UV_PROJECT_ENVIRONMENT
 }
 
-workbench_alive() {
-    [ -f "$WORKBENCH_PID" ] && kill -0 "$(cat "$WORKBENCH_PID")" 2>/dev/null
+temporal() {
+    local compose=(docker compose -f "$HERE/temporal/compose.yaml") running
+    # The stack reads its own settings — the database password among them — from this checkout's .env.
+    [ -f "$HERE/.env" ] && compose+=(--env-file "$HERE/.env")
+    case "$ACTION" in
+        start) "${compose[@]}" up -d ;;
+        stop) "${compose[@]}" stop ;;
+        status)
+            running="$("${compose[@]}" ps --status running --services | tr '\n' ' ')"
+            echo "${running:-none running}" ;;
+        *) usage ;;
+    esac
 }
 
-check() {
-    (cd "$HERE" && uv --project "$HERE" run --locked --no-sync python -m app.interfaces.worker check) || return 1
-    if workbench_alive && curl -fsS -o /dev/null "$WORKBENCH_URL/"; then
-        echo "workbench              $WORKBENCH_URL"
-    else
-        echo "workbench              NOT SERVING"
-        return 1
-    fi
-}
-
-stop_pid() {
-    # SIGINT lets the process shut down and remove its pid file; a worker does not end on SIGTERM.
-    local file="$1" name="$2" pid
+wsl_pid() {
+    # The pid its file names while that process is still this worker: the file outlives a killed
+    # worker, and pids are reused. A zombie's command line is empty.
+    local file="$RUNTIME/$NAME.pid" pid
+    [ -f "$file" ] || return 1
     pid="$(cat "$file")"
-    kill -INT "$pid"
-    for _ in $(seq 20); do kill -0 "$pid" 2>/dev/null || break; sleep 0.5; done
-    kill -0 "$pid" 2>/dev/null && kill -KILL "$pid"
-    rm -f "$file"
-    echo "$name stopped"
+    tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | grep -q -- "-m app.interfaces.worker wsl" || return 1
+    echo "$pid"
 }
 
-case "${1:-}" in
-    up)
-        docker compose $COMPOSE_ENV -f "$HERE/temporal/compose.yaml" up -d
-        uv --project "$HERE" sync --locked --quiet
-        if wsl_alive; then
-            echo "wsl worker already running (pid $(cat "$PID"))"
-        else
-            # Every stream redirected and the shell replaced: nothing is left holding this script's output open.
-            (cd "$HERE" && exec setsid nohup uv --project "$HERE" run --locked --no-sync python -m app.interfaces.worker wsl \
-                >>"$RUNTIME/worker-wsl.log" 2>&1 </dev/null) >/dev/null 2>&1 </dev/null &
-            echo "wsl worker started; log: $RUNTIME/worker-wsl.log"
-        fi
-        windows up
-        if workbench_alive; then
-            echo "workbench already running (pid $(cat "$WORKBENCH_PID"))"
-        else
-            (cd "$HERE" && exec setsid nohup uv --project "$HERE" run --locked --no-sync python -m app.interfaces.workbench.server \
-                >>"$RUNTIME/workbench.log" 2>&1 </dev/null) >/dev/null 2>&1 </dev/null &
-            echo "workbench started; log: $RUNTIME/workbench.log"
-        fi
-        # Workers take a few seconds to connect and poll; the workbench records its pid once it serves.
-        for _ in $(seq 30); do
-            check >/dev/null 2>&1 && break
-            sleep 2
-        done
-        check
-        ;;
-    check)
-        check
-        ;;
-    down)
-        if workbench_alive; then
-            stop_pid "$WORKBENCH_PID" "workbench"
-        fi
-        if wsl_alive; then
-            stop_pid "$PID" "wsl worker"
-        fi
-        windows down
-        docker compose $COMPOSE_ENV -f "$HERE/temporal/compose.yaml" stop
-        ;;
-    *)
-        echo "usage: bash workers.sh up|check|down" >&2
-        exit 2
-        ;;
+wsl_worker() {
+    local pid scope="orchestra-$NAME.scope"
+    case "$ACTION" in
+        status)
+            if pid="$(wsl_pid)"; then echo "running $pid"; else echo "stopped"; fi ;;
+        start)
+            if pid="$(wsl_pid)"; then echo "running $pid"; return; fi
+            environment
+            uv --project "$HERE" sync --locked --quiet
+            # In a systemd scope of its own: the Workbench's service, which may start it, takes every
+            # process of its unit with it when it stops or restarts, and must never take a worker. One
+            # temporary directory for the worker and for the sweep after it, whoever starts either.
+            # Every stream redirected and the shell replaced: nothing holds this script's output open.
+            (cd "$HERE" && TMPDIR=/tmp exec setsid nohup systemd-run --user --scope --quiet --collect --unit="$scope" \
+                uv --project "$HERE" run --locked --no-sync python -m app.interfaces.worker wsl \
+                >>"$RUNTIME/$NAME.log" 2>&1 </dev/null) >/dev/null 2>&1 </dev/null &
+            echo "started; log: $RUNTIME/$NAME.log" ;;
+        stop)
+            if pid="$(wsl_pid)"; then
+                # SIGINT lets it shut down — its activities cancelled, its turns' agents ended, its pid
+                # file removed. One still there after 10 s is killed, and its reapers end its agents.
+                kill -INT "$pid" 2>/dev/null || true
+                for _ in $(seq 20); do wsl_pid >/dev/null || break; sleep 0.5; done
+                if wsl_pid >/dev/null; then kill -KILL "$pid" 2>/dev/null || true; fi
+                for _ in $(seq 10); do wsl_pid >/dev/null || break; sleep 0.5; done
+                if pid="$(wsl_pid)"; then echo "still running $pid" >&2; exit 1; fi
+            fi
+            # Its scope ends once the reapers it left have ended its agents' scopes.
+            for _ in $(seq 20); do systemctl --user is-active --quiet "$scope" || break; sleep 0.5; done
+            if systemctl --user is-active --quiet "$scope"; then echo "its scope $scope still runs" >&2; exit 1; fi
+            rm -f "$RUNTIME/$NAME.pid"
+            echo "stopped" ;;
+        sweep)
+            environment
+            cd "$HERE"
+            # shellcheck disable=SC2086 # the pid, when there is one, is one more argument
+            TMPDIR=/tmp uv --project "$HERE" run --locked --no-sync python -m app.interfaces.worker sweep $GONE ;;
+        *) usage ;;
+    esac
+}
+
+windows_worker() {
+    # workers.ps1 through powershell.exe by its path: the Workbench's service has no Windows PATH.
+    local powershell out code=0
+    powershell="$(wslpath -u 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe')"
+    # Into a file, never a pipe: a worker it starts would inherit the pipe and hold it open.
+    out="$(mktemp "$RUNTIME/windows.XXXXXX")"
+    "$powershell" -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w "$HERE/workers.ps1")" "$ACTION" "$NAME" \
+        ${GONE:+"$GONE"} >"$out" 2>&1 </dev/null || code=$?
+    tr -d '\r' <"$out"
+    rm -f "$out"
+    return "$code"
+}
+
+workbench_service() {
+    local units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+    case "$ACTION" in
+        install)
+            environment
+            uv --project "$HERE" sync --locked --quiet
+            mkdir -p "$units"
+            # This checkout and its environment, which only this machine knows, are rendered in here.
+            sed -e "s|@CHECKOUT@|$HERE|g" -e "s|@ENVIRONMENT@|$UV_PROJECT_ENVIRONMENT|g" \
+                "$HERE/app/interfaces/workbench/$UNIT" >"$units/$UNIT"
+            systemctl --user daemon-reload
+            # The user manager, and the Workbench with it, outlives the last WSL terminal only while lingering is on.
+            if [ "$(loginctl show-user "$USER" -p Linger --value 2>/dev/null)" != yes ]; then
+                echo "warning: lingering is off for $USER, so the Workbench stops when your last WSL terminal" \
+                     "closes; turn it on with: sudo loginctl enable-linger $USER" >&2
+            fi
+            systemctl --user enable "$UNIT"
+            # Restarted, not only started: installing again is how this checkout's new code loads.
+            systemctl --user restart "$UNIT"
+            systemctl --user --no-pager --lines=0 status "$UNIT" ;;
+        uninstall)
+            systemctl --user disable --now "$UNIT" 2>/dev/null || true
+            rm -f "$units/$UNIT"
+            systemctl --user daemon-reload ;;
+        start|stop|restart) systemctl --user "$ACTION" "$UNIT" ;;
+        status) systemctl --user --no-pager status "$UNIT" ;;
+        *) usage ;;
+    esac
+}
+
+case "$COMPONENT" in
+    temporal) temporal ;;
+    wsl) [ -n "$NAME" ] || usage; wsl_worker ;;
+    windows) [ -n "$NAME" ] || usage; windows_worker ;;
+    workbench) workbench_service ;;
+    *) usage ;;
 esac

@@ -71,7 +71,8 @@ where the run was. Do not re-derive a `states/` layer here.
 | [app/orchestration/](../../app/orchestration/README.md) — [workflow.py](../../app/orchestration/workflow.py) | the run: stages, verdict routes, stops and their named answers, the final gate, the `status` query |
 | [routing.py](../../app/orchestration/routing.py) | which stop a verdict asks for and where it sends the run — no dependencies |
 | [app/application/](../../app/application/README.md) — [activities.py](../../app/application/activities.py) | everything a run does on its target host: resolve, worktree, role-run, merge, discard, the change for review, trace writes |
-| [client.py](../../app/application/client.py) | the one client of runs — start, list, status, answer, the change, the worktrees — shared by the page and the CLI |
+| [client.py](../../app/application/client.py) | the one client of runs — start, list, status, answer, stop, force terminate, the change, the worktrees and the removal of what a closed run kept — shared by the page and the CLI |
+| [stack.py](../../app/application/stack.py) | the stack's one reading and its one owner: Temporal and each host's worker, started, stopped and restarted for the Makefile, the command line and the page |
 | [app/agents/](../../app/agents/README.md) — [nodes.py](../../app/agents/nodes.py) | prompt composition, the agent argv, session identity, verdict parsing, failure classes |
 | [terminal.py](../../app/agents/terminal.py) · [ptyhost.py](../../app/agents/ptyhost.py) · [turn_hook.py](../../app/agents/turn_hook.py) | each role's live terminal on its host — its record, its WebSocket, a role turn run in it and that turn's completion |
 | [launch.py](../../app/agents/launch.py) | one agent process from an argv list, with its whole descendant tree contained |
@@ -82,9 +83,9 @@ where the run was. Do not re-derive a `states/` layer here.
 | [policy.json](../../policy.json) · [policy.py](../../app/foundation/policy.py) | roles, brains, budgets, access, target hosts — and strict validation of them |
 | [envpath.py](../../app/foundation/envpath.py) | where each checkout's environment lives on each host, and its guarded removal |
 | [app/observability/](../../app/observability/README.md) — [telemetry.py](../../app/observability/telemetry.py) | the optional trace of a run — its work item, phases, role steps, stops, final diff and scores, written to the [trace contract](trace-contract.md) — and the per-run settings that let each agent's tracing plugin nest its turns there |
-| [app/interfaces/](../../app/interfaces/README.md) — [workbench/](../../app/interfaces/workbench/server.py) | the operator's page: every run, its stop and answers, its live terminals, its rounds and its change |
-| [cli.py](../../app/interfaces/cli.py) | the command line over the same client: start, answer, continue, show, list — for tests and automation |
-| [worker.py](../../app/interfaces/worker.py) · [workers.sh](../../workers.sh) · [workers.ps1](../../workers.ps1) | one Temporal worker per host, and their start, check and stop |
+| [app/interfaces/](../../app/interfaces/README.md) — [workbench/](../../app/interfaces/workbench/server.py) | the operator's page: the stack, every run, its stop and answers, its live terminals, its rounds and its change — a systemd user service in WSL, outside the stack it controls |
+| [cli.py](../../app/interfaces/cli.py) | the command line over the same client and the stack's owner: start, answer, continue, stop, force terminate, show, list, the stack — for tests, automation and the Makefile |
+| [worker.py](../../app/interfaces/worker.py) · [workers.sh](../../workers.sh) · [workers.ps1](../../workers.ps1) | one Temporal worker per host, and each part of the stack's process mechanics: start, stop, status and the sweep of what a dead worker's stages left |
 | [temporal/](../../temporal/compose.yaml) | the Temporal service: server, its PostgreSQL, the web UI, the namespace |
 | [roles/](../../roles/) | two persona files, sent at session start |
 | [tests/](../../tests/README.md) | what is proven, and how to run it |
@@ -164,7 +165,7 @@ still lands on a checkout.
 - **D17** **The execution seam is a role turn in the role's live terminal on the target host, contained.**
   A role-run is an activity on its target host's task queue. Each role of a run has one
   terminal on that host's worker, from its first turn until the run's merge or discard begins
-  or the run is aborted: every byte its agent draws is recorded under `tmp/orchestration/<run-id>/terminals/`
+  or the run otherwise ends: every byte its agent draws is recorded under `tmp/orchestration/<run-id>/terminals/`
   and served on the worker's WebSocket, which takes keystrokes back, so the operator can
   watch, press Esc and type at any time. A turn ends the agent process under the terminal,
   if any, and starts the vendor's interactive CLI again from an argv list — no shell, so no
@@ -254,20 +255,54 @@ still lands on a checkout.
   run without keys records nothing and behaves identically. Only activities write it, each run
   once, so neither a replayed workflow task nor a retry can write a row twice; the only values that
   cross back into the workflow are the opaque ids of the work item and its phases, which no route,
-  verdict, budget or stop reads. A failed stage is recorded as an error with its error type before
+  verdict, budget or stop reads. A step a Stop cut short is no failure: its row says only that the run
+  was stopped. One cut short any other way — its worker stopped, a force terminate, a heartbeat timeout
+  — is recorded as lost. A failed stage is recorded as an error with its error type before
   its failure reaches the workflow.
 
   The trace store receives only what this component launches. No user-level configuration holds a
   working key — neither Claude's settings nor its credential store, whose secret outranks any a
-  run supplies — so this component takes the keys from `secrets/langfuse.env`, the one file holding every
+  run supplies — so this component takes the keys from this checkout's `.env`, the one file holding every
   Langfuse credential, and a traced Claude role-run receives them in its own settings file for as long as it
-  runs; one a stage left when its worker died first is removed by the next worker to start on that
-  host. The setup, on both hosts, is in [tools/README.md](../../tools/README.md).
+  runs. One a stage left when its worker died first is removed as soon as the stack stops that worker
+  and has proven it gone (D32), or else by the next worker to start on that host. The setup, on both hosts, is in [tools/README.md](../../tools/README.md).
 - **D23** **Each target host has its own task queue**, `target:<os>:<host>`,
   polled only by that host's worker, and every activity of a run goes to its
-  target's queue. The WSL worker also runs the workflows on the `orchestration`
-  queue. A run needs the workflow queue and its own target's queue polled, and
-  nothing else: a WSL run never waits on the Windows worker.
+  target's queue. The WSL worker also runs the workflows, on its policy's
+  workflow queue (`workflow_queue`): `orchestration` for the deployment, where
+  every run Temporal retains is queried, and one of their own for the demo's and
+  the acceptance's policies, so each is a stack apart whose worker never takes
+  another's workflow tasks. A run needs its workflow queue and its own target's
+  queue polled, and nothing else: a WSL run never waits on the Windows worker.
+- **D32** **The stack has one owner, and the Workbench is outside it.** A stack is
+  what one policy runs: Temporal, one service on the machine, and a worker per
+  target host, the WSL one also running the policy's workflows.
+  `app/application/stack.py` is its one reading and its one owner — the Makefile's
+  `up`, `down` and `check`, the command line's `--stack` and the Workbench's stack
+  panel all go through it, on WSL. It starts Temporal, then each worker once
+  Temporal answers, and stops them in the reverse order. A part is up only when
+  proven: Temporal answering, and a worker polling each of its queues as the
+  process its pid file names — Temporal lists a dead worker's polls for minutes. A
+  worker stopped on purpose counts as stopped only once its process is proven gone,
+  and then what its stages left on that host is swept at once (D20). One action
+  runs at a time, under a lock the kernel frees if its holder dies. The checkout's
+  own policy's stack manages all three parts; another policy's manages only its
+  WSL worker, since Temporal is the deployment's and the Windows host runs only
+  its own copy of a policy. The process mechanics are `workers.sh` and
+  `workers.ps1`, one part at a time: the WSL worker starts in a systemd scope of its
+  own, so a restart of the Workbench's service never takes it; the Windows worker
+  is created through WMI, hidden, and known by its command line as well as its pid.
+  WSL runs a Windows program with the token of whatever started WSL — from the
+  Workbench's service, which systemd starts, that is the process that booted the
+  distro — and the Windows worker and its agents never run as an administrator: a
+  start from an elevated side is refused, and says to start WSL from a normal
+  terminal. The reading shows such a worker as one this side cannot start, and a
+  restart leaves it running rather than stop it only to leave it down.
+  The Workbench is a systemd user service in WSL, `orchestra-workbench.service`: it
+  starts whenever the distro does and comes back if it fails, runs with the
+  operator's login PATH, which the workers it starts inherit, and is installed,
+  started and stopped only by the Makefile's `workbench-*` targets — never by
+  itself, `make up` or `make down`.
 - **D24** **The worktree lifecycle and the final gate.** A run's worktree is
   created by the target's own git at `<worktree root>/<run-id>` on branch
   `<run-id>` from the base branch, linked the way that repository's own git
@@ -304,12 +339,15 @@ still lands on a checkout.
   verdict and its feedback, its change as its target host's git reads it, and links to its Temporal
   and Langfuse pages. Each run also says what it is doing now — the stage and role at work, or
   the stop it waits at or the failure it stopped on — since when, and which host's worker it is
-  blocked by when one is down; above them the page shows whether Temporal answers and whether each
-  host's worker polls, the reading `make check` prints. It also shows any repository's worktrees
-  and which of them are merged. It starts runs, and stops or force-terminates them (D31). It holds no state: every read is Temporal's or a worker's, and every write is a
-  start, an answer Update, a Stop or a force terminate through `client.py`, which the command line
-  uses too, so the page can do nothing the workflow's own rules and validators, or Temporal's own
-  lifecycle, do not allow. A change is read in bounded
+  blocked by when one is down, with that worker's start beside it; a run whose workflow worker is
+  down is still shown, from its listing. Above them the stack panel shows each part of the stack
+  and starts, stops and restarts it or the whole stack (D32), the reading `make check` prints. It
+  also shows any repository's worktrees, which of them are merged and which run each is. It starts
+  runs, stops or force-terminates them (D31), and removes what a closed run kept. It holds no
+  state: every read is Temporal's, a worker's or the stack owner's, and every write is a start, an
+  answer Update, a Stop, a force terminate or a removal through `client.py`, which the command line
+  uses too, or a stack action through the stack's owner — so the page can do nothing the workflow's
+  own rules and validators, Temporal's own lifecycle or the stack's owner do not allow. A change is read in bounded
   parts, because Temporal refuses a payload past its own limit and a review that cannot be read is
   worse than one read in two presses; each part carries the identity of the change it came from, so
   parts of two changes — the terminals stay writable at the gate — are never shown as one. Its API and the workers' terminal sockets accept only the
@@ -336,17 +374,18 @@ still lands on a checkout.
   weights pass it, so naming two genuinely different models is the operator's
   part of this invariant.
 - **D6** **A stop waits in the workflow and nowhere else.** Each stop publishes
-  the actions it takes — approve, revise or abort at the plan approval; guide or
-  abort at a blocker or an exhausted budget; continue or abort after a failed
-  stage; merge, `revise:engineer`, `revise:architect` or discard at the final
-  gate, where a revise names the role it goes to — and the page and the command
-  line offer exactly those, owning only how each is labelled and typed. Its
-  answer arrives as an Update carrying one of them, and a validator rejects
-  anything else before it reaches history, so no unrecognised answer is ever read
-  as abort or discard; guide and revise carry the operator's words, and a discard
-  must be confirmed. The Update's id is
-  `answer:<stop-id>`, so an answer sent twice is applied once. No activity ever
-  waits for a human.
+  the actions it takes — approve or revise at the plan approval; guide at a
+  blocker or an exhausted budget; continue after a failed stage; merge,
+  `revise:engineer`, `revise:architect` or discard at the final gate, where a
+  revise names the role it goes to — and the page and the command line offer
+  exactly those, owning only how each is labelled and typed. Its answer arrives
+  as an Update carrying one of them, and a validator rejects anything else before
+  it reaches history, so no unrecognised answer is ever read as a discard; guide
+  and revise carry the operator's words, and a discard must be confirmed. The
+  Update's id is `answer:<stop-id>`, so an answer sent twice is applied once. No
+  activity ever waits for a human. Ending a run is no stop's answer: a Stop ends
+  it from any state (D31). No stop offers `abort`; a run that took one ended
+  `ABORTED`, and the workflow keeps its handling so those runs still replay.
 - **D10** **Account safety:** human-triggered only (no scheduler may start an
   agent run on subscription auth), strictly sequential, bounded, official
   CLI interfaces only. Scheduled/parallel execution, if ever wanted, moves
@@ -380,7 +419,9 @@ still lands on a checkout.
   and the terminals' close ends its agent sooner. A git side effect already running —
   the worktree's creation, a merge, a discard — is never cut off: the run shows
   `STOPPING`, waits for what git did, and a merge or discard that landed ends the run
-  as it always does, while anything else ends it stopped. *Force terminate* is
+  as it always does, while anything else ends it stopped. One that its host's worker
+  has not taken within the policy's heartbeat interval fails, never having run, so a
+  Stop never waits for a worker to come back, and nothing lands after it. *Force terminate* is
   Temporal's termination, for a run a Stop cannot finish: the run closes at once and
   none of its own cleanup runs, but termination cannot stop what the run's host is
   already doing. A working role's turn hears it at its next heartbeat and ends its
@@ -390,7 +431,16 @@ still lands on a checkout.
   terminals stay until its host's worker restarts, and nothing stops a git side effect
   mid-write. The workbench asks for force terminate to be confirmed and says all of
   this. Both are the workbench's and the command line's (`--stop`,
-  `--force-terminate`), through `client.py`.
+  `--force-terminate`), through `client.py`. What a run that closed this way kept —
+  its worktree, its branch and the worktree's environment — stays until the operator
+  removes it from the workbench, confirmed, through the run's target host's own git
+  as a discard removes them; never while the run is open, never for a run that
+  merged or was discarded, and never under a git side effect of the run still running
+  on its host — a terminated run's merge goes on — which refuses it there until it
+  has landed. A removal runs once, like every git side effect: when git refuses, the
+  workbench says why, and only the operator's next removal tries again. One that its
+  host's worker has not taken within a minute fails never having run, and the workbench
+  names the worker to start.
 - **D18b** **A rehydrated session is bootstrapped from zero**:
   any prompt built for a session being born carries task, persona, the
   **current stage ask**, and the latest findings/guidance — never a delta
@@ -449,7 +499,7 @@ constrains.
 | D1 Temporal owns the workflow, D5 round budget and single attempts, D8 compact state | [Owns](#owns) |
 | D9 no chat-UI automation on critical accounts, D11 agents never stage, commit or push | [Does not own](#does-not-own) |
 | D2 two roles and four stages, D13 config versus code, D22 environments, D30 source organised by concern | [Composition](#composition) |
-| D4 verdict routing, D7 sessions, D17 execution seam, D18 model as configuration, D20 observability owners, D21 provider session stores, D23 a task queue per host, D24 worktree lifecycle and final gate, D29 the workbench | [Relationships and dependency direction](#relationships-and-dependency-direction) |
+| D4 verdict routing, D7 sessions, D17 execution seam, D18 model as configuration, D20 observability owners, D21 provider session stores, D23 a task queue per host, D32 the stack's one owner, D24 worktree lifecycle and final gate, D29 the workbench | [Relationships and dependency direction](#relationships-and-dependency-direction) |
 | D3, D6, D10, D14, D15, D16, D31 Stop and force terminate, D18b, D19, D25 determinism, D26 repository facts, D27 controller-only git | [Invariants](#invariants) |
 | D28 containment, live-terminal and plugin-build limits | [Risks and technical debt](#risks-and-technical-debt) |
 

@@ -1,0 +1,17 @@
+# The Workbench as a systemd user service in WSL, outside the stack it controls: it starts whenever
+# this distro does and comes back if it fails. `make workbench-install` renders @CHECKOUT@ and
+# @ENVIRONMENT@ — this checkout and its uv-managed environment — into ~/.config/systemd/user.
+[Unit]
+Description=Orchestra Workbench, the operator console on 127.0.0.1
+
+[Service]
+WorkingDirectory=@CHECKOUT@
+Environment=UV_PROJECT_ENVIRONMENT=@ENVIRONMENT@
+# A login shell's: the operator's PATH — uv, and the agent CLIs the workers it starts run — which the
+# user manager's own environment lacks.
+ExecStart=/bin/bash -lc 'exec uv --project . run --locked --no-sync python -m app.interfaces.workbench.server'
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

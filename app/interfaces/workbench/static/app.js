@@ -1,15 +1,15 @@
 "use strict";
-// The workbench page: the runs, one run's stop, terminals, rounds and change. Agent and run
-// text is only ever set as text, never as markup.
+// The workbench page: the stack, the runs, one run's stop, terminals, rounds and change. Agent and
+// run text is only ever set as text, never as markup.
 
 const CONFIG = JSON.parse(document.getElementById("config").textContent);
 const ROLES = ["engineer", "architect"];
 // How an answer is shown. Which answers a stop takes comes with the stop, and whether one is accepted
 // is the workflow's; an action named here only by the stop still gets its button.
 const LABELS = { approve: "Approve", revise: "Revise", "revise:engineer": "Revise — engineer",
-  "revise:architect": "Revise — architect", guide: "Guide", continue: "Continue", abort: "Abort",
+  "revise:architect": "Revise — architect", guide: "Guide", continue: "Continue",
   merge: "Merge", discard: "Discard" };
-const DANGER = new Set(["abort", "discard"]);
+const DANGER = new Set(["discard"]);
 // A second look before an answer that lands or removes the work.
 const ASK = { merge: "Merge the verified change into the base branch?",
   discard: "Discard deletes the worktree and its branch. Discard?" };
@@ -52,7 +52,26 @@ function el(tag, text, className) {
 
 // ---- what the stack and each run are doing now ----------------------------------------------
 
-const HOSTS = { wsl: "WSL worker", windows: "Windows worker" };
+const PARTS = { temporal: "Temporal", wsl: "WSL worker", windows: "Windows worker" };
+const HOSTS = { wsl: PARTS.wsl, windows: PARTS.windows };
+const VERBS = { start: "Start", stop: "Stop", restart: "Restart" };
+// What stopping a part interrupts, said before the operator confirms it; a restart stops it first.
+const INTERRUPTS = {
+  temporal: "Stopping Temporal pauses every run until it starts again. An agent at work goes on, but if " +
+    "Temporal stays down longer than a role's heartbeat interval, its stage fails and waits for you to continue it.",
+  wsl: "Stopping the WSL worker ends any agent at work on it — its stage then waits for you to continue it — " +
+    "and pauses every run until it starts again. A merge or discard it is running may be cut off; its run " +
+    "then waits at that step until the step fails or times out, and Force terminate ends it sooner.",
+  windows: "Stopping the Windows worker ends any agent at work on it — its stage then waits for you to " +
+    "continue it — and pauses the Windows runs until it starts again. A merge or discard it is running is " +
+    "cut off; its run then waits at that step until the step times out, and Force terminate ends it sooner.",
+  stack: "Stopping the stack stops both workers, then Temporal: every agent at work ends — its stage then " +
+    "waits for you to continue it — a merge or discard running may be cut off, and every run pauses until " +
+    "it starts again.",
+};
+// The stack's last reading: what the page shows of each part, and whether a blocked run's host can be
+// started from here.
+let stackReading = null;
 
 // How long since an ISO time, as minutes and seconds, or hours and minutes past an hour.
 function elapsed(since) {
@@ -76,19 +95,77 @@ function now(view) {
   return { text: text, blocked: blocked.length ? "blocked: " + blocked.join(", ") : "" };
 }
 
-async function refreshHealth() {
-  let health;
+async function refreshStack() {
   try {
-    health = await api("/api/health");
+    stackReading = await api("/api/health");
   } catch (error) {
     return;
   }
-  const line = $("health");
-  line.replaceChildren(el("span", "Temporal " + health.temporal, health.temporal));
-  for (const [host, state] of Object.entries(health.hosts)) {
-    line.appendChild(el("span", (HOSTS[host] || host) + " " + state, state));
+  renderStack(stackReading);
+}
+
+// Each part with its state, and — for one this stack manages — the controls that suit it.
+function renderStack(health) {
+  const parts = $("stack-parts");
+  parts.replaceChildren();
+  for (const part of health.components) {
+    const box = el("span", null, "stack-part");
+    box.appendChild(el("span", PARTS[part.name] || part.name, "name"));
+    box.appendChild(el("span", part.state, part.state));
+    box.title = [part.pid && "pid " + part.pid, part.detail, !part.managed && "not this stack's to start or stop"]
+      .filter(Boolean).join(" · ");
+    if (part.managed) {
+      // One this side cannot start again gets no Start or Restart; its reason is in its detail.
+      const actions = part.state === "down" ? ["start"] : ["restart", "stop"];
+      for (const action of actions.filter((action) => part.startable || action === "stop")) {
+        box.appendChild(stackButton(action, part.name, $("stack-result")));
+      }
+      if (!part.startable) {
+        box.appendChild(el("span", part.state === "unknown" ? "its state cannot be read" : "cannot be started from here",
+          "muted"));
+      }
+    }
+    parts.appendChild(box);
   }
-  line.title = health.error || "";
+  const all = $("stack-all");
+  all.replaceChildren();
+  if (health.components.filter((part) => part.managed).length > 1) {
+    for (const action of ["start", "restart", "stop"]) all.appendChild(stackButton(action, null, $("stack-result")));
+  }
+  $("connection").textContent = health.temporal === "up" ? "" : "Temporal is down: " + (health.error || "");
+}
+
+function stackButton(action, part, line, label) {
+  const button = el("button", label || VERBS[action] + " " + (part ? PARTS[part] : "stack"),
+    action === "stop" ? "danger" : "");
+  button.type = "button";
+  button.onclick = () => stackAction(action, part, line);
+  return button;
+}
+
+// A start, stop or restart of the stack or one part, as its one owner does it; what each part came to.
+async function stackAction(action, part, line) {
+  const named = part ? PARTS[part] : "the stack";
+  if (action !== "start" && !window.confirm(INTERRUPTS[part || "stack"] + " " + VERBS[action] + " " + named + "?")) {
+    return;
+  }
+  const buttons = document.querySelectorAll("#stack button, #run-blocked button");
+  for (const button of buttons) button.disabled = true;
+  line.textContent = "sending…";
+  try {
+    const done = await api("/api/stack", { action: action, component: part });
+    const failed = done.results.filter((result) => !result.ok);
+    line.textContent = (failed.length ? "failed: " : "done: ") + action + " " + named + " — " +
+      done.results.map((result) => PARTS[result.component] + ": " + result.said).join("; ");
+    stackReading = done.health;
+    renderStack(stackReading);
+  } catch (error) {
+    line.textContent = "not accepted: " + error.message;
+  } finally {
+    for (const button of buttons) button.disabled = false;
+  }
+  refreshRuns();
+  refreshRun();
 }
 
 // ---- the run list -------------------------------------------------------------------------
@@ -174,6 +251,17 @@ async function loadWorktrees() {
       const li = el("li");
       li.appendChild(el("span", (row.branch || "(detached)") + " — " + row.state, "task"));
       li.appendChild(el("span", row.path, "muted"));
+      if (row.run) li.appendChild(el("span", "run " + row.run.toLowerCase(), "muted"));
+      if (row.removable) {
+        const remove = el("button", "Remove", "danger");
+        remove.type = "button";
+        remove.onclick = (event) => {
+          event.stopPropagation();
+          removeKept(row.branch, $("worktrees-result"), loadWorktrees);
+        };
+        li.appendChild(remove);
+      }
+      if (row.run) li.onclick = () => select(row.branch);
       list.appendChild(li);
     }
     if (!view.rows.length) list.appendChild(el("li", "none", "muted"));
@@ -210,6 +298,8 @@ $("start").onsubmit = async (event) => {
 function select(runId) {
   if (selected === runId) return;
   selected = runId;
+  $("run-kept").hidden = true;
+  $("run-task").textContent = "";
   shownStop = null;
   diffLoadedFor = null;
   for (const role of ROLES) closeTerminal(role);
@@ -237,15 +327,21 @@ async function refreshRun() {
   const state = status.state;
   const view = status.view;
   runActive = view.state !== "closed";
-  $("run-task").textContent = view.goal || runId;
-  $("run-meta").textContent = [runId, view.repo + " on " + view.host,
-    view.phase && "phase " + view.phase + ", round " + (view.round || 0), view.worktree]
-    .filter(Boolean).join(" · ");
+  if (!status.unreadable || !$("run-task").textContent) {
+    $("run-task").textContent = view.goal || runId;
+    $("run-meta").textContent = [runId, view.repo && view.repo + " on " + view.host,
+      view.phase && "phase " + view.phase + ", round " + (view.round || 0), view.worktree]
+      .filter(Boolean).join(" · ");
+  }
   const shown = now(view);
-  $("run-now").replaceChildren(el("span", shown.text), el("span", shown.blocked ? " · " + shown.blocked : "",
-    "blocked"));
+  $("run-now").replaceChildren(el("span", status.unreadable || shown.text),
+    el("span", shown.blocked ? " · " + shown.blocked : "", "blocked"));
   $("run-controls").hidden = !runActive;
   $("run-stop").disabled = view.state === "stopping";
+  renderBlocked(view);
+  renderKept(runId, view);
+  // With its worker down the run is shown from its listing alone: what it last said stays on the page.
+  if (status.unreadable) return;
   $("link-temporal").href = status.links.temporal;
   $("link-trace").hidden = !status.links.trace;
   if (status.links.trace) $("link-trace").href = status.links.trace;
@@ -257,6 +353,50 @@ async function refreshRun() {
     diffLoadedFor = status.stop.id;
     loadDiff();
   }
+}
+
+// A run blocked by a host whose worker this stack can start offers that start where it says so.
+function renderBlocked(view) {
+  const box = $("run-blocked");
+  const down = new Set((stackReading ? stackReading.components : [])
+    .filter((part) => part.managed && part.startable && part.state === "down").map((part) => part.name));
+  const startable = view.blocked_by.filter((host) => down.has(host));
+  box.hidden = !startable.length;
+  if (box.dataset.shown === startable.join()) return;
+  box.dataset.shown = startable.join();
+  box.replaceChildren(...startable.map((host) => stackButton("start", host, $("run-control-result"),
+    "Start the " + PARTS[host])));
+}
+
+// What a closed run kept — its worktree and branch, unmerged — until the operator removes them.
+function renderKept(runId, view) {
+  $("run-kept").hidden = !view.kept;
+  if (!view.kept) return;
+  $("run-kept-text").textContent = "It keeps its worktree " + view.worktree + " and its branch " + runId +
+    ": look at its change below, and remove them once you are done with them.";
+  $("run-kept-show").onclick = () => showWorktrees(view.repo);
+  $("run-remove").onclick = () => removeKept(runId, $("run-control-result"), refreshRun);
+}
+
+async function removeKept(runId, line, then) {
+  if (!window.confirm("Remove deletes run " + runId + "'s worktree and its branch, with any of its work that " +
+    "is not merged. Remove them?")) return;
+  line.textContent = "sending…";
+  try {
+    await api("/api/runs/" + encodeURIComponent(runId) + "/remove", { confirm: true });
+    line.textContent = "removed";
+  } catch (error) {
+    line.textContent = "not accepted: " + error.message;
+    return;
+  }
+  then();
+}
+
+function showWorktrees(repo) {
+  $("worktrees-path").value = "";
+  $("worktrees-repo").value = repo;
+  loadWorktrees();
+  $("worktrees").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 function renderStop(stop) {
@@ -451,8 +591,8 @@ function closeTerminal(role) {
 }
 
 loadRepos().catch((error) => { $("start-result").textContent = error.message; });
-refreshHealth();
+refreshStack();
 refreshRuns();
-setInterval(refreshHealth, 5000);
+setInterval(refreshStack, 5000);
 setInterval(refreshRuns, 5000);
 setInterval(refreshRun, 2500);

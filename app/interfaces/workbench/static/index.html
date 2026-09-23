@@ -11,9 +11,13 @@
 <body>
 <header class="bar">
   <h1>Orchestration workbench</h1>
-  <span id="health" class="health"></span>
   <span id="connection" class="muted"></span>
 </header>
+<section id="stack" class="card stack-panel">
+  <div id="stack-parts" class="stack-parts"></div>
+  <div id="stack-all" class="actions"></div>
+  <p id="stack-result" class="muted"></p>
+</section>
 <main class="layout">
   <aside class="sidebar">
     <form id="start" class="card">
@@ -40,6 +44,7 @@
       <label>or its path <input id="worktrees-path" type="text" placeholder="/mnt/e/Repos/name"></label>
       <p id="worktrees-base" class="muted"></p>
       <ul id="worktrees" class="runs"></ul>
+      <p id="worktrees-result" class="muted"></p>
     </section>
   </aside>
   <section id="run" class="content" hidden>
@@ -50,6 +55,14 @@
       <div id="run-controls" class="actions" hidden>
         <button id="run-stop" type="button">Stop run</button>
         <button id="run-terminate" type="button" class="danger">Force terminate</button>
+      </div>
+      <div id="run-blocked" class="actions" hidden></div>
+      <div id="run-kept" hidden>
+        <p id="run-kept-text" class="muted"></p>
+        <div class="actions">
+          <button id="run-kept-show" type="button">Show in Worktrees</button>
+          <button id="run-remove" type="button" class="danger">Remove worktree and branch</button>
+        </div>
       </div>
       <p id="run-control-result" class="muted"></p>
       <p class="links"><a id="link-temporal" target="_blank" rel="noopener">Temporal</a>

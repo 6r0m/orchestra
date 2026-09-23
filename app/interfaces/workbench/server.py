@@ -1,12 +1,14 @@
-"""The operator's workbench: one localhost page over every run.
+"""The operator's workbench: one localhost page over every run and the stack they run on.
 
     python -m app.interfaces.workbench.server
 
 It serves `static/` beside it and a small JSON API over `app.application` on `http://127.0.0.1:<workbench_port>`:
-the stack's health, the runs and what each is doing now, a run's status and timeline, its change,
-starting a run and answering its stop. The
-page opens each run's agent terminals directly on the worker of the run's host (`app.agents.terminal`).
-It holds no state of its own: stopping it changes no run.
+the stack's reading and its start, stop and restart; the runs and what each is doing now, a run's
+status and timeline, its change; starting a run, answering its stop, stopping or force-terminating
+it, and removing what a closed run kept. The page opens each run's agent terminals directly on the
+worker of the run's host (`app.agents.terminal`). It holds no state of its own: stopping it changes
+no run and stops no part of the stack. WSL's systemd runs it (`orchestra-workbench.service`); it
+never manages its own process.
 
 Every API request carries the page's token in `X-Workbench-Token`; a request whose Host is not
 this server's loopback address, or whose Origin is another site, is refused, so neither another
@@ -14,18 +16,20 @@ page in the browser nor a DNS-rebound name can use it.
 """
 import asyncio
 import base64
+import concurrent.futures
+import datetime
 import json
 import os
 import re
 import sys
 import threading
+import time
 import urllib.parse
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from app.application import client as runs
 from app.application import stack
-from app.foundation import paths
 from app.foundation import policy as P
 from app.workspace import repos
 from app.agents import terminal
@@ -40,6 +44,12 @@ STATIC = {"/": ("index.html", "text/html; charset=utf-8"), "/app.js": ("app.js",
 RUN_ID = re.compile(r"^[\w-]{1,64}$")
 MAX_BODY = 1 << 20
 ANSWER_KEYS = {"stop", "action", "text", "confirm"}
+# The page reads the stack three ways every few seconds, and a Windows worker's process takes about
+# half a second to read: every request shares one reading at most this old, and a stack action drops it.
+READING_SECONDS = 3
+# A run's status is a query its own workflow worker answers; while that worker is down the page still
+# shows the run, from its listing, after waiting this long for the answer.
+STATUS_SECONDS = datetime.timedelta(seconds=5)
 
 
 class Loop:
@@ -55,7 +65,14 @@ class Loop:
             if self._client is None:
                 self._client = await self._connect()
             return await work(self._client)
-        return asyncio.run_coroutine_threadsafe(attempt(), self.loop).result(timeout)
+        done = asyncio.run_coroutine_threadsafe(attempt(), self.loop)
+        try:
+            return done.result(timeout)
+        except concurrent.futures.TimeoutError:
+            # Its answer is no longer awaited, so the work is cancelled rather than left to finish unseen; a
+            # call it already sent — a Stop, an answer — may still take effect in Temporal.
+            done.cancel()
+            raise
 
 
 def trace_links():
@@ -75,6 +92,21 @@ def make_handler(call, policy, token, links=None):
     # What a run that Temporal no longer runs said the last time it was read: it says nothing else now,
     # and the list is read again every few seconds.
     finished = {}
+    reading = {"at": None, "value": None}
+    reading_lock = threading.Lock()
+
+    def stack_reading():
+        """The stack's reading, shared by the requests of a few seconds."""
+        with reading_lock:
+            if reading["at"] is None or time.monotonic() - reading["at"] > READING_SECONDS:
+                try:
+                    reading["value"] = call(lambda client: stack.status(policy, client))
+                except runs.Refusal as exc:
+                    # No Temporal to ask; the processes are still read.
+                    reading["value"] = asyncio.run(stack.status(policy, None, str(exc)))
+                reading["at"] = time.monotonic()
+            return reading["value"]
+
     hosts = {"127.0.0.1:%d" % port, "localhost:%d" % port}
     origins = terminal.allowed_origins(port)
     config = {"token": token, "temporal_ui": TEMPORAL_UI,
@@ -111,7 +143,7 @@ def make_handler(call, policy, token, links=None):
             return None
 
         def _error(self, exc):
-            if isinstance(exc, (runs.NotWaiting,)):
+            if isinstance(exc, (runs.NotWaiting, stack.Busy)):
                 return self._send(HTTPStatus.CONFLICT, {"error": str(exc)})
             if isinstance(exc, (runs.Refusal, repos.Refused, P.InvalidPolicy)):
                 return self._send(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
@@ -136,7 +168,7 @@ def make_handler(call, policy, token, links=None):
             parts = [part for part in path.split("/") if part][1:]
             try:
                 if parts == ["health"]:
-                    return self._send(HTTPStatus.OK, self._health())
+                    return self._send(HTTPStatus.OK, stack_reading())
                 if parts == ["runs"]:
                     query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
                     return self._send(HTTPStatus.OK, self._run_page((query.get("cursor") or [None])[0]))
@@ -200,18 +232,29 @@ def make_handler(call, policy, token, links=None):
                                                                             "cleanup, so it must be confirmed"})
                     call(lambda client: runs.force_terminate(client, parts[1], "force terminated from the Workbench"))
                     return self._send(HTTPStatus.OK, {"terminated": parts[1]})
+                if len(parts) == 3 and parts[0] == "runs" and RUN_ID.match(parts[1]) and parts[2] == "remove":
+                    if body.get("confirm") is not True:
+                        return self._send(HTTPStatus.BAD_REQUEST, {"error": "removing what a run kept deletes its "
+                                                                            "unmerged work, so it must be confirmed"})
+                    call(lambda client: runs.remove_worktree(client, parts[1]),
+                         timeout=runs.REMOVAL.total_seconds() + 60)
+                    return self._send(HTTPStatus.OK, {"removed": parts[1]})
+                if parts == ["stack"]:
+                    action = body.get("action")
+                    if action not in stack.ACTIONS:
+                        return self._send(HTTPStatus.BAD_REQUEST, {"error": "the action is one of: %s"
+                                                                            % ", ".join(stack.ACTIONS)})
+                    try:
+                        results = stack.ACTIONS[action](policy, body.get("component") or None)
+                    finally:
+                        with reading_lock:
+                            reading["at"] = None
+                    return self._send(HTTPStatus.OK, {"results": results, "health": stack_reading()})
                 return self._send(HTTPStatus.NOT_FOUND, {"error": "not found"})
             except runs.NotAccepted as exc:
                 return self._send(HTTPStatus.UNPROCESSABLE_ENTITY, {"error": str(exc)})
             except Exception as exc:                # noqa: BLE001 - every failure is answered
                 return self._error(exc)
-
-        def _health(self):
-            """The stack's health — and, when Temporal cannot be reached, that reading says so."""
-            try:
-                return call(lambda client: stack.health(client, policy))
-            except runs.Refusal as exc:
-                return stack.unreachable(policy, str(exc))
 
         def _run_page(self, cursor):
             """One page of runs with each one's state, and the cursor for the page of older runs."""
@@ -224,17 +267,18 @@ def make_handler(call, policy, token, links=None):
             except Exception:                       # noqa: BLE001 - a cursor we did not write
                 raise runs.Refusal("that is not a cursor this page handed out")
 
+            health = stack_reading()
+
             async def read(client):
                 listed, older = await runs.runs(client, cursor=token)
-                health = await stack.health(client, policy)
 
                 async def one(run):
                     if run["run_id"] in finished:
                         return finished[run["run_id"]]   # a finished run's state never changes again
                     try:
-                        shown = runs.view(run, await runs.status(client, run["run_id"]), health)
+                        shown = runs.view(run, await runs.status(client, run["run_id"], STATUS_SECONDS), health)
                     except Exception:               # noqa: BLE001 - a run whose status fails still lists
-                        shown = runs.view(run, None, health)
+                        return runs.view(run, None, health)
                     if run["execution"] != "RUNNING":
                         finished[run["run_id"]] = shown
                     return shown
@@ -244,19 +288,49 @@ def make_handler(call, policy, token, links=None):
             return {"runs": shown, "cursor": base64.urlsafe_b64encode(older).decode() if older else None}
 
         def _worktrees(self, repo):
-            """Every worktree of one repository and its merge state, read by that repository's own host."""
-            selected, view = call(lambda client: runs.worktrees_of(client, repo))
-            return {"repo": selected["id"], "base_branch": view["base_branch"], "rows": view["rows"]}
+            """Every worktree of one repository and its merge state, read by that repository's own host,
+            with the run each belongs to — its branch is the run's id — and whether that run has closed,
+            so that what it kept can be removed."""
+            async def read(client):
+                selected, view = await runs.worktrees_of(client, repo)
+                rows = []
+                for row in view["rows"]:
+                    listed = (await runs.execution(client, row["branch"])
+                              if row["branch"] and RUN_ID.match(row["branch"]) else None)
+                    kept = False
+                    if listed and listed["execution"] != "RUNNING":
+                        try:
+                            kept = runs.not_kept(listed, await runs.status(client, row["branch"], STATUS_SECONDS),
+                                                 await runs.removal(client, row["branch"])) is None
+                        except Exception:           # noqa: BLE001 - its worker down: removable is not known
+                            kept = False
+                    rows.append(dict(row, run=listed and listed["execution"], removable=kept))
+                return selected, view, rows
+            selected, view, rows = call(read)
+            return {"repo": selected["id"], "base_branch": view["base_branch"], "rows": rows}
 
         def _run(self, run_id):
+            health = stack_reading()
+
             async def read(client):
-                return (await runs.status(client, run_id), await runs.execution(client, run_id),
-                        await stack.health(client, policy))
-            status, execution, health = call(read)
-            if status is None:
+                execution = await runs.execution(client, run_id)
+                try:
+                    return await runs.status(client, run_id, STATUS_SECONDS), execution, None
+                except Exception as exc:            # noqa: BLE001 - its workflow worker down, or not answering
+                    return None, execution, "its status cannot be read now: %s" % exc
+            status, execution, unreadable = call(read)
+            if status is None and (execution is None or unreadable is None):
                 return HTTPStatus.NOT_FOUND, {"error": "no run %r" % run_id}
+            removal = None
+            if execution and execution["execution"] != "RUNNING" and not unreadable:
+                removal = call(lambda client: runs.removal(client, run_id))
+            # A run whose worker is down is still shown, from its listing: what blocks it is the point.
+            status = status or {"state": {}, "stop": None, "lines": [], "timeline": [], "queue": None}
+            status["unreadable"] = unreadable
             status["view"] = runs.view(execution or {"run_id": run_id, "execution": None, "started": None,
-                                                     "closed": None}, status, health)
+                                                     "closed": None, "task_queue": None},
+                                       None if unreadable else status, health)
+            status["view"]["kept"] = not unreadable and runs.not_kept(execution, status, removal) is None
             trace_id = status["state"].get("trace_id")
             status["links"] = {"temporal": "%s/namespaces/%s/workflows/%s" % (TEMPORAL_UI, runs.NAMESPACE, run_id),
                                "trace": links(trace_id) if links and trace_id else None}
@@ -272,31 +346,14 @@ def serve(policy, call, links=None, host="127.0.0.1"):
     return server
 
 
-def pid_file(port):
-    """Where the workbench serving `port` records its pid — one file per instance.
-
-    Named by the port because a second instance on another port is a real thing to run (a browser
-    check while the usual one keeps serving), and a shared name let its `down` stop the wrong one.
-    """
-    return os.path.join(paths.RUNTIME_ROOT, "workbench-%d.pid" % port)
-
-
 def main():
     policy = P.load()
     server = serve(policy, Loop().call, trace_links())
-    os.makedirs(paths.RUNTIME_ROOT, exist_ok=True)
-    with open(pid_file(policy["workbench_port"]), "w", encoding="utf-8") as fh:
-        fh.write(str(os.getpid()))
     print("workbench on http://127.0.0.1:%d" % policy["workbench_port"], flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
-    finally:
-        try:
-            os.remove(pid_file(policy["workbench_port"]))
-        except OSError:
-            pass
 
 
 if __name__ == "__main__":

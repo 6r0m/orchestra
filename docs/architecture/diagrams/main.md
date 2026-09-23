@@ -9,7 +9,7 @@ Nothing inside a part is drawn here; that belongs to the part's own main view.
 flowchart TD
     subgraph orchestra["Orchestra (app/)"]
         interfaces["interfaces<br/><i>cli · worker · workbench</i>"]
-        application["application<br/><i>activities · client</i>"]
+        application["application<br/><i>activities · client · stack</i>"]
         orchestration["orchestration<br/><i>workflow · routing</i>"]
         agents["agents<br/><i>terminal · launch · nodes · trust</i>"]
         workspace["workspace<br/><i>repos · worktrees</i>"]

@@ -24,7 +24,7 @@ Entry points are modules, so the checkout is the working directory:
 
 ```bash
 python -m app.interfaces.cli "fix X in Y"      # or: make feature TASK="fix X in Y"
-python -m app.interfaces.worker wsl            # started by workers.sh / workers.ps1
+python -m app.interfaces.worker wsl            # started by the stack's owner, through workers.sh / workers.ps1
 python -m app.interfaces.workbench.server
 ```
 

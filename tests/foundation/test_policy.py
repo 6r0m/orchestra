@@ -32,6 +32,7 @@ POLICY = """{
   "auto_proceed": false,
   "timeout_seconds": 60,
   "heartbeat_seconds": 30,
+  "workflow_queue": "orchestration:other",
   "workbench_port": 8390,
   "targets": {"wsl": {"host": "local", "worktree_root": "/tmp", "terminal_port": 8401},
               "windows": {"host": "local", "worktree_root": "C:\\\\tmp", "terminal_port": 8402}},
@@ -77,6 +78,11 @@ class OneResolver(unittest.TestCase):
             P.prompt_path(loaded, "architect", None),
             os.path.normpath(os.path.join(paths.REPO,
                                           loaded["roles"]["architect"]["prompt"])))
+
+    def test_the_shipped_workflow_queue_is_the_one_its_runs_were_started_on(self):
+        """Runs started before the queue became the policy's are on `orchestration`: renamed, no worker
+        would poll them again."""
+        self.assertEqual(P.workflow_queue(P.load(P.POLICY_FILE)), "orchestration")
 
     def test_the_base_it_is_given_is_the_base_it_uses(self):
         """The control: a resolver that ignored its base would pass the two tests above."""

@@ -29,6 +29,7 @@ from app.agents import launch  # noqa: E402
 from app.agents import nodes as N  # noqa: E402
 from app.agents import terminal  # noqa: E402
 from tests.agents.test_launch import alive, force_kill, gone_within  # noqa: E402
+import folders  # noqa: E402
 
 WINDOWS = sys.platform.startswith("win")
 FAKE = os.path.join(HERE, "fake_cli.py")
@@ -63,7 +64,7 @@ class Turns(unittest.TestCase):
         self.run_id = "test-terminal-%s" % uuid.uuid4().hex[:8]
         self.rdir = terminal.run_dir(self.run_id)
         self.worktree = tempfile.mkdtemp(prefix="orch-term-wt-")
-        self.addCleanup(shutil.rmtree, self.worktree, True)
+        self.addCleanup(folders.remove, self.worktree)
         self.addCleanup(shutil.rmtree, self.rdir, True)
         self.addCleanup(terminal.close_run, self.run_id)
 
@@ -453,7 +454,7 @@ class Lifecycle(unittest.TestCase):
     def test_a_change_while_the_architect_judges_fails_the_step_and_is_never_the_verified_tree(self):
         from app.workspace import worktrees
         repo = tempfile.mkdtemp(prefix="orch-verify-")
-        self.addCleanup(shutil.rmtree, repo, True)
+        self.addCleanup(folders.remove, repo)
         for args in (["init", "-q", "-b", "develop"], ["config", "user.email", "t@t"], ["config", "user.name", "t"]):
             subprocess.run(["git", "-C", repo] + args, check=True)
         with open(os.path.join(repo, "app.txt"), "w") as fh:

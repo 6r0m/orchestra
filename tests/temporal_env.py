@@ -5,8 +5,10 @@ synchronous tests drive them through `run`. Setting ORCH_WORKFLOW_UNDER_TEST=emp
 registers a workflow with no logic instead of the real one: the scenarios' red control.
 """
 import asyncio
-import atexit
 import concurrent.futures
+# Imported first, so its join of every pool's threads at exit is registered before this module's own
+# shutdowns, which then run ahead of it (`_at_exit`).
+import concurrent.futures.thread  # noqa: F401
 import contextlib
 import datetime
 import io
@@ -36,6 +38,7 @@ POLICY = dict(policy_mod.load(),
               stage_skills={"plan": "/investigate-change", "assess": "/architect",
                             "build": "/implement-approved-change", "verify": "/architect"})
 WSL_QUEUE = policy_mod.queue(POLICY, "wsl")
+WORKFLOW_QUEUE = policy_mod.workflow_queue(POLICY)
 WINDOWS_QUEUE = policy_mod.queue(POLICY, "windows")
 # Polled by its own host: the control that shows the queue, not the target, decides where a role runs.
 SHARED_QUEUE = "target:shared:test"
@@ -49,11 +52,25 @@ def run(coro, timeout=300):
     return asyncio.run_coroutine_threadsafe(coro, _loop).result(timeout)
 
 
+def _at_exit(stop):
+    """Run `stop` as the interpreter begins to shut down, before it joins every thread pool's threads.
+    An activity still running holds one of them, and only its worker's shutdown cancels it; an atexit
+    handler would come after that join, which would then wait on the activity for good. The last
+    registered runs first: the workers, then the server. `threading._register_atexit` is CPython's own hook
+    for that moment, the one `concurrent.futures` registers its join with; proven on the pinned 3.13."""
+    def guarded():
+        try:
+            stop()
+        except Exception as exc:                    # noqa: BLE001 - reported; the exit goes on
+            print("temporal_env: a shutdown at exit failed: %r" % (exc,), file=sys.stderr, flush=True)
+    threading._register_atexit(guarded)
+
+
 def env():
     global _env
     if _env is None:
         _env = run(WorkflowEnvironment.start_time_skipping())
-        atexit.register(lambda: run(_env.shutdown()))
+        _at_exit(lambda: run(_env.shutdown()))
     return _env
 
 
@@ -69,7 +86,7 @@ def workflows():
     if os.environ.get("ORCH_WORKFLOW_UNDER_TEST") == "empty":
         import empty_workflow
         run_class = empty_workflow.EmptyRun
-    return [run_class, WF.WorktreeView, WF.ReviewDiff] + control_workflows.ALL
+    return [run_class, WF.WorktreeView, WF.ReviewDiff, WF.RemoveWorktree] + control_workflows.ALL
 
 
 def _unexpected(*args, **kwargs):
@@ -84,7 +101,7 @@ _hosts = {}
 def _start_workers():
     async def build():
         # A worker validates its workflows on the running loop, so it is built there.
-        made = [Worker(env().client, task_queue=WF.TASK_QUEUE, workflows=workflows())]
+        made = [Worker(env().client, task_queue=WORKFLOW_QUEUE, workflows=workflows())]
         for queue in (WSL_QUEUE, WINDOWS_QUEUE, SHARED_QUEUE):
             _hosts.setdefault(queue, A.Activities(runner=_unexpected, telemetry=None))
             made.append(Worker(env().client, task_queue=queue, activities=_hosts[queue].all(),
@@ -95,13 +112,38 @@ def _start_workers():
     started = run(build())
     for worker in started:
         run(worker.__aenter__())
-    atexit.register(lambda: [run(worker.__aexit__(None, None, None)) for worker in reversed(started)])
+    _at_exit(lambda: [run(worker.__aexit__(None, None, None)) for worker in reversed(started)])
 
 
 def hosts():
     if not _hosts:
         _start_workers()
     return _hosts
+
+
+def own_host(test, queue, script, git=None, telemetry=None):
+    """A host of the test's own on `queue`, whose worker the test can take away: its activities, over a
+    fake agent playing `script`, and the function that stops its worker — which the test's cleanup calls
+    too, and which does nothing a second time."""
+    from fakes import FakeAgent, FakeRepos, FakeWorktrees
+    host = A.Activities(runner=FakeAgent(script), git=git or FakeWorktrees(), repositories=FakeRepos(),
+                        telemetry=telemetry)
+    # Outside the loop: the first call starts the test server, and waits on that loop to do it.
+    connected = client()
+
+    async def build():
+        return Worker(connected, task_queue=queue, activities=host.all(),
+                      activity_executor=concurrent.futures.ThreadPoolExecutor(max_workers=2))
+    worker = run(build())
+    run(worker.__aenter__())
+    stopped = []
+
+    def stop():
+        if not stopped:
+            stopped.append(True)
+            run(worker.__aexit__(None, None, None))
+    test.addCleanup(stop)
+    return host, stop
 
 
 def configure(queue, script, git=None, repositories=None, telemetry=None):
@@ -130,7 +172,7 @@ class Run:
     def __init__(self, **kwargs):
         self.run_id = uuid.uuid4().hex[:12]
         self.handle = run(client().start_workflow(WF.FeatureRun.run, start_input(self.run_id, **kwargs),
-                                                  id=self.run_id, task_queue=WF.TASK_QUEUE))
+                                                  id=self.run_id, task_queue=WORKFLOW_QUEUE))
         self.answered = None
         self.status = run(cli.follow(self.handle))
 

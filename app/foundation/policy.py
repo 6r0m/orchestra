@@ -31,7 +31,7 @@ ROLE_KEYS = {"brain", "workspace_access", "prompt", "model", "reasoning_effort"}
 # Model and effort reach a command line, so they must be plain tokens.
 PLAIN_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]*")
 TOP_KEYS = {"roles", "max_rounds", "auto_proceed", "timeout_seconds", "heartbeat_seconds",
-            "targets", "target_repo", "workbench_port", "stage_skills", "_policy_path"}
+            "targets", "target_repo", "workbench_port", "stage_skills", "workflow_queue", "_policy_path"}
 REPO_KEYS = {"commit_allowed", "push_allowed", "merge_allowed"}
 # Where a run's agents can execute. Each host has its own task queue, polled only by
 # that host's worker, so a role never runs on the wrong OS.
@@ -226,6 +226,9 @@ def validate(raw):
     heartbeat = raw.get("heartbeat_seconds")
     if not isinstance(heartbeat, int) or isinstance(heartbeat, bool) or heartbeat < 1:
         raise InvalidPolicy("heartbeat_seconds must be an int >= 1")
+    # Required, so a policy that forgets it fails here rather than joining another stack's runs.
+    if not (isinstance(raw.get("workflow_queue"), str) and PLAIN_TOKEN.fullmatch(raw["workflow_queue"])):
+        raise InvalidPolicy("workflow_queue must be a plain token: the task queue this policy's runs are on")
     targets = raw.get("targets")
     if not isinstance(targets, dict) or set(targets) != set(TARGETS):
         raise InvalidPolicy("targets must define exactly %s" % (TARGETS,))
@@ -248,3 +251,13 @@ def validate(raw):
 def queue(policy, target):
     """The task queue of one target host: `target:<os>:<host>`."""
     return "target:%s:%s" % (target, policy["targets"][target]["host"])
+
+
+def workflow_queue(policy):
+    """The task queue this policy's runs — and the reads of their changes and worktrees — are on.
+
+    The deployment's is `orchestration`, where every run Temporal retains is queried; another
+    policy's, a stack of its own — the demo's, the acceptance's — so its worker never takes another
+    stack's workflow tasks.
+    """
+    return policy["workflow_queue"]

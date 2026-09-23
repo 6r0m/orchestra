@@ -11,7 +11,11 @@ h3 { font-size: 13px; margin: 0 0 6px; }
 @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; margin-bottom: 12px; }
 .muted { color: var(--muted); }
-.health span { margin-right: 12px; }
+.stack-panel { margin: 12px 16px 0; }
+.stack-parts { display: flex; flex-wrap: wrap; gap: 16px; }
+.stack-part { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.stack-part .name { font-weight: 600; }
+.starting, .running, .unknown { color: var(--warn); }
 .up { color: var(--ok); }
 .down, .blocked { color: var(--bad); }
 label { display: block; margin: 6px 0; }

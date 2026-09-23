@@ -21,6 +21,7 @@ sys.path[:0] = [PKG, HERE]
 from app.application import activities as A  # noqa: E402
 from app.foundation import envpath  # noqa: E402
 from app.workspace import worktrees as W  # noqa: E402
+import folders  # noqa: E402
 
 WINDOWS = sys.platform.startswith("win")
 TARGET = "windows" if WINDOWS else "wsl"
@@ -42,7 +43,7 @@ class Repo(unittest.TestCase):
 
     def setUp(self):
         self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="orch-git-"))
-        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.addCleanup(folders.remove, self.tmp)
         self.repo = os.path.join(self.tmp, "repo")
         self.root = os.path.join(self.tmp, "worktrees")
         os.makedirs(self.repo)

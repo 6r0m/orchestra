@@ -77,8 +77,9 @@ You need Docker, [uv](https://docs.astral.sh/uv/), git, and whichever agent CLIs
 ```bash
 git clone <this repository> orchestra && cd orchestra
 cp .env.example .env          # nothing in it is required to start
-make up                       # Temporal + its database, both workers, the workbench
-make check                    # which queues are polled, and the page's URL
+make workbench-install        # the Workbench: a systemd user service in WSL, started with it
+make up                       # Temporal + its database, then both workers — or Start in the page
+make check                    # each part of the stack, and the Workbench's service
 ```
 
 Open the page — `http://127.0.0.1:8390` by default — and start a run on this repository. To work on
@@ -87,7 +88,7 @@ the page can also start a run on any path you type.
 
 ```bash
 make feature TASK="fix the retry in the uploader"   # the same run, from the command line
-make down                                           # stop everything; Temporal keeps its data
+make down                                           # stop the stack; Temporal keeps its data
 ```
 
 <!-- A screenshot or short GIF of the workbench belongs here: the run list, a live terminal

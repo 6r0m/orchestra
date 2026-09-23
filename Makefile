@@ -14,25 +14,50 @@ export TASK_SAFE
 V = UV_PROJECT_ENVIRONMENT="$$(uv run --no-project --managed-python --python 3.13 python app/foundation/envpath.py $(CURDIR))" \
     uv run --locked python
 
-.PHONY: help up check down feature demo test public-check
+.PHONY: help up check down restart workbench-install workbench-uninstall workbench-start workbench-stop \
+	workbench-restart workbench-status feature demo test public-check
 
 help: ## Show these targets
-	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
+	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-19s %s\n", $$1, $$2}'
 
-up: ## Start the Temporal stack, both workers and the workbench
-	@bash workers.sh up
+# The stack goes through its one owner (app/application/stack.py), as the Workbench's controls do.
+up: ## Start the stack: Temporal, then both workers, each proven up
+	@$(V) -m app.interfaces.cli --stack start
 
-check: ## Show which worker queues are polled and the workbench URL
-	@bash workers.sh check
+check: ## Show the stack — Temporal, and whether each worker runs and polls — and the Workbench's service
+	@$(V) -m app.interfaces.cli --stack status; code=$$?; \
+	  printf '%-16s %s\n' workbench "$$(systemctl --user is-active orchestra-workbench.service)"; exit $$code
 
-down: ## Stop the workbench, both workers and the stack; its data stays on its volume
-	@bash workers.sh down
+down: ## Stop both workers, then Temporal; its data stays on its volume, and the Workbench keeps serving
+	@$(V) -m app.interfaces.cli --stack stop
+
+restart: ## Stop the stack, then start it
+	@$(V) -m app.interfaces.cli --stack restart
+
+# The Workbench is not part of the stack it controls: WSL's systemd starts it and keeps it running.
+workbench-install: ## Install the Workbench as a systemd user service in WSL, enabled and (re)started
+	@bash workers.sh workbench install
+
+workbench-uninstall: ## Stop the Workbench's service and remove it
+	@bash workers.sh workbench uninstall
+
+workbench-start: ## Start the Workbench's service
+	@bash workers.sh workbench start
+
+workbench-stop: ## Stop the Workbench's service; the stack it controls keeps running
+	@bash workers.sh workbench stop
+
+workbench-restart: ## Restart the Workbench's service, to load this checkout's code; the stack keeps running
+	@bash workers.sh workbench restart
+
+workbench-status: ## Show the Workbench's service
+	@bash workers.sh workbench status
 
 feature: ## Run one task through the workflow (usage: make feature TASK="fix X in Y")
 	@test -n "$$TASK_SAFE" || { echo 'usage: make feature TASK="fix X in Y"' >&2; exit 2; }
 	@$(V) -m app.interfaces.cli "$$TASK_SAFE"
 
-demo: ## Watch runs answered, stopped and force-terminated in a Workbench of its own, with fake agents (needs `make up`)
+demo: ## Watch runs answered, stopped and force-terminated, and a worker brought back, in a Workbench of its own, with fake agents (needs `make up`)
 	@$(V) tools/demo.py
 
 test: ## Run the whole suite in this checkout's environment

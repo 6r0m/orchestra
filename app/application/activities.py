@@ -9,8 +9,10 @@ Temporal would retry an activity without limit by default. A role-run and every 
 side effect run once instead: a failure stops the run for the
 operator, and the operator's Continue is the only way anything runs again.
 """
+import contextlib
 import os
 import sys
+import threading
 
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
@@ -100,6 +102,27 @@ def _failure(exc):
                             non_retryable=True)
 
 
+# A step cut short from outside that is not known to be its run's Stop: its worker stopped under it, or
+# Temporal no longer knows it — its run force-terminated, or the step unheard past its heartbeat timeout.
+LOST = "lost"
+LOST_MESSAGE = ("its worker stopped under it, or Temporal no longer knows it: its run was force-terminated, "
+                "or it went unheard past its heartbeat timeout")
+
+
+def _cut_short(stopped):
+    """How a step was cut short from outside: "stopped" when its run's Stop reached it — Temporal's
+    cancellation, or `stopped`, the Stop's cleanup on this host having ended its agent first — LOST when
+    anything else did, None when it failed on its own. Temporal's "no longer known" alone says nothing
+    of a Stop: a run that timed out its step goes on, and so the step is lost."""
+    try:
+        details = activity.cancellation_details()
+    except RuntimeError:                            # called outside an activity
+        details = None
+    if stopped or (details and details.cancel_requested):
+        return "stopped"
+    return LOST if details else None
+
+
 class Activities:
     """The activities of one host, with the seams tests replace: execution, git, repositories, trace."""
 
@@ -110,6 +133,27 @@ class Activities:
         self._telemetry = telemetry
         self._client = None
         self._resolved = False
+        # Which runs' git a side effect is changing on this host now. Termination closes a run but not
+        # the merge or discard its host is running, and what the run kept is never removed under it.
+        self._git_lock = threading.Lock()
+        self._git_busy = {}
+        # The runs a Stop ended on this host, marked by its cleanup before it ends their agents: a step
+        # those agents' end cuts short was stopped, and did not fail.
+        self._stopped = set()
+
+    @contextlib.contextmanager
+    def _git_step(self, run_id, what):
+        """Hold the run's worktree for one git side effect; one already under way refuses this one."""
+        with self._git_lock:
+            if run_id in self._git_busy:
+                raise ApplicationError("run %s's worktree is busy: its %s is still running on this host"
+                                       % (run_id, self._git_busy[run_id]), type="Busy", non_retryable=True)
+            self._git_busy[run_id] = what
+        try:
+            yield
+        finally:
+            with self._git_lock:
+                self._git_busy.pop(run_id, None)
 
     def all(self):
         return [self.prepare, self.create_worktree, self.open_run, self.open_phase, self.run_role,
@@ -140,11 +184,12 @@ class Activities:
     @activity.defn
     def create_worktree(self, args):
         state = args["state"]
-        try:
-            path = self.git.create(state["repo_path"], state["base_branch"], state["worktree_root"],
-                                   state["run_id"], state["target"], state.get("lfs_pointers", False))
-        except Exception as exc:
-            raise _failure(exc) from exc
+        with self._git_step(state["run_id"], "worktree's creation"):
+            try:
+                path = self.git.create(state["repo_path"], state["base_branch"], state["worktree_root"],
+                                       state["run_id"], state["target"], state.get("lfs_pointers", False))
+            except Exception as exc:
+                raise _failure(exc) from exc
         plan = W.plan_path(state["todo_dir"], state["todo_name"], state["created"], state["task"])
         return {"worktree_path": path, "worktree": path, "plan": plan, "todo_path": os.path.join(path, plan)}
 
@@ -247,7 +292,14 @@ class Activities:
         except Exception as exc:
             # A failed step leaves no agent behind, whichever check failed it.
             terminal.end_agent(state["run_id"], role_name)
-            T.end(span, error_type=N.error_type(exc), error=exc)
+            cut = _cut_short(state["run_id"] in self._stopped)
+            if cut == "stopped":
+                # The operator stopped the run: the step did not fail, and its row says only that (D20).
+                T.end(span, ended="the run was stopped while this step was at work")
+            elif cut == LOST:
+                T.end(span, error_type=LOST, error=LOST_MESSAGE)
+            else:
+                T.end(span, error_type=N.error_type(exc), error=exc)
             T.flush(client)
             raise _failure(exc) from exc
         finally:
@@ -279,6 +331,7 @@ class Activities:
     def finish_trace(self, args):
         state, client = args["state"], self.client()
         if state.get("status") in ("ABORTED", "STOPPED"):
+            self._stopped.add(state["run_id"])
             # A run ended here keeps its worktree but no longer needs its live terminals, and an agent
             # still in one ends with it.
             terminal.close_run(state["run_id"])
@@ -295,24 +348,26 @@ class Activities:
         # No agent may change the worktree between the check of the verified tree and the commit,
         # nor hold it open while it is removed; a conflict's next turn opens the terminals again.
         terminal.close_run(state["run_id"])
-        try:
-            return self.git.merge(state["repo_path"], state["worktree_path"], state["run_id"],
-                                  state["base_branch"], state.get("verified_tree"), state["plan"],
-                                  state["todo_done_dir"], ("%s: %s" % (stem, words))[:100],
-                                  "Merge %s" % stem)
-        except W.MergeRefused as exc:
-            return {"result": "refused", "reason": str(exc)}
-        except Exception as exc:
-            raise _failure(exc) from exc
+        with self._git_step(state["run_id"], "merge"):
+            try:
+                return self.git.merge(state["repo_path"], state["worktree_path"], state["run_id"],
+                                      state["base_branch"], state.get("verified_tree"), state["plan"],
+                                      state["todo_done_dir"], ("%s: %s" % (stem, words))[:100],
+                                      "Merge %s" % stem)
+            except W.MergeRefused as exc:
+                return {"result": "refused", "reason": str(exc)}
+            except Exception as exc:
+                raise _failure(exc) from exc
 
     @activity.defn
     def discard(self, args):
         state = args["state"]
-        terminal.close_run(state["run_id"])
-        try:
-            self.git.discard(state["repo_path"], state["worktree_path"], state["run_id"])
-        except Exception as exc:
-            raise _failure(exc) from exc
+        with self._git_step(state["run_id"], "discard"):
+            terminal.close_run(state["run_id"])
+            try:
+                self.git.discard(state["repo_path"], state["worktree_path"], state["run_id"])
+            except Exception as exc:
+                raise _failure(exc) from exc
         return {"result": "discarded"}
 
     @activity.defn

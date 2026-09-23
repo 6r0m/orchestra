@@ -7,9 +7,9 @@ page over every run — without any of them owning behaviour worth testing on it
 
 ## Owns
 
-- `cli` — the command line over `application.client`: start, answer, continue, show, list, worktrees.
-- `worker` — one Temporal worker per host, polling that host's queue and no other.
-- `workbench/server` and `workbench/static` — the operator's page: every run, its stop and answers, its live terminals, its rounds and its change.
+- `cli` — the command line over `application.client` and `application.stack`: start, answer, continue, stop, force terminate, show, list, worktrees, and the stack, which the Makefile's `up`, `down` and `check` run.
+- `worker` — one Temporal worker per host, polling that host's queue and no other, and the sweep of what dead workers' stages left on the host.
+- `workbench/server` and `workbench/static` — the operator's page: the stack and its controls, every run, its stop and answers, its live terminals, its rounds, its change and what it kept; and `workbench/orchestra-workbench.service`, the systemd user unit that runs the page in WSL.
 
 ## Does not own
 
@@ -21,17 +21,20 @@ print, serve and exit. The page holds no state of its own.
 
 | part | responsibility |
 |---|---|
-| `cli.py` | the command line over the shared client |
+| `cli.py` | the command line over the shared client and the stack's owner |
 | `worker.py` | this host's Temporal worker and the queues it polls |
 | `workbench/server.py` | the page's HTTP server and its small JSON API |
 | `workbench/static/` | the page itself: HTML, CSS, JavaScript and a pinned xterm.js |
+| `workbench/orchestra-workbench.service` | the systemd user unit the page runs as, rendered for a checkout by `make workbench-install` |
 
 ## Relationships
 
 This package's relationships are drawn once, in [the main view](diagrams/main.md).
 
-Through `application.client`: every start and every answer, so the page and the command
-line can do nothing the workflow's own rules and validators do not allow.
+Through `application.client`: every start, answer, Stop, force terminate and removal, so the
+page and the command line can do nothing the workflow's own rules and validators, or Temporal's own
+lifecycle, do not allow. Through `application.stack`: the stack's reading and every start, stop
+and restart of it, so neither keeps a second copy of how the stack runs.
 
 Through the worker's WebSocket: the page attaches to a run's live terminals on whichever
 host is running them.
@@ -42,7 +45,8 @@ terminal record directly, and an indirection to hide that would buy nothing.
 ## Invariants
 
 - **Nothing imports an entry point**, enforced by `tests/test_architecture.py`. That is what keeps argparse and console output out of the worker and the workbench.
-- **The workbench holds no state (D29).** Every read is Temporal's or a worker's, and every write is a start or an answer Update.
+- **The workbench holds no state (D29).** Every read is Temporal's, a worker's or the stack owner's — the stack's reading shared by the requests of a few seconds, and a finished run's view kept once read — and every write goes through `client` or `stack`.
+- **The workbench never manages its own process (D32).** Systemd runs it; it starts and stops the stack, and the stack never includes it.
 - **A stop's answers are the ones it publishes (D6).** The page and the command line offer exactly the actions a stop publishes; the page owns their labels, colours and dialogs, the command line their shorthands and how each is typed, and neither keeps its own list.
 - **Everything listens on `127.0.0.1`**, and the API and the terminal sockets accept only the page's token, from the page's own origin. The terminal sockets take that token in the handshake's own header, never in a URL.
 - **Agent text reaches the page as terminal bytes or as text, never as markup.**

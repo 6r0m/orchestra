@@ -100,7 +100,7 @@ class TraceParity(Scenario):
         control_trace_sink.ROWS.clear()
         handle = E.run(E.client().start_workflow(control_workflows.TelemetryInWorkflow.run, {},
                                                  id="trace-control-%s" % uuid.uuid4().hex[:8],
-                                                 task_queue=WF.TASK_QUEUE))
+                                                 task_queue=E.WORKFLOW_QUEUE))
         deadline = time.monotonic() + 30
         while E.run(handle.describe()).close_time is None and time.monotonic() < deadline:
             time.sleep(0.2)

@@ -13,6 +13,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 import uuid
 
@@ -199,6 +201,35 @@ class Preflight(unittest.TestCase):
         self.assertIn("make up", out)
         self.assertNotIn("orchestration-up", out)
         self.assertEqual(Client.started, [])
+
+    def test_a_worker_counts_as_polling_only_while_its_last_poll_is_recent(self):
+        """Temporal lists a dead worker's polls for minutes: a poll older than a long poll and its margin
+        is no worker, while an idle worker's last poll, about a long poll ago, is one."""
+        import asyncio
+        import datetime
+        from google.protobuf.timestamp_pb2 import Timestamp
+        from temporalio.api.enums.v1 import TaskQueueType
+        from app.application import client as runs
+
+        class Client:
+            namespace = "orchestration"
+
+            def __init__(self, seconds_ago):
+                stamp = Timestamp()
+                stamp.FromDatetime((datetime.datetime.now(datetime.timezone.utc)
+                                    - datetime.timedelta(seconds=seconds_ago)).replace(tzinfo=None))
+                poller = type("Poller", (), {"identity": "4242@here", "last_access_time": stamp})()
+
+                class Service:
+                    async def describe_task_queue(self, request):
+                        return type("Reply", (), {"pollers": [poller]})()
+                self.workflow_service = Service()
+
+        needed = [("target:windows:local", TaskQueueType.TASK_QUEUE_TYPE_ACTIVITY)]
+        with self.assertRaises(runs.Refusal) as refused:
+            asyncio.run(runs.preflight(Client(runs.POLLING.total_seconds() + 5), needed))
+        self.assertIn("the windows worker is not running", str(refused.exception))
+        asyncio.run(runs.preflight(Client(62), needed))
 
 
 class Elapsed(unittest.TestCase):
@@ -1344,8 +1375,10 @@ class TraceContract(Scenario):
         self.assertEqual([N.error_type(exc) for exc, _ in cases], [kind for _, kind in cases])
 
     def test_the_outcome_is_scored_once_known_and_a_stop_is_not(self):
+        """A run the operator stopped has no final verification to score: a Stop is not a judgement.
+        One stopped at its final gate keeps the 1 it scored there; nothing here writes a 0 over it."""
         from app.observability import telemetry
-        for status, expected in (("READY_FOR_HUMAN", [1.0]), ("ABORTED", [0.0]), (None, [])):
+        for status, expected in (("READY_FOR_HUMAN", [1.0]), ("ABORTED", [0.0]), ("STOPPED", []), (None, [])):
             client = _Events()
             values = {"run_id": "r1", "trace_id": "f" * 32}
             if status:
@@ -1572,6 +1605,143 @@ class TraceContract(Scenario):
                     value = condition["value"]
                     values = set(value) if isinstance(value, list) else {value}
                     self.assertTrue(values <= known[widget["view"]], (widget["name"], values))
+
+
+class CutShort(Scenario):
+    """A role step cut short from outside (structure D20, the trace contract's levels): a Stop is no failure
+    of the stage it meets and no evidence about the work — its row closes at DEFAULT saying the run was
+    stopped, with no error type for a dashboard to count — while a step lost any other way is ERROR,
+    `lost`. The control for all of them: a turn that fails on its own is still ERROR (TraceContract)."""
+
+    def setUp(self):
+        self.release = threading.Event()
+        self.addCleanup(self.release.set)
+        self.client = _Events()
+
+    def working(self, started, until=None):
+        """An agent at work: its turn heartbeats, as a real one does, until `until` holds or it is cancelled."""
+        from app.agents import terminal
+
+        def runner(worktree, argv, rdir, name, prompt, timeout, env, *, brain):
+            started.set()
+            while not self.release.is_set() and not (until and until()):
+                terminal._activity_tick(name)
+                time.sleep(0.1)
+            return 1, ""
+        return runner
+
+    def run_on(self, runner, heartbeat_seconds=2, queue=None):
+        """A run whose first step is `runner`, on the shared WSL host or on `queue`'s own; its handle."""
+        from app.orchestration import workflow as WF
+        if queue is None:
+            E.host([], telemetry=self.client)
+            E.hosts()[E.WSL_QUEUE].runner = runner
+        run_id = uuid.uuid4().hex[:12]
+        handle = E.run(E.client().start_workflow(
+            WF.FeatureRun.run, E.start_input(run_id, policy=dict(E.POLICY, heartbeat_seconds=heartbeat_seconds),
+                                             queue=queue),
+            id=run_id, task_queue=E.WORKFLOW_QUEUE))
+        self.addCleanup(shutil.rmtree, A.run_dir(run_id), True)
+        self.addCleanup(lambda: E.run(handle.describe()).close_time is None and E.run(handle.terminate("over")))
+        return handle
+
+    def step(self, seconds=30):
+        """The step's row, once it has been closed."""
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            closed = [event for event in self.client.events if event["name"] == "engineer-plan" and "output" in event]
+            if closed:
+                return closed[0]
+            time.sleep(0.2)
+        self.fail("the step's row was never closed")
+
+    def assertStopped(self, step):
+        self.assertNotEqual(step.get("level"), "ERROR", step)
+        self.assertNotIn("error_type", step.get("metadata") or {})
+        self.assertEqual(step["output"], {"ended": "the run was stopped while this step was at work"})
+
+    def assertLost(self, step):
+        self.assertEqual((step.get("level"), (step.get("metadata") or {}).get("error_type")), ("ERROR", "lost"), step)
+        self.assertNotIn("ended", step["output"])
+
+    def test_how_a_step_was_cut_short_is_read_signal_by_signal(self):
+        """The classifier with each signal on its own, which the runs below cannot hold apart."""
+        from temporalio.activity import ActivityCancellationDetails as Details
+        self.addCleanup(setattr, A.activity, "cancellation_details", A.activity.cancellation_details)
+        for stopped, details, expected in ((True, None, "stopped"),
+                                           (False, Details(cancel_requested=True), "stopped"),
+                                           (False, Details(not_found=True), A.LOST),
+                                           (False, Details(worker_shutdown=True), A.LOST),
+                                           (False, Details(timed_out=True), A.LOST),
+                                           (False, None, None)):
+            A.activity.cancellation_details = lambda details=details: details
+            self.assertEqual(A._cut_short(stopped), expected, (stopped, details))
+
+    def test_a_stop_that_reaches_the_step_first_is_recorded_stopped(self):
+        started = threading.Event()
+        handle = self.run_on(self.working(started))
+        self.assertTrue(started.wait(60), "the engineer is at work")
+        E.run(handle.cancel())
+        self.assertStopped(self.step())
+
+    def test_a_stop_whose_cleanup_ends_the_agent_first_is_recorded_stopped(self):
+        """The order a real Stop takes: the heartbeat that would bring the cancellation is up to a minute
+        away, and the Stop's cleanup on the host closes the run's terminals — ending the agent — at once."""
+        from app.agents import terminal
+        closed, started = threading.Event(), threading.Event()
+        close_run = terminal.close_run
+
+        def closing(run_id):
+            close_run(run_id)
+            closed.set()
+        self.addCleanup(setattr, terminal, "close_run", close_run)
+        terminal.close_run = closing
+        handle = self.run_on(self.working(started, until=closed.is_set), heartbeat_seconds=E.POLICY["heartbeat_seconds"])
+        self.assertTrue(started.wait(60), "the engineer is at work")
+        E.run(handle.cancel())
+        self.assertStopped(self.step())
+
+    def test_a_force_terminated_step_is_lost(self):
+        started = threading.Event()
+        handle = self.run_on(self.working(started))
+        self.assertTrue(started.wait(60), "the engineer is at work")
+        E.run(handle.terminate("force terminate"))
+        self.assertLost(self.step())
+
+    def test_a_step_unheard_past_its_heartbeat_timeout_is_lost_while_its_run_goes_on(self):
+        """Temporal times the step out, and its run stops for the operator; the step, heard from again, is
+        told Temporal no longer knows it — which says nothing of a Stop."""
+        from app.agents import terminal
+        from app.orchestration import workflow as WF
+
+        def silent(worktree, argv, rdir, name, prompt, timeout, env, *, brain):
+            from temporalio import activity
+            handle = E.client().get_workflow_handle(activity.info().workflow_id)
+            terminal._activity_tick(name)
+            # Unheard until Temporal has timed the step out and its run stopped for the operator.
+            deadline = time.monotonic() + 60
+            while time.monotonic() < deadline and not self.release.is_set():
+                if (E.run(handle.query(WF.FeatureRun.status))["stop"] or {}).get("reason") == "failed":
+                    break
+                time.sleep(0.5)
+            while not self.release.is_set():
+                terminal._activity_tick(name)
+                time.sleep(0.1)
+            return 1, ""
+        handle = self.run_on(silent)
+        self.assertLost(self.step(60))
+        status = E.run(handle.query(WF.FeatureRun.status))
+        self.assertEqual((status["stop"] or {}).get("reason"), "failed", "the run goes on, stopped for the operator")
+
+    def test_a_step_whose_worker_stops_under_it_is_lost(self):
+        queue = "target:wsl:own-%s" % uuid.uuid4().hex[:8]
+        started = threading.Event()
+        host, worker_goes = E.own_host(self, queue, [], telemetry=self.client)
+        host.runner = self.working(started)
+        self.run_on(host.runner, queue=queue)
+        self.assertTrue(started.wait(60), "the engineer is at work")
+        worker_goes()
+        self.assertLost(self.step())
 
 
 if __name__ == "__main__":

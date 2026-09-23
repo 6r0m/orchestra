@@ -21,6 +21,7 @@
   "timeout_seconds": 3600,
   "workbench_port": 8390,
   "heartbeat_seconds": 120,
+  "workflow_queue": "orchestration",
   "targets": {
     "wsl": {"host": "local", "worktree_root": "~/worktrees", "terminal_port": 8091},
     "windows": {"host": "local", "worktree_root": "C:\\Worktrees", "terminal_port": 8092}

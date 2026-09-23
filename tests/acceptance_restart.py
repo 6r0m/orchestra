@@ -5,11 +5,16 @@ and after it closed, a rejected answer writing no event on a real server, and a 
 a discard through real workers and real git.
 
 It never touches a real repository or agent. A throwaway repository, fake `claude` and
-`codex` executables, and a dedicated `accept` host whose queue only this script's worker
-polls; the stops it answers are its own run's. Afterwards it takes back all it made: its runs
-and the reads of their changes from Temporal — the Workbench lists every run Temporal retains —
-their folders, its workers' pid files and its trust records. Needs the stack and both workers up
-(`make up`), and restarts all three:
+`codex` executables, and a stack of its own — a host and a workflow queue new each time, which only
+this script's worker polls, on free ports; the stops it answers are its own run's. The live stack is
+stopped and started by the Workbench's own API, from its service's context: each worker's stop takes
+the stages' settings left in that worker's own temporary folder, and the Workbench, the stack down,
+still answers and reads it down. A worker its side would start elevated is refused, saying so, and
+this script starts it instead. Then the service is restarted, and the WSL worker it started keeps
+running, in a scope of its own, with the real CLIs on its PATH. Afterwards it takes back all it made:
+its runs and the reads of their changes from Temporal — the Workbench lists every run Temporal
+retains — their folders, its worker's pid file and its trust records. Needs the stack up (`make up`)
+and the Workbench's service (`make workbench-install`), and restarts all of it:
 
     uv run --locked python tests/acceptance_restart.py
 """
@@ -19,11 +24,13 @@ import os
 import re
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
 import textwrap
 import time
+import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PKG = os.path.abspath(os.path.join(HERE, os.pardir))
@@ -34,12 +41,15 @@ from temporalio.client import Client, WorkflowUpdateFailedError  # noqa: E402
 from temporalio.exceptions import WorkflowAlreadyStartedError  # noqa: E402
 
 from app.application import client as runs  # noqa: E402
+from app.application import stack  # noqa: E402
 from app.foundation import policy as P  # noqa: E402
-from app.agents import trust  # noqa: E402
+from app.agents import terminal, trust  # noqa: E402
+from app.observability import telemetry  # noqa: E402
 from app.orchestration import workflow as WF  # noqa: E402
 import temporal_cleanup  # noqa: E402
 
 RUNTIME = os.path.join(REPO, "tmp", "orchestration")
+SERVICE = "orchestra-workbench.service"
 
 # The acceptance's own agent, speaking the turn contract the runner expects: its prompt is the last
 # argument and the turn ends through the vendor's own completion wiring, which `fake_cli` owns.
@@ -91,6 +101,12 @@ def git(path, *args):
     return subprocess.run(["git", "-C", path] + list(args), capture_output=True, text=True, check=True).stdout
 
 
+def free_port():
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
 def alive(pid):
     try:
         with open("/proc/%d/stat" % pid) as fh:
@@ -108,11 +124,10 @@ class Acceptance:
         self.bin = os.path.join(self.tmp, "bin")
         self.hang = os.path.join(self.tmp, "hang")
         self.worker = None
-        # What the cleanup takes back: each run as soon as its id is known, the command line still
-        # following one whose id it has printed, and every worker this script started.
+        # What the cleanup takes back: each run as soon as its id is known, and the command line still
+        # following one whose id it has printed.
         self.runs = []
         self.follower = None
-        self.worker_pids = []
 
     def setup(self):
         os.makedirs(self.repo)
@@ -140,14 +155,18 @@ class Acceptance:
             role["prompt"] = os.path.join(PKG, role["prompt"])
         policy["heartbeat_seconds"] = 10
         policy["timeout_seconds"] = 900
-        policy["targets"] = {"wsl": {"host": "accept", "worktree_root": self.root, "terminal_port": 18091},
-                             "windows": {"host": "accept", "worktree_root": "C:\\Worktrees", "terminal_port": 18092}}
+        # New each time: a run a killed acceptance left behind never meets the next one's worker.
+        host = "accept%s" % os.urandom(3).hex()
+        policy["workflow_queue"] = "orchestration:%s" % host
+        policy["targets"] = {"wsl": {"host": host, "worktree_root": self.root, "terminal_port": free_port()},
+                             "windows": {"host": host, "worktree_root": "C:\\Worktrees", "terminal_port": free_port()}}
         self.policy = os.path.join(self.tmp, "policy.json")
         json.dump(policy, open(self.policy, "w"))
         self.descriptors = os.path.join(self.tmp, "repos.json")
         json.dump({"sample": {"path": self.repo, "target": "wsl",
                               "worktree_root": os.path.join(self.root, "sample")}}, open(self.descriptors, "w"))
         self.queue = P.queue(P.load(self.policy), "wsl")
+        self.workflow_queue = P.workflow_queue(P.load(self.policy))
 
     def env(self):
         return dict(os.environ, PATH=self.bin + os.pathsep + os.environ["PATH"], ORCH_POLICY=self.policy,
@@ -158,7 +177,6 @@ class Acceptance:
         log = open(os.path.join(self.tmp, "worker.log"), "a")
         self.worker = subprocess.Popen([sys.executable, "-m", "app.interfaces.worker", "wsl"], cwd=PKG,
                                        env=self.env(), stdout=log, stderr=log, start_new_session=True)
-        self.worker_pids.append(self.worker.pid)
 
     def kill_worker(self):
         if self.worker and self.worker.poll() is None:
@@ -177,7 +195,7 @@ class Acceptance:
         while time.monotonic() < deadline:
             try:
                 await cli.preflight(client, [(queue, TaskQueueType.TASK_QUEUE_TYPE_ACTIVITY),
-                                             (WF.TASK_QUEUE, TaskQueueType.TASK_QUEUE_TYPE_WORKFLOW)])
+                                             (self.workflow_queue, TaskQueueType.TASK_QUEUE_TYPE_WORKFLOW)])
                 return True
             except (cli.Refusal, Exception):
                 await asyncio.sleep(2)
@@ -196,6 +214,131 @@ class Acceptance:
     async def events(self, handle):
         return len([event async for event in handle.fetch_history_events()])
 
+    @staticmethod
+    def service():
+        """The Workbench's service's main process while it runs; None when it does not."""
+        shown = subprocess.run(["systemctl", "--user", "show", "-p", "MainPID", "--value", SERVICE],
+                               capture_output=True, text=True)
+        return (int(shown.stdout.strip() or 0) or None) if shown.returncode == 0 else None
+
+    @staticmethod
+    def workbench(path, body=None):
+        """The live Workbench's API, as its page calls it."""
+        request = urllib.request.Request(
+            "http://127.0.0.1:%d%s" % (P.load()["workbench_port"], path), method="GET" if body is None else "POST",
+            data=None if body is None else json.dumps(body).encode(),
+            headers={"X-Workbench-Token": terminal.token(), "Content-Type": "application/json"})
+        # A start waits for each part to be proven up, Temporal from cold included.
+        with urllib.request.urlopen(request, timeout=1200) as response:
+            return json.loads(response.read())
+
+    @staticmethod
+    def parts(health):
+        return {part["name"]: part for part in health["components"]}
+
+    @staticmethod
+    def worker_temp(part):
+        """Where the live worker of `part` puts its stages' settings — the folder it named as it started — as
+        this host reaches it."""
+        with open(os.path.join(RUNTIME, stack.worker_name(P.load(), part) + ".log"), encoding="utf-8",
+                  errors="replace") as fh:
+            named = re.findall(r"stage settings under (.+)$", fh.read(), re.MULTILINE)
+        check(bool(named), "the %s worker named its stages' settings folder as it started" % part)
+        folder = named[-1].strip()
+        if part == "windows":
+            folder = subprocess.run(["wslpath", "-u", folder], capture_output=True, text=True,
+                                    check=True).stdout.strip()
+        return folder
+
+    def settings_left(self, parts):
+        """A stage's settings, as a stage of each live worker leaves them in that worker's own folder when
+        the worker dies first; that worker's stop must take them."""
+        left = []
+        for name in ("wsl", "windows"):
+            folder = tempfile.mkdtemp(prefix="%s%d-" % (telemetry.SETTINGS_DIR_PREFIX, parts[name]["pid"]),
+                                      dir=self.worker_temp(name))
+            with open(os.path.join(folder, telemetry.SETTINGS_FILE), "w") as fh:
+                json.dump({"stands for": "a traced stage's settings, with the trace store's key"}, fh)
+            left.append(folder)
+        return left
+
+    def restart_by_workbench(self, service):
+        """The live stack stopped and started by the Workbench's own API, from its service's context."""
+        before = self.parts(self.workbench("/api/health"))
+        check(all(part["state"] == "up" for part in before.values()), "the live stack is up: %s"
+              % ", ".join("%s %s" % (name, part["state"]) for name, part in before.items()))
+        left = self.settings_left(before)
+        results = self.workbench("/api/stack", {"action": "stop"})["results"]
+        check(all(result["ok"] for result in results), "the Workbench stopped the live stack: %s"
+              % "; ".join("%s %s" % (result["component"], result["said"]) for result in results))
+        check(not [folder for folder in left if os.path.exists(folder)],
+              "each worker's stop took the stage settings left in its own folder: %s" % ", ".join(left))
+        health = self.workbench("/api/health")
+        check(health["temporal"] == "down" and all(part["state"] == "down" for part in health["components"]),
+              "and, all of it down, the Workbench still answers and reads it down")
+        results = {result["component"]: result
+                   for result in self.workbench("/api/stack", {"action": "start"})["results"]}
+        # WSL started by an elevated process runs Windows programs elevated, the Windows worker too.
+        elevated = [name for name, part in before.items() if part["managed"] and not part["startable"]]
+        check(all(result["ok"] for name, result in results.items() if name not in elevated),
+              "the Workbench started it again, each part proven up: %s"
+              % "; ".join("%s %s" % (name, result["said"]) for name, result in results.items()))
+        for name in elevated:
+            check(not results[name]["ok"] and "elevated" in results[name]["said"],
+                  "the Workbench would have started the %s worker elevated, so did not, and said why: %s"
+                  % (name, results[name]["said"]))
+            print("  NOTE this WSL was started by an elevated process: this script starts the %s worker instead"
+                  % name, flush=True)
+            done = subprocess.run([sys.executable, "-m", "app.interfaces.cli", "--stack", "start", name], cwd=PKG,
+                                  capture_output=True, text=True, timeout=900)
+            check(done.returncode == 0, "started from this script's side: %s" % done.stdout.strip())
+        parts = self.parts(self.workbench("/api/health"))
+        check(all(part["state"] == "up" for part in parts.values()) and parts["windows"]["pid"],
+              "it reads every part up, the Windows worker too, through the client it held across Temporal's restart")
+        check(self.service() == service, "and its service never restarted meanwhile (main process %s)" % service)
+
+    def worker_survives_the_service(self):
+        """The Workbench's service restarted: the WSL worker it started keeps running, as it was."""
+        unit = subprocess.run(["systemctl", "--user", "show", "-p", "FragmentPath", "--value", SERVICE],
+                              capture_output=True, text=True, check=True).stdout.strip()
+        verified = subprocess.run(["systemd-analyze", "--user", "verify", unit], capture_output=True, text=True)
+        check(verified.returncode == 0 and not (verified.stdout + verified.stderr).strip(),
+              "systemd reads its installed unit without a word: %s" % (verified.stdout + verified.stderr).strip())
+        before = self.parts(self.workbench("/api/health"))["wsl"]["pid"]
+        subprocess.run(["systemctl", "--user", "restart", SERVICE], check=True, timeout=60)
+        deadline = time.monotonic() + 60
+        while True:
+            try:
+                wsl = self.parts(self.workbench("/api/health"))["wsl"]
+                break
+            except OSError:
+                if time.monotonic() > deadline:
+                    raise
+                time.sleep(1)
+        check(alive(before) and (wsl["state"], wsl["pid"]) == ("up", before),
+              "the Workbench's service restarted, and the WSL worker, pid %s, still runs and polls" % before)
+        # A failure systemd must answer: SIGKILL, never SIGTERM, which a service ends on cleanly.
+        killed = self.service()
+        os.kill(killed, signal.SIGKILL)
+        deadline = time.monotonic() + 30
+        while True:
+            try:
+                if self.service() not in (None, killed) and self.workbench("/api/health"):
+                    break
+            except OSError:
+                pass
+            if time.monotonic() > deadline:
+                check(False, "the Workbench came back within 30 s of being killed")
+            time.sleep(1)
+        check(True, "killed, the Workbench's service came back by itself, as main process %s" % self.service())
+        with open("/proc/%d/cgroup" % before) as fh:
+            scope = "/orchestra-%s.scope" % stack.worker_name(P.load(), "wsl")
+            check(scope in fh.read(), "in a scope of its own, %s, which no restart of the service takes" % scope[1:])
+        with open("/proc/%d/environ" % before, "rb") as fh:
+            path = dict(entry.split(b"=", 1) for entry in fh.read().split(b"\0") if b"=" in entry)[b"PATH"].decode()
+        found = {brain: shutil.which(brain, path=path) for brain in ("claude", "codex")}
+        check(all(found.values()), "the real CLIs are on its PATH: %s" % found)
+
     async def run(self):
         self.setup()
         client = await self.connect()
@@ -209,6 +352,8 @@ class Acceptance:
         self.runs.append(run1)
         handle = client.get_workflow_handle(run1)
         status = await handle.query(WF.FeatureRun.status)
+        check(status["workflow_queue"] == self.workflow_queue,
+              "it runs on this acceptance's own workflow queue, %s" % status["workflow_queue"])
         before = await self.events(handle)
         try:
             await handle.execute_update(WF.FeatureRun.answer, {"stop": status["stop"]["id"], "action": "discard",
@@ -235,12 +380,14 @@ class Acceptance:
         check(not any(name.startswith("build") for name in names), "no build turn ran: %s" % ", ".join(names))
         check(any(name.startswith("assess-e2") for name in names), "the architect judged the changed plan")
 
-        step("the server and all three workers restart while the run waits")
-        subprocess.run(["docker", "compose", "-f", os.path.join(PKG, "temporal", "compose.yaml"), "restart", "temporal"],
-                       check=True, capture_output=True)
-        subprocess.run(["bash", os.path.join(PKG, "workers.sh"), "down"], capture_output=True, text=True)
+        step("the live stack and this acceptance's worker restart while the run waits")
+        # Through the stack's one owner, never from this script's worker's environment: the live workers
+        # must never inherit the fakes it runs.
         self.kill_worker()
-        subprocess.run(["bash", os.path.join(PKG, "workers.sh"), "up"], capture_output=True, text=True, timeout=600)
+        service = self.service()
+        check(service is not None, "the Workbench's service runs here (`make workbench-install`)")
+        self.restart_by_workbench(service)
+        self.worker_survives_the_service()
         client = await self.connect()
         self.start_worker()
         check(await self.polled(client, self.queue), "after the restart the workers poll again")
@@ -275,7 +422,7 @@ class Acceptance:
 
         step("a run id is refused while its run is open")
         try:
-            await client.start_workflow(WF.FeatureRun.run, {}, id=run1, task_queue=WF.TASK_QUEUE,
+            await client.start_workflow(WF.FeatureRun.run, {}, id=run1, task_queue=self.workflow_queue,
                                         id_conflict_policy=__import__("temporalio.common").common.WorkflowIDConflictPolicy.FAIL,
                                         id_reuse_policy=__import__("temporalio.common").common.WorkflowIDReusePolicy.REJECT_DUPLICATE)
             check(False, "the open run's id is refused")
@@ -297,15 +444,20 @@ class Acceptance:
         while alive(grandchild) and time.monotonic() < gone:
             time.sleep(0.1)
         check(not alive(grandchild), "killing the worker ended the grandchild within 5 s, before any timeout")
+        # It was the only worker of this acceptance's stack, workflows included: its run moves again only
+        # once one polls, as a deployment's does when its WSL worker comes back.
+        os.remove(self.hang)
+        self.start_worker()
+        check(await self.polled(client, self.queue), "the restarted worker polls")
         out = proc.communicate(timeout=300)[0]
         self.follower = None
         run2 = re.search(r"run-id: ([\w-]+)", out).group(1)
         self.runs.append(run2)
+        queue = (await client.get_workflow_handle(run2).query(WF.FeatureRun.status))["workflow_queue"]
+        check(queue == self.workflow_queue, "the second run, too, on this acceptance's own workflow queue: %s" % queue)
         check("reason:   failed" in out and "heartbeat" in out.lower(),
-              "after the heartbeat timeout the run stopped for the operator")
-        os.remove(self.hang)
-        self.start_worker()
-        check(await self.polled(client, self.queue), "the restarted worker polls")
+              "after the heartbeat timeout the run stopped for the operator, the command line still following it%s"
+              % ("" if "reason:   failed" in out else ": %s" % " | ".join(out.strip().splitlines()[-6:])))
         code, out = self.cli("--continue", run2)
         check(code == 0 and "READY_FOR_HUMAN" in out, "Continue ran the stage once more and reached READY_FOR_HUMAN")
         code, out = self.cli("--resume", run2, "--answer", "discard", "--confirm")
@@ -326,7 +478,7 @@ class Acceptance:
 
         step("a run id is refused after its run closed, while it is retained")
         try:
-            await client.start_workflow(WF.FeatureRun.run, {}, id=run1, task_queue=WF.TASK_QUEUE,
+            await client.start_workflow(WF.FeatureRun.run, {}, id=run1, task_queue=self.workflow_queue,
                                         id_conflict_policy=__import__("temporalio.common").common.WorkflowIDConflictPolicy.FAIL,
                                         id_reuse_policy=__import__("temporalio.common").common.WorkflowIDReusePolicy.REJECT_DUPLICATE)
             check(False, "the closed run's id is refused")
@@ -351,15 +503,11 @@ class Acceptance:
             left.append("runs %s in Temporal (%r)" % (", ".join(self.runs), exc))
         for run_id in self.runs:
             shutil.rmtree(os.path.join(RUNTIME, run_id), ignore_errors=True)
-        for pid in self.worker_pids:
-            # Its workers run under a policy of their own, so each named its pid file after itself, and
-            # a killed one could not take it back.
-            try:
-                os.remove(os.path.join(RUNTIME, "worker-wsl-%d.pid" % pid))
-            except FileNotFoundError:
-                pass
-        left += [name for name in os.listdir(RUNTIME)
-                 if name in self.runs or any(name.endswith("-%d.pid" % pid) for pid in self.worker_pids)]
+        # Its worker runs under a policy of its own, whose pid file a killed one could not take back.
+        record = stack.pid_file(P.load(self.policy), "wsl")
+        if os.path.exists(record):
+            os.remove(record)
+        left += [name for name in os.listdir(RUNTIME) if name in self.runs or name == os.path.basename(record)]
         try:
             trust.forget(self.repo, [role["brain"] for role in P.load(self.policy)["roles"].values()])
         except Exception as exc:                   # noqa: BLE001 - reported below, never raised here

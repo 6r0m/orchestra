@@ -138,7 +138,7 @@ def main():
     os.environ["LANGFUSE_TRACING_ENVIRONMENT"] = "fixture"
     tele = T.resolve()
     if tele is None:
-        print("no Langfuse keys (secrets/langfuse.env) - nothing to emit", file=sys.stderr)
+        print("no Langfuse keys (.env) - nothing to emit", file=sys.stderr)
         return 1
     # A fixture has no agent transcripts: its fake architect writes no rollout, so an upload
     # would only mark every architect step as missing its turns.

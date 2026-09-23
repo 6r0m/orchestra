@@ -10,4 +10,5 @@ UV_PROJECT_ENVIRONMENT="$(uv run --no-project --managed-python --python 3.13 pyt
 export UV_PROJECT_ENVIRONMENT
 uv --project "$HERE" sync --locked --quiet
 cd "$HERE"
-exec uv --project "$HERE" run --locked --no-sync python -m unittest discover -s tests -p "test_*.py" -t . "$@"
+# `python -m tests` is unittest, with a look at an exit that does not come (tests/__main__.py).
+exec uv --project "$HERE" run --locked --no-sync python -m tests discover -s tests -p "test_*.py" -t . "$@"

@@ -12,7 +12,7 @@ $hostTests = @(
     "tests.workspace.test_repos", "tests.workspace.test_worktrees",
     "tests.orchestration.test_workflow", "tests.orchestration.test_stops", "tests.orchestration.test_replay",
     "tests.observability.test_trace_parity", "tests.observability.test_stale_settings", "tests.foundation.test_policy",
-    "tests.test_architecture"
+    "tests.application.test_stack", "tests.test_architecture", "tests.test_harness"
 )
 if (-not $Tests) { $Tests = $hostTests }
 
@@ -25,7 +25,8 @@ $env:UV_PROJECT_ENVIRONMENT = $environment
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Push-Location $here
 try {
-    & $uv --project $here run --locked --no-sync python -m unittest @Tests
+    # `python -m tests` is unittest, with a look at an exit that does not come (tests\__main__.py).
+    & $uv --project $here run --locked --no-sync python -m tests @Tests
     exit $LASTEXITCODE
 } finally {
     Pop-Location

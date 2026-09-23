@@ -1,7 +1,7 @@
 """Live agent terminals on this host, and a role turn run in one.
 
 A run's role has one terminal on its target host, from its first turn until the run is
-merged, discarded or aborted. The terminal is this worker's: it records every byte the
+merged, discarded or otherwise ended. The terminal is this worker's: it records every byte the
 agent draws to `tmp/orchestration/<run-id>/terminals/<role>.out`, and serves the record and
 the live bytes on the worker's WebSocket, `ws://127.0.0.1:<terminal_port>/<run-id>/<role>`,
 taking keystrokes back. Whoever holds the page can watch, press Esc and type at any time.

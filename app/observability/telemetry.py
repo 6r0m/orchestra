@@ -678,35 +678,39 @@ def discard_settings(path):
             _warn_once("claude settings cleanup", exc)
 
 
-def discard_stale_settings():
+def discard_stale_settings(gone=()):
     """Remove the settings a role-run left when the process running it died first — a worker killed
     mid-stage, as a restart may do — so the trace store's key does not outlive it. Returns the
-    directories removed. Never raises.
+    directories removed and those still there — a file held open, a folder not writable — or the
+    temporary folder itself when it cannot be listed: whatever may still hold a key. Never raises.
 
     Only a directory whose maker is gone: `harness_settings` names each after its process, and a
-    stage still running in another worker on this host keeps its own. A name that says no process,
+    stage still running in another worker on this host keeps its own. A process in `gone` its caller
+    has proven gone — the stack, having stopped a worker — and is taken at its word: Windows can give
+    its pid to a new process within moments. Any other is asked about; a name that says no process,
     or a process that cannot be asked about, is left as it is.
     """
     import shutil
     import tempfile
     root = tempfile.gettempdir()
-    removed = []
+    removed, left = [], []
     try:
         names = os.listdir(root)
     except OSError as exc:
         _warn_once("claude settings sweep", exc)
-        return removed
+        return removed, [root]
     for name in names:
         owner = name[len(SETTINGS_DIR_PREFIX):].split("-", 1)[0] if name.startswith(SETTINGS_DIR_PREFIX) else ""
-        if not owner.isdigit() or _alive(int(owner)):
+        if not owner.isdigit() or (int(owner) not in gone and _alive(int(owner))):
             continue
         path = os.path.join(root, name)
         shutil.rmtree(path, ignore_errors=True)
         if os.path.exists(path):
             _warn_once("claude settings sweep", OSError("could not remove %s" % path))
+            left.append(path)
         else:
             removed.append(path)
-    return removed
+    return removed, left
 
 
 def _alive(pid):
@@ -1066,10 +1070,12 @@ def final_diff(client, values, read_diff):
 
 
 def outcome_score(client, values):
-    """Score whether a work item ended with a verified build: 1 at `READY_FOR_HUMAN`, 0 when aborted.
+    """Score whether a work item's build was verified: 1 at `READY_FOR_HUMAN`, 0 when aborted.
 
-    A run that only stopped at a gate has not ended, so it is not scored. The
-    score has one id per work item, so recording it again replaces it.
+    A run that only stopped at a gate has not ended, so it is not scored. A run the operator ended
+    with a Stop is not scored either: a Stop is not a judgement, and a 0 would read as a final
+    verification that failed, where none may have run — one stopped at its final gate keeps the 1
+    it scored there. The score has one id per work item, so recording it again replaces it.
     """
     if client is None or not values:
         return

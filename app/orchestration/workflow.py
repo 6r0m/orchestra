@@ -26,7 +26,6 @@ with workflow.unsafe.imports_passed_through():
     from app.orchestration import routing
 
 NAMESPACE = "orchestration"
-TASK_QUEUE = "orchestration"
 
 # A role-run and every git side effect run once; only reads retry.
 ONCE = RetryPolicy(maximum_attempts=1)
@@ -39,19 +38,21 @@ STOP_CLEANUP = timedelta(minutes=1)
 
 # What each stop takes, published with it, so a client shows the stop's own actions. A revise at
 # the final gate goes to the role the operator names, and each role is an action of its own:
-# `revise:<role>` arrives as the answer's action and role.
+# `revise:<role>` arrives as the answer's action and role. Ending a run is no stop's answer: a Stop
+# ends it from any state. No stop offers `abort`; a run that took one ended `ABORTED`, and its handling
+# stays so those runs still replay.
 ACTIONS = {
-    "approval": ("approve", "revise", "abort"),
-    "blocker": ("guide", "abort"),
-    "exhausted": ("guide", "abort"),
-    "failed": ("continue", "abort"),
+    "approval": ("approve", "revise"),
+    "blocker": ("guide",),
+    "exhausted": ("guide",),
+    "failed": ("continue",),
     "final": ("merge", "revise:engineer", "revise:architect", "discard"),
 }
 HINTS = {
-    "approval": "approve to start implementation, revise with feedback for a new plan, or abort",
-    "blocker": "guide with your decision to continue, or abort",
-    "exhausted": "guide with your decision to continue, or abort",
-    "failed": "fix the cause, then continue to run the stage again, or abort",
+    "approval": "approve to start implementation, or revise with feedback for a new plan",
+    "blocker": "guide with your decision to continue",
+    "exhausted": "guide with your decision to continue",
+    "failed": "fix the cause, then continue to run the stage again",
     "final": "merge into the base branch, revise with feedback to the engineer or the architect, "
              "or discard the worktree",
 }
@@ -62,9 +63,11 @@ TRACED_STOPS = ("approval", "blocker", "exhausted")
 def _message(error):
     cause = error.cause if isinstance(error, ActivityError) and error.cause else error
     if isinstance(cause, TimeoutError) and cause.type is not None:
+        clock = cause.type.name.lower().replace("_", "-")
+        if clock == "schedule-to-start":
+            return "%s timeout: no worker of the run's host took this step; start it, then continue" % clock
         # A heartbeat timeout is how a lost worker shows: say which clock ran out.
-        return "%s timeout: the worker running this step stopped responding or ran out of time" % (
-            cause.type.name.lower().replace("_", "-"))
+        return "%s timeout: the worker running this step stopped responding or ran out of time" % clock
     return str(getattr(cause, "message", None) or cause)
 
 
@@ -163,8 +166,6 @@ class FeatureRun:
             outcome = await self._final_gate()
             if outcome == "done":
                 return s
-            if outcome == "abort":
-                return await self._end("ABORTED")
             review_next = outcome == "review"
 
     async def _stage(self, stage):
@@ -202,7 +203,8 @@ class FeatureRun:
         return True
 
     async def _until_done(self, label, attempt):
-        """Await `attempt`; on a failure stop for the operator, who continues it or aborts."""
+        """Await `attempt`; on a failure stop for the operator, who continues it — or, on a run that was
+        offered one, aborts."""
         s = self.state
         while True:
             try:
@@ -339,8 +341,13 @@ class FeatureRun:
         what git did, and returns it — a merge or discard that landed ends the run as it always does,
         and anything else meets the Stop at the run's next step."""
         self._unless_stopping()
+        # It waits for its host's worker to take it as long as a role's step may go unheard: past that the
+        # worker is gone, and the step fails never having run — it neither holds a Stop until a worker
+        # comes back nor lands after the run was stopped.
+        waits = (timedelta(seconds=self.policy["heartbeat_seconds"])
+                 if workflow.patched("a-git-step-waits-for-its-worker-at-most") else None)
         effect = workflow.start_activity(name, args, task_queue=self.queue, start_to_close_timeout=GIT_TIMEOUT,
-                                         retry_policy=ONCE)
+                                         schedule_to_start_timeout=waits, retry_policy=ONCE)
         try:
             return await asyncio.shield(effect)
         except asyncio.CancelledError:
@@ -403,8 +410,9 @@ class FeatureRun:
 
     @workflow.query
     def status(self):
+        # Both queues the run needs: its target host's, and the one it runs on, its policy's own.
         return {"state": self.state, "stop": self.stop, "lines": self.lines, "timeline": self.timeline,
-                "queue": self.queue}
+                "queue": self.queue, "workflow_queue": workflow.info().task_queue}
 
 
 @workflow.defn
@@ -427,3 +435,16 @@ class WorktreeView:
         return await workflow.execute_activity(
             "worktree_view", args, task_queue=args["queue"], start_to_close_timeout=SHORT_TIMEOUT,
             retry_policy=READS)
+
+
+@workflow.defn
+class RemoveWorktree:
+    """What a closed run kept — its worktree, its branch, the worktree's environment — removed by its
+    target host's own git, as a discard removes them; once, like every git side effect. A removal no
+    worker of that host takes within `waits` seconds fails never having run, as a run's git step does."""
+
+    @workflow.run
+    async def run(self, args):
+        return await workflow.execute_activity(
+            "discard", {"state": args["state"]}, task_queue=args["queue"], start_to_close_timeout=SHORT_TIMEOUT,
+            schedule_to_start_timeout=timedelta(seconds=args["waits"]), retry_policy=ONCE)
