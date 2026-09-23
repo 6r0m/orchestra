@@ -185,6 +185,20 @@ class StackControl(unittest.TestCase):
         self.assertEqual([part["name"] for part in body["health"]["components"]], ["temporal", "wsl", "windows"],
                          "with the stack's reading after it")
 
+    def test_the_whole_stack_as_the_page_asks_for_it_reaches_the_owner_as_every_part(self):
+        """The page's whole-stack buttons name no part — `component` null — which reaches the owner as the
+        whole stack, as a request naming none does."""
+        stack_as(self)
+        asked = []
+
+        def stop(policy, component=None, progress=None):
+            asked.append(component)
+            return [{"component": part, "ok": True, "said": "stopped"} for part in ("wsl", "windows", "temporal")]
+        self.addCleanup(setattr, stack, "ACTIONS", stack.ACTIONS)
+        stack.ACTIONS = dict(stack.ACTIONS, stop=stop)
+        status, body = request("POST", "/api/stack", {"action": "stop", "component": None})
+        self.assertEqual((status, asked), (200, [None]), body)
+
     def test_what_the_owner_does_not_do_is_refused(self):
         self.assertEqual(request("POST", "/api/stack", {"action": "delete"})[0], 400)
         self.assertEqual(request("POST", "/api/stack", {"action": "start", "component": "workbench"})[0], 400,

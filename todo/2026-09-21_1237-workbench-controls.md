@@ -1,6 +1,8 @@
 # The Workbench: Orchestra's operator console
 
-**Status:** DONE — reviews passed and the full suite green on both hosts (D19); awaiting the operator's merge
+**Status:** DONE — reviews passed and the full suite green on both hosts (D19); awaiting the operator's merge.
+One condition outside this repository: on this machine a logon task of its own boots WSL elevated, so the
+Workbench refuses to start the Windows worker after every Windows logon (see the last Review record entry).
 **Scope:** the Workbench (`app/interfaces/workbench`); the shared application control API — the run
 client (`app/application/client.py`) and one stack lifecycle owner beside it; the workflow's handling
 of a Stop (`app/orchestration/workflow.py`); the stack's process scripts (`workers.sh`,
@@ -186,7 +188,9 @@ from [structure.md](../docs/architecture/structure.md).
   - Effect: the completion criteria — the full suite on the final code, on both hosts, since the change
     touches launching, terminals and worktrees (`AGENTS.md`).
   - Reason: *"for our kiss goal"*
-  - Date/source: 2026-09-23, operator
+  - Date/source: 2026-09-23, operator, in this change's session, after being told the remaining steps
+    included the `wsl --shutdown` validation: *"we will not test wsl shutdown, we need test just full
+    suite and that's it for our kiss goal"*
 
 ### Operator gates
 
@@ -1080,5 +1084,40 @@ suite on the final code, on both hosts.
 - The full suite on the final code: WSL 391 tests OK (4 skipped); Windows 277 OK (34 skipped), its
   process exiting two seconds after its summary. `make public-check` passed; `git diff --check` clean;
   nothing staged, committed or pushed.
+
+### 2026-09-23 — an outside review of the finished todo: PATCH, evaluated
+
+- **Trigger:** the operator pasted an outside review and asked for it to be weighed against the code,
+  the architecture and the decisions, and refuted where wrong.
+- **"D19 is not a valid operator decision" — refuted.** The operator gave it in this session, in the
+  words D19 now quotes, after being told the remaining steps included the `wsl --shutdown` validation;
+  it supersedes D18 in part, recorded as the register requires. The instruction the review quotes
+  (*"validate with architect and user"*) appears in no transcript of this change before the review.
+  D19 stands; only the operator can restore D18's validation.
+- **"The skipped validation is the only proof of the service's token" — right, and more than the review
+  knew.** Measured: Windows programs started from the systemd user manager — the Workbench service's
+  context — run elevated, while those from a `wsl.exe` session opened from the editor do not; WSL
+  booted 37 s after Windows, before any window of the operator's; and a logon task of this machine's
+  own runs elevated at every logon and calls `wsl.exe`, which boots WSL when it is not running. The
+  scheduler's log is off, so which call booted it is inferred, not logged. Consequence: after every
+  logon the Workbench correctly refuses to start the Windows worker. The validation the review proposes
+  — `wsl --shutdown`, then a normal start — would pass on that boot and fail again at the next logon;
+  the proof is a sign-out and sign-in once that task no longer boots WSL elevated. The task is this
+  machine's configuration, outside this repository, and was not changed. `docs/using.md` now says that
+  anything elevated that runs `wsl.exe` first, not only an administrator's terminal, starts WSL elevated.
+- **"Pressing the Temporal and whole-stack buttons in a browser is required" — refuted as required,
+  its one real gap closed.** The Temporal buttons are built by the same loop and function as the WSL
+  worker's, which the demo presses; only the part's name differs. The whole-stack buttons differ in
+  one thing: they name no part (`component` null). The live acceptance stopped and started the whole
+  stack, Temporal included, through the service's own API; what no test covered was the page's request
+  itself — now an API test, whose control (a missing part defaulted to one) fails it. Neither button
+  can be pressed by the demo: its Workbench runs another policy's stack, which manages only its own WSL
+  worker, so the page draws neither; pressing them for real stops the operator's live Temporal and
+  workers, an operator step D19 set aside. D12's *"restart that worker or the stack"* is met by the
+  worker's restart the demo presses.
+- **Agreed:** the architecture stands, and the debts left are not blockers.
+- **Found in this evaluation:** `make demo` had not run since the seventh round changed it. Run once on
+  the final code, against the live Temporal started for it and stopped again after: passed, the empty
+  Revise and the Discard question among its checks, nothing left behind.
 - **Left:** a start of a worker already running counts its polls from a window back; a regression there
   slows a start, never misreads one.
