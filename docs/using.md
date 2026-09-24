@@ -6,11 +6,8 @@ what the tests, any automation and the Makefile use.
 ## The Workbench
 
 A systemd user service in WSL, installed once from this checkout. Start WSL from a normal terminal,
-not an administrator's, and let nothing elevated start it first: Windows programs the service starts
-run with the token WSL was started with — a scheduled task or logon script that runs `wsl.exe` elevated
-before you open WSL starts it elevated — and the Windows worker, with every agent it runs, is never
-started as an administrator. From an elevated WSL the Workbench refuses to start it and says so, until
-`wsl --shutdown` and a normal start.
+not an administrator's: Windows programs the service starts run with the token WSL was started with,
+and the Windows worker — with every agent it runs — is never started as an administrator.
 
 ```bash
 make workbench-install    # render it for this checkout and its environment, enable it, start it

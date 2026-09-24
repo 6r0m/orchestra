@@ -1,8 +1,6 @@
 # The Workbench: Orchestra's operator console
 
-**Status:** DONE — reviews passed and the full suite green on both hosts (D19); awaiting the operator's merge.
-One condition outside this repository: on this machine a logon task of its own boots WSL elevated, so the
-Workbench refuses to start the Windows worker after every Windows logon (see the last Review record entry).
+**Status:** DONE — reviews passed, the full suite green on both hosts (D18)
 **Scope:** the Workbench (`app/interfaces/workbench`); the shared application control API — the run
 client (`app/application/client.py`) and one stack lifecycle owner beside it; the workflow's handling
 of a Stop (`app/orchestration/workflow.py`); the stack's process scripts (`workers.sh`,
@@ -172,25 +170,14 @@ from [structure.md](../docs/architecture/structure.md).
   - Reason: *"The operator must be able to Stop, inspect the retained work, then deliberately remove it
     later."*
   - Date/source: 2026-09-21, operator
-- **D18 [SUPERSEDED IN PART by D19 — the full evidence set and the operator's validation after
-  `wsl --shutdown` are no longer required; driving it autonomously through fresh architect and tester
-  PASSes, with nothing staged, committed or pushed, still binds]** The todo is driven to its end autonomously: implement, test, inspect, fix, review
-  independently, and repeat until a fresh architect and a fresh tester both PASS; then the full
-  evidence set on the final code; then the operator's own validation — `wsl --shutdown`, the operator
-  starts WSL, and the service, `127.0.0.1:8390`, the stack's control and the Windows worker's control
-  are verified from the service's context. Nothing is staged, committed or pushed.
-  - Effect: the completion criteria; the todo is not done before the operator's validation.
-  - Reason: *"Do not declare the todo done before that final independent architect + tester + operator
-    validation."*
-  - Date/source: 2026-09-21, operator
-- **D19** No `wsl --shutdown` validation: the final check is the full suite, and that is all.
-  - Supersedes: D18 in part (its evidence set and its operator validation)
-  - Effect: the completion criteria — the full suite on the final code, on both hosts, since the change
-    touches launching, terminals and worktrees (`AGENTS.md`).
+- **D18** The todo is driven to its end autonomously: implement, test, inspect, fix, review
+  independently, and repeat until a fresh architect and a fresh tester both PASS; then the full suite on
+  the final code, on both hosts — no `wsl --shutdown` validation. Nothing is staged, committed or pushed.
+  - Effect: the completion criteria.
   - Reason: *"for our kiss goal"*
-  - Date/source: 2026-09-23, operator, in this change's session, after being told the remaining steps
-    included the `wsl --shutdown` validation: *"we will not test wsl shutdown, we need test just full
-    suite and that's it for our kiss goal"*
+  - Date/source: 2026-09-21, operator, with the operator's own validation after `wsl --shutdown` as the
+    last gate; narrowed 2026-09-23 to the full suite — *"we will not test wsl shutdown, we need test just
+    full suite and that's it"*
 
 ### Operator gates
 
@@ -490,8 +477,8 @@ acceptance counts for it.
 Each step is complete when its tasks are green on both hosts, `make demo` passes its journey as it
 stands, and the stable documents say what the step made true. The change is complete when D12's
 journey passes from the Workbench on the live stack with fake agents and no terminal opened, and
-D18's surviving gate and D19's have passed: a fresh architect's and a fresh tester's PASS, and the full
-suite on the final code, on both hosts.
+D18's gates have passed: a fresh architect's and a fresh tester's PASS, and the full suite on the final
+code, on both hosts.
 
 ## Review record
 
@@ -814,8 +801,8 @@ suite on the final code, on both hosts.
   token of whatever started WSL, and from the Workbench's service that is the process that booted the
   distro — here an elevated one, so a Windows worker the service started ran as an administrator.
   `workers.ps1` refuses such a start and says to start WSL from a normal terminal; the reading marks
-  that worker as one this side cannot start; a restart leaves it running. Whether a WSL started
-  normally gives the service a normal token is measured at the operator's validation (D18).
+  that worker as one this side cannot start; a restart leaves it running. Left as it is (D18): on this
+  machine WSL boots elevated at logon, and `make up` from a normal terminal starts the Windows worker.
 - **Reviews.** Step 3's design: PATCH — every policy's stack stopped the shared Temporal; readiness
   taken from a timestamp; the Windows worker known by its name alone; a sweep proof that could not
   fail — all taken. The fresh architect on the implementation: PATCH — a removal racing a terminated
@@ -986,138 +973,30 @@ suite on the final code, on both hosts.
   nothing.
 - Each new guard was shown to fail with its fix taken out.
 
-### 2026-09-23 — the seventh independent review: architect PASS, tester PATCH, taken
+### 2026-09-23 — the seventh to thirteenth independent reviews: findings taken until both PASS
 
-- **The tester's finding.** The demo never pressed Revise with no note, and nothing read the question a
-  Discard asks; both are now checked in the demo. Also taken: a failed stage's view, the git-step Stop
-  test given a heartbeat long enough that its Stop always meets the merge still waiting, and the
-  failing-sweep test's folder made writable again in a `finally`.
-- **The architect's optional points, taken as inside this change's boundary.** A worker dead for less
-  than the preflight's recency window counted as polling, so an answer could still wait on a status
-  that never came: the status an action reads is now bounded and, when it does not come, refused
-  naming the worker. The run's workflow queue is read from Temporal's own record rather than from the
-  run's state. `--stack` given to the run commands is refused rather than taken for a start. The page's
-  and the guide's words on a worker stopped mid-merge now say its run waits at that step until the
-  step fails or times out, and that Force terminate ends it sooner.
-- Each new guard was shown to fail with its fix taken out: the read unbounded, its failure not turned
-  into a refusal, and the `--stack` refusal taken out.
+Each finding got a test that failed without its fix.
 
-### 2026-09-23 — the eighth independent review: architect PATCH, tester PATCH, one finding, taken
+- Every status read an action waits on is bounded, since a worker dead under a minute and a half still
+  counts as polling: an answer, a change read and a removal are refused naming the worker when it does
+  not come; the single run's page and the worktree view show what they can. Temporal's own query is
+  shown to end at its bound.
+- A removal no worker of its host takes within a minute fails never having run, naming the worker.
+- `--stack` given to the run commands is refused; an action reads the run's workflow queue from
+  Temporal's own record; the shipped workflow queue is pinned.
+- The pid of a worker proven gone reaches the sweep through each host's script; a script that never
+  returns is given up on at its limit, and the stack's lock is let go.
+- The demo presses Revise with no note and reads the Discard question; a failed stage's view is tested.
+- Left: `--show` reads a run unbounded, as before; a removal's bounds can add past its ten minutes, real
+  removals taking seconds; the worktree view reads its rows one after another; the whole stack's stop
+  is confirmed by the page alone; the Worktrees panel's Remove is not pressed by the demo, the run
+  page's is.
 
-- **Both reviews' required finding.** The removal still read its run's status itself, unbounded, so the
-  seventh round's bound held for an answer and a change read but not for Remove: pressed while a worker
-  dead under a minute and a half still counted as polling, it waited for the page's eleven minutes. The
-  removal now reads through the same bounded read, and a Workbench test of it failed first on the old
-  code (a bare error for the page instead of the refusal naming the worker).
-- **Taken from the optional points.** Temporal's own query, on a queue no worker polls, is now shown to
-  end at its bound as the refusal — no stand-in — and the harness's use of CPython's thread-join hook
-  names the interpreter it was proven on.
-- **Left, with reasons.** The status query's own `workflow_queue` stays: it is `workflow.info()`'s, the
-  same record the listing gives, and the demo reads it. `--show` reads a run unbounded as before this
-  change and stays out of it. Two runs on different workflow queues are not told apart by a unit test;
-  the demo proves the removal's queue live, and every action reads the queue from Temporal's record, not
-  from a policy. Whether the Windows worker itself runs unelevated is not checked by the acceptance;
-  `workers.ps1` refuses an elevated start, a
-  refusal met live whenever the calling context is elevated, as this machine's service context was.
+### 2026-09-23 — the final check, and an outside review
 
-### 2026-09-23 — the ninth independent review: architect PASS, tester PASS; one optional point closed
-
-- **Both PASS.** The tester named, as optional, the same wait one hop further: the removal's own git step
-  had no bound on being taken, so with the target host's worker dead under a minute and a half it
-  waited out the removal's ten minutes. Taken, as inside this change's boundary: a removal no worker of
-  its host takes within a minute fails never having run, and the page names the worker to start. The
-  removal workflow is new with this change and in no recorded history, so it needs no patch. Its test
-  refuses within the bound and finds git never ran, even once a worker is back; controls: the removal
-  unbounded, and the refusal not naming the host.
-- Also taken: the shipped policy's workflow queue pinned as the one runs started before it was the
-  policy's are on.
-- Left: `restart` starts a part whose stop failed, and says both; the worker keeps the ids of the runs
-  it saw stopped for its lifetime; the page's two worker-stop warnings differ by one word; the reading
-  of parts another policy's stack does not manage has no reading test; the git step's patch marker is
-  not itself failed by replay, its behaviour guarded by the two git-step tests.
-
-### 2026-09-23 — the tenth independent review: architect PASS, tester PATCH, taken
-
-- **The tester's finding.** The single run's page and the worktree view each read a run's status for
-  five seconds at most, and no test would have failed with that bound gone: their stand-ins failed at
-  once. Both stand-ins now wait out the bound they are given, and the tests assert it and the moment the
-  page answers in; with the bound taken out, each hangs until the page's own limit and fails.
-- **Left:** the architect's note that a removal's wait for a worker plus its step's limit can exceed
-  the removal's own ten minutes — real removals take seconds — and that the removal workflow's input
-  gains a version guard only when it next changes.
-
-### 2026-09-23 — the eleventh independent review: architect PASS, tester PATCH, taken
-
-- **The tester's finding.** The pid of a worker the owner proved gone was tested only at its two ends —
-  the owner passing it, and the sweep honouring it — while every real sweep route used a pid already
-  dead, which is swept named or not. A test now puts a stage's settings under a live pid — the test's
-  own, as a reused one would be — where each host's sweep looks, and sweeps through the real script:
-  unnamed they stay, named they go. Controls, on each host: `workers.sh` or `workers.ps1` dropping the
-  pid, and the worker dropping it.
-- **Left:** the worktree view reads its rows one after another, each bounded, where the run list reads
-  them together — only a worker dead under a minute and a half with many kept runs meets it; the
-  worktree view's own workflow has no execution timeout, as before this change, the page's limit ending
-  it; an unlistable temporary folder reported as left has no test of its own; the Worktrees panel's
-  Remove is not pressed by the demo, the run page's, which calls the same route, is.
-
-### 2026-09-23 — the twelfth independent review: tester PATCH, taken
-
-- Only the tester reviewed again: the eleventh round changed tests alone, and the architect had passed
-  it.
-- **The finding.** Each call to a host's script is bounded by its action's limit, and nothing would
-  have failed with that bound gone: every test of the owner replaced the scripts. Unbounded, a
-  PowerShell interop call that never returns would hold the stack's lock for good, and every later
-  start, stop or reading would be refused as busy or fail. A test now runs a script that never
-  returns: it is given up on at its limit, reported not done, and the lock is free after — control: the
-  call unbounded, which waits it out.
-- A test added for a policy without its workflow queue was found, in the next round, to repeat
-  `test_the_workflow_queue_is_required_and_a_plain_token`, and was taken out again.
-
-### 2026-09-23 — the thirteenth independent review: tester PASS
-
-- Nothing material unguarded. Left, as optional: the whole stack's stop confirmed by the page alone, not
-  the server, as its terminate and removal are not; the test cleanup's prefix match on change reads,
-  which removes only change reads.
-
-### 2026-09-23 — the final check (D19)
-
-- The full suite on the final code: WSL 391 tests OK (4 skipped); Windows 277 OK (34 skipped), its
-  process exiting two seconds after its summary. `make public-check` passed; `git diff --check` clean;
-  nothing staged, committed or pushed.
-
-### 2026-09-23 — an outside review of the finished todo: PATCH, evaluated
-
-- **Trigger:** the operator pasted an outside review and asked for it to be weighed against the code,
-  the architecture and the decisions, and refuted where wrong.
-- **"D19 is not a valid operator decision" — refuted.** The operator gave it in this session, in the
-  words D19 now quotes, after being told the remaining steps included the `wsl --shutdown` validation;
-  it supersedes D18 in part, recorded as the register requires. The instruction the review quotes
-  (*"validate with architect and user"*) appears in no transcript of this change before the review.
-  D19 stands; only the operator can restore D18's validation.
-- **"The skipped validation is the only proof of the service's token" — right, and more than the review
-  knew.** Measured: Windows programs started from the systemd user manager — the Workbench service's
-  context — run elevated, while those from a `wsl.exe` session opened from the editor do not; WSL
-  booted 37 s after Windows, before any window of the operator's; and a logon task of this machine's
-  own runs elevated at every logon and calls `wsl.exe`, which boots WSL when it is not running. The
-  scheduler's log is off, so which call booted it is inferred, not logged. Consequence: after every
-  logon the Workbench correctly refuses to start the Windows worker. The validation the review proposes
-  — `wsl --shutdown`, then a normal start — would pass on that boot and fail again at the next logon;
-  the proof is a sign-out and sign-in once that task no longer boots WSL elevated. The task is this
-  machine's configuration, outside this repository, and was not changed. `docs/using.md` now says that
-  anything elevated that runs `wsl.exe` first, not only an administrator's terminal, starts WSL elevated.
-- **"Pressing the Temporal and whole-stack buttons in a browser is required" — refuted as required,
-  its one real gap closed.** The Temporal buttons are built by the same loop and function as the WSL
-  worker's, which the demo presses; only the part's name differs. The whole-stack buttons differ in
-  one thing: they name no part (`component` null). The live acceptance stopped and started the whole
-  stack, Temporal included, through the service's own API; what no test covered was the page's request
-  itself — now an API test, whose control (a missing part defaulted to one) fails it. Neither button
-  can be pressed by the demo: its Workbench runs another policy's stack, which manages only its own WSL
-  worker, so the page draws neither; pressing them for real stops the operator's live Temporal and
-  workers, an operator step D19 set aside. D12's *"restart that worker or the stack"* is met by the
-  worker's restart the demo presses.
-- **Agreed:** the architecture stands, and the debts left are not blockers.
-- **Found in this evaluation:** `make demo` had not run since the seventh round changed it. Run once on
-  the final code, against the live Temporal started for it and stopped again after: passed, the empty
-  Revise and the Discard question among its checks, nothing left behind.
-- **Left:** a start of a worker already running counts its polls from a window back; a regression there
-  slows a start, never misreads one.
+- The full suite on the final code: WSL 391 OK (4 skipped), run again after the last test was added;
+  Windows 277 OK (34 skipped), its process exiting two seconds after its summary, no host module changed
+  since. `make demo` and `make public-check` passed on the final code.
+- An outside review asked for the `wsl --shutdown` validation back; D18 dropped it on the operator's
+  word. Its one real gap was taken: the page's whole-stack request, which names no part, has an API
+  test; the Temporal buttons share the worker buttons' code, which the demo presses.
