@@ -45,14 +45,18 @@ def lock_of_its_own(test):
     stack.LOCK = os.path.join(folder, "stack.lock")
 
 
-def free_port():
+def port_for_another_process():
+    """A port another process will bind, told its number through a policy: free now, then let go, so
+    something else may take it first. A socket this process holds binds port 0 instead."""
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         return probe.getsockname()[1]
 
 
-def other_policy(test):
-    """A policy file of the test's own: its own host name, ports and workflow queue, as the demo's."""
+def other_policy(test, held=None):
+    """A policy file of the test's own: its own host name, ports and workflow queue, as the demo's; a
+    target in `held` on the port the test holds for it."""
+    held = held or {}
     tmp = tempfile.mkdtemp(prefix="orch-stack-")
     test.addCleanup(shutil.rmtree, tmp, True)
     with open(P.POLICY_FILE, encoding="utf-8") as fh:
@@ -60,9 +64,9 @@ def other_policy(test):
     for role in policy["roles"].values():
         role["prompt"] = os.path.join(PKG, role["prompt"])
     host = "stack%s" % os.urandom(3).hex()
-    for target in policy["targets"].values():
-        target.update(host=host, terminal_port=free_port())
-    policy.update(workbench_port=free_port(), workflow_queue="orchestration:%s" % host)
+    for name, target in policy["targets"].items():
+        target.update(host=host, terminal_port=held.get(name) or port_for_another_process())
+    policy.update(workbench_port=port_for_another_process(), workflow_queue="orchestration:%s" % host)
     path = os.path.join(tmp, "policy.json")
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(policy, fh)
@@ -463,16 +467,16 @@ class RealWorker(unittest.TestCase):
     def test_a_second_worker_stops_at_the_port_the_first_holds_and_leaves_its_record(self):
         """A second worker of one policy never takes the first one's place: it stops at the terminal port
         the first holds, before it writes a record of its own, so the first one's stays as it was."""
-        policy, path = other_policy(self)
         target = "windows" if WINDOWS else "wsl"
-        record = self.record(policy, target)
-        with open(record, "w", encoding="utf-8") as fh:
-            fh.write("4242")
         temp = tempfile.mkdtemp(prefix="orch-second-")
         self.addCleanup(shutil.rmtree, temp, True)
         with socket.socket() as first:
-            first.bind(("127.0.0.1", policy["targets"][target]["terminal_port"]))
+            first.bind(("127.0.0.1", 0))
             first.listen()
+            policy, path = other_policy(self, {target: first.getsockname()[1]})
+            record = self.record(policy, target)
+            with open(record, "w", encoding="utf-8") as fh:
+                fh.write("4242")
             # Its own temporary folder, for the sweep it makes as it starts; no Temporal, were it to get there.
             done = subprocess.run([sys.executable, "-m", "app.interfaces.worker", target], cwd=PKG,
                                   env=dict(os.environ, ORCH_POLICY=path, TMPDIR=temp, TMP=temp, TEMP=temp,

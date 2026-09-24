@@ -138,7 +138,9 @@ def check(condition, text):
         raise SystemExit("demo failed: %s" % text)
 
 
-def free_port():
+def port_for_another_process():
+    """A port another process will bind, told its number through a policy: free now, then let go, so
+    something else may take it first. A socket this process holds binds port 0 instead."""
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         return probe.getsockname()[1]
@@ -212,9 +214,10 @@ class Demo:
         policy["heartbeat_seconds"], policy["timeout_seconds"] = 10, 900
         policy["workflow_queue"] = "orchestration:%s" % host
         policy["targets"] = {"wsl": {"host": host, "worktree_root": worktrees,
-                                     "terminal_port": free_port()},
-                             "windows": {"host": host, "worktree_root": "C:\\Worktrees", "terminal_port": free_port()}}
-        policy["workbench_port"] = free_port()
+                                     "terminal_port": port_for_another_process()},
+                             "windows": {"host": host, "worktree_root": "C:\\Worktrees",
+                                         "terminal_port": port_for_another_process()}}
+        policy["workbench_port"] = port_for_another_process()
         path = os.path.join(self.tmp, "policy.json")
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(policy, fh)

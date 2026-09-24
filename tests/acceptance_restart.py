@@ -101,7 +101,9 @@ def git(path, *args):
     return subprocess.run(["git", "-C", path] + list(args), capture_output=True, text=True, check=True).stdout
 
 
-def free_port():
+def port_for_another_process():
+    """A port another process will bind, told its number through a policy: free now, then let go, so
+    something else may take it first. A socket this process holds binds port 0 instead."""
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         return probe.getsockname()[1]
@@ -158,8 +160,10 @@ class Acceptance:
         # New each time: a run a killed acceptance left behind never meets the next one's worker.
         host = "accept%s" % os.urandom(3).hex()
         policy["workflow_queue"] = "orchestration:%s" % host
-        policy["targets"] = {"wsl": {"host": host, "worktree_root": self.root, "terminal_port": free_port()},
-                             "windows": {"host": host, "worktree_root": "C:\\Worktrees", "terminal_port": free_port()}}
+        policy["targets"] = {"wsl": {"host": host, "worktree_root": self.root,
+                                     "terminal_port": port_for_another_process()},
+                             "windows": {"host": host, "worktree_root": "C:\\Worktrees",
+                                         "terminal_port": port_for_another_process()}}
         self.policy = os.path.join(self.tmp, "policy.json")
         json.dump(policy, open(self.policy, "w"))
         self.descriptors = os.path.join(self.tmp, "repos.json")
