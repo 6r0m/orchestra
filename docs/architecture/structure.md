@@ -418,8 +418,8 @@ still lands on a checkout.
   Temporal takes it with no worker polling. The workflow hears it wherever the run
   waits and ends it `STOPPED`, which Temporal records as cancelled: it runs no git, so
   the worktree and branch stay as they are, and its cleanup — the run's terminals and
-  trace, closed on its target host — waits a minute at most, so a host whose worker is
-  gone never holds a Stop. A working role's turn hears the Stop at its next heartbeat,
+  trace, closed on its target host — waits a minute at most, or the policy's
+  `stop_cleanup_seconds`, so a host whose worker is gone never holds a Stop. A working role's turn hears the Stop at its next heartbeat,
   and the terminals' close ends its agent sooner. A git side effect already running —
   the worktree's creation, a merge, a discard — is never cut off: the run shows
   `STOPPING`, waits for what git did, and a merge or discard that landed ends the run

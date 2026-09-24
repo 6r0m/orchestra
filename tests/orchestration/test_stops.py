@@ -425,14 +425,35 @@ class Stop(Lifecycle):
         self.assertEqual(self.git_run(), ["create"])
 
     def test_a_run_whose_host_has_no_worker_ends_stopped_without_waiting_for_one(self):
-        # No worker polls this host's queue: the run waits for it from its first step.
-        handle = self.start(target="windows", queue="target:windows:gone")
+        # No worker polls this host's queue: the run waits for it from its first step, and the Stop's
+        # cleanup there waits its policy's bound, here a short one, never for a worker.
+        handle = self.start(target="windows", queue="target:windows:gone",
+                            policy=dict(E.POLICY, stop_cleanup_seconds=2))
+        began = time.monotonic()
         E.run(handle.cancel())
         with self.assertRaises(WorkflowFailureError, msg="Temporal records the run cancelled"):
             E.run(handle.result())
+        self.assertLess(time.monotonic() - began, 30, "the cleanup waited its policy's bound, not a minute")
         status = E.run(handle.query(WF.FeatureRun.status))
         self.assertEqual(status["state"]["status"], "STOPPED")
         self.assertIn("the windows host's cleanup did not run", "\n".join(status["lines"]))
+
+    def test_a_stops_cleanup_is_bound_to_a_minute_when_its_policy_sets_none(self):
+        """Every shipped policy, and every run recorded before a policy could set one, carries no bound of its
+        own: the cleanup is then scheduled to close within the workflow's minute, as `approval_stop.json`
+        records it."""
+        handle = self.start(target="windows", queue="target:windows:gone")
+        E.run(handle.cancel())
+        scheduled, deadline = None, time.monotonic() + 30
+        while scheduled is None and time.monotonic() < deadline:
+            for event in history(handle):
+                attributes = event.activity_task_scheduled_event_attributes
+                if (event.event_type == EventType.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED
+                        and attributes.activity_type.name == "finish_trace"):
+                    scheduled = attributes
+            time.sleep(0.2)
+        self.assertIsNotNone(scheduled, "the Stop's cleanup was scheduled")
+        self.assertEqual(scheduled.schedule_to_close_timeout.ToTimedelta(), datetime.timedelta(minutes=1))
 
     def merge_with_its_worker_gone(self, heartbeat_seconds=2):
         """A run at its final gate on a host of the test's own, whose worker goes away just as the merge is
@@ -440,7 +461,8 @@ class Stop(Lifecycle):
         queue = "target:wsl:gone-%s" % uuid.uuid4().hex[:8]
         self.git = FakeWorktrees()
         _, worker_goes = E.own_host(self, queue, to_ready(), git=self.git)
-        handle = self.start(queue=queue, auto=True, policy=dict(E.POLICY, heartbeat_seconds=heartbeat_seconds))
+        handle = self.start(queue=queue, auto=True,
+                            policy=dict(E.POLICY, heartbeat_seconds=heartbeat_seconds, stop_cleanup_seconds=2))
         stop = self.until(handle, lambda status: status["stop"] and status["stop"]["reason"] == "final", 120)["stop"]
         worker_goes()
         E.run(E.cli.runs.answer(E.client(), handle.id, {"stop": stop["id"], "action": "merge"}, check=False))

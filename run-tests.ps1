@@ -25,8 +25,8 @@ $env:UV_PROJECT_ENVIRONMENT = $environment
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Push-Location $here
 try {
-    # `python -m tests` is unittest, with a look at an exit that does not come (tests\__main__.py).
-    & $uv --project $here run --locked --no-sync python -m tests @Tests
+    # Each test class in a process of its own, a few at a time (tests\runner.py).
+    & $uv --project $here run --locked --no-sync python -m tests --parallel @Tests
     exit $LASTEXITCODE
 } finally {
     Pop-Location

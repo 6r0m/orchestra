@@ -461,6 +461,16 @@ class Policy(unittest.TestCase):
             with self.assertRaises(policy_mod.InvalidPolicy):
                 policy_mod.validate(raw)
 
+    def test_a_stops_cleanup_bound_is_optional_and_a_whole_number_of_seconds(self):
+        policy_mod.validate(self._raw())
+        raw = self._raw()
+        raw["stop_cleanup_seconds"] = 5
+        policy_mod.validate(raw)
+        for bad in (0, -1, "2", True, 1.5):
+            raw["stop_cleanup_seconds"] = bad
+            with self.assertRaisesRegex(policy_mod.InvalidPolicy, "stop_cleanup_seconds", msg=repr(bad)):
+                policy_mod.validate(raw)
+
     def test_each_target_host_has_its_own_queue(self):
         self.assertEqual((policy_mod.queue(POLICY, "wsl"), policy_mod.queue(POLICY, "windows")),
                          ("target:wsl:local", "target:windows:local"))

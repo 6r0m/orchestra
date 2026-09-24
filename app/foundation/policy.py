@@ -31,7 +31,8 @@ ROLE_KEYS = {"brain", "workspace_access", "prompt", "model", "reasoning_effort"}
 # Model and effort reach a command line, so they must be plain tokens.
 PLAIN_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]*")
 TOP_KEYS = {"roles", "max_rounds", "auto_proceed", "timeout_seconds", "heartbeat_seconds",
-            "targets", "target_repo", "workbench_port", "stage_skills", "workflow_queue", "_policy_path"}
+            "stop_cleanup_seconds", "targets", "target_repo", "workbench_port", "stage_skills",
+            "workflow_queue", "_policy_path"}
 REPO_KEYS = {"commit_allowed", "push_allowed", "merge_allowed"}
 # Where a run's agents can execute. Each host has its own task queue, polled only by
 # that host's worker, so a role never runs on the wrong OS.
@@ -226,6 +227,11 @@ def validate(raw):
     heartbeat = raw.get("heartbeat_seconds")
     if not isinstance(heartbeat, int) or isinstance(heartbeat, bool) or heartbeat < 1:
         raise InvalidPolicy("heartbeat_seconds must be an int >= 1")
+    # Optional: without it a Stop's cleanup waits the workflow's own minute.
+    if "stop_cleanup_seconds" in raw:
+        cleanup = raw["stop_cleanup_seconds"]
+        if not isinstance(cleanup, int) or isinstance(cleanup, bool) or cleanup < 1:
+            raise InvalidPolicy("stop_cleanup_seconds must be an int >= 1")
     # Required, so a policy that forgets it fails here rather than joining another stack's runs.
     if not (isinstance(raw.get("workflow_queue"), str) and PLAIN_TOKEN.fullmatch(raw["workflow_queue"])):
         raise InvalidPolicy("workflow_queue must be a plain token: the task queue this policy's runs are on")

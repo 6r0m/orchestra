@@ -30,10 +30,11 @@ import temporal_env as E  # noqa: E402
 from app.agents import terminal  # noqa: E402
 from app.interfaces.workbench import server as workbench  # noqa: E402
 from fakes import FakeWorktrees, codex_review_first, codex_review_resumed  # noqa: E402
-from tests.application.test_stack import lock_of_its_own  # noqa: E402
+from tests.application.test_stack import free_port, lock_of_its_own  # noqa: E402
 from tests.orchestration.test_workflow import Scenario  # noqa: E402
 
-PORT = 18490
+# Picked for each process: every class of a parallel run is a process of its own, with a workbench of its own.
+PORT = free_port()
 # Every request reads the stack afresh, so what a test says of it is what the page sees.
 workbench.READING_SECONDS = 0
 
