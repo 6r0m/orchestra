@@ -1,13 +1,13 @@
 # The Workbench: Orchestra's operator console
 
-**Status:** DONE — reviews passed, the full suite green on both hosts (D18)
+**Status:** PASS 2026-09-23 — merged into `main`; the follow-ups of 2026-09-24 at the end
 **Scope:** the Workbench (`app/interfaces/workbench`); the shared application control API — the run
 client (`app/application/client.py`) and one stack lifecycle owner beside it; the workflow's handling
 of a Stop (`app/orchestration/workflow.py`); the stack's process scripts (`workers.sh`,
 `workers.ps1`) and the `Makefile`
-**Stable documentation owner:** [structure.md](../docs/architecture/structure.md) — structure D29
+**Stable documentation owner:** [structure.md](../../docs/architecture/structure.md) — structure D29
 (the Workbench), structure D6 and D24 (a stop's decisions, the final gate), a new decision for Stop
-and force terminate — and [docs/using.md](../docs/using.md) (operating Orchestra)
+and force terminate — and [docs/using.md](../../docs/using.md) (operating Orchestra)
 
 ## Contents
 
@@ -30,7 +30,7 @@ Operator -> Workbench -> shared application control API -> Temporal / workers / 
 ## Authority register
 
 `D<n>` here are this todo's own. The project's architecture decisions are cited as *structure D<n>*,
-from [structure.md](../docs/architecture/structure.md).
+from [structure.md](../../docs/architecture/structure.md).
 
 ### Operator decisions
 
@@ -229,9 +229,9 @@ from [structure.md](../docs/architecture/structure.md).
 
 **Verified facts**
 
-- The Workbench's API has seven routes, all in [server.py](../app/interfaces/workbench/server.py): the
+- The Workbench's API has seven routes, all in [server.py](../../app/interfaces/workbench/server.py): the
   run list, one run's status, its change in parts, a repository's worktrees, the repositories,
-  starting a run, and answering its stop. Every command-line form ([cli.py](../app/interfaces/cli.py))
+  starting a run, and answering its stop. Every command-line form ([cli.py](../../app/interfaces/cli.py))
   has a Workbench equivalent.
 - A stop publishes its action IDs and the page and the command line render them (task 4, D11).
 - `abort` is offered at the approval, blocker, exhausted and failed stops, never at the final gate; an
@@ -244,8 +244,8 @@ from [structure.md](../docs/architecture/structure.md).
   workers, then Temporal: stopping the stack stops the console. Each component already has start and
   stop code of its own in the script.
 - The refusal when no worker polls names `make orchestration-up` (`START_WORKERS` in
-  [client.py](../app/application/client.py)); the [Makefile](../Makefile) target is `make up`.
-- Whether each queue is polled is read by `worker.check` ([worker.py](../app/interfaces/worker.py))
+  [client.py](../../app/application/client.py)); the [Makefile](../../Makefile) target is `make up`.
+- Whether each queue is polled is read by `worker.check` ([worker.py](../../app/interfaces/worker.py))
   through `client.preflight`, and printed by `make check`; the Workbench shows none of it.
 - The installed SDK (temporalio 1.33) has `WorkflowHandle.cancel()` — a request the workflow's own code
   receives and may clean up after — and `WorkflowHandle.terminate()`, which closes the run with no
@@ -801,8 +801,8 @@ code, on both hosts.
   token of whatever started WSL, and from the Workbench's service that is the process that booted the
   distro — here an elevated one, so a Windows worker the service started ran as an administrator.
   `workers.ps1` refuses such a start and says to start WSL from a normal terminal; the reading marks
-  that worker as one this side cannot start; a restart leaves it running. Left as it is (D18): on this
-  machine WSL boots elevated at logon, and `make up` from a normal terminal starts the Windows worker.
+  that worker as one this side cannot start; a restart leaves it running. On this machine WSL boots
+  elevated at logon; the start is now handed to the desktop's shell, which starts the worker as the user.
 - **Reviews.** Step 3's design: PATCH — every policy's stack stopped the shared Temporal; readiness
   taken from a timestamp; the Windows worker known by its name alone; a sweep proof that could not
   fail — all taken. The fresh architect on the implementation: PATCH — a removal racing a terminated
@@ -1000,3 +1000,14 @@ Each finding got a test that failed without its fix.
 - An outside review asked for the `wsl --shutdown` validation back; D18 dropped it on the operator's
   word. Its one real gap was taken: the page's whole-stack request, which names no part, has an API
   test; the Temporal buttons share the worker buttons' code, which the demo presses.
+
+### 2026-09-24 — the stack's lifetime, and the Windows worker from an elevated WSL
+
+- `make up` and `make down` behave as a service's start and stop. Temporal's containers were
+  `unless-stopped`, so Docker brought Temporal back at every WSL start without the workers: now
+  `on-failure` — a failed container comes back, and after WSL restarts the stack is down until
+  started. A test reads the compose file (control: `unless-stopped`).
+- From an elevated WSL, the Windows worker's start is handed to the desktop's shell, which starts it
+  as the user (Microsoft's ExecInExplorer pattern); a start is refused only with no shell to hand it
+  to. Proven live: the Workbench's own Start, from its elevated service, brought the worker up
+  unelevated. The suite never runs elevated, so no test of its own covers the hand-off.

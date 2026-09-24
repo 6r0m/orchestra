@@ -2,6 +2,8 @@
 # the web UI. Adapted from Temporal's own PostgreSQL compose file
 # (github.com/temporalio/samples-server, compose/docker-compose-postgres.yml).
 # Ports are published on loopback only; PostgreSQL is not published at all.
+# It lives from `make up` to `make down`, as the workers do: a container that fails comes back,
+# and none starts again by itself when Docker does, at WSL's start.
 name: orchestra-temporal
 
 services:
@@ -20,7 +22,7 @@ services:
       timeout: 5s
       retries: 60
       start_period: 30s
-    restart: unless-stopped
+    restart: on-failure
 
   schema:
     image: temporalio/admin-tools:1.32.0
@@ -57,7 +59,7 @@ services:
       timeout: 3s
       retries: 60
       start_period: 30s
-    restart: unless-stopped
+    restart: on-failure
 
   namespace:
     image: temporalio/admin-tools:1.32.0
@@ -80,7 +82,7 @@ services:
       TEMPORAL_DEFAULT_NAMESPACE: orchestration
     ports:
       - "127.0.0.1:8080:8080"
-    restart: unless-stopped
+    restart: on-failure
 
 volumes:
   postgres-data:

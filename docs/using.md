@@ -5,9 +5,10 @@ what the tests, any automation and the Makefile use.
 
 ## The Workbench
 
-A systemd user service in WSL, installed once from this checkout. Start WSL from a normal terminal,
-not an administrator's: Windows programs the service starts run with the token WSL was started with,
-and the Windows worker — with every agent it runs — is never started as an administrator.
+A systemd user service in WSL, installed once from this checkout. Windows programs the service starts
+run with the token WSL was started with, and the Windows worker — with every agent it runs — is never
+started as an administrator: from an elevated WSL, its start goes through your desktop's shell, which
+starts it as you.
 
 ```bash
 make workbench-install    # render it for this checkout and its environment, enable it, start it
@@ -42,7 +43,9 @@ make down       # stop both workers, then Temporal; its data stays, and the Work
 make restart    # the whole stack; one part: orchestrate --stack restart temporal|wsl|windows
 ```
 
-Nothing is exposed beyond loopback.
+The stack runs from a start to a stop, like a service started by hand: it outlives the terminal that
+started it, a part that fails comes back, and after WSL restarts it is down until started again — only
+the Workbench comes back with WSL. Nothing is exposed beyond loopback.
 
 ## The page
 

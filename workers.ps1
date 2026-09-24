@@ -3,7 +3,7 @@
 # <name> is the worker's name on this machine: its pid file and log in tmp\orchestration. It runs
 # this checkout's own policy, in this checkout's uv-managed Windows environment (app\foundation\envpath.py).
 param([ValidateSet("start", "stop", "status", "sweep")][string] $Action, [Parameter(Mandatory)][string] $Name,
-      [string] $Gone = "")
+      [string] $Gone = "", [switch] $Handed)
 $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $runtime = Join-Path $here "tmp\orchestration"
@@ -31,6 +31,20 @@ function Test-Elevated {
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
+function Get-Shell {
+    # The desktop's own shell view: a program Explorer starts through it runs with the user's unelevated
+    # token — Microsoft's ExecInExplorer pattern for an elevated process that must start an unelevated one.
+    # $null where there is no desktop shell to ask.
+    try {
+        $location = 0; $root = $null; $window = 0
+        # SWC_DESKTOP (8) and SWFO_NEEDDISPATCH (1): the desktop itself, whatever folder windows are open.
+        return (New-Object -ComObject Shell.Application).Windows().FindWindowSW(
+            [ref] $location, [ref] $root, 8, [ref] $window, 1)
+    } catch {
+        return $null
+    }
+}
+
 function Use-Environment {
     # Native tools write progress to stderr; only their exit codes decide.
     $ErrorActionPreference = "Continue"
@@ -44,18 +58,39 @@ switch ($Action) {
     "status" {
         $worker = Get-Worker
         if ($worker) { "running $($worker.ProcessId)" } else { "stopped" }
-        # Whether a start from here would be refused, so no one stops a worker only to find that out.
-        if (Test-Elevated) { "elevated" }
+        # Whether a start from here would be refused — elevated, with no desktop shell in this session to
+        # hand it to — so no one stops a worker only to find that out. The process is enough to read here.
+        $session = [Diagnostics.Process]::GetCurrentProcess().SessionId
+        if ((Test-Elevated) -and -not (Get-Process explorer -ErrorAction SilentlyContinue |
+                                         Where-Object SessionId -eq $session)) { "elevated" }
     }
     "start" {
         $worker = Get-Worker
         if ($worker) { "running $($worker.ProcessId)"; exit 0 }
-        # WSL runs Windows programs with the token of whatever started it; from an elevated one, the
-        # worker and every agent it starts would run as an administrator.
+        # WSL runs Windows programs with the token of whatever started it, and the worker and every agent
+        # it starts never run as an administrator: from an elevated side this same start is handed, once,
+        # to the desktop's shell, which runs it with the user's own token.
         if (Test-Elevated) {
-            "refused: Windows programs started from here run elevated, because WSL was started by an " +
-            "elevated process, and the Windows worker and its agents never run as an administrator. Start " +
-            "WSL from a normal terminal (wsl --shutdown, then open WSL), or start the worker from one."
+            $shell = if ($Handed) { $null } else { Get-Shell }
+            if (-not $shell) {
+                "refused: Windows programs started from here run elevated, because WSL was started by an " +
+                "elevated process, and there is no desktop shell here to start the Windows worker as you. " +
+                "Start it from a normal terminal."
+                exit 1
+            }
+            $handoff = Join-Path $runtime "$Name.handoff.log"
+            Remove-Item $handoff -ErrorAction SilentlyContinue
+            $inner = "& '{0}' start '{1}' -Handed *> '{2}'" -f $PSCommandPath.Replace("'", "''"),
+                     $Name.Replace("'", "''"), $handoff.Replace("'", "''")
+            $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
+            # Hidden (0), as the worker itself is: nothing takes focus.
+            $shell.Document.Application.ShellExecute(
+                "powershell.exe", "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded", $here, "open", 0)
+            $deadline = (Get-Date).AddSeconds(120)
+            while (-not (Get-Worker) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
+            if (Get-Worker) { "started through the desktop's shell, as you; log: $log"; exit 0 }
+            "the start handed to the desktop's shell brought no worker up within 120 s: " +
+                (Get-Content -Raw $handoff -ErrorAction SilentlyContinue)
             exit 1
         }
         $environment = Use-Environment

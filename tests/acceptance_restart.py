@@ -9,8 +9,8 @@ It never touches a real repository or agent. A throwaway repository, fake `claud
 this script's worker polls, on free ports; the stops it answers are its own run's. The live stack is
 stopped and started by the Workbench's own API, from its service's context: each worker's stop takes
 the stages' settings left in that worker's own temporary folder, and the Workbench, the stack down,
-still answers and reads it down. A worker its side would start elevated is refused, saying so, and
-this script starts it instead. Then the service is restarted, and the WSL worker it started keeps
+still answers and reads it down. A worker its side cannot start — elevated, with no desktop shell to
+hand the start to — is refused, saying so, and this script starts it instead. Then the service is restarted, and the WSL worker it started keeps
 running, in a scope of its own, with the real CLIs on its PATH. Afterwards it takes back all it made:
 its runs and the reads of their changes from Temporal — the Workbench lists every run Temporal
 retains — their folders, its worker's pid file and its trust records. Needs the stack up (`make up`)
@@ -278,7 +278,7 @@ class Acceptance:
               "and, all of it down, the Workbench still answers and reads it down")
         results = {result["component"]: result
                    for result in self.workbench("/api/stack", {"action": "start"})["results"]}
-        # WSL started by an elevated process runs Windows programs elevated, the Windows worker too.
+        # From an elevated WSL a worker start goes through the desktop's shell; with none, it is refused.
         elevated = [name for name, part in before.items() if part["managed"] and not part["startable"]]
         check(all(result["ok"] for name, result in results.items() if name not in elevated),
               "the Workbench started it again, each part proven up: %s"

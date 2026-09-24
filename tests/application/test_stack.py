@@ -73,8 +73,9 @@ class Mechanics:
     """Stands in for the scripts: records each (component, action) — a sweep's named pids in `swept` —
     and answers as the test says each part is: `running` the parts whose process runs, `refuse` the
     workers a stop cannot end, `linger` the ones a stop reports gone that a second look still finds,
-    `unreadable` those whose status cannot be read at all, `elevated` those a start from this side
-    would run elevated, which their script refuses, `unswept` those whose sweep fails."""
+    `unreadable` those whose status cannot be read at all, `elevated` those whose start from this side
+    their script refuses — elevated, with no desktop shell to hand it to — `unswept` those whose sweep
+    fails."""
 
     def __init__(self, running=(), refuse=(), linger=(), unreadable=(), elevated=(), unswept=()):
         self.calls, self.swept, self.running = [], [], set(running)
@@ -209,8 +210,8 @@ class Owner(unittest.TestCase):
         self.assertEqual((result["ok"], result["said"]), (False, "its containers stopped, but it still answers"))
 
     def test_a_restart_leaves_a_worker_this_side_cannot_start_again_as_it_is(self):
-        """WSL started by an elevated process runs Windows programs elevated, and the Windows worker never
-        starts so: stopping it would only leave it down. The rest of the stack restarts."""
+        """A Windows worker this side cannot start — elevated, with no desktop shell to hand the start to —
+        would only be left down by a stop. The rest of the stack restarts."""
         mechanics = self.use(Mechanics(running=("temporal", "wsl", "windows"), elevated=("windows",)))
         results = stack.restart(P.load())
         self.assertEqual([call for call in mechanics.calls if call[0] == "windows"], [("windows", "status")],
@@ -270,6 +271,16 @@ class Started(unittest.TestCase):
                                        [{"identity": "4242@here", "polled": now()}], seconds=2))
         self.assertIsNone(self.polling(lambda name: [{"identity": "1111@here", "polled": now()}], seconds=2),
                           "the dead worker's last polls, which Temporal still lists")
+
+
+class Lifetime(unittest.TestCase):
+    def test_no_part_starts_again_by_itself_when_docker_does(self):
+        """The stack runs from its owner's start to its stop: Temporal's containers come back when they fail,
+        never with Docker at WSL's start, where no worker would come back beside them."""
+        with open(os.path.join(PKG, "temporal", "compose.yaml"), encoding="utf-8") as fh:
+            policies = [line.split(":", 1)[1].strip() for line in fh if line.strip().startswith("restart:")]
+        self.assertTrue(policies, "each long-running service names its restart policy")
+        self.assertEqual(set(policies), {"on-failure"})
 
 
 @unittest.skipIf(WINDOWS, "the stack is read from WSL")

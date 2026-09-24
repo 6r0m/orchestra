@@ -285,7 +285,9 @@ still lands on a checkout.
   process its pid file names — Temporal lists a dead worker's polls for minutes. A
   worker stopped on purpose counts as stopped only once its process is proven gone,
   and then what its stages left on that host is swept at once (D20). One action
-  runs at a time, under a lock the kernel frees if its holder dies. The checkout's
+  runs at a time, under a lock the kernel frees if its holder dies. A part runs from
+  its start to its stop and nothing else starts it: Temporal's containers come back
+  only when they fail, never with Docker at WSL's start. The checkout's
   own policy's stack manages all three parts; another policy's manages only its
   WSL worker, since Temporal is the deployment's and the Windows host runs only
   its own copy of a policy. The process mechanics are `workers.sh` and
@@ -295,9 +297,11 @@ still lands on a checkout.
   WSL runs a Windows program with the token of whatever started WSL — from the
   Workbench's service, which systemd starts, that is the process that booted the
   distro — and the Windows worker and its agents never run as an administrator: a
-  start from an elevated side is refused, and says to start WSL from a normal
-  terminal. The reading shows such a worker as one this side cannot start, and a
-  restart leaves it running rather than stop it only to leave it down.
+  start from an elevated side is handed to the desktop's shell, which starts it with
+  the user's own token (Microsoft's ExecInExplorer pattern). Only with no shell to
+  hand it to is the start refused, saying so; the reading then shows the worker as one
+  this side cannot start, and a restart leaves it running rather than stop it only to
+  leave it down.
   The Workbench is a systemd user service in WSL, `orchestra-workbench.service`: it
   starts whenever the distro does and comes back if it fails, runs with the
   operator's login PATH, which the workers it starts inherit, and is installed,

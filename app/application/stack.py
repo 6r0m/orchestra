@@ -40,10 +40,11 @@ SCRIPT_SECONDS = {"start": 900, "stop": 90, "status": 60, "sweep": 120}
 
 
 # WSL runs a Windows program with the token of whatever started WSL, and the Windows worker and its
-# agents never run as an administrator: `workers.ps1` refuses a start from an elevated side, and says so.
+# agents never run as an administrator: from an elevated side `workers.ps1` hands the start to the desktop's
+# shell, which starts it as the user, and only with no shell to hand it to refuses it, saying so.
 ELEVATED = ("Windows programs started from here run elevated, because WSL was started by an elevated "
-            "process, and the Windows worker never runs as an administrator: start WSL from a normal "
-            "terminal to start this worker from here")
+            "process, and no desktop shell is there to start the Windows worker as you: start it from a "
+            "normal terminal")
 
 
 class Busy(runs.Refusal):
