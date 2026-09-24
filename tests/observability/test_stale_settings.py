@@ -31,12 +31,18 @@ STAGE = textwrap.dedent("""\
 """) % PKG
 
 
-def port_for_another_process():
+def port_for_another_process(used):
     """A port another process will bind, told its number through a policy: free now, then let go, so
-    something else may take it first. A socket this process holds binds port 0 instead."""
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
+    something else may take it first. Never one in `used`, the policy's ports so far, which it then joins.
+    A socket this process holds binds port 0 instead."""
+    for _ in range(10):
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        if port not in used:
+            used.add(port)
+            return port
+    raise OSError("no free port apart from %s" % sorted(used))
 
 
 class StaleSettings(unittest.TestCase):
@@ -47,9 +53,10 @@ class StaleSettings(unittest.TestCase):
             policy = json.load(fh)
         for role in policy["roles"].values():
             role["prompt"] = os.path.join(PKG, role["prompt"])
+        used = set()
         for target in policy["targets"].values():
-            target.update(host="sweep%s" % os.urandom(3).hex(), terminal_port=port_for_another_process())
-        policy.update(workbench_port=port_for_another_process(), workflow_queue="orchestration:sweep")
+            target.update(host="sweep%s" % os.urandom(3).hex(), terminal_port=port_for_another_process(used))
+        policy.update(workbench_port=port_for_another_process(used), workflow_queue="orchestration:sweep")
         path = os.path.join(self.tmp, "policy.json")
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(policy, fh)

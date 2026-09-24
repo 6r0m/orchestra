@@ -17,6 +17,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from unittest import mock
 
 HERE = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))
 PKG = os.path.abspath(os.path.join(HERE, os.pardir))
@@ -45,18 +46,25 @@ def lock_of_its_own(test):
     stack.LOCK = os.path.join(folder, "stack.lock")
 
 
-def port_for_another_process():
+def port_for_another_process(used):
     """A port another process will bind, told its number through a policy: free now, then let go, so
-    something else may take it first. A socket this process holds binds port 0 instead."""
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
+    something else may take it first. Never one in `used`, the policy's ports so far, which it then joins.
+    A socket this process holds binds port 0 instead."""
+    for _ in range(10):
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        if port not in used:
+            used.add(port)
+            return port
+    raise OSError("no free port apart from %s" % sorted(used))
 
 
 def other_policy(test, held=None):
     """A policy file of the test's own: its own host name, ports and workflow queue, as the demo's; a
     target in `held` on the port the test holds for it."""
     held = held or {}
+    used = set(held.values())
     tmp = tempfile.mkdtemp(prefix="orch-stack-")
     test.addCleanup(shutil.rmtree, tmp, True)
     with open(P.POLICY_FILE, encoding="utf-8") as fh:
@@ -65,8 +73,8 @@ def other_policy(test, held=None):
         role["prompt"] = os.path.join(PKG, role["prompt"])
     host = "stack%s" % os.urandom(3).hex()
     for name, target in policy["targets"].items():
-        target.update(host=host, terminal_port=held.get(name) or port_for_another_process())
-    policy.update(workbench_port=port_for_another_process(), workflow_queue="orchestration:%s" % host)
+        target.update(host=host, terminal_port=held.get(name) or port_for_another_process(used))
+    policy.update(workbench_port=port_for_another_process(used), workflow_queue="orchestration:%s" % host)
     path = os.path.join(tmp, "policy.json")
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(policy, fh)
@@ -285,6 +293,20 @@ class Lifetime(unittest.TestCase):
             policies = [line.split(":", 1)[1].strip() for line in fh if line.strip().startswith("restart:")]
         self.assertTrue(policies, "each long-running service names its restart policy")
         self.assertEqual(set(policies), {"on-failure"})
+
+
+class Ports(unittest.TestCase):
+    def test_one_policys_ports_all_differ_though_the_system_hands_a_port_back(self):
+        """A policy's ports are picked one at a time, each let go, so the system may hand one back — the
+        port the test holds, or one just picked — which the policy would refuse: it is picked again."""
+        system = mock.MagicMock()
+        system.socket.return_value.__enter__.return_value.getsockname.side_effect = [
+            ("127.0.0.1", port) for port in (40001, 40002, 40002, 40003)]
+        with mock.patch.dict(globals(), socket=system):
+            policy, _ = other_policy(self, {"wsl": 40001})
+        self.assertEqual(policy["targets"]["wsl"]["terminal_port"], 40001, "the port the test holds")
+        self.assertEqual(policy["targets"]["windows"]["terminal_port"], 40002, "picked again, past the held one")
+        self.assertEqual(policy["workbench_port"], 40003, "picked again, past the one just picked")
 
 
 @unittest.skipIf(WINDOWS, "the stack is read from WSL")
