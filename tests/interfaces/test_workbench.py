@@ -5,9 +5,11 @@ The page's own behavior in a browser is proven by the browser acceptance, not he
 import asyncio
 import datetime
 import http.client
+import http.server
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -30,11 +32,9 @@ import temporal_env as E  # noqa: E402
 from app.agents import terminal  # noqa: E402
 from app.interfaces.workbench import server as workbench  # noqa: E402
 from fakes import FakeWorktrees, codex_review_first, codex_review_resumed  # noqa: E402
-from tests.application.test_stack import free_port, lock_of_its_own  # noqa: E402
+from tests.application.test_stack import lock_of_its_own  # noqa: E402
 from tests.orchestration.test_workflow import Scenario  # noqa: E402
 
-# Picked for each process: every class of a parallel run is a process of its own, with a workbench of its own.
-PORT = free_port()
 # Every request reads the stack afresh, so what a test says of it is what the page sees.
 workbench.READING_SECONDS = 0
 
@@ -60,23 +60,33 @@ def stack_as(test, down=()):
 
 
 class Server:
-    """One workbench per test process, over the test server's client."""
+    """One workbench per test process, over the test server's client. Each class of a parallel run is a
+    process with a workbench of its own, so it binds the port the system gives it there and then — never
+    one picked beforehand and let go, which another process could take in between — and then learns the
+    Host and origin it answers from the port it holds, as `workbench.serve` would from the policy's."""
     _instance = None
 
     @classmethod
     def get(cls):
         if cls._instance is None:
-            policy = dict(E.POLICY, workbench_port=PORT)
-            server = workbench.serve(policy, lambda work, timeout=300: E.run(work(E.client()), timeout),
-                                     links=lambda trace_id: "http://langfuse.test/trace/%s" % trace_id)
+            server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), http.server.BaseHTTPRequestHandler)
+            policy = dict(E.POLICY, workbench_port=server.server_port)
+            server.RequestHandlerClass = workbench.make_handler(
+                lambda work, timeout=300: E.run(work(E.client()), timeout), policy, terminal.token(),
+                links=lambda trace_id: "http://langfuse.test/trace/%s" % trace_id)
+            server.daemon_threads = True
             threading.Thread(target=server.serve_forever, daemon=True).start()
             cls._instance = server
         return cls._instance
 
 
-def request(method, path, body=None, token=True, host="127.0.0.1:%d" % PORT, origin=None):
-    Server.get()
-    connection = http.client.HTTPConnection("127.0.0.1", PORT, timeout=120)
+def port():
+    return Server.get().server_port
+
+
+def request(method, path, body=None, token=True, host=None, origin=None):
+    connection = http.client.HTTPConnection("127.0.0.1", port(), timeout=120)
+    host = host or "127.0.0.1:%d" % port()
     headers = {"Host": host}
     if token:
         headers["X-Workbench-Token"] = terminal.token() if token is True else token
@@ -118,7 +128,7 @@ class Access(unittest.TestCase):
         self.assertEqual(request("GET", "/api/repos", token=False)[0], 403)
         self.assertEqual(request("GET", "/api/repos", token="wrong")[0], 403)
         self.assertEqual(request("POST", "/api/runs", {"task": "x"}, origin="http://evil.example")[0], 403)
-        self.assertEqual(request("GET", "/", host="evil.example:%d" % PORT)[0], 403, "a rebound name is refused")
+        self.assertEqual(request("GET", "/", host="evil.example:%d" % port())[0], 403, "a rebound name is refused")
         self.assertEqual(request("POST", "/api/runs", {"task": "x"}, token=False)[0], 403)
 
     def test_the_page_carries_its_config_and_forbids_framing(self):
@@ -128,13 +138,28 @@ class Access(unittest.TestCase):
         self.assertEqual(config["token"], terminal.token())
         self.assertEqual(config["terminal_ports"], {name: target["terminal_port"]
                                                     for name, target in E.POLICY["targets"].items()})
-        connection = http.client.HTTPConnection("127.0.0.1", PORT)
-        connection.request("GET", "/", headers={"Host": "127.0.0.1:%d" % PORT})
+        connection = http.client.HTTPConnection("127.0.0.1", port())
+        connection.request("GET", "/", headers={"Host": "127.0.0.1:%d" % port()})
         response = connection.getresponse()
         response.read()
         self.assertIn("frame-ancestors 'none'", response.getheader("Content-Security-Policy"))
         for path in ("/app.js", "/style.css", "/vendor/xterm.js", "/vendor/xterm.css"):
             self.assertEqual(request("GET", path, token=False)[0], 200, path)
+
+
+class Ports(unittest.TestCase):
+    def test_workbenches_in_processes_of_their_own_bind_ports_of_their_own_at_once(self):
+        """Each class of a parallel run is a process with a workbench of its own: several bind together,
+        each on a port of its own, and none is refused one another took."""
+        script = ("import sys, time; sys.path[:0] = [%r]; "
+                  "from tests.interfaces import test_workbench as T; "
+                  "print(T.Server.get().server_port, flush=True); time.sleep(3)") % PKG
+        children = [subprocess.Popen([sys.executable, "-c", script], cwd=PKG, stdout=subprocess.PIPE,
+                                     stderr=subprocess.PIPE, text=True) for _ in range(4)]
+        said = [child.communicate(timeout=120) for child in children]
+        self.assertEqual([child.returncode for child in children], [0] * 4, [err[-500:] for _, err in said])
+        ports = [int(out.split()[-1]) for out, _ in said]
+        self.assertEqual(len(set(ports)), 4, "each on a port of its own: %s" % ports)
 
 
 class Health(unittest.TestCase):

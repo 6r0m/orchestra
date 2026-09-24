@@ -461,12 +461,14 @@ class Policy(unittest.TestCase):
             with self.assertRaises(policy_mod.InvalidPolicy):
                 policy_mod.validate(raw)
 
-    def test_a_stops_cleanup_bound_is_optional_and_a_whole_number_of_seconds(self):
+    def test_a_stops_cleanup_bound_is_optional_and_may_only_shorten_the_minute(self):
+        """A Stop's cleanup waits a minute at most: a policy may shorten that, never lengthen it."""
         policy_mod.validate(self._raw())
         raw = self._raw()
-        raw["stop_cleanup_seconds"] = 5
-        policy_mod.validate(raw)
-        for bad in (0, -1, "2", True, 1.5):
+        for good in (1, 5, 60):
+            raw["stop_cleanup_seconds"] = good
+            policy_mod.validate(raw)
+        for bad in (0, -1, "2", True, 1.5, 61, 3600):
             raw["stop_cleanup_seconds"] = bad
             with self.assertRaisesRegex(policy_mod.InvalidPolicy, "stop_cleanup_seconds", msg=repr(bad)):
                 policy_mod.validate(raw)

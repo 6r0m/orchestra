@@ -32,10 +32,6 @@ ONCE = RetryPolicy(maximum_attempts=1)
 READS = RetryPolicy(maximum_attempts=3)
 GIT_TIMEOUT = timedelta(hours=2)
 SHORT_TIMEOUT = timedelta(minutes=10)
-# A Stop's cleanup — the run's terminals and trace, on its target host — is best-effort, and waits
-# this long at most, so a host whose worker is gone never holds a Stop. A policy may set its own; a run
-# recorded before that key existed carries none, and waits exactly this.
-STOP_CLEANUP = timedelta(minutes=1)
 
 # What each stop takes, published with it, so a client shows the stop's own actions. A revise at
 # the final gate goes to the role the operator names, and each role is an action of its own:
@@ -381,7 +377,9 @@ class FeatureRun:
         self._stopping()
         self._doing("cleanup")
         try:
-            bound = timedelta(seconds=self.policy.get("stop_cleanup_seconds", STOP_CLEANUP.total_seconds()))
+            # Best-effort, and bounded (P.STOP_CLEANUP_SECONDS): a run recorded before a policy could
+            # shorten it carries no bound of its own, and waits exactly the minute.
+            bound = timedelta(seconds=self.policy.get("stop_cleanup_seconds", P.STOP_CLEANUP_SECONDS))
             await workflow.execute_activity("finish_trace", {"state": dict(s, status="STOPPED")},
                                             task_queue=self.queue, schedule_to_close_timeout=bound,
                                             retry_policy=ONCE)

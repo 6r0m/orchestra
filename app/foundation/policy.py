@@ -34,6 +34,9 @@ TOP_KEYS = {"roles", "max_rounds", "auto_proceed", "timeout_seconds", "heartbeat
             "stop_cleanup_seconds", "targets", "target_repo", "workbench_port", "stage_skills",
             "workflow_queue", "_policy_path"}
 REPO_KEYS = {"commit_allowed", "push_allowed", "merge_allowed"}
+# A Stop's cleanup waits this long at most, so a host whose worker is gone never holds a Stop; a policy's
+# `stop_cleanup_seconds` may only shorten it.
+STOP_CLEANUP_SECONDS = 60
 # Where a run's agents can execute. Each host has its own task queue, polled only by
 # that host's worker, so a role never runs on the wrong OS.
 TARGETS = ("wsl", "windows")
@@ -227,11 +230,13 @@ def validate(raw):
     heartbeat = raw.get("heartbeat_seconds")
     if not isinstance(heartbeat, int) or isinstance(heartbeat, bool) or heartbeat < 1:
         raise InvalidPolicy("heartbeat_seconds must be an int >= 1")
-    # Optional: without it a Stop's cleanup waits the workflow's own minute.
+    # Optional, and only ever shorter than the minute a Stop's cleanup waits at most.
     if "stop_cleanup_seconds" in raw:
         cleanup = raw["stop_cleanup_seconds"]
-        if not isinstance(cleanup, int) or isinstance(cleanup, bool) or cleanup < 1:
-            raise InvalidPolicy("stop_cleanup_seconds must be an int >= 1")
+        if (not isinstance(cleanup, int) or isinstance(cleanup, bool)
+                or not 1 <= cleanup <= STOP_CLEANUP_SECONDS):
+            raise InvalidPolicy("stop_cleanup_seconds must be an int from 1 to %d: it may only shorten a "
+                                "Stop's cleanup" % STOP_CLEANUP_SECONDS)
     # Required, so a policy that forgets it fails here rather than joining another stack's runs.
     if not (isinstance(raw.get("workflow_queue"), str) and PLAIN_TOKEN.fullmatch(raw["workflow_queue"])):
         raise InvalidPolicy("workflow_queue must be a plain token: the task queue this policy's runs are on")
