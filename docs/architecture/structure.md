@@ -126,8 +126,9 @@ Do not re-derive a `states/` layer here.
   code (`stages.py`, `flows.py`). The order of a run's stages is configuration:
   its **flow**, one file in `flows/` holding `role:action` steps, read and
   checked when a run starts and handed to it whole — the workflow never reads a
-  flow, a run keeps the one it started with, and a run started before flows
-  follows `LEGACY_FLOW`, today's default order. A flow keeps these rules: from
+  flow, a run keeps the one it started with, and a start that carries no flow
+  at all, as none did before flows, follows `LEGACY_FLOW`, today's default
+  order. A flow keeps these rules: from
   one to `MAX_FLOW_STEPS` steps, the bound that keeps a run the bounded work one
   workflow is for; each step's role the one its action is the stages'; every
   `plan` followed by its `assess` and every `build` by its `verify`, so an

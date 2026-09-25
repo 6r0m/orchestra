@@ -1,7 +1,7 @@
 # Configurable flows: the order of a run's work, chosen per task
 
-**Status:** IN PROGRESS — built; the agents' review round and the external review's third pass fixed; the
-external review's PASS next
+**Status:** IN PROGRESS — built; the agents' review round and the external review's third and fourth
+passes fixed; its PASS next
 **Scope:** the order of a run's steps — a new `flows/` folder and its reader `app/foundation/flows.py`;
 [workflow.py](../app/orchestration/workflow.py), [routing.py](../app/orchestration/routing.py),
 [stages.py](../app/foundation/stages.py), [policy.py](../app/foundation/policy.py) and `policy.json`, the
@@ -162,7 +162,7 @@ this convention keep their wording: in D5 and Q2, D11, D13 and D24 are the archi
   blocker or an exhausted budget re-enters the loop it stopped in, as today.
 - **A7 [ACTIVE]:** the workflow never reads `flows/` or the policy's `default_flow`. A new run's flow is
   read and checked by the client at its start and sent in the start input as `{name, steps}`. A start
-  input with no flow — every recorded history and every run open at release — runs `LEGACY_FLOW`, a
+  input with no `flow` key — every recorded history and every run open at release — runs `LEGACY_FLOW`, a
   constant in code of today's order that issues exactly today's commands, so no `workflow.patched` is
   needed for it; it can retire, through replay and a patch, once no such history matters.
 - **A8 [RESOLVED by D13]:** the two flows are named `engineer-code` — the engineer starts, from the
@@ -371,7 +371,8 @@ release. Architecture D13 says so by design; the operator has asked for that des
    copy; no schema version or checksum. The workflow interprets the steps and never reads a file: a work
    step, its review loop (PATCH or UNVERIFIED back to the work step, bounded by `max_rounds` of that work
    action; BLOCKER or an exhausted budget to the operator's guide), then the step's gate. Feedback and
-   guidance stay in the run's state. A start input with no flow runs `LEGACY_FLOW`.
+   guidance stay in the run's state. A start input with no `flow` key runs `LEGACY_FLOW`; a `flow` it
+   gives, null included, is taken as given and must be `{name, steps}`.
 5. **`research`:** its ask investigates the task and current practice, on the live web and in the
    repository as far as the role can read, and answers with a research brief and an abstract todo as its
    final message (A5). `run_role` returns that message as the step's output; the workflow keeps it in
@@ -443,7 +444,8 @@ release. Architecture D13 says so by design; the operator has asked for that des
 10. One session per role per run, across all of that role's steps (architecture D7).
 11. The trace records flows and never routes them (architecture D20).
 12. The workflow never reads `flows/` or the policy's default: a new run's flow arrives in its start
-    input, and a start input without one runs `LEGACY_FLOW` (A7).
+    input, and a start input without a `flow` key runs `LEGACY_FLOW` (A7); any other ends `REFUSED`
+    before any step unless it is `{name, steps}` and keeps the rules.
 13. Nothing reads a log to continue a run: what a step hands on — a verdict, feedback, a research brief —
     returns as its activity's result and lives in the run's state (A5).
 14. One action contract owns each action's role and whether it is a review; access decides only the
@@ -473,7 +475,7 @@ release. Architecture D13 says so by design; the operator has asked for that des
    puts `{name, steps}` in the start input; the Workbench's run start and its flows read; the CLI's
    `--flow`; `auto_proceed` kept as it is, worded *skip approvals* on the page and in the CLI's help.
 5. [x] **Workflow:** the interpreter over the start input's steps, the gates generalised in
-   `routing.py`, the `DONE` ending, `LEGACY_FLOW` for a start input without a flow, no file read; the
+   `routing.py`, the `DONE` ending, `LEGACY_FLOW` for a start input without a `flow` key, no file read; the
    brief kept in state from the step's result; the Workbench and the CLI read a `DONE` run as closed with
    its work kept, which `client.not_kept` decides today.
 6. [x] **The role step:** the role and whether the step is a review from the action contract, not from
@@ -663,4 +665,16 @@ the external reviewer's PASS, and a real `architect-research` run in the operato
   restored; in a browser, a default named, none, missing and refused — Start pressed on the last two
   answered by the server, and each placeholder taken out failing its check; `make public-check`
   passed with the new files tracked.
+- **Next:** the external review's PASS; then the full suite once per host.
+
+### 2026-09-25 — the external review, fourth pass: PATCH, one fix
+
+- **Fixed:** a start giving `"flow": null` took the order from before flows, as one with no `flow` key
+  does — `start.get` cannot tell them apart, and the last report's "only a missing flow gets the old
+  order" was not what the code did. The workflow now asks whether the key is there: absent is a run
+  from before flows; any value, null included, goes through `flows.steps_of`, so null ends the run
+  `REFUSED` before any activity.
+- **Evidence:** red first — null started the plan. WSL and Windows, `test_flows`, `test_workflow`
+  and the replay — 10 classes, 67 tests each; controls, each red then green: null taken as legacy
+  again, the legacy order read from a file, the steps made into a list, the check taken out.
 - **Next:** the external review's PASS; then the full suite once per host.

@@ -110,17 +110,19 @@ class FeatureRun:
         s = self.state = {"run_id": start["run_id"], "task": start["task"], "label": start["label"],
                           "created": start["created"], "auto_proceed": start["auto_proceed"],
                           "repo": repository["id"], "target": repository["target"], "status": "RUNNING"}
+        # A start with no flow at all is a run started before flows, which follows the order that code took.
+        legacy = "flow" not in start
         flow = start.get("flow")
         try:
-            # A run started before flows was handed none, and follows the order that code took. Any other
-            # is checked here as the client checked it, taken as given whatever its shape: one the run cannot
-            # follow ends it refused before any step, rather than stuck retrying its first workflow task.
-            steps = list(flows.LEGACY_FLOW) if flow is None else flows.steps_of(flow)
+            # A flow given, null too, is checked here as the client checked it, taken as given whatever its
+            # shape: one the run cannot follow ends it refused before any step, rather than stuck retrying
+            # its first workflow task.
+            steps = list(flows.LEGACY_FLOW) if legacy else flows.steps_of(flow)
         except flows.InvalidFlow as error:
             s.update(status="REFUSED", refusal="its flow: %s" % error)
             self._line("refused: %s" % s["refusal"])
             return s
-        s["flow"] = {"name": None, "steps": steps} if flow is None else flow
+        s["flow"] = {"name": None, "steps": steps} if legacy else flow
         self.segments = flows.segments(steps)
         try:
             s.update(await self._activity("prepare", {"repository": repository, "policy": self.policy},

@@ -648,6 +648,8 @@ class Flows(Scenario):
                 ({"name": "mine", "steps": ["engineer:plan", "you:approve"]},
                  "its flow: step 1, 'engineer:plan': the engineer's work goes to its review, assess, next"),
                 ("engineer-code", "its flow: a run is handed its flow as {name, steps}"),
+                # A flow given as null is given, and is no run from before flows, which had none at all.
+                (None, "its flow: a run is handed its flow as {name, steps}"),
                 ({"name": "mine"}, "its flow: a run is handed its flow as {name, steps}"),
                 ({"name": "../mine", "steps": self.CODE}, "its flow: '../mine' is not a flow's name")):
             run = self.drive([], handed=handed)
