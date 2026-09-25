@@ -20,8 +20,8 @@ because killing the direct child leaves its tool processes running:
   which it lives outside the job. We hold that handle, so our death closes it. Ending
   the tree closes the job to newcomers, holds each process it lists, terminates the job
   and waits for each: until its termination finishes a process still holds the directory
-  it worked in, which Windows will not remove. An end it cannot prove within the grace
-  raises.
+  it worked in, which Windows will not remove. An end it cannot prove — a listed process
+  it cannot open, one not ended within the grace — raises.
 
 Whichever way the run ends — its exit, a timeout, a Stop raised by `on_tick`, or our
 death — the tree is gone afterwards.
@@ -536,12 +536,19 @@ class _WindowsTree:
                 self.kernel32.CloseHandle(handle)
 
     def _hold(self, held):
-        """Take hold of each process the job lists, by id, to wait on; one already gone needs none."""
+        """Take hold of each process the job lists, by id, to wait on. One that cannot be opened needs no
+        wait only when the job no longer lists it — it has ended, and closed to newcomers, the job takes no
+        other under its id; otherwise its end cannot be proved."""
         for pid in self._pids():
-            if pid not in held:
-                handle = self.kernel32.OpenProcess(self.SYNCHRONIZE, False, pid)
-                if handle:
-                    held[pid] = handle
+            if pid in held:
+                continue
+            handle = self.kernel32.OpenProcess(self.SYNCHRONIZE, False, pid)
+            if handle:
+                held[pid] = handle
+                continue
+            error = self.ctypes.get_last_error()
+            if pid in self._pids():
+                raise OSError(error, "OpenProcess failed for process %d, still in the agent's job" % pid)
 
     def _pids(self):
         """The processes in the job now, by id."""

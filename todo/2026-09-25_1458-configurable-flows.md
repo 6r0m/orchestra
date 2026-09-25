@@ -722,3 +722,15 @@ the external reviewer's PASS, and a real `architect-research` run in the operato
   68 classes, 327 tests, WSL 99 classes, 446 tests, both green; `make public-check` passed; the stack
   restarted on it.
 - **Next:** the external review of this fix; then the operator's live `architect-research` run.
+
+### 2026-09-25 — the race fix, second review: PATCH, one hole closed
+
+- **Fixed:** a process the job listed but `OpenProcess` could not open was skipped, so the end could
+  return without proving it. Now the job is asked again, before the termination: gone from its list,
+  it has ended — it stays listed until its handles are released, and closed to newcomers the job takes
+  no other under its id — and needs no wait; still listed, the end raises.
+- **Evidence:** the two new tests three times of three; controls, each red then green — the unopenable
+  process skipped in silence, every failed opening raising — and the five before; Windows 68 classes,
+  329 tests, green; `make public-check` passed; the stack restarted on it. The change is Windows only,
+  so WSL's last run, 446 tests, stands.
+- **Next:** the external review's PASS; then the operator's live `architect-research` run.

@@ -226,8 +226,8 @@ still lands on a checkout.
   it worked in, which Windows then refuses to remove, and the job drops it from its own list at
   once — so the end closes the job to newcomers, holds each process it lists, and after the
   termination waits until each has ended: a worktree is free to remove the moment its agents are
-  ended, and an end not proved within the grace fails the step, so no merge or discard goes on as
-  though it were. A Claude engineer runs in `dontAsk` mode with edits allowed inside its worktree and
+  ended, and an end it cannot prove — a process it lists but cannot open, or one not ended within
+  the grace — fails the step, so no merge or discard goes on as though it were. A Claude engineer runs in `dontAsk` mode with edits allowed inside its worktree and
   the host's skills directory added for reading, so a turn never waits on a permission prompt:
   what is not allowed is denied and the agent works on. A Codex role never asks either. The
   prompt follows `--`, so no option that takes several values can swallow it. On Windows a Codex role-run uses Codex's unelevated sandbox: the elevated one

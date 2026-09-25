@@ -207,12 +207,35 @@ class ProcessTree(unittest.TestCase):
         os.rmdir(work)
 
     @unittest.skipUnless(WINDOWS, "the job object is the Windows primitive")
+    def test_a_process_gone_between_the_look_and_its_opening_needs_no_wait(self):
+        """The job listed it, and by the time it is opened it has ended and the job no longer lists it: no
+        handle, and nothing to wait for — not a failure."""
+        tree = launch._Tree()
+        self.addCleanup(tree.close)
+        tree.start(self._argv("sleep"), self.tmp, subprocess.DEVNULL, subprocess.DEVNULL, subprocess.DEVNULL, None)
+        deadline = time.monotonic() + 30
+        while not self._grandchild(optional=True) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        pid = self._grandchild()[0]
+        listed, looks = tree._pids, []
+
+        def listing_one_gone_since():
+            looks.append(True)
+            # An id no process has: the first look lists it, the next no longer does.
+            return listed() + ([0x7FFFFFFF] if len(looks) == 1 else [])
+        tree._pids = listing_one_gone_since
+        tree.kill()
+        self.assertGreater(len(looks), 1, "the job was asked again about the process it could not open")
+        self.assertFalse(alive(pid))
+
+    @unittest.skipUnless(WINDOWS, "the job object is the Windows primitive")
     def test_an_end_it_cannot_prove_raises_rather_than_returns(self):
-        """The job not closed to newcomers, its termination refused, a wait that fails, or a process still
-        there when the grace is spent: the end raises, so no caller — a merge, a discard — goes on as though
-        the tree were gone."""
+        """The job not closed to newcomers, a process it still lists that cannot be opened, its termination
+        refused, a wait that fails, or a process still there when the grace is spent: the end raises, so no
+        caller — a merge, a discard — goes on as though the tree were gone."""
         waited_out = 0x00000102                              # WAIT_TIMEOUT
         for broken, error, said in (("close", OSError, "SetInformationJobObject failed"),
+                                    ("open", OSError, "OpenProcess failed for process \\d+, still in the agent's job"),
                                     ("terminate", OSError, "TerminateJobObject failed"),
                                     ("wait", OSError, "WaitForSingleObject failed"),
                                     ("grace", TimeoutError, "did not end within %ds of its kill" % launch.GRACE_SECONDS)):
@@ -227,6 +250,7 @@ class ProcessTree(unittest.TestCase):
                         time.sleep(0.05)
                     self.leftovers.append(int(open(marker).read()))
                     native = {"close": ("SetInformationJobObject", lambda *args: 0),
+                              "open": ("OpenProcess", lambda access, inherit, pid: None),
                               "terminate": ("TerminateJobObject", lambda job, code: 0),
                               "wait": ("WaitForSingleObject", lambda handle, millis: tree.WAIT_FAILED),
                               "grace": ("WaitForSingleObject", lambda handle, millis: waited_out)}[broken]
