@@ -158,8 +158,9 @@ def configure(queue, script, git=None, repositories=None, telemetry=None):
 
 
 def start_input(run_id, task="toy task", auto=False, policy=None, target="wsl", queue=None, repo="example",
-                flow=None):
-    """A run's start as the client makes it. With no `flow` it is a run started before flows existed."""
+                flow=None, handed=None):
+    """A run's start as the client makes it. With no `flow` it is a run started before flows existed;
+    `handed` is the start's flow exactly as given, whatever its shape, as a start past the client may."""
     policy = policy or POLICY
     now = datetime.datetime(2026, 9, 15, 12, 0)
     started = {"run_id": run_id, "task": task, "label": cli.work_item_label(run_id, task, now),
@@ -168,6 +169,8 @@ def start_input(run_id, task="toy task", auto=False, policy=None, target="wsl", 
                "policy": policy, "queue": queue or policy_mod.queue(policy, target)}
     if flow is not None:
         started["flow"] = {"name": "test-flow", "steps": list(flow)}
+    if handed is not None:
+        started["flow"] = handed
     return started
 
 

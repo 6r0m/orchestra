@@ -59,11 +59,13 @@ its path as WSL sees it (`/mnt/e/...` for a Windows drive). It follows the flow 
 list, whose steps show under it: `engineer-code`, the default — `default_flow` in `policy.json` — has
 the engineer plan from the code; `architect-research` has the architect research first and its brief
 wait for your approval. With no `default_flow`, a run that names no flow takes the order runs took
-before flows, and the list offers that first. Each flow
-is a file in [flows/](../flows/README.md), read again each time the list is opened, so a flow you add
-or edit there shows at once; one that breaks a rule is listed with the reason and cannot be chosen. A
-run keeps the flow it started with. *Skip approvals* skips every approval the flow schedules, never a
-blocker, an exhausted budget, a failed stage or the final gate.
+before flows, and the list offers that first. Each flow is a file in [flows/](../flows/README.md),
+read again each time the list is opened, so a flow you add or edit there shows at once; one that
+breaks a rule is listed with the reason and cannot be chosen. The one already chosen, or named the
+default, stays chosen when its file breaks a rule or is gone — marked refused or missing — so Start
+answers with the reason rather than starting another flow. A run keeps the flow it started with.
+*Skip approvals* skips every approval the flow schedules, never a blocker, an exhausted budget, a
+failed stage or the final gate.
 
 Each run says what it is doing now and for how long — the stage and the agent at work, the question
 it waits on, the failure it stopped on — and, when a host's worker it needs is down, that it is

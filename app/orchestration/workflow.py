@@ -107,19 +107,21 @@ class FeatureRun:
     async def _run(self, start):
         self.policy, self.queue = start["policy"], start["queue"]
         repository = start["repository"]
-        flow = start.get("flow") or {"name": None, "steps": list(flows.LEGACY_FLOW)}
         s = self.state = {"run_id": start["run_id"], "task": start["task"], "label": start["label"],
                           "created": start["created"], "auto_proceed": start["auto_proceed"],
-                          "repo": repository["id"], "target": repository["target"], "flow": flow,
-                          "status": "RUNNING"}
+                          "repo": repository["id"], "target": repository["target"], "status": "RUNNING"}
+        flow = start.get("flow")
         try:
-            # The client checked it; a run started past the client is checked here, and a broken flow
-            # ends the run refused rather than failing it at every step.
-            self.segments = flows.segments(flows.check(list(flow["steps"])))
+            # A run started before flows was handed none, and follows the order that code took. Any other
+            # is checked here as the client checked it, taken as given whatever its shape: one the run cannot
+            # follow ends it refused before any step, rather than stuck retrying its first workflow task.
+            steps = list(flows.LEGACY_FLOW) if flow is None else flows.steps_of(flow)
         except flows.InvalidFlow as error:
             s.update(status="REFUSED", refusal="its flow: %s" % error)
             self._line("refused: %s" % s["refusal"])
             return s
+        s["flow"] = {"name": None, "steps": steps} if flow is None else flow
+        self.segments = flows.segments(steps)
         try:
             s.update(await self._activity("prepare", {"repository": repository, "policy": self.policy},
                                           READS, SHORT_TIMEOUT))

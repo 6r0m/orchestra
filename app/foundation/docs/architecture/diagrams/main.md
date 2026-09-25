@@ -16,6 +16,7 @@ flowchart LR
     hostfs[("this host's disk")]
     policy -->|"the stage vocabulary"| stages
     policy -->|"the checkout root"| paths
+    policy -->|"what can name a flow"| flows
     repos_ext -->|"policy.json"| policy
     flows -->|"the stage contract"| stages
     flows -->|"the checkout root"| paths

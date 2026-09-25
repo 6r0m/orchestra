@@ -15,6 +15,7 @@ import json
 import os
 import re
 
+from app.foundation import flows
 from app.foundation import paths
 from app.foundation import stages
 
@@ -227,9 +228,9 @@ def validate(raw):
         raise InvalidPolicy("timeout_seconds must be an int >= 1")
     if not isinstance(raw.get("auto_proceed"), bool):
         raise InvalidPolicy("auto_proceed must be a boolean")
-    # The flow a run starts on when it names none, a file in `flows/`, read only at a run's start.
-    if "default_flow" in raw and not (isinstance(raw["default_flow"], str)
-                                      and PLAIN_TOKEN.fullmatch(raw["default_flow"])):
+    # The flow a run starts on when it names none, a file in `flows/`, read only at a run's start: named
+    # by the flows' own grammar, so a name taken here can always be a file there.
+    if "default_flow" in raw and not flows.is_name(raw["default_flow"]):
         raise InvalidPolicy("default_flow must name a flow in flows/, such as engineer-code")
     heartbeat = raw.get("heartbeat_seconds")
     if not isinstance(heartbeat, int) or isinstance(heartbeat, bool) or heartbeat < 1:

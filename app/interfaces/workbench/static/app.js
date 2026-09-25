@@ -356,15 +356,23 @@ async function loadFlows() {
   shownFlows = shown;
   listedFlows = answer.flows;
   const select = $("start-flow");
-  const chosen = select.value || answer.default;
+  // The flow chosen, else the policy's default; "" when the policy names none.
+  const chosen = select.value || answer.default || "";
   const options = answer.flows.map((flow) => {
-    // A flow that breaks a rule is listed, never offered: its reason is what to fix in its file.
+    // A flow that breaks a rule is listed, never offered: its reason is what to fix in its file. The one
+    // chosen stays chosen, so a start on it is refused with that reason, never made on another flow.
     const option = el("option", flow.error ? flow.name + " (refused)" : flow.name);
     option.value = flow.name;
-    option.disabled = Boolean(flow.error);
+    option.disabled = Boolean(flow.error) && flow.name !== chosen;
     if (flow.error) option.title = flow.error;
     return option;
   });
+  if (chosen && !answer.flows.some((flow) => flow.name === chosen)) {
+    // So does a flow chosen, or named the default, that has no file.
+    const missing = el("option", chosen + " (missing)");
+    missing.value = chosen;
+    options.unshift(missing);
+  }
   if (!answer.default) {
     // With no default in the policy a run names no flow, as the command line's does, and takes the
     // order runs took before flows.
@@ -373,7 +381,7 @@ async function loadFlows() {
     options.unshift(none);
   }
   select.replaceChildren(...options);
-  if (answer.flows.some((flow) => flow.name === chosen && !flow.error)) select.value = chosen;
+  select.value = chosen;
   showFlowSteps();
 }
 

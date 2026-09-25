@@ -1,6 +1,7 @@
 # Configurable flows: the order of a run's work, chosen per task
 
-**Status:** IN PROGRESS — built, and the agents' review round fixed; the external review next
+**Status:** IN PROGRESS — built; the agents' review round and the external review's third pass fixed; the
+external review's PASS next
 **Scope:** the order of a run's steps — a new `flows/` folder and its reader `app/foundation/flows.py`;
 [workflow.py](../app/orchestration/workflow.py), [routing.py](../app/orchestration/routing.py),
 [stages.py](../app/foundation/stages.py), [policy.py](../app/foundation/policy.py) and `policy.json`, the
@@ -175,8 +176,9 @@ this convention keep their wording: in D5 and Q2, D11, D13 and D24 are the archi
   `app/foundation/flows.py`: foundation owns the contract every package reads — the policy and the
   stages of a run.
 - **A10 [ACTIVE]:** which flow is the default is `policy.json`'s `default_flow`, which the policy checks
-  is a plain name; that it names a flow that holds is checked when a run starts on it, as for any flow
-  named. The policy already owns the defaults of a run, `auto_proceed` among them. Only the client
+  by the flows' own grammar for a name; that it names a flow that holds is checked when a run starts on
+  it, as for any flow named — and the Workbench keeps a default that is missing or refused chosen, so
+  a start on it is refused as the command line's is. The policy already owns the defaults of a run, `auto_proceed` among them. Only the client
   reads it, when a new run names no flow (A7); with no default, such a run takes `LEGACY_FLOW`, and the
   Workbench offers that as a choice of its own.
 - **A11 [RESOLVED by D14]:** a flow without a build ends `DONE` after its last step and never merges: its
@@ -642,3 +644,23 @@ the external reviewer's PASS, and a real `architect-research` run in the operato
   histories event for event — control: a plain-text research reply; `make public-check` passed, and the
   new untracked files, which it does not scan, have no leak under the same Gitleaks.
 - **Next:** the external review; the full suite once it passes.
+
+### 2026-09-25 — the external review, third pass: PATCH, three fixes
+
+- **Fixed, each seen failing first:** the workflow made the flow it was handed into a list — a dict of
+  steps became its keys, and `{"architect:research": …}` ran research; a string, or a flow with no
+  steps, raised inside the workflow. It now takes `{name, steps}` as given (`flows.steps_of`), and any
+  other shape ends the run `REFUSED` before any activity. A flow's name had two grammars — the
+  policy's took `engineer:code`, which no file can be — and `flows.is_name` is now the one. A default
+  that is missing or refused left the Start form on another flow, which Start would have run; the
+  flow chosen, or the default, now stays chosen, marked so, and Start gets the server's reason.
+- **Corrected, not refuted:** a run handed such a string does not fail — its first workflow task
+  fails and Temporal retries it, so the run stayed open and stuck (observed on the test server).
+- **Kept, as the review asked:** the flat action mappings in `stages.py`; no Child Workflows,
+  Continue-As-New or Worker Versioning.
+- **Evidence:** WSL, the affected modules — 33 classes, 174 tests; Windows, the host modules —
+  29 classes, 167 tests; the ten histories replay; 25 controls red with the fix out and green
+  restored; in a browser, a default named, none, missing and refused — Start pressed on the last two
+  answered by the server, and each placeholder taken out failing its check; `make public-check`
+  passed with the new files tracked.
+- **Next:** the external review's PASS; then the full suite once per host.

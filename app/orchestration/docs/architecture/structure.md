@@ -47,7 +47,7 @@ the queue; what the activity does is the other side's.
 - **A stop waits here and nowhere else (D6).** Each stop publishes the actions it takes, a revise at the final gate named per role, and its answer arrives as an Update carrying one of them, with the stable id `answer:<stop-id>`, so an answer sent twice is applied once. No activity ever waits for a human.
 - **A Stop is Temporal's cancellation, heard wherever the run waits (D31).** It ends the run `STOPPED` and runs no git; a git side effect already running lands first and decides how the run ends, and one no worker has taken fails within the policy's heartbeat interval, never having run; the cleanup waits a bounded time, so a host whose worker is gone never holds it.
 - **Only architect verdicts route (D4).** An engineer's blocker reaches a human only through the architect.
-- **A run keeps the flow it started with (D13).** Its steps are in its start input; a flow that breaks a rule ends it `REFUSED` before any work, and one without a build ends it `DONE`, merging nothing.
+- **A run keeps the flow it started with (D13).** Its steps are in its start input, taken as given: a flow of another shape than `{name, steps}`, or one that breaks a rule, ends it `REFUSED` before any step — never stuck retrying its first workflow task — and one without a build ends it `DONE`, merging nothing.
 - **There is no state machine layer**, deliberately. Do not re-derive one; the reasoning is in [the project's structure document](../../../../docs/architecture/structure.md).
 
 ## Accepted decisions

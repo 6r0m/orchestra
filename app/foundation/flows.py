@@ -33,6 +33,11 @@ class InvalidFlow(ValueError):
     """A flow that breaks a rule, or that does not exist; nothing has run."""
 
 
+def is_name(value):
+    """Whether `value` can name a flow — the one grammar for a flow's name, wherever one is taken."""
+    return isinstance(value, str) and _NAME.fullmatch(value) is not None
+
+
 def split(step):
     role, _, action = step.partition(":")
     return role, action
@@ -79,9 +84,19 @@ def check(steps):
     return steps
 
 
+def steps_of(flow):
+    """The steps of the flow a run is handed — `{name, steps}`, as a start gives it — checked, and taken as
+    given: a flow of another shape is refused, never made into one."""
+    if not isinstance(flow, dict) or set(flow) != {"name", "steps"}:
+        raise InvalidFlow("a run is handed its flow as {name, steps}")
+    if not is_name(flow["name"]):
+        raise InvalidFlow("%r is not a flow's name" % (flow["name"],))
+    return check(flow["steps"])
+
+
 def load(name):
     """The steps of the flow `name` in `flows/`, checked."""
-    path = os.path.join(FLOWS_DIR, "%s.json" % name) if isinstance(name, str) and _NAME.fullmatch(name) else None
+    path = os.path.join(FLOWS_DIR, "%s.json" % name) if is_name(name) else None
     if path is None or not os.path.isfile(path):
         raise InvalidFlow("no flow %r in %s" % (name, FLOWS_DIR))
     try:

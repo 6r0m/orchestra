@@ -78,6 +78,25 @@ class Rules(unittest.TestCase):
         self.refused(CODE[:3] + ["you:merge"], "the merge is the last step, right after a verify")
         self.refused(CODE + ["architect:research"], "the merge is the last step")
 
+    def test_a_run_is_handed_its_flow_as_a_name_and_its_steps_taken_as_given(self):
+        self.assertEqual(flows.steps_of({"name": "mine", "steps": CODE}), CODE)
+        for handed, reason in (("engineer-code", r"\{name, steps\}"), (None, r"\{name, steps\}"),
+                               ({"name": "mine"}, r"\{name, steps\}"),
+                               ({"name": "mine", "steps": CODE, "why": "more"}, r"\{name, steps\}"),
+                               ({"name": "../mine", "steps": CODE}, "'../mine' is not a flow's name"),
+                               ({"name": None, "steps": CODE}, "None is not a flow's name"),
+                               # A shape the steps would only take if made into a list: keys, characters.
+                               ({"name": "mine", "steps": {"architect:research": "first"}}, "a list of steps"),
+                               ({"name": "mine", "steps": "architect:research"}, "a list of steps")):
+            with self.assertRaisesRegex(flows.InvalidFlow, reason, msg=repr(handed)):
+                flows.steps_of(handed)
+
+    def test_one_grammar_names_a_flow_wherever_one_is_taken(self):
+        for name in ("engineer-code", "v2.1_mine"):
+            self.assertTrue(flows.is_name(name), name)
+        for name in ("engineer:code", "../mine", "sub/flow", "sub\\flow", ".hidden", "", None, 3):
+            self.assertFalse(flows.is_name(name), repr(name))
+
     def test_research_comes_before_any_plan(self):
         self.refused(CODE[:3] + ["architect:research", "you:approve"], "step 4, 'architect:research': research "
                      "comes before any plan")

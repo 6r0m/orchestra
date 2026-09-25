@@ -134,8 +134,11 @@ Do not re-derive a `states/` layer here.
   engineer's work always reaches a review (D4); an approval only after a review
   or a `research`; a `research` only before any `plan`, which starts from its
   brief; a `build` only after a `plan`; and a flow that builds ends with the
-  merge, right after a `verify` (D24). A flow a run is handed that breaks a rule
-  ends the run `REFUSED` before any work. It is one list, with no states,
+  merge, right after a `verify` (D24). A run is handed its flow as `{name, steps}`
+  and takes it as given: one of another shape, or that breaks a rule, ends the
+  run `REFUSED` before any step. A flow's name is its file's, by one grammar
+  (`flows.is_name`) wherever a name is taken — a file, the policy's
+  `default_flow`, a run's own flow. It is one list, with no states,
   transitions or conditions — Temporal's own pattern for a workflow defined as
   data, one interpreter given the definition as its input.
 - **D22** **Environments are part of the toolchain.** Every orchestration

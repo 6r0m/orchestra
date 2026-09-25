@@ -500,7 +500,8 @@ class Policy(unittest.TestCase):
         policy_mod.validate(raw)
         raw["default_flow"] = "engineer-code"
         policy_mod.validate(raw)
-        for bad in (3, "", "../policy", None):
+        # A flow's name by the flows' own grammar: one the policy takes can always name a file in flows/.
+        for bad in (3, "", "../policy", None, "engineer:code"):
             raw["default_flow"] = bad
             with self.assertRaisesRegex(policy_mod.InvalidPolicy, "default_flow", msg=repr(bad)):
                 policy_mod.validate(raw)
@@ -637,15 +638,26 @@ class Flows(Scenario):
                          auto=True)
         self.assertEqual((run.stop["reason"], run.stop["feedback"]), ("exhausted", "fix B"))
 
-    def test_a_run_handed_a_flow_that_breaks_a_rule_is_refused_before_any_work(self):
-        from fakes import FakeWorktrees
-        git = FakeWorktrees()
-        run = self.drive([], git=git, flow=["engineer:plan", "you:approve"])
-        self.assertTrue(run.closed())
-        self.assertEqual(run.state["status"], "REFUSED")
-        self.assertEqual(run.state["refusal"], "its flow: step 1, 'engineer:plan': the engineer's work goes to its "
-                                               "review, assess, next")
-        self.assertEqual(git.calls, [], "no worktree")
+    def test_a_run_handed_a_flow_it_cannot_follow_is_refused_before_any_step(self):
+        """Whatever shape a start past the client hands it: the flow is taken as given, never made into one."""
+        from temporalio.api.enums.v1 import EventType
+        for handed, said in (
+                # Its keys, in whatever order they arrive, would make a flow that holds.
+                ({"name": "mine", "steps": {"architect:research": "first"}},
+                 "its flow: a flow is a list of steps, each `role:action`"),
+                ({"name": "mine", "steps": ["engineer:plan", "you:approve"]},
+                 "its flow: step 1, 'engineer:plan': the engineer's work goes to its review, assess, next"),
+                ("engineer-code", "its flow: a run is handed its flow as {name, steps}"),
+                ({"name": "mine"}, "its flow: a run is handed its flow as {name, steps}"),
+                ({"name": "../mine", "steps": self.CODE}, "its flow: '../mine' is not a flow's name")):
+            run = self.drive([], handed=handed)
+            self.assertTrue(run.closed(), handed)
+            self.assertEqual((run.state["status"], run.state["refusal"]), ("REFUSED", said))
+            self.assertNotIn("flow", run.state, "a flow it cannot follow is never shown as the run's")
+            history = temporal_env.run(run.handle.fetch_history())
+            self.assertEqual([event for event in history.events
+                              if event.event_type == EventType.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED], [],
+                             "no step, no worktree: %r" % (handed,))
 
     def test_a_run_started_through_the_client_keeps_its_flow_when_its_file_changes(self):
         import shutil
