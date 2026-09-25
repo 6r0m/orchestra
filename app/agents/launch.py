@@ -18,8 +18,10 @@ because killing the direct child leaves its tool processes running:
 - Windows: the agent is created already inside a job object that kills every process
   in it when its last handle closes — one `CreateProcess` call, so no moment exists in
   which it lives outside the job. We hold that handle, so our death closes it. Ending
-  the tree waits for each of its processes: until one's termination finishes it still
-  holds the directory it worked in, which Windows will not remove.
+  the tree closes the job to newcomers, holds each process it lists, terminates the job
+  and waits for each: until its termination finishes a process still holds the directory
+  it worked in, which Windows will not remove. An end it cannot prove within the grace
+  raises.
 
 Whichever way the run ends — its exit, a timeout, a Stop raised by `on_tick`, or our
 death — the tree is gone afterwards.
@@ -75,12 +77,17 @@ def run(argv, cwd, stdin_path, stdout_path, stderr_path, timeout, env=None, on_t
                     tree.stop(proc)
                     raise RoleTimeout("role-run did not finish within %ds" % timeout)
         except BaseException:
-            tree.stop(proc)
-            tree.close()
+            # The tree's handle goes whatever its end says; an end it cannot prove is raised.
+            try:
+                tree.stop(proc)
+            finally:
+                tree.close()
             raise
     # The agent is done; anything it left behind goes with it.
-    tree.kill()
-    tree.close()
+    try:
+        tree.kill()
+    finally:
+        tree.close()
     return rc
 
 
@@ -307,10 +314,13 @@ class _WindowsProcess:
 
 class _WindowsTree:
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+    JOB_OBJECT_LIMIT_ACTIVE_PROCESS = 0x0008
     JOB_OBJECT_BASIC_PROCESS_ID_LIST = 3
     JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
     SYNCHRONIZE = 0x00100000
     ERROR_MORE_DATA = 234
+    WAIT_OBJECT_0 = 0
+    WAIT_FAILED = 0xFFFFFFFF
     EXTENDED_STARTUPINFO_PRESENT = 0x00080000
     CREATE_UNICODE_ENVIRONMENT = 0x00000400
     STARTF_USESTDHANDLES = 0x00000100
@@ -349,6 +359,16 @@ class _WindowsTree:
             raise OSError(self.ctypes.get_last_error(), "%s failed" % what)
 
     def _job(self):
+        job = self.kernel32.CreateJobObjectW(None, None)
+        self._check(job, "CreateJobObjectW")
+        if not self._limit(job):
+            self.kernel32.CloseHandle(job)
+            self._check(False, "SetInformationJobObject")
+        return job
+
+    def _limit(self, job, closed=False):
+        """Set the job's limits: kill on close always, and — once `closed` — no process may join it any more.
+        True when set."""
         ctypes = self.ctypes
 
         class IoCounters(ctypes.Structure):
@@ -375,16 +395,14 @@ class _WindowsTree:
                         ("PeakProcessMemoryUsed", ctypes.c_size_t),
                         ("PeakJobMemoryUsed", ctypes.c_size_t)]
 
-        job = self.kernel32.CreateJobObjectW(None, None)
-        self._check(job, "CreateJobObjectW")
         limits = ExtendedLimits()
         limits.BasicLimitInformation.LimitFlags = self.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-        ok = self.kernel32.SetInformationJobObject(job, self.JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
-                                                   ctypes.byref(limits), ctypes.sizeof(limits))
-        if not ok:
-            self.kernel32.CloseHandle(job)
-            self._check(False, "SetInformationJobObject")
-        return job
+        if closed:
+            # A process that would join is refused at its creation, before it runs (ERROR_NOT_ENOUGH_QUOTA).
+            limits.BasicLimitInformation.LimitFlags |= self.JOB_OBJECT_LIMIT_ACTIVE_PROCESS
+            limits.BasicLimitInformation.ActiveProcessLimit = 0
+        return bool(self.kernel32.SetInformationJobObject(job, self.JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+                                                          ctypes.byref(limits), ctypes.sizeof(limits)))
 
     def _stdio(self, value, reading, owned):
         """The child's inheritable handle for one stream, and the parent's end of a pipe or None."""
@@ -494,22 +512,39 @@ class _WindowsTree:
             pass
 
     def kill(self):
-        if self.job:
-            # Termination only begins it: a process has its exit code while it still holds its handles —
-            # the directory it worked in among them, which Windows then refuses to remove. So each process
-            # is taken hold of while still in the job, and the tree is gone, within a bound, on return.
-            members = []
+        """End every process of the tree and return once each has ended — or raise, when that is not
+        proved within GRACE_SECONDS, so nothing goes on as though the tree were gone."""
+        if not self.job:
+            return
+        # Termination only begins the end: a process has its exit code while it still holds its handles —
+        # the directory it worked in among them, which Windows then refuses to remove — and the job drops
+        # every process from its own list the moment it is terminated, so none can be found afterwards
+        # (measured). The job is closed to newcomers first; each process it lists then — running, or
+        # ending by itself, which it lists until its handles are released — is held, and waited for once
+        # the job is terminated.
+        held = {}
+        try:
             try:
-                members = self._members()
+                self._check(self._limit(self.job, closed=True), "SetInformationJobObject")
+                self._hold(held)
             finally:
-                self.kernel32.TerminateJobObject(self.job, 1)
-            deadline = time.monotonic() + GRACE_SECONDS
-            for handle in members:
-                self.kernel32.WaitForSingleObject(handle, int(max(0.0, deadline - time.monotonic()) * 1000))
+                terminated = self.kernel32.TerminateJobObject(self.job, 1)
+            self._check(terminated, "TerminateJobObject")
+            self._wait(held, time.monotonic() + GRACE_SECONDS)
+        finally:
+            for handle in held.values():
                 self.kernel32.CloseHandle(handle)
 
-    def _members(self):
-        """A handle to wait on for each process in the job now; one already gone needs none."""
+    def _hold(self, held):
+        """Take hold of each process the job lists, by id, to wait on; one already gone needs none."""
+        for pid in self._pids():
+            if pid not in held:
+                handle = self.kernel32.OpenProcess(self.SYNCHRONIZE, False, pid)
+                if handle:
+                    held[pid] = handle
+
+    def _pids(self):
+        """The processes in the job now, by id."""
         ctypes = self.ctypes
         from ctypes import wintypes
         room = 64
@@ -520,11 +555,18 @@ class _WindowsTree:
             ids = IdList()
             if self.kernel32.QueryInformationJobObject(self.job, self.JOB_OBJECT_BASIC_PROCESS_ID_LIST,
                                                        ctypes.byref(ids), ctypes.sizeof(ids), None):
-                break
+                return list(ids.ids[:ids.listed])
             self._check(ctypes.get_last_error() == self.ERROR_MORE_DATA, "QueryInformationJobObject")
             room = max(room * 2, ids.assigned)
-        handles = (self.kernel32.OpenProcess(self.SYNCHRONIZE, False, pid) for pid in ids.ids[:ids.listed])
-        return [handle for handle in handles if handle]
+
+    def _wait(self, held, deadline):
+        """Each held process ended by `deadline`; TimeoutError naming one that has not."""
+        for pid, handle in held.items():
+            waited = self.kernel32.WaitForSingleObject(handle, int(max(0.0, deadline - time.monotonic()) * 1000))
+            self._check(waited != self.WAIT_FAILED, "WaitForSingleObject")
+            if waited != self.WAIT_OBJECT_0:
+                raise TimeoutError("the agent's process tree did not end within %ds of its kill: process %d is "
+                                   "still there" % (GRACE_SECONDS, pid))
 
     def close(self):
         if self.job:

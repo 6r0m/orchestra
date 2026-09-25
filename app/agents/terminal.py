@@ -199,29 +199,37 @@ class Terminal:
         return self.agent
 
     def end_agent(self):
+        """End the agent under this terminal; an end its tree cannot prove is raised, after the terminal is
+        told it has no agent."""
         agent, self.agent = self.agent, None
         if agent is not None:
-            agent.end()
-            agent.pump.join(timeout=launch.GRACE_SECONDS)
-            self.announce()
+            try:
+                agent.end()
+            finally:
+                agent.pump.join(timeout=launch.GRACE_SECONDS)
+                self.announce()
 
     def agent_gone(self, agent):
         """That agent's process ended by itself: it leaves the terminal, which stops being live."""
         if self.agent is agent:
             self.agent = None
-        agent.end()
-        self.announce()
+        try:
+            agent.end()
+        finally:
+            self.announce()
 
     def close(self):
-        self.end_agent()
-        with self.lock:
-            if self.record is not None:
-                self.record.close()
-                self.record = None
-            viewers, self.viewers = list(self.viewers), []
-        # Each viewer's connection closes, so a page attaches again to whatever terminal comes next.
-        for deliver in viewers:
-            deliver(None)
+        try:
+            self.end_agent()
+        finally:
+            with self.lock:
+                if self.record is not None:
+                    self.record.close()
+                    self.record = None
+                viewers, self.viewers = list(self.viewers), []
+            # Each viewer's connection closes, so a page attaches again to whatever terminal comes next.
+            for deliver in viewers:
+                deliver(None)
 
     def live(self):
         agent = self.agent
@@ -246,11 +254,19 @@ def open_terminal(run_id, role):
 
 
 def close_run(run_id):
-    """End every terminal of a run on this host; their records stay."""
+    """End every terminal of a run on this host; their records stay. Each closes even when another's agent
+    could not be proved ended, and that failure is raised once all have: what comes next — a merge, a
+    discard — must not go on as though the worktree were free."""
     with _terminals_lock:
         closing = [_terminals.pop(key) for key in list(_terminals) if key[0] == run_id]
+    failed = None
     for terminal in closing:
-        terminal.close()
+        try:
+            terminal.close()
+        except Exception as exc:                    # noqa: BLE001 - raised below, once every terminal is closed
+            failed = failed or exc
+    if failed is not None:
+        raise failed
 
 
 def end_agent(run_id, role):

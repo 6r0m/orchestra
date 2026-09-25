@@ -35,6 +35,20 @@ GRANDCHILD = textwrap.dedent("""
     time.sleep(120)
 """)
 
+# Starts the grandchild only once told to, and exits: the child it leaves, if the job takes one, is the tree's.
+LATE = textwrap.dedent("""
+    import os, subprocess, sys, time
+    trigger, marker = sys.argv[1], sys.argv[2]
+    while not os.path.exists(trigger):
+        time.sleep(0.02)
+    try:
+        subprocess.Popen([sys.executable, os.path.join(os.path.dirname(__file__), "grandchild.py"), marker])
+    except OSError:
+        sys.exit(0)
+    while not os.path.exists(marker) or not open(marker).read():
+        time.sleep(0.02)
+""")
+
 # Starts the grandchild, waits until it is running, then sleeps or exits.
 CHILD = textwrap.dedent("""
     import os, subprocess, sys, time
@@ -166,6 +180,63 @@ class ProcessTree(unittest.TestCase):
         tree.kill()
         self.assertFalse(alive(pid), "a process of the tree outlived its end")
         os.rmdir(work)
+
+    @unittest.skipUnless(WINDOWS, "Windows removes no directory a process still works in")
+    def test_no_process_joins_the_tree_once_its_end_has_begun(self):
+        """The end holds what the job lists before it terminates the job, which drops every process from its
+        list at once. One started after that look would die unwaited for, still holding the directory it
+        worked in; so the job is closed to newcomers first, and such a one never starts."""
+        with open(os.path.join(self.tmp, "late.py"), "w", encoding="utf-8") as fh:
+            fh.write(LATE)
+        work = tempfile.mkdtemp(prefix="orch-launch-cwd-", dir=self.tmp)
+        trigger = os.path.join(self.tmp, "go")
+        tree = launch._Tree()
+        self.addCleanup(tree.close)
+        root = tree.start([sys.executable, os.path.join(self.tmp, "late.py"), trigger, self.marker], work,
+                          subprocess.DEVNULL, subprocess.DEVNULL, subprocess.DEVNULL, None)
+        looked = tree._hold
+
+        def looked_then_one_tries_to_start(held):
+            looked(held)
+            if not os.path.exists(trigger):
+                open(trigger, "w").close()
+                root.wait(timeout=30)            # it tries to start its child, and is gone
+        tree._hold = looked_then_one_tries_to_start
+        tree.kill()
+        self.assertEqual(self._grandchild(optional=True), [], "a process started in the tree after its end began")
+        os.rmdir(work)
+
+    @unittest.skipUnless(WINDOWS, "the job object is the Windows primitive")
+    def test_an_end_it_cannot_prove_raises_rather_than_returns(self):
+        """The job not closed to newcomers, its termination refused, a wait that fails, or a process still
+        there when the grace is spent: the end raises, so no caller — a merge, a discard — goes on as though
+        the tree were gone."""
+        waited_out = 0x00000102                              # WAIT_TIMEOUT
+        for broken, error, said in (("close", OSError, "SetInformationJobObject failed"),
+                                    ("terminate", OSError, "TerminateJobObject failed"),
+                                    ("wait", OSError, "WaitForSingleObject failed"),
+                                    ("grace", TimeoutError, "did not end within %ds of its kill" % launch.GRACE_SECONDS)):
+            with self.subTest(broken=broken):
+                marker = os.path.join(self.tmp, "%s.pid" % broken)
+                tree = launch._Tree()
+                try:
+                    tree.start([sys.executable, os.path.join(self.tmp, "child.py"), marker, "sleep", self.DETACH],
+                               self.tmp, subprocess.DEVNULL, subprocess.DEVNULL, subprocess.DEVNULL, None)
+                    deadline = time.monotonic() + 30
+                    while not (os.path.exists(marker) and open(marker).read()) and time.monotonic() < deadline:
+                        time.sleep(0.05)
+                    self.leftovers.append(int(open(marker).read()))
+                    native = {"close": ("SetInformationJobObject", lambda *args: 0),
+                              "terminate": ("TerminateJobObject", lambda job, code: 0),
+                              "wait": ("WaitForSingleObject", lambda handle, millis: tree.WAIT_FAILED),
+                              "grace": ("WaitForSingleObject", lambda handle, millis: waited_out)}[broken]
+                    setattr(tree.kernel32, *native)
+                    with self.assertRaisesRegex(error, said):
+                        tree.kill()
+                finally:
+                    # Kill on close ends whatever the broken end left.
+                    tree.close()
+                self.assertTrue(gone_within(self.leftovers[-1], 10))
 
     def test_the_owners_death_ends_the_whole_tree(self):
         """Killed outright, the process that launched the agent takes the tree with it."""

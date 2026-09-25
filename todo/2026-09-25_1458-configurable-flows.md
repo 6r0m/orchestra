@@ -704,3 +704,21 @@ the external reviewer's PASS, and a real `architect-research` run in the operato
   68 classes, 322 tests, both green; `make public-check` passed; the stack restarted again, so its
   Windows worker runs the fix.
 - **Next:** the operator's live `architect-research` run.
+
+### 2026-09-25 — the race fix, reviewed: PATCH, the end proved or raised
+
+- **Fixed:** the end checked neither the termination nor the waits, so one it could not prove still
+  returned; now each raises, handles close in `finally`, and a run's terminals all close before the
+  failure reaches its merge or discard, which stops before git.
+- **Refuted, with measurements:** the review's look at the job again once terminated sees nothing —
+  `TerminateJobObject` drops every process from the job's list (and the host's) within 0.2 ms, while
+  it still holds its directory for 0.5–3 ms (20 of 20). A process ending by itself stays listed until
+  its handles are released (10 of 10). So the end closes the job to newcomers first (its active
+  process limit, 0 — a newcomer is refused before it runs), holds what the job lists, then
+  terminates and waits; no completion port, supervisor or new timeout.
+- **Evidence:** the new tests five times of five on Windows; controls, each red then green — the job
+  open to newcomers, the look taken after the termination as the review asked, the termination
+  unchecked, the waits unchecked, the run's terminals closed only up to the first failure; Windows
+  68 classes, 327 tests, WSL 99 classes, 446 tests, both green; `make public-check` passed; the stack
+  restarted on it.
+- **Next:** the external review of this fix; then the operator's live `architect-research` run.

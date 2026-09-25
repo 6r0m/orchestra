@@ -451,6 +451,32 @@ class Lifecycle(unittest.TestCase):
             self.assertEqual(engineer + architect, ["engineer", "architect"], action)
         self.assertEqual(seen, [("merge", [None, None]), ("discard", [None, None])])
 
+    def test_an_agent_end_not_proved_stops_a_merge_or_discard_before_git_and_every_terminal_closes(self):
+        from fakes import FakeWorktrees
+        state = {"run_id": self.run_id, "plan": "todo/x.md", "task": "t", "repo_path": "/r", "worktree_path": "/w",
+                 "base_branch": "develop", "verified_tree": "v", "todo_done_dir": "todo/done"}
+        git = FakeWorktrees()
+        host = activities.Activities(runner=None, git=git, telemetry=None)
+
+        def unproved(agent):
+            raise TimeoutError("the agent's process tree did not end within 5s of its kill")
+        for action in ("merge", "discard"):
+            # The terminal whose end fails is closed first, so the other shows it was closed all the same.
+            pump = threading.Thread(target=lambda: None)
+            pump.start()
+            engineer = terminal.open_terminal(self.run_id, "engineer")
+            engineer.agent = type("Agent", (), {"end": unproved, "returncode": lambda self: None,
+                                                "write": lambda self, data: None, "pump": pump})()
+            told = []
+            engineer.attach(told.append)
+            ended = self.live("architect")
+            with self.assertRaisesRegex(TimeoutError, "did not end", msg=action):
+                getattr(host, action)({"state": state})
+            self.assertEqual(ended, ["architect"], action)
+            self.assertEqual([terminal.get(self.run_id, role) for role in ("engineer", "architect")], [None, None])
+            self.assertEqual(told[-2:], [json.dumps({"live": False}), None], "its page is told, then let go")
+        self.assertEqual(git.calls, [], "no git after an end not proved")
+
     def test_a_change_while_the_architect_judges_fails_the_step_and_is_never_the_verified_tree(self):
         from app.workspace import worktrees
         repo = tempfile.mkdtemp(prefix="orch-verify-")
