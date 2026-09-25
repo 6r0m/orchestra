@@ -156,8 +156,8 @@ class Selection(unittest.TestCase):
 
     def test_the_example_descriptors_are_valid_and_none_of_your_own_are_shipped(self):
         example = repos.load(os.path.join(PKG, "repos.example.json"))
-        self.assertEqual(sorted(example), ["service", "webapp"])
-        self.assertEqual(example["webapp"]["target"], "windows")
+        self.assertEqual(sorted(example), ["service", "work/webapp"])
+        self.assertEqual(example["work/webapp"]["target"], "windows")
         self.assertEqual(example["service"]["base_branch"], "main")
         # The file a run actually reads is yours and is never committed; absent means no descriptors.
         self.assertFalse(os.path.exists(os.path.join(PKG, "repos.json")) and

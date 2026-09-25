@@ -1,0 +1,508 @@
+# Configurable flows: the order of a run's work, chosen per task
+
+**Status:** REVIEW REQUIRED
+**Scope:** the order of a run's steps — a new `flows/` folder and its reader `app/foundation/flows.py`;
+[workflow.py](../app/orchestration/workflow.py), [routing.py](../app/orchestration/routing.py),
+[stages.py](../app/foundation/stages.py), [policy.py](../app/foundation/policy.py) and `policy.json`, the
+role step in [activities.py](../app/application/activities.py), [nodes.py](../app/agents/nodes.py), the
+run start in [client.py](../app/application/client.py), the Workbench's Start form and the CLI, the
+trace's phases
+**Stable documentation owner:** [docs/architecture/structure.md](../docs/architecture/structure.md)
+(architecture D2, D5, D6, D13, D19, D24); [trace-contract.md](../docs/architecture/trace-contract.md);
+[diagrams/stops.md](../docs/architecture/diagrams/stops.md); [docs/using.md](../docs/using.md); a new
+`flows/README.md`
+
+## Contents
+
+- [Goal](#goal) · [Authority register](#authority-register) · [Non-goals](#non-goals)
+- [Verified evidence](#verified-evidence) · [Current architecture](#current-architecture-and-source-of-truth)
+- [Problem](#problem) · [Decision](#decision) · [Invariants](#required-invariants)
+- [Tasks](#implementation-tasks) · [Verification](#test-first-and-verification-plan)
+- [Documentation](#documentation-plan) · [Rollout](#rollout-and-rollback) · [Completion](#completion-criteria)
+- [Review record](#review-record)
+
+## Goal
+
+The operator chooses, for each task, the order in which the roles work — research first or code
+first, with or without their approval between steps, building or not — from flows they can read and
+edit without a code change; a run keeps the flow it started with.
+
+## Authority register
+
+In this todo `D<n>` alone is this register's own entry; a decision of
+[structure.md](../docs/architecture/structure.md) is written *architecture D<n>*. Entries recorded before
+this convention keep their wording: in D5 and Q2, D11, D13 and D24 are the architecture's.
+
+### Operator decisions
+
+- **D1** A run follows a flow picked for its task.
+  - Effect: the Start form and the CLI take a flow; a run's order of work is no longer one fixed
+    sequence.
+  - Reason: *"otherwise operator can't gain control"*
+  - Date/source: 2026-09-25, operator — *"ui should give flow select for exact specific task"*;
+    *"good goal just pick up needed flow"*
+- **D2** A flow is an ordered list of `role:action` steps: the actions are a small fixed set the code
+  owns — `research`, `plan`, `assess`, `build`, `verify` — plus the operator's gates, approve and
+  merge; a review's PATCH returns to the work step before it, bounded, and BLOCKER stops for the
+  operator; the flows live in one JSON file, shown on the page as a select with the chosen flow's steps
+  as one line; a run keeps the flow it started with.
+  - Effect: the shape of a flow and how it is shown.
+  - Reason: not stated.
+  - Date/source: 2026-09-25, operator, of that proposal — *"your flow understing is good!"*
+- **D3** Two flows to support: **research-first** — the architect researches and writes an abstract
+  todo, the operator agrees, then the engineer rechecks it against the current code and applies it —
+  and **code-first**, the reverse, when the code matters more.
+  - Effect: `research` is a new action, and a flow may start with the architect.
+  - Reason: not stated.
+  - Date/source: 2026-09-25, operator — *"he should start for investigation frist without ingeener at
+    all"*; *"first need research some and then do abstract todo for architect, then operator agreed and
+    give to ingeneer to recheck current code how it applied, or vise versa in case code is more
+    importatins"*
+- **D4** Flows are shown and edited in the most KISS and basic way, out of the box.
+  - Effect: a JSON file edited by hand, re-read when used; no editor, no new service.
+  - Reason: not stated.
+  - Date/source: 2026-09-25, operator — *"we need in very KISS and basic understand how to show our
+    flows and also quick edit them out of box"*
+- **D5** D13 is to be understood and re-decided so that it gives the system flexibility rather than
+  restricting it: flows as JSON, or whatever the industry's KISS standard recommends.
+  - Effect: the clause of D13 that keeps the set and order of stages in code, and "There is no JSON
+    workflow DSL", are the operator's to change; the new wording is this todo's proposal (Decision
+    item 1) until approved.
+  - Reason: *"goal not restict our system but give flexiblity to it, otherwise operator can't gain
+    control"*
+  - Date/source: 2026-09-25, operator — *"need to understand d13 … so code should use some jsons with
+    flows or what best industrila standart recomment it KISS"*
+- **D6** The architect is not restricted: it keeps its repository access. A repository-free architect
+  — a web model fed attached, merged files — is optional and future, not this change.
+  - Effect: no packaging of files for a model without repository access here.
+  - Reason: not stated.
+  - Date/source: 2026-09-25, operator — *"we not need restirct arhcitectore very hard - just
+    optionally in case it web version in future … (focus not now, in future)"*
+- **D7** The flows live apart from the policy: a folder of their own, one file per flow named by the
+  flow, placed as the domain architecture places configuration.
+  - Effect: closes Q1 — not a key in `policy.json`.
+  - Reason: not stated.
+  - Date/source: 2026-09-25, operator — *"ofcourse separate , different subfolder for all data and
+    internal flows and inside exact flow name, check our domain driven architecture"*
+- **D8** One switch skips every approval gate where the operator is needed, for all of a run's steps —
+  never the final merge check.
+  - Effect: closes Q3.
+  - Reason: not stated.
+  - Date/source: 2026-09-25, operator — *"I guess could globally skip approval for all stages where
+    human needed except final merging check"*
+- **D9** The code-based flow — the engineer's first turn, on the code — is the default; the flows get
+  names without the word "first" that say who starts and from what.
+  - Effect: closes Q4; the names are A8's until confirmed.
+  - Reason: not stated.
+  - Date/source: 2026-09-25, operator — *"code-frist let be default, but I guess need better names
+    without first word emphasize that first turn will be engeener base on code?"*
+- **D10** Reuse what the engine already integrated here provides out of the box, as much as possible,
+  checked against its own documentation.
+  - Effect: the design uses Temporal's own recommended pattern and its existing machinery, and builds
+    only what Temporal leaves to its users (see the verified evidence).
+  - Reason: *"wierd why we don't resue as mcuh as possible already ingetrated stuff?"*
+  - Date/source: 2026-09-25, operator — *"we already have some engine brain orchestrator, it should give
+    some out of box check web carefully and his docs"*; again: *"ok we need reuse temporal as much as
+    possilbe"*
+- **D11** The ending is flexible: a flow builds only when it has build steps, so a flow may end without
+  building.
+  - Effect: closes Q2; research-only and plan-only flows are allowed; a build, when there is one, still
+    ends in a verify and the final merge check.
+  - Reason: not stated.
+  - Date/source: 2026-09-25, operator — *"bro why just not do this flexible if there are some to build
+    then agent will be build no?"*
+- **D12** Skipping approvals skips only the scheduled approval gates, never the emergency stops.
+  - Effect: refines D8 — a blocker, an exhausted budget and a failed step still stop, as does the final
+    merge check.
+  - Reason: not stated.
+  - Date/source: 2026-09-25, operator — *"yes here we skip only sheduled approvals not emergency"*
+- **D13** The flows are named `engineer-code` and `architect-research`.
+  - Effect: A8 confirmed.
+  - Reason: not stated.
+  - Date/source: 2026-09-25, operator, of A8 — *"good"*
+- **D14** A flow that ends at its plan does not merge it: a merge is always human-gated. A way to merge
+  such a todo, like a checkmark, may come in future; not now.
+  - Effect: closes Q5; A11 confirmed.
+  - Reason: *"because merfe always human gated"*
+  - Date/source: 2026-09-25, operator — *"bro ofcourse no! … could be in future like checkmark but now
+    hardly no!"*
+
+### Operator gates
+
+- **Q1 [CLOSED by D7]:** where the flows live — a `flows` key in `policy.json`, beside the roles
+  and budgets it arranges, or a `flows.json` of its own. Default while open: A1.
+- **Q2 [CLOSED by D11]:** whether every flow ends `engineer:build`, `architect:verify`,
+  `you:merge`, which keeps the only path to a commit exactly as it is (D11, D24), or the tail is free
+  too, under validation rules of its own. Default while open: A2.
+- **Q3 [CLOSED by D8]:** whether *skip the plan approval* stays, skipping every `you:approve` of
+  the chosen flow, or goes, replaced by flows without that gate. Default while open: A3.
+- **Q4 [CLOSED by D9]:** which flow a run takes when none is named, and whether research-first
+  ships beside code-first. Default while open: A4.
+- **Q5 [CLOSED by D14]:** whether a flow that ends at its plan, without building, may merge that
+  todo into the base branch — a merge after an assessment's PASS rather than a verify's — or ends keeping
+  it in its worktree. Default while open: A11.
+
+### Working assumptions
+
+- **A1 [RESOLVED by D7 — not taken]:** flows are a `flows` object in `policy.json`: one owner of how
+  runs behave, already validated strictly, re-read at every start and carried into each run's start
+  input.
+- **A2 [RESOLVED by D11 — not taken]:** the tail is fixed: every flow ends `engineer:build`,
+  `architect:verify`, `you:merge`; what varies is everything before the build.
+- **A3 [RESOLVED by D8]:** *skip the plan approval* stays and skips every `you:approve` of the chosen
+  flow; never the final gate.
+- **A4 [RESOLVED by D9]:** `code-first` — today's order — is the default, and `research-first` ships
+  beside it.
+- **A5 [ACTIVE]:** `research` writes no file: the architect is read-only, so its brief is its final
+  message, kept in the run's logs like every role's reports, shown at the gate after it and pointed at by
+  the next work step's ask.
+- **A6 [ACTIVE]:** `revise` at an approve gate returns to the work step before that gate; `guide` at a
+  blocker or an exhausted budget re-enters the loop it stopped in, as today.
+- **A7 [ACTIVE]:** a run started with no flow — every recorded history and every run open at release —
+  runs the default flow, which issues exactly today's commands, so no `workflow.patched` is needed for
+  it; a run started with a flow carries its steps in its start input.
+- **A8 [RESOLVED by D13]:** the two flows are named `engineer-code` — the engineer starts, from the
+  code; today's order and the default — and `architect-research` — the architect starts, with research
+  and an abstract todo (D9).
+- **A9 [ACTIVE]:** the folder is `flows/` at the checkout root, beside `roles/`: operator-edited
+  configuration sits there by the domain architecture ([app/README.md](../app/README.md): "`policy.json`,
+  `repos.json` and `roles/` sit at the checkout root, because they are the operator's to edit"), and
+  `roles/` is already a folder of one file each with a README routing to them. A flow is
+  `flows/<name>.json`, holding its steps; `flows/README.md` routes to each. Reading and checking them is
+  `app/foundation/flows.py`: foundation owns the contract every package reads — the policy and the
+  stages of a run.
+- **A10 [ACTIVE]:** which flow is the default is `policy.json`'s `default_flow`, checked to name a file
+  in `flows/`: the policy already owns the defaults of a run, `auto_proceed` among them.
+- **A11 [RESOLVED by D14]:** a flow without a build ends `DONE` after its last step and never merges: its worktree
+  and branch are kept for the operator, as a stopped run's are, with the Workbench's existing removal
+  (architecture D31); a research brief stays in the run's logs.
+- **A12 [ACTIVE]:** `research` is the read-only role's action, as `assess` and `verify` are, so an
+  engineer's work always goes to an architect's review (architecture D4).
+
+## Non-goals
+
+- No repository-free architect, no files packaged for a model without repository access (D6).
+- No branches, conditions, parallel steps or loops beyond the review loop; no new roles — the two stay,
+  with their access (architecture D2); no new brains.
+- No editor for flows on the page (D4): the file is the editor.
+- No change to the merge itself — it still follows a verify's PASS (architecture D11, D24) — nor to the
+  stops' answers beyond an approve gate appearing where a flow puts it.
+- No new Temporal machinery — no dynamic workflow types, child workflows, search attributes or worker
+  versioning: the run stays one workflow type whose input carries its flow (D10).
+- No merge of a flow that ends without a build, nor a checkmark for one — a future option at most (D14).
+- No scheduled or parallel runs (architecture D10).
+
+## Verified evidence
+
+**Verified facts**
+
+- **Architecture D13 today** ([structure.md](../docs/architecture/structure.md)): brains, models,
+  budgets, access, targets, repository descriptors and personas are configuration; "Stage asks (which
+  artifact a stage produces or judges) and any new *stage* are code. There is no JSON workflow DSL."
+  Architecture D2 fixes "Four stages, one workflow: `plan → assess → build → verify`".
+- **Why the routing is code** ([history/decisions.md](../docs/history/decisions.md), "The workflow engine
+  was not the first answer"): a hand-rolled state machine came first and "lost reviewer feedback on
+  routing edges — the feedback lived on the edge rather than in the state"; the fix was ordinary
+  workflow code over one compact state. structure.md, "Why there is no state machine here": "Do not
+  re-derive a `states/` layer here."
+- **Today's order is code:** `FeatureRun._loop` pairs `("plan", "assess")` and `("build", "verify")` by
+  phase ([workflow.py](../app/orchestration/workflow.py), `_loop`); `routing.gate_reason_for` offers the
+  approval only in the plan phase and only without `auto_proceed`; `_final_gate` sends a revise to
+  `build` or back to review; `_plan_stands` re-assesses a plan changed after its PASS.
+- **Feedback lives in state:** `_stage` writes `verdict`, `feedback` and clears `guidance`; the next
+  prompt carries the task, persona, the stage's ask, the architect's findings and the operator's
+  guidance ([nodes.py](../app/agents/nodes.py), `compose_prompt`). A role keeps one session across its
+  stages (architecture D7).
+- **Every consumer of the fixed set** (`grep` of `STAGE_ROLE`, `PHASES`, stage and phase names under
+  `app/`): `stages.py` (`STAGES`, `STAGE_ROLE`, `PHASES`, `STAGE_ASK`); `workflow.py`; `routing.py`;
+  `activities.run_role` (the role from `STAGE_ROLE[stage]`, `max_rounds[phase]`, the judged tree by
+  stage); `agents/terminal.py` (a terminal's role from its log name's stage); `policy.validate`
+  (`stage_skills` keys must be stages, `max_rounds` keys must be exactly the phases); `telemetry`
+  (`PHASE_NAMES`, `PHASE_ROLES`, a step name per stage and role); `client.start`, the CLI's
+  `--auto-proceed`, the Workbench's *skip the plan approval*.
+- **A run carries its policy:** `client.start` loads `policy.json` at every start and puts the whole
+  policy into the workflow's start input ([client.py](../app/application/client.py), `start`), so what a
+  run was started with is in its recorded history.
+- **Replay is guarded:** eight recorded histories under [tests/histories/](../tests/histories/), all
+  replayed by [test_replay.py](../tests/orchestration/test_replay.py), whose control shows an
+  unpatched change fails (architecture D25).
+- **Access:** the architect runs Codex with `--sandbox read-only` and live web search; the engineer
+  Claude with edits allowed in its worktree ([nodes.py](../app/agents/nodes.py), `build_argv`;
+  `policy.json`). A read-only role cannot write a research file.
+- **A web architect already has a home:** architecture D9 allows "a low-cost web chat whose account can
+  be lost, such as DeepSeek" as "a detached architect — deliberately, never as a silent addition" — the
+  future D6 names.
+- **What the engine gives out of the box (D10):** Temporal ships no workflow language of its own; for
+  workflows defined as data its own answer is one interpreter workflow given the definition as input.
+  - Its sample: "how one can write a workflow to interpret arbitrary steps from a user-provided DSL",
+    the definition passed as the workflow's input
+    ([temporalio/samples-python, `dsl`](https://github.com/temporalio/samples-python/tree/main/dsl)).
+  - Its co-founder, on the community forum: "I would avoid the code generation approach. Writing a
+    single interpreter workflow for your JSON is the way to go"; a definition changed while runs are open
+    is "up to your implementation of the interpreter"
+    ([forum](https://community.temporal.io/t/how-will-temporal-store-the-workflow-status-if-we-read-the-workflow-definition-from-json-yaml-in-code/2600)).
+  - Its staff: pass "the whole workflow definition as input to your workflow when you start it", and JSON
+    is what most such languages use, being neutral
+    ([forum](https://community.temporal.io/t/implementing-dsl-workflows/3413)).
+  - Dynamic workflows (`@workflow.defn(dynamic=True)`) serve workflow *types* not registered in advance
+    ([Python SDK](https://python.temporal.io/temporalio.workflow.html)); a run here is always one type,
+    `FeatureRun`.
+  - What this design reuses of it, unchanged: the durable state of the loop, the recorded history the
+    flow is kept in — the start input, shown for every run in Temporal's own web UI — Updates for the
+    gates' answers, cancellation for a Stop, the visibility list the Workbench already reads its runs from
+    ([client.py](../app/application/client.py), `runs`), and replay with `workflow.patched` for
+    compatibility. What it builds is only the part Temporal leaves to its users: the interpreter, which
+    is today's loop generalised.
+- **Where configuration lives:** [app/README.md](../app/README.md) — "`policy.json`, `repos.json` and
+  `roles/` sit at the checkout root, because they are the operator's to edit (D13)", the architecture's
+  D13; `roles/` is a folder of one file per role with a README routing to them.
+- **What a closed run keeps:** a run closed short of a merge or a discard keeps its worktree and branch
+  until the operator removes them from the Workbench, through its host's own git (architecture D31;
+  [docs/using.md](../docs/using.md), "The page").
+
+**Inferences**
+
+- What the operator wants to vary is the order of the steps and whether a run builds at all (D11); the
+  guarantee of architecture D11 and D24 — only a verified tree is committed — holds as long as a merge
+  comes only after a verify's PASS, whatever came before it.
+- A flow expressed as today's order, run by the interpreter, can issue exactly today's commands, as the
+  optional `stop_cleanup_seconds` did without `workflow.patched` (A7); the eight histories prove it or
+  refute it.
+- The history's lesson holds for any order: feedback and guidance stay in the run's state and reach the
+  next step's prompt; a flow never carries them on its edges.
+
+**Assumptions / unverified**
+
+- How long a research brief runs, and so how much of it the gate after it shows: measured on the first
+  real `architect-research` run.
+- Whether [tools/langfuse_dashboard.py](../tools/langfuse_dashboard.py) filters on phase names, which a
+  research phase would need to join.
+
+## Current architecture and source of truth
+
+- [structure.md](../docs/architecture/structure.md) owns the roles and stages (architecture D2), budgets
+  (D5), stops and their answers (D6), config versus code (D13), the architect's horizon (D15), skills per
+  stage (D19), the worktree's lifecycle and the final gate (D24), a closed run's kept work (D31) and
+  determinism (D25) — all the architecture's.
+- The order of work is `FeatureRun._loop` over the routes of `routing.py`; what each stage asks is
+  `stages.STAGE_ASK`, rendered by `nodes.compose_prompt`; a stage's role and access come from
+  `policy.json` through `activities.run_role`.
+- The trace's phases and steps are the [trace contract](../docs/architecture/trace-contract.md)'s.
+
+## Problem
+
+The order of a run's work is fixed in code — the engineer plans first, always — so a task that should
+start from research, stop at a plan, or skip straight to code, cannot, and changing the order means a
+release. Architecture D13 says so by design; the operator has asked for that design to change (D5).
+
+## Decision
+
+1. **A flow is data; its actions are code** — Temporal's own pattern (D10): one interpreter workflow,
+   the definition as its input. A flow names its steps, `role:action`, in order; what each action asks
+   for and produces stays in `stages.py`, and which role may do it stays with the policy's roles.
+   Architecture D13 becomes: the actions, and the rules a flow must keep, are code; the flows — the order
+   of a run's steps, and whether it builds — are configuration. "There is no JSON workflow DSL" gives way
+   to that one list: no states, no transitions, no conditions.
+2. **Where and how (D7, A9, A10):** a folder `flows/` at the checkout root, beside `roles/`, one file per
+   flow named by it (the names are D13's), with `flows/README.md` routing to each:
+   ```
+   flows/engineer-code.json       ["engineer:plan", "architect:assess", "you:approve",
+                                   "engineer:build", "architect:verify", "you:merge"]
+   flows/architect-research.json  ["architect:research", "you:approve",
+                                   "engineer:plan", "architect:assess", "you:approve",
+                                   "engineer:build", "architect:verify", "you:merge"]
+   ```
+   `policy.json`'s `default_flow` is `engineer-code` (D9). `app/foundation/flows.py` reads and checks
+   them; they are read at every start and each time the Workbench's Flow list is opened, as `repos.json`
+   is.
+3. **The rules a flow keeps**, checked when it is read and refused with their reason:
+   - known roles and actions, and at least one step;
+   - `plan` and `build` are the write role's; `research`, `assess` and `verify` the read-only role's
+     (A12), so a review is never done by the role whose work it judges (architecture D3);
+   - every `plan` is directly followed by an `assess`, every `build` by a `verify`: an engineer's work
+     always reaches an architect's review (architecture D4);
+   - `you:approve` follows a review or a `research`;
+   - `you:merge` only as the last step, directly after a `verify` — the only path to a commit
+     (architecture D11, D24);
+   - a flow that builds ends with `you:merge`; a flow without a build ends wherever its last step is
+     (D11, D14).
+4. **One run, one flow:** the start input carries the chosen flow's steps beside the policy; the workflow
+   interprets them — a work step, its review loop (PATCH or UNVERIFIED back to the work step, bounded by
+   `max_rounds` of that work action; BLOCKER or an exhausted budget to the operator's guide), then the
+   step's gate. Feedback and guidance stay in the run's state. A run with no flow in its input runs the
+   default's steps (A7).
+5. **`research`:** its ask investigates the task and current practice, on the live web and in the
+   repository as far as the role can read, and answers with a research brief and an abstract todo as its
+   final message (A5); the gate after it shows the brief, and the next work step's ask points at it.
+6. **Shown and chosen:** the Start form gains a Flow list with the chosen flow's steps as one line under
+   it; a run's page shows its own flow with its current step; the CLI takes `--flow NAME`.
+7. **One switch for approvals (D8, D12):** *skip approvals* — today's *skip the plan approval* and
+   `auto_proceed`, per run and in the policy — skips every scheduled `you:approve` of the run's flow,
+   never the final merge check and never an emergency stop: a blocker, an exhausted budget and a failed
+   step still stop, because the run has no way on without the operator.
+8. **A flow without a build (D11, D14):** after its last step the run ends `DONE`; it never merges; its
+   worktree and branch are kept for the operator, and removed from the Workbench as a stopped run's are
+   (architecture D31); a research brief stays in the run's logs.
+9. **Reused from Temporal, unchanged (D10):** the run stays one workflow type, `FeatureRun`, whose
+   start input carries its flow — recorded in its history and shown in Temporal's web UI; the gates stay
+   Updates, a Stop stays cancellation, the Workbench's run list stays Temporal's visibility query, and
+   compatibility stays `workflow.patched` over the recorded histories. Built here: only the interpreter.
+
+### Premise / KISS gate
+
+- **Owner:** the workflow already owns the order of work, and Temporal already owns its durability,
+  history, answers, cancellation and replay (D10); the flows are configuration beside the roles (D7).
+  Nothing new owns the run.
+- **Adds:** the `flows/` folder of two files and its README, one reader in `foundation`, one policy key
+  (`default_flow`), one action with its ask, one field in the start input, one ending (`DONE`), one list
+  on the page, one CLI flag, one trace phase — and no Temporal machinery (item 9).
+- **Removes:** the hard-wired pairing of stages in `_loop`, and the plan-only approval in `routing.py`,
+  which become the flow's own steps.
+- **Given up:** graphs — branches, conditions, parallel steps. No flow the operator has named needs them.
+
+### Alternatives considered
+
+- **A few flows in code** (a research switch): the least code, but every new order is a release —
+  it gives the operator no control (D1, D5).
+- **A standard workflow language** (the Serverless Workflow specification, Amazon States Language,
+  BPMN): expressive, but states, transitions and conditions for a linear run of two roles, and routing on
+  edges is the machinery that lost feedback before (history). Rejected.
+- **Code generated from each flow:** Temporal's co-founder advises against it (verified evidence); one
+  interpreter reads every flow.
+- **Temporal's dynamic workflows, a type per flow:** for types unknown when a worker registers; every run
+  here is one type, and the flow is its input.
+- **YAML:** easier to read, but a new dependency, and every configuration file here is JSON.
+- **A `flows` key in `policy.json`:** not taken (D7).
+
+## Required invariants
+
+1. Only a review step's verdict routes; an engineer's work always reaches an architect's review
+   (architecture D4).
+2. A review is done by the read-only role, never by the role whose work it judges (architecture D3).
+3. The only path to a commit is the final gate after `verify`'s PASS, and a merge commits exactly the
+   verified tree (architecture D11, D24); a flow without a build never merges.
+4. Feedback and guidance live in the run's state and reach the next step's prompt; a session born again
+   gets the current step's ask (architecture D18b).
+5. Every review loop is bounded; its limit stops for the operator (architecture D5).
+6. Each stop publishes its own answers, and an answer it does not offer is rejected (architecture D6).
+7. Skipping approvals skips only the scheduled approve gates — never a blocker, an exhausted budget, a
+   failed step or the final gate (D8, D12).
+8. The workflow stays deterministic; the recorded histories replay; a run keeps the flow it started with
+   (architecture D25).
+9. A flow that breaks a rule is refused when it is read, with the rule it broke; a run never starts on
+   it and nothing half-runs.
+10. One session per role per run, across all of that role's steps (architecture D7).
+11. The trace records flows and never routes them (architecture D20).
+
+## Implementation tasks
+
+0. [x] **The operator's questions** answered: Q1–Q5, closed by D7, D11, D8, D9 and D14.
+1. [ ] **Guards, failing first:** reading and checking `flows/` — both shipped flows accepted, each
+   broken rule refused with its reason; the workflow on the time-skipping server with the fake agents —
+   `engineer-code` issuing today's sequence, `architect-research` end to end (research, its gate, revise
+   back to research, approve, a plan whose ask points at the brief, assess, build, verify, merge), a flow
+   without a build ending `DONE` with its worktree kept and nothing merged, *skip approvals* skipping every
+   approve gate while a blocker, an exhausted budget, a failed step and the final gate still stop, a run
+   keeping its flow after its file changes; the page's Flow list; the CLI's `--flow`.
+2. [ ] **Actions:** `research` and its ask in `stages.py`; the plan's ask pointing at a brief when one
+   exists.
+3. [ ] **Flows:** `flows/` with its two files and README; `app/foundation/flows.py` reading and checking
+   them; `policy.json`'s `default_flow`; `stage_skills` and `max_rounds` keyed by action.
+4. [ ] **Start:** `client.start(flow=…)` puts the steps in the start input; the Workbench's run start and
+   its flows read; the CLI's `--flow`; *skip the plan approval* renamed *skip approvals* on the page and
+   the CLI.
+5. [ ] **Workflow:** the interpreter over the start input's steps, the gates generalised in
+   `routing.py`, the `DONE` ending, no flow meaning the default's steps; the Workbench and the CLI read a
+   `DONE` run as closed with its work kept, which `client.not_kept` decides today.
+6. [ ] **The role step:** the role from the step, not from `STAGE_ROLE`; the brief kept and handed on;
+   a terminal's role from the step (`agents/terminal.py`).
+7. [ ] **Trace:** a research phase and its steps, in `telemetry` and the trace contract; the dashboard
+   checked.
+8. [ ] **Page:** the Flow list, the steps line, a run's own flow with its current step.
+9. [ ] **A recorded `architect-research` history** in `tests/histories/`, so replay guards the new path.
+10. [ ] **Docs** (below).
+11. [ ] **Verification:** the changed modules on both hosts; the whole suite once per host after the
+    external reviewer's PASS; the operator's manual check.
+
+## Test-first and verification plan
+
+### Red evidence
+
+| case | kind | today |
+|---|---|---|
+| a flow in `flows/` is accepted, a broken one refused with its rule | permanent guard | no `flows/`; the order is code |
+| an `architect-research` run: research → gate → plan → … → merge | permanent guard | no `research`; the engineer always starts |
+| revise at the gate after research returns to research | permanent guard | no such gate |
+| *skip approvals* skips every approve gate, never the final gate | permanent guard | only the plan phase's approval |
+| with *skip approvals*, a blocker, an exhausted budget and a failed step still stop | permanent guard | holds for the plan's approval only |
+| a flow without a build ends `DONE`, keeps its worktree, merges nothing | permanent guard | every run builds; no `DONE` |
+| a run keeps its flow when its file changes mid-run | permanent guard | no flow to keep |
+| `engineer-code` issues today's commands: the eight histories replay | acceptance | passes today; must still pass |
+| the page lists flows and shows the chosen one's steps | permanent guard, in a browser | no Flow list |
+
+### Green evidence
+
+The cases above; `test_replay` with the new `architect-research` history and its control; the changed
+modules on both hosts; `git diff --check`; `make public-check`; then the whole suite once per host after
+the external reviewer's PASS, and a real `architect-research` run in the operator's manual check.
+
+## Documentation plan
+
+- **Authoritative owners:** [structure.md](../docs/architecture/structure.md) — architecture D2 (roles
+  and flows), D5 (a budget per work action), D6 (an approve gate where a flow puts it), D13 (re-decided
+  per this todo's D5), D19 (skills per action), D24 (a run that ends `DONE`);
+  [diagrams/stops.md](../docs/architecture/diagrams/stops.md);
+  [trace-contract.md](../docs/architecture/trace-contract.md) (the research phase);
+  [docs/using.md](../docs/using.md) (choosing a flow, editing flows); `flows/README.md`, new, like
+  [roles/README.md](../roles/README.md): what each flow is for, linking its file.
+- **Router:** [app/README.md](../app/README.md)'s sentence on where configuration sits, and the root
+  [README.md](../README.md)'s configuration table, gain `flows/`.
+- **Duplication avoided:** the flows' rules live in `app/foundation/flows.py` and are stated once in
+  architecture D13; the page, the CLI and `flows/README.md` name a flow and never restate its rules.
+- Stable docs, code, comments, tests and configuration do not reference this todo.
+
+## Rollout and rollback
+
+- **Rollout:** a run open at release has no flow in its input and continues on the default's steps,
+  with today's commands (A7).
+- **Rollback:** a run started with any other flow cannot replay on the old code; roll back only once no
+  such run is open.
+
+## Completion criteria
+
+- Tasks 0–11 done; every red case green; the recorded histories, the new one included, replay; the
+  documentation owners updated; the external reviewer's PASS; the whole suite clean once per host; an
+  `architect-research` run done end to end in the operator's manual check.
+
+## Review record
+
+### 2026-09-25 — opened
+
+- **Trigger:** during the Workbench's live check — *"architector could switched in future to deepseek
+  browser … and he should start for investigation frist"*, then *"ui should give flow select for exact
+  specific task"*, and D1–D6.
+- **Evidence gathered:** the architecture's D2, D13, D9 and the state-machine history; every consumer
+  of the fixed stages; the start input's policy snapshot and the recorded histories; Temporal's DSL
+  sample.
+
+### 2026-09-25 — the operator's answers, and what the engine gives
+
+- **Authority:** D7–D10 added; Q1 closed by D7, Q3 by D8, Q4 by D9; A1, A3, A4 resolved; A8–A10 added.
+  Q2 stays open.
+- **Evidence:** Temporal ships no workflow language; its sample, its co-founder and its staff give the
+  interpreter pattern with the definition as input, which the Decision now names as its basis; where
+  configuration sits by the domain architecture, and `roles/` as the precedent for `flows/`.
+
+### 2026-09-25 — a flexible ending, and the todo made whole
+
+- **Authority:** D11–D13 added; Q2 closed by D11; A2 and A8 resolved; A11, A12 and Q5 added. D10's
+  source gains the operator's *"reuse temporal as much as possilbe"*.
+- **Fix:** the rules now let a flow end without a build, which ends `DONE` keeping its work; skipping
+  approvals never skips an emergency stop; what is reused of Temporal is listed as Decision item 9, and
+  new Temporal machinery is a non-goal. The architecture's decisions are now written *architecture
+  D<n>*, which this register's own numbers had made ambiguous.
+- **Next:** the operator's external reviewer — *"update fully todo and wait reviewer"*.
+
+### 2026-09-25 — the last question
+
+- **Authority:** D14 added; Q5 closed by D14; A11 resolved. Every operator gate is closed.

@@ -24,7 +24,7 @@
   "workflow_queue": "orchestration",
   "targets": {
     "wsl": {"host": "local", "worktree_root": "~/worktrees", "terminal_port": 8091},
-    "windows": {"host": "local", "worktree_root": "C:\\Worktrees", "terminal_port": 8092}
+    "windows": {"host": "local", "worktree_root": "E:\\Worktrees", "terminal_port": 8092}
   },
   "target_repo": {
     "commit_allowed": false,

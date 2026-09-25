@@ -227,15 +227,112 @@ $("runs-older").onclick = async () => {
   }
 };
 
+// ---- the repositories: each list a menu of their owners ------------------------------------
+
+// The repositories as last shown, so an unchanged answer leaves an open menu as it is.
+let shownRepos = "";
+
+// A repository's name may carry its owners — `work/platform/service` — and is then found under `work`,
+// then `platform`, each opening to the right as it is hovered or reached with Tab.
+function repoTree(listed) {
+  const root = { owners: new Map(), repos: [] };
+  for (const repo of listed) {
+    let node = root;
+    for (const owner of repo.id.split("/").slice(0, -1)) {
+      if (!node.owners.has(owner)) node.owners.set(owner, { owners: new Map(), repos: [] });
+      node = node.owners.get(owner);
+    }
+    node.repos.push(repo);
+  }
+  return root;
+}
+
+function repoMenu(node, choose) {
+  const list = el("ul", null, "menu");
+  for (const [name, owned] of node.owners) {
+    const item = el("li", null, "owner");
+    const button = el("button", name);
+    button.type = "button";
+    item.append(button, repoMenu(owned, choose));
+    list.appendChild(item);
+  }
+  for (const repo of node.repos) {
+    const button = el("button", repo.id.split("/").pop() + " (" + repo.target + ")");
+    button.type = "button";
+    button.onclick = () => choose(repo.id);
+    const item = el("li");
+    item.appendChild(button);
+    list.appendChild(item);
+  }
+  return list;
+}
+
+// A list stays the <select> the forms read, hidden behind the button that opens its menu.
+function picker(select) {
+  if (select.nextElementSibling && select.nextElementSibling.classList.contains("picker")) {
+    return select.nextElementSibling;
+  }
+  const box = el("div", null, "picker");
+  const button = el("button", "none", "picker-button");
+  button.type = "button";
+  // Opening reads repos.json again, so an entry added to it shows without reloading the page.
+  button.onclick = () => {
+    const menu = box.querySelector(".menu");
+    menu.hidden = !menu.hidden;
+    if (!menu.hidden) reloadRepos();
+  };
+  box.onkeydown = (event) => {
+    if (event.key !== "Escape") return;
+    box.querySelector(".menu").hidden = true;
+    button.focus();
+  };
+  box.append(button, el("ul", null, "menu"));
+  box.lastChild.hidden = true;
+  select.hidden = true;
+  select.after(box);
+  return box;
+}
+
+function setRepo(select, id) {
+  select.value = id;
+  const chosen = select.selectedOptions[0];
+  picker(select).querySelector(".picker-button").textContent = chosen ? chosen.textContent : "none";
+}
+
 async function loadRepos() {
-  for (const repo of await api("/api/repos")) {
-    for (const id of ["start-repo", "worktrees-repo"]) {
+  const listed = await api("/api/repos");
+  const shown = JSON.stringify(listed);
+  if (shown === shownRepos) return;
+  shownRepos = shown;
+  const tree = repoTree(listed);
+  for (const id of ["start-repo", "worktrees-repo"]) {
+    const select = $(id);
+    const chosen = select.value;
+    select.replaceChildren(...listed.map((repo) => {
       const option = el("option", repo.id + " (" + repo.target + ")");
       option.value = repo.id;
-      $(id).appendChild(option);
-    }
+      return option;
+    }));
+    const box = picker(select);
+    const menu = repoMenu(tree, (repo) => {
+      setRepo(select, repo);
+      box.querySelector(".menu").hidden = true;
+      select.dispatchEvent(new Event("change"));
+    });
+    if (!listed.length) menu.appendChild(el("li", "none in repos.json: type its path", "muted"));
+    const open = box.querySelector(".menu");
+    menu.hidden = open.hidden;
+    open.replaceWith(menu);
+    setRepo(select, listed.some((repo) => repo.id === chosen) ? chosen : select.value);
   }
 }
+
+// A click anywhere but in a repository menu closes it.
+document.addEventListener("click", (event) => {
+  for (const menu of document.querySelectorAll(".picker > .menu")) {
+    if (!menu.parentElement.contains(event.target)) menu.hidden = true;
+  }
+});
 
 // ---- the worktrees of a repository, and what is still unmerged -----------------------------
 
@@ -394,7 +491,7 @@ async function removeKept(runId, line, then) {
 
 function showWorktrees(repo) {
   $("worktrees-path").value = "";
-  $("worktrees-repo").value = repo;
+  setRepo($("worktrees-repo"), repo);
   loadWorktrees();
   $("worktrees").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
@@ -590,7 +687,8 @@ function closeTerminal(role) {
   $("state-" + role).textContent = "";
 }
 
-loadRepos().catch((error) => { $("start-result").textContent = error.message; });
+const reloadRepos = () => loadRepos().catch((error) => { $("start-result").textContent = error.message; });
+reloadRepos();
 refreshStack();
 refreshRuns();
 setInterval(refreshStack, 5000);

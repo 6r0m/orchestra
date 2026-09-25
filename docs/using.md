@@ -52,6 +52,11 @@ the Workbench comes back with WSL. Nothing is exposed beyond loopback.
 Runs are grouped by whether they need you, are running, or are finished; older finished runs are a
 page away, so nothing Temporal still retains is out of reach.
 
+A run starts from the form beside them: on a repository named in `repos.json` — its menu reads the file
+again each time it is opened, and a name that carries its owners, `work/platform/service`, is found
+under `work`, then `platform`, each opening to the right as you hover it — or on any other one typed as
+its path as WSL sees it (`/mnt/e/...` for a Windows drive).
+
 Each run says what it is doing now and for how long — the stage and the agent at work, the question
 it waits on, the failure it stopped on — and, when a host's worker it needs is down, that it is
 blocked by it, with that worker's Start beside it. A run whose worker is down is still shown.
@@ -83,13 +88,13 @@ export UV_PROJECT_ENVIRONMENT="$(uv run --no-project --managed-python --python 3
 O="uv run --locked python -m app.interfaces.cli"
 
 $O "<task>"                        # a run on this repository
-$O "<task>" --repo webapp          # a run on a repository named in repos.json
+$O "<task>" --repo work/webapp     # a run on a repository named in repos.json
 $O --resume <run-id> --answer yes  # answer the stop the run waits at
 $O --continue <run-id>             # run a failed stage again, after you fixed its cause
 $O --stop <run-id>                 # end a run from whatever it is doing, keeping its worktree and branch
 $O --force-terminate <run-id>      # close a run a stop cannot finish, at once; git already running goes on
 $O --show <run-id>                 # the stage table and the architect's words
-$O --worktrees --repo webapp       # every worktree, and whether its work is merged
+$O --worktrees --repo work/webapp  # every worktree, and whether its work is merged
 ```
 
 Each stop prints what it asks and the answers it takes: `yes` or `revise <feedback>` at the plan's
