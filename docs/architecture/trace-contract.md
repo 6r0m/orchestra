@@ -24,9 +24,9 @@ graph group rows by name. A run's own values are metadata.
 | kind | parent | what it records |
 |---|---|---|
 | work item | none — the trace's only root | the request, the repository, the base branch and the OS the agents run on |
-| phase | the work item | plan or build, and which roles act in it |
-| role step | its phase | one role-run: what the role was asked, and its answer — the engineer's account, or the architect's verdict, feedback and reasoning |
-| stop | its phase; the work item for the plan approval | why the run stopped for a person — the plan approval, with the plan's summary, a blocker or an exhausted budget; a failed stage and the final gate write no row |
+| phase | the work item | research, plan or build — the work stages of the run's flow — and which roles act in it |
+| role step | its phase | one role-run: what the role was asked, and its answer — the engineer's account, the architect's research brief, or the architect's verdict, feedback and reasoning |
+| stop | its phase; the work item for an approval | why the run stopped for a person — an approval, with what it approves: the plan's summary or the research brief; a blocker or an exhausted budget; a failed stage and the final gate write no row |
 | answer | where its stop is | what the person answered |
 | final diff | the work item | the change as `gdiff -s` copies it, cut at a size cap |
 

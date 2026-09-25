@@ -16,6 +16,7 @@ from temporalio.common import WorkflowIDConflictPolicy, WorkflowIDReusePolicy
 from temporalio.exceptions import TimeoutError as StepTimeout, TimeoutType, WorkflowAlreadyStartedError
 from temporalio.service import RPCError, RPCStatusCode
 
+from app.foundation import flows
 from app.foundation import policy as policy_mod
 from app.workspace import repos
 from app.orchestration import workflow as WF
@@ -185,6 +186,7 @@ def view(listed, status, health):
             "host": state.get("target"), "worktree": state.get("worktree_path"), "state": kind,
             "status": state.get("status"), "phase": state.get("phase"), "round": state.get("round"),
             "episode": state.get("episode"), "stage": working.get("stage"), "role": working.get("role"),
+            "flow": state.get("flow"), "step": state.get("step"),
             "since": stop.get("since") if stop else working.get("since"),
             "stop": stop and {key: stop.get(key) for key in ("id", "reason", "hint", "feedback", "todo")},
             "failure": stop["feedback"] if kind == "failed" else None,
@@ -193,20 +195,29 @@ def view(listed, status, health):
             "actions": list(stop["actions"]) if stop and not closed else []}
 
 
-async def start(client, task, repo=None, auto_proceed=False, policy_path=None, check=True):
-    """Start a run on `repo` (a repos.json name, a path, or this repository); returns its handle."""
+async def start(client, task, repo=None, auto_proceed=False, policy_path=None, check=True, flow=None):
+    """Start a run on `repo` (a repos.json name, a path, or this repository), following `flow` (a file in
+    `flows/`, the policy's `default_flow` when none is named); returns its handle.
+
+    The flow is read and checked here, once, and the run is handed its steps: it never reads a flow, so
+    a flow edited later changes only the runs started after it."""
     pol = policy_mod.load(policy_path)
     selected = repos.select(repo)
     queue = policy_mod.queue(pol, selected["target"])
+    name = flow or pol.get("default_flow")
+    chosen = {"name": name, "steps": flows.load(name)} if name else None
     if check:
         await preflight(client, queues(policy_mod.workflow_queue(pol), queue))
     now = datetime.datetime.now()
     for attempt in range(START_ATTEMPTS):
         run_id = worktrees.run_id(task)
+        # `auto_proceed` skips every approval the flow schedules — never an emergency stop or the merge.
         start_input = {"run_id": run_id, "task": task, "label": work_item_label(run_id, task, now),
                        "created": now.isoformat(timespec="minutes"),
                        "auto_proceed": auto_proceed or pol["auto_proceed"],
                        "repository": selected, "policy": pol, "queue": queue}
+        if chosen:
+            start_input["flow"] = chosen
         try:
             return await client.start_workflow(
                 WF.FeatureRun.run, start_input, id=run_id, task_queue=policy_mod.workflow_queue(pol),

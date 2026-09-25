@@ -21,6 +21,7 @@ from fakes import codex_first_out, codex_review_first, codex_review_resumed  # n
 
 from app.application import client as runs  # noqa: E402
 from app.foundation import policy as policy_mod  # noqa: E402
+from app.orchestration import workflow as WF  # noqa: E402
 
 
 class Scenario(unittest.TestCase):
@@ -221,6 +222,18 @@ class Sessions(Scenario):
                     '{"verdict": "PASS", "feedback": "ok"}\nActually, I could not check the tests.'):
             with self.assertRaises(N.ContentError):
                 N.parse_review(claude, 0, bad)
+
+    def test_a_brief_is_the_final_message_and_an_empty_one_is_no_answer(self):
+        from app.agents import nodes as N
+        claude, codex = {"brain": "claude"}, {"brain": "codex"}
+        self.assertEqual(N.final_message(claude, "  Brief: one job.\n"), "Brief: one job.")
+        self.assertEqual(N.final_message(codex, codex_first_out("Brief: one job.")[0]), "Brief: one job.")
+        # A turn that said nothing gave no brief: neither its events nor its blank message are one.
+        for silent in (codex_first_out("")[0], codex_first_out(" \n")[0], "no events at all\n"):
+            with self.assertRaises(N.ContentError, msg=silent):
+                N.final_message(codex, silent)
+        with self.assertRaises(N.ContentError):
+            N.final_message(claude, " \n")
 
     def test_plan_pass_is_written_as_the_approval_summary(self):
         # D18: the operator approves implementation from this text alone.
@@ -480,6 +493,185 @@ class Policy(unittest.TestCase):
         del raw["targets"]["windows"]
         with self.assertRaisesRegex(policy_mod.InvalidPolicy, "targets"):
             policy_mod.validate(raw)
+
+    def test_the_default_flow_is_optional_and_names_one(self):
+        raw = self._raw()
+        raw.pop("default_flow", None)
+        policy_mod.validate(raw)
+        raw["default_flow"] = "engineer-code"
+        policy_mod.validate(raw)
+        for bad in (3, "", "../policy", None):
+            raw["default_flow"] = bad
+            with self.assertRaisesRegex(policy_mod.InvalidPolicy, "default_flow", msg=repr(bad)):
+                policy_mod.validate(raw)
+
+
+class Flows(Scenario):
+    """A run follows the flow it was started with, one step after another; a run started before flows
+    follows the order those runs took."""
+
+    CODE = ["engineer:plan", "architect:assess", "you:approve", "engineer:build", "architect:verify", "you:merge"]
+    RESEARCH = ["architect:research", "you:approve"] + CODE
+    LOST = "ERROR: No saved session found with ID 01a0-bogus. Run `codex resume` without an ID\n"
+
+    def watched(self):
+        from fakes import FakeWorktrees
+
+        class Watched(FakeWorktrees):
+            def __init__(inner):
+                super().__init__()
+                inner.judged = []
+
+            def work_tree(inner, path):
+                inner.judged.append(path)
+                return "verified-tree"
+        return Watched()
+
+    def test_a_run_started_before_flows_follows_the_order_those_runs_took(self):
+        run = self.drive([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, codex_review_first("PASS")[0])])
+        self.assertEqual(run.state["flow"], {"name": None, "steps": self.CODE})
+        self.assertEqual((run.stop["reason"], run.state["step"]), ("approval", 2))
+        self.assertEqual(run.stop["hint"], WF.HINTS["approval"], "a plan's approval reads as it always has")
+
+    def test_research_first_hands_its_brief_to_the_plan_and_merges(self):
+        brief, _ = codex_first_out("Brief: use the platform's scheduler.\nAbstract todo: add one job.")
+        git = self.watched()
+        run = self.drive([("research-e1-1", 0, brief),
+                          ("research-e2-1", 0, codex_first_out("Brief v2: the scheduler, narrowed to one queue.")[0]),
+                          ("plan-e3-1", 0, "planned\n"), ("assess-e3-1", 0, codex_review_resumed("PASS")),
+                          ("build-e4-1", 0, "built\n"), ("verify-e4-1", 0, codex_review_resumed("PASS"))],
+                         git=git, flow=self.RESEARCH)
+        # The brief is the research step's answer: no verdict read from it, no tree judged for it.
+        self.assertEqual((run.stop["reason"], run.state["step"]), ("approval", 1))
+        self.assertEqual(run.state["brief"], "Brief: use the platform's scheduler.\nAbstract todo: add one job.")
+        self.assertIn("Abstract todo: add one job.", run.stop["feedback"], "the approval shows the brief")
+        self.assertEqual(run.stop["hint"], "approve to go on to the plan, or revise with feedback for new research")
+        self.assertNotIn("verdict", run.state)
+        self.assertEqual(git.judged, [], "research judges no tree")
+        self.assertEqual(run.status["timeline"][-1]["brief"], run.state["brief"])
+        research = self.agent.calls[0]["argv"]
+        self.assertEqual(research[research.index("--sandbox") + 1], "read-only", "the architect researches read-only")
+        # Revised: the research runs again, with the operator's words.
+        # The command line's code 2 is a run stopped for you again, 0 one at its final gate or finished.
+        code, out = run.answer("revise narrow it to one queue")
+        self.assertEqual((code, run.stop["reason"]), (2, "approval"), out)
+        self.assertIn("narrow it to one queue", self.agent.calls[1]["prompt"])
+        self.assertEqual(run.state["brief"], "Brief v2: the scheduler, narrowed to one queue.")
+        # Approved: the engineer plans from the brief, on the code; the words were the research's own.
+        code, out = run.answer("yes")
+        self.assertEqual((code, run.stop["reason"], run.state["step"]), (2, "approval", 4), out)
+        plan = self.agent.calls[2]["prompt"]
+        self.assertIn("Brief v2: the scheduler, narrowed to one queue.", plan)
+        self.assertNotIn("narrow it to one queue", plan)
+        code, out = run.answer("yes")
+        self.assertEqual((code, run.stop["reason"], run.state["step"]), (0, "final", 7), out)
+        code, out = run.answer("merge")
+        self.assertEqual((code, run.state["status"]), (0, "MERGED"), out)
+        self.assertEqual(self.names(), ["research-e1-1", "research-e2-1", "plan-e3-1", "assess-e3-1",
+                                        "build-e4-1", "verify-e4-1"])
+        self.assertIn(("merge", run.run_id, "verified-tree"), [call[:3] for call in git.calls])
+
+    def test_a_research_session_born_again_is_given_the_brief_its_feedback_is_about(self):
+        brief, _ = codex_first_out("Brief: use the platform's scheduler.")
+        run = self.drive([("research-e1-1", 0, brief), ("research-e2-1", 1, self.LOST),
+                          ("research-e2-1-rehydrated", 0, codex_first_out("Brief v2.")[0])],
+                         flow=self.RESEARCH)
+        code, out = run.answer("revise narrow it to one queue")
+        self.assertEqual((code, run.stop["reason"], run.state["brief"]), (2, "approval", "Brief v2."), out)
+        prompt = self.agent.calls[-1]["prompt"]
+        for said in ("# Task", "You are the architect", "# Your previous brief", "Brief: use the platform's scheduler.",
+                     "narrow it to one queue"):
+            self.assertIn(said, prompt)
+
+    def test_research_alone_ends_done_once_its_brief_is_approved_and_closes_its_terminals(self):
+        from unittest import mock
+        brief, _ = codex_first_out("Brief: nothing to build.")
+        with mock.patch("app.agents.terminal.close_run") as closed:
+            run = self.drive([("research-e1-1", 0, brief)], flow=["architect:research", "you:approve"])
+            self.assertEqual(run.stop["hint"], "approve to end the run, or revise with feedback for new research")
+            code, out = run.answer("yes")
+        self.assertEqual((code, run.state["status"]), (0, "DONE"), out)
+        self.assertTrue(run.closed())
+        closed.assert_called_once_with(run.run_id)
+
+    def test_a_flow_without_a_build_ends_done_keeping_its_worktree(self):
+        from fakes import FakeWorktrees
+        git = FakeWorktrees()
+        run = self.drive([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, codex_review_first("PASS")[0])],
+                         git=git, flow=["engineer:plan", "architect:assess"])
+        self.assertTrue(run.closed())
+        self.assertEqual(run.state["status"], "DONE")
+        self.assertTrue(run.state["worktree_path"], "its worktree is kept")
+        self.assertEqual([call[0] for call in git.calls], ["create"], "nothing merged, nothing discarded")
+
+    def test_an_approval_says_where_it_goes_and_a_blocker_keeps_its_own_hint(self):
+        twice = self.CODE[:5] + ["you:approve", "engineer:build", "architect:verify", "you:merge"]
+        run = self.drive([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, codex_review_first("PASS")[0]),
+                          ("build-e2-1", 0, "built\n"), ("verify-e2-1", 0, codex_review_resumed("PASS", "half done")),
+                          ("build-e3-1", 0, "built on\n"), ("verify-e3-1", 0, codex_review_resumed("BLOCKER", "no"))],
+                         flow=twice)
+        self.assertEqual(run.stop["hint"], WF.HINTS["approval"])
+        run.answer("yes")
+        self.assertEqual((run.stop["reason"], run.state["step"], run.stop["feedback"]), ("approval", 5, "half done"))
+        self.assertEqual(run.stop["hint"], "approve to go on to the build, or revise with feedback for a new build")
+        code, out = run.answer("yes")
+        self.assertEqual((code, run.stop["reason"], run.state["step"]), (2, "blocker", 7), out)
+        self.assertEqual(run.stop["hint"], WF.HINTS["blocker"], "the flow's last part says no more than its stop")
+
+    def test_skipping_approvals_never_skips_an_emergency_stop_or_the_final_gate(self):
+        brief, _ = codex_first_out("Brief.")
+        run = self.drive([("research-e1-1", 0, brief),
+                          ("plan-e2-1", 0, "planned\n"), ("assess-e2-1", 0, codex_review_resumed("BLOCKER", "no")),
+                          ("plan-e3-1", 0, "replanned\n"), ("assess-e3-1", 0, codex_review_resumed("PASS")),
+                          ("build-e4-1", 0, "built\n"), ("verify-e4-1", 0, codex_review_resumed("PASS"))],
+                         flow=self.RESEARCH, auto=True)
+        self.assertEqual(run.stop["reason"], "blocker", "no approval stopped it, the blocker does")
+        code, out = run.answer("go on with the queue")
+        self.assertEqual((code, run.stop["reason"]), (0, "final"), out)
+        self.assertEqual(self.names(), ["research-e1-1", "plan-e2-1", "assess-e2-1", "plan-e3-1", "assess-e3-1",
+                                        "build-e4-1", "verify-e4-1"])
+
+    def test_skipping_approvals_never_skips_a_spent_round_budget(self):
+        run = self.drive([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, codex_review_first("PATCH", "fix A")[0]),
+                          ("plan-e1-2", 0, "revised\n"), ("assess-e1-2", 0, codex_review_resumed("PATCH", "fix B"))],
+                         auto=True)
+        self.assertEqual((run.stop["reason"], run.stop["feedback"]), ("exhausted", "fix B"))
+
+    def test_a_run_handed_a_flow_that_breaks_a_rule_is_refused_before_any_work(self):
+        from fakes import FakeWorktrees
+        git = FakeWorktrees()
+        run = self.drive([], git=git, flow=["engineer:plan", "you:approve"])
+        self.assertTrue(run.closed())
+        self.assertEqual(run.state["status"], "REFUSED")
+        self.assertEqual(run.state["refusal"], "its flow: step 1, 'engineer:plan': the engineer's work goes to its "
+                                               "review, assess, next")
+        self.assertEqual(git.calls, [], "no worktree")
+
+    def test_a_run_started_through_the_client_keeps_its_flow_when_its_file_changes(self):
+        import shutil
+        import tempfile
+        from app.foundation import flows
+        folder = tempfile.mkdtemp(prefix="orch-flows-")
+        self.addCleanup(shutil.rmtree, folder, True)
+        self.addCleanup(setattr, flows, "FLOWS_DIR", flows.FLOWS_DIR)
+        flows.FLOWS_DIR = folder
+        mine = os.path.join(folder, "mine.json")
+        with open(mine, "w", encoding="utf-8") as fh:
+            json.dump(self.CODE, fh)
+        repo = tempfile.mkdtemp(prefix="orch-flow-repo-")
+        self.addCleanup(shutil.rmtree, repo, True)
+        self.host, self.agent = host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, codex_review_first("PASS")[0]),
+                                      ("build-e2-1", 0, "built\n"), ("verify-e2-1", 0, codex_review_resumed("PASS"))])
+        run = Run(handle=temporal_env.run(runs.start(client(), "a flow of my own", repo=repo, flow="mine",
+                                                     check=False)))
+        self.addCleanup(run.cleanup)
+        self.assertEqual((run.state["flow"], run.stop["reason"]), ({"name": "mine", "steps": self.CODE}, "approval"))
+        # The file now plans again after the approval; the run goes on with the steps it was handed.
+        with open(mine, "w", encoding="utf-8") as fh:
+            json.dump(self.CODE[:3] + ["engineer:plan", "architect:assess"], fh)
+        code, out = run.answer("yes")
+        self.assertEqual((code, run.stop["reason"]), (0, "final"), out)
+        self.assertEqual(self.names(), ["plan-e1-1", "assess-e1-1", "build-e2-1", "verify-e2-1"])
 
 
 if __name__ == "__main__":

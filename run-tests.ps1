@@ -12,6 +12,7 @@ $hostTests = @(
     "tests.workspace.test_repos", "tests.workspace.test_worktrees",
     "tests.orchestration.test_workflow", "tests.orchestration.test_stops", "tests.orchestration.test_replay",
     "tests.observability.test_trace_parity", "tests.observability.test_stale_settings", "tests.foundation.test_policy",
+    "tests.foundation.test_flows",
     "tests.application.test_stack", "tests.test_architecture", "tests.test_harness"
 )
 if (-not $Tests) { $Tests = $hostTests }

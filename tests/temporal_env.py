@@ -157,22 +157,30 @@ def configure(queue, script, git=None, repositories=None, telemetry=None):
     return activities, agent
 
 
-def start_input(run_id, task="toy task", auto=False, policy=None, target="wsl", queue=None, repo="example"):
+def start_input(run_id, task="toy task", auto=False, policy=None, target="wsl", queue=None, repo="example",
+                flow=None):
+    """A run's start as the client makes it. With no `flow` it is a run started before flows existed."""
     policy = policy or POLICY
     now = datetime.datetime(2026, 9, 15, 12, 0)
-    return {"run_id": run_id, "task": task, "label": cli.work_item_label(run_id, task, now),
-            "created": now.isoformat(timespec="minutes"), "auto_proceed": auto,
-            "repository": {"id": repo, "path": "/fake/repo", "target": target},
-            "policy": policy, "queue": queue or policy_mod.queue(policy, target)}
+    started = {"run_id": run_id, "task": task, "label": cli.work_item_label(run_id, task, now),
+               "created": now.isoformat(timespec="minutes"), "auto_proceed": auto,
+               "repository": {"id": repo, "path": "/fake/repo", "target": target},
+               "policy": policy, "queue": queue or policy_mod.queue(policy, target)}
+    if flow is not None:
+        started["flow"] = {"name": "test-flow", "steps": list(flow)}
+    return started
 
 
 class Run:
     """One workflow execution in the test server, driven the way the CLI drives it."""
 
-    def __init__(self, **kwargs):
-        self.run_id = uuid.uuid4().hex[:12]
-        self.handle = run(client().start_workflow(WF.FeatureRun.run, start_input(self.run_id, **kwargs),
-                                                  id=self.run_id, task_queue=WORKFLOW_QUEUE))
+    def __init__(self, handle=None, **kwargs):
+        # A run the client started is followed as one started here.
+        if handle is None:
+            run_id = uuid.uuid4().hex[:12]
+            handle = run(client().start_workflow(WF.FeatureRun.run, start_input(run_id, **kwargs),
+                                                 id=run_id, task_queue=WORKFLOW_QUEUE))
+        self.run_id, self.handle = handle.id, handle
         self.answered = None
         self.status = run(cli.follow(self.handle))
 

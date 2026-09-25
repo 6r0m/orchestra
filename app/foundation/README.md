@@ -1,6 +1,6 @@
 # foundation
 
-The contract every other package reads: where this checkout and its environments are, the validated policy, and the stages of a run.
+The contract every other package reads: where this checkout and its environments are, the validated policy, the stages of a run, and the flows that order them.
 
 | concern | owner |
 |---|---|

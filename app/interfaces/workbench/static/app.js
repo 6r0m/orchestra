@@ -327,6 +327,61 @@ async function loadRepos() {
   }
 }
 
+// ---- the flows a run may follow -------------------------------------------------------------
+
+// A flow's steps as one line, `role action` each; the step at `current`, if given, set apart.
+function flowLine(steps, current) {
+  const line = el("span");
+  steps.forEach((step, index) => {
+    if (index) line.appendChild(document.createTextNode(" → "));
+    const words = step.replace(":", " ");
+    line.appendChild(index === current ? el("strong", words) : document.createTextNode(words));
+  });
+  return line;
+}
+
+// The flows as last shown, so an unchanged answer leaves an open list as it is.
+let shownFlows = "";
+let listedFlows = [];
+
+function showFlowSteps() {
+  const chosen = listedFlows.find((flow) => flow.name === $("start-flow").value);
+  $("start-flow-steps").replaceChildren(chosen && chosen.steps ? flowLine(chosen.steps) : "");
+}
+
+async function loadFlows() {
+  const answer = await api("/api/flows");
+  const shown = JSON.stringify(answer);
+  if (shown === shownFlows) return;
+  shownFlows = shown;
+  listedFlows = answer.flows;
+  const select = $("start-flow");
+  const chosen = select.value || answer.default;
+  const options = answer.flows.map((flow) => {
+    // A flow that breaks a rule is listed, never offered: its reason is what to fix in its file.
+    const option = el("option", flow.error ? flow.name + " (refused)" : flow.name);
+    option.value = flow.name;
+    option.disabled = Boolean(flow.error);
+    if (flow.error) option.title = flow.error;
+    return option;
+  });
+  if (!answer.default) {
+    // With no default in the policy a run names no flow, as the command line's does, and takes the
+    // order runs took before flows.
+    const none = el("option", "none — the order from before flows");
+    none.value = "";
+    options.unshift(none);
+  }
+  select.replaceChildren(...options);
+  if (answer.flows.some((flow) => flow.name === chosen && !flow.error)) select.value = chosen;
+  showFlowSteps();
+}
+
+// flows/ is read again each time the list is opened, so a flow added or edited there shows without a reload.
+const reloadFlows = () => loadFlows().catch((error) => { $("start-result").textContent = error.message; });
+$("start-flow").onfocus = reloadFlows;
+$("start-flow").onchange = showFlowSteps;
+
 // A click anywhere but in a repository menu closes it.
 document.addEventListener("click", (event) => {
   for (const menu of document.querySelectorAll(".picker > .menu")) {
@@ -378,7 +433,7 @@ $("start").onsubmit = async (event) => {
   try {
     const started = await api("/api/runs", { task: $("start-task").value,
       repo: $("start-path").value.trim() || $("start-repo").value,
-      auto_proceed: $("start-auto").checked });
+      flow: $("start-flow").value, auto_proceed: $("start-auto").checked });
     $("start-result").textContent = "started " + started.run_id;
     $("start-task").value = "";
     await refreshRuns();
@@ -430,6 +485,10 @@ async function refreshRun() {
       view.phase && "phase " + view.phase + ", round " + (view.round || 0), view.worktree]
       .filter(Boolean).join(" · ");
   }
+  // The run's own flow, as it was started — a run started before flows took the order shown.
+  $("run-flow").replaceChildren(...(view.flow ? [
+    el("span", "flow " + (view.flow.name || "from before flows") + ": "),
+    flowLine(view.flow.steps, view.state === "closed" ? null : view.step)] : []));
   const shown = now(view);
   $("run-now").replaceChildren(el("span", status.unreadable || shown.text),
     el("span", shown.blocked ? " · " + shown.blocked : "", "blocked"));
@@ -577,11 +636,11 @@ $("run-terminate").onclick = () => lifecycle("terminate");
 function renderTimeline(timeline) {
   const root = $("timeline");
   root.replaceChildren();
-  for (const phase of ["plan", "build"]) {
+  // A run's phases are its flow's work stages, in the order it took them.
+  for (const phase of [...new Set(timeline.map((entry) => entry.phase))]) {
     const entries = timeline.filter((entry) => entry.phase === phase);
-    if (!entries.length) continue;
     const box = el("div", null, "phase");
-    box.appendChild(el("h3", phase === "plan" ? "Plan" : "Build"));
+    box.appendChild(el("h3", phase.charAt(0).toUpperCase() + phase.slice(1)));
     for (const entry of entries) {
       const row = el("div", null, "entry");
       const head = el("div");
@@ -591,6 +650,7 @@ function renderTimeline(timeline) {
       head.appendChild(el("span", " " + (entry.at || "").slice(0, 19).replace("T", " "), "muted"));
       row.appendChild(head);
       if (entry.feedback) row.appendChild(el("pre", entry.feedback, "text"));
+      if (entry.brief) row.appendChild(el("pre", entry.brief, "text"));
       box.appendChild(row);
     }
     root.appendChild(box);
@@ -689,6 +749,7 @@ function closeTerminal(role) {
 
 const reloadRepos = () => loadRepos().catch((error) => { $("start-result").textContent = error.message; });
 reloadRepos();
+reloadFlows();
 refreshStack();
 refreshRuns();
 setInterval(refreshStack, 5000);

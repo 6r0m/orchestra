@@ -8,12 +8,19 @@ Every stop a run can reach, and what each answer does to it. What a verdict mean
 graph TD
     start([start]) --> prepare[resolve repository on target] -->|refused| refused([REFUSED])
     prepare --> worktree[create worktree] --> plan
+    worktree -. "a flow that begins with research" .-> research
+    research -. approval .-> stop0{{stop}}
+    research -. "no approval" .-> plan
+    stop0 -. approve .-> plan
+    stop0 -. revise .-> research
     plan --> assess
     assess -. PATCH / UNVERIFIED .-> plan
     assess -. "PASS, no approval" .-> build
     assess -. "approval · blocker · exhausted" .-> stop1{{stop}}
     stop1 -. approve .-> build
     stop1 -. "revise · guide" .-> plan
+    assess -. "PASS, a flow with no build" .-> done([DONE])
+    stop1 -. "approve, a flow with no build" .-> done
     build --> verify
     verify -. PATCH / UNVERIFIED .-> build
     verify -. "blocker · exhausted" .-> stop2{{stop}}
@@ -25,6 +32,11 @@ graph TD
     final -. "merge" .-> merged([MERGED])
     final -. "discard, confirmed" .-> discarded([DISCARDED])
 ```
+
+This is the default flow, `engineer-code`, with the stops a run's flow may add or leave out
+([structure D13](../structure.md)): research first, whose brief waits at an approval; an approval
+the flow does not schedule, or one *skip approvals* skips, going straight on; and a flow with no build
+ending `DONE`, its worktree kept, where this one reaches the final gate.
 
 Any stage, the worktree's creation, a merge or a discard that fails stops at a `failed` stop, whose
 `continue` runs that step once more — a git step no worker of its host took within the policy's

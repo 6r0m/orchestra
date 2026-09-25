@@ -1,6 +1,6 @@
 # Configurable flows: the order of a run's work, chosen per task
 
-**Status:** REVIEW REQUIRED
+**Status:** IN PROGRESS — built, and the agents' review round fixed; the external review next
 **Scope:** the order of a run's steps — a new `flows/` folder and its reader `app/foundation/flows.py`;
 [workflow.py](../app/orchestration/workflow.py), [routing.py](../app/orchestration/routing.py),
 [stages.py](../app/foundation/stages.py), [policy.py](../app/foundation/policy.py) and `policy.json`, the
@@ -174,9 +174,11 @@ this convention keep their wording: in D5 and Q2, D11, D13 and D24 are the archi
   `flows/<name>.json`, holding its steps; `flows/README.md` routes to each. Reading and checking them is
   `app/foundation/flows.py`: foundation owns the contract every package reads — the policy and the
   stages of a run.
-- **A10 [ACTIVE]:** which flow is the default is `policy.json`'s `default_flow`, checked to name a file
-  in `flows/`: the policy already owns the defaults of a run, `auto_proceed` among them. Only the client
-  reads it, when a new run names no flow (A7).
+- **A10 [ACTIVE]:** which flow is the default is `policy.json`'s `default_flow`, which the policy checks
+  is a plain name; that it names a flow that holds is checked when a run starts on it, as for any flow
+  named. The policy already owns the defaults of a run, `auto_proceed` among them. Only the client
+  reads it, when a new run names no flow (A7); with no default, such a run takes `LEGACY_FLOW`, and the
+  Workbench offers that as a choice of its own.
 - **A11 [RESOLVED by D14]:** a flow without a build ends `DONE` after its last step and never merges: its
   worktree and branch are kept for the operator, as a stopped run's are, with the Workbench's existing
   removal (architecture D31); a research brief stays in the run's state and is mirrored in the logs and
@@ -350,8 +352,9 @@ release. Architecture D13 says so by design; the operator has asked for that des
    their reason:
    - known roles and actions; at least one step and at most `MAX_FLOW_STEPS`, 32, in `flows.py` — the
      bound that keeps a run the bounded work one workflow is recommended for (verified evidence), with
-     room to spare over the six to eight steps a flow takes; a flow that ever needs more is the evidence
-     to reconsider continue-as-new or child workflows, not a reason for them now;
+     room to spare over the six to eight steps a flow takes; a flow that genuinely outgrows it is evidence
+     to revisit the limit and, should the history become the constraint, continue-as-new — child
+     workflows only if an independently owned sub-workflow or a real partitioning boundary appears;
    - each step's role is the one the contract gives its action (A12), so a review is never done by the
      role whose work it judges (architecture D3);
    - every `plan` is directly followed by an `assess`, every `build` by a `verify`: an engineer's work
@@ -449,7 +452,7 @@ release. Architecture D13 says so by design; the operator has asked for that des
 ## Implementation tasks
 
 0. [x] **The operator's questions** answered: Q1–Q5, closed by D7, D11, D8, D9 and D14.
-1. [ ] **Guards, failing first:** reading and checking `flows/` — both shipped flows accepted, each
+1. [x] **Guards, failing first:** reading and checking `flows/` — both shipped flows accepted, each
    broken rule refused with its reason, an empty flow and one over `MAX_FLOW_STEPS` among them; the
    workflow on the time-skipping server with the fake agents —
    `engineer-code` issuing today's sequence, `architect-research` end to end (research returning its brief
@@ -459,26 +462,27 @@ release. Architecture D13 says so by design; the operator has asked for that des
    while a blocker, an exhausted budget, a failed step and the final gate still stop, a run keeping its
    flow after its file changes, a recorded history with no flow replaying on `LEGACY_FLOW` while
    `flows/engineer-code.json` differs from it; the page's Flow list; the CLI's `--flow`.
-2. [ ] **The action contract:** `research` and its ask in `stages.py`, `STAGE_ROLE` extended to it, and a
+2. [x] **The action contract:** `research` and its ask in `stages.py`, `STAGE_ROLE` extended to it, and a
    mapping of each review to the work it judges; the plan's ask carrying a brief when state holds one.
-3. [ ] **Flows:** `flows/` with its two files and README; `app/foundation/flows.py` reading them,
+3. [x] **Flows:** `flows/` with its two files and README; `app/foundation/flows.py` reading them,
    checking each step against the contract and the length against `MAX_FLOW_STEPS`; `policy.json`'s
    `default_flow`; `stage_skills` and `max_rounds` keyed by action.
-4. [ ] **Start:** `client.start(flow=…)` reads and checks the flow, the default when none is named, and
+4. [x] **Start:** `client.start(flow=…)` reads and checks the flow, the default when none is named, and
    puts `{name, steps}` in the start input; the Workbench's run start and its flows read; the CLI's
    `--flow`; `auto_proceed` kept as it is, worded *skip approvals* on the page and in the CLI's help.
-5. [ ] **Workflow:** the interpreter over the start input's steps, the gates generalised in
+5. [x] **Workflow:** the interpreter over the start input's steps, the gates generalised in
    `routing.py`, the `DONE` ending, `LEGACY_FLOW` for a start input without a flow, no file read; the
    brief kept in state from the step's result; the Workbench and the CLI read a `DONE` run as closed with
    its work kept, which `client.not_kept` decides today.
-6. [ ] **The role step:** the role and whether the step is a review from the action contract, not from
+6. [x] **The role step:** the role and whether the step is a review from the action contract, not from
    read access; a research step returning its final message as its output; a terminal's role from the
    contract (`agents/terminal.py`).
-7. [ ] **Trace:** a research phase and its steps, its brief recorded as a role's response, in
+7. [x] **Trace:** a research phase and its steps, its brief recorded as a role's response, in
    `telemetry` and the trace contract; the dashboard checked.
-8. [ ] **Page:** the Flow list, the steps line, a run's own flow with its current step.
-9. [ ] **A recorded `architect-research` history** in `tests/histories/`, so replay guards the new path.
-10. [ ] **Docs** (below).
+8. [x] **Page:** the Flow list, the steps line, a run's own flow with its current step.
+9. [x] **Recorded histories** in `tests/histories/` — `research_revise_plan_merge` and
+   `plan_only_done` — so replay guards the new paths.
+10. [x] **Docs** (below).
 11. [ ] **Verification:** the changed modules on both hosts; the whole suite once per host after the
     external reviewer's PASS; the operator's manual check.
 
@@ -598,3 +602,43 @@ the external reviewer's PASS, and a real `architect-research` run in the operato
   statements; YAML read with `yaml` and `dacite`).
 - **Refuted:** nothing.
 - **Next:** the review's go was on these two fixes; the go to implement is the operator's.
+
+### 2026-09-25 — built
+
+- **Red, each observed before the code:** `test_flows` would not import; the workflow ran `plan` where
+  `research` was scripted, with no `flow`, `step` or `DONE`; `/api/flows` answered 404; the CLI had no
+  `--flow`; `default_flow` was an unknown policy key.
+- **Green:** WSL, the changed modules — 64 classes, 294 tests; Windows, the host modules they touch —
+  33 classes, 175 tests. Ten recorded histories replay, the two new ones among them, and fail under the
+  control. `test_flows` joins the Windows host list.
+- **Controls, each red with its fix out and green restored:** the legacy order read from a flow file;
+  review taken from read access; the step bound taken out; the brief not carried to the plan; *skip
+  approvals* skipping a blocker; the default flow ignored; a flow without a build ending at the final
+  gate.
+- **In a browser:** the Start form's Flow list offers both flows, picks `engineer-code` and shows each
+  flow's steps.
+- **Found while building:** the page drew only `plan` and `build` rounds, and the CLI counted `DONE` as a
+  failure — both fixed; the trace-contract test expected every row kind from a code-first run, and now
+  excepts research's, which a research-first run writes.
+
+### 2026-09-25 — the agents' review round: PATCH, fixed
+
+- **Fixed, every finding valid:** a run ending `DONE` left its terminals open; the approval's text showed
+  at a blocker or an exhausted budget in a flow's last part, and a plan's text after a verify; the words a
+  research was revised with reached the plan; an empty Codex brief became its raw events; research after a
+  plan was taken — now a rule of its own; a research session born again lost the brief its feedback was
+  about; a flow handed to the workflow past the client went unchecked — it now ends the run `REFUSED`; the
+  page picked the first flow when the policy names no default; `--show` did not fit `research`; the
+  package docs and D6, D13, D19, D20, D29 still said four stages or two phases. Found in the final
+  re-read: every role's step asked for Codex reasoning, so an engineer bound to Codex would have written
+  its own — now the architect's alone, a brief's as a verdict's.
+- **Tests that could not fail, rebuilt or added:** a flow kept though its file changes to a different
+  next step; *skip approvals* never skipping a spent budget; the brief's parse; research's read-only
+  flags; the name guard against real files beside the folder; a flow file that cannot be read.
+- **Evidence:** WSL, the changed modules — 41 classes, 184 tests, and after the reasoning fix the modules
+  it touches — 25 classes, 122 tests; Windows, the host modules — 29 classes, 165 tests, again after it;
+  21 controls red with the fix out and green restored; in a browser, the Flow list with a
+  default and without one — control: the page's new option taken out; the recorder reproduces both new
+  histories event for event — control: a plain-text research reply; `make public-check` passed, and the
+  new untracked files, which it does not scan, have no leak under the same Gitleaks.
+- **Next:** the external review; the full suite once it passes.

@@ -1,20 +1,25 @@
-"""The four stages of a run: which role runs each, what each asks for, and what a review answers.
+"""The stages a run can take: which role runs each, what each asks for, and what a review answers.
 
 The contract, not its delivery. `app.agents.nodes` renders an ask into a vendor prompt and
 parses the reply out of it; `app.orchestration` routes on the verdict; `app.observability`
 scores it. None of them owns the words, and the stage a run is in means the same thing to
 all of them.
 
-Stage asks and the set of stages are code, never configuration (D13): each ask names the
-artifact its stage produces or judges, and a new stage is a change to the workflow. What a
-role *is* stays configuration — its persona file, its brain, its model — and belongs to
-`policy`.
+Stage asks, the set of stages and which role takes each are code (D13): each ask names the
+artifact its stage produces or judges, and a new stage is a change to the workflow. The order
+a run takes them in is its flow's (`flows`). What a role *is* stays configuration — its persona
+file, its brain, its model — and belongs to `policy`.
 """
 
-STAGES = ("plan", "assess", "build", "verify")
-STAGE_ROLE = {"plan": "engineer", "assess": "architect",
+STAGES = ("research", "plan", "assess", "build", "verify")
+STAGE_ROLE = {"research": "architect", "plan": "engineer", "assess": "architect",
               "build": "engineer", "verify": "architect"}
-PHASES = ("plan", "build")            # the two bounded loops
+# Each review, and the work it judges: a review answers with a verdict on what that work left in the
+# worktree. Every other stage is work — a read-only role researching included.
+REVIEWS = {"assess": "plan", "verify": "build"}
+# The work whose product is its answer rather than a file: the run keeps it and hands it on.
+ANSWERS = ("research",)
+PHASES = ("plan", "build")            # the bounded loops: the work each review judges
 
 # What an architect may answer, and the only words that route (D4).
 VERDICTS = ("PASS", "PATCH", "BLOCKER", "UNVERIFIED")
@@ -39,6 +44,11 @@ _ARCHITECT_EVIDENCE = ("Judge from the todo, the repository, `git diff`, the eng
 
 # `{{TODO_PATH}}` and `{{LOGS}}` are filled in by whoever renders the ask.
 STAGE_ASK = {
+    "research": ("Research the task before anyone touches the code: the problem it poses, current "
+                 "practice and its options on the live web, and what the repository shows as far as you "
+                 "can read it. Write no file. Answer with a research brief — the direction you recommend "
+                 "and why, the options you weighed, the risks — and an abstract todo: the change in "
+                 "outline, which the engineer will check against the code."),
     "plan": ("Investigate the task in the "
              "current repository and write the reviewable todo to exactly: "
              "{{TODO_PATH}}\nDo not implement. Do not commit."),

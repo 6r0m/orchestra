@@ -14,7 +14,7 @@ flowchart TD
         agents["agents<br/><i>terminal · launch · nodes · trust</i>"]
         workspace["workspace<br/><i>repos · worktrees</i>"]
         observability["observability<br/><i>telemetry</i>"]
-        foundation["foundation<br/><i>paths · envpath · policy · stages</i>"]
+        foundation["foundation<br/><i>paths · envpath · policy · stages · flows</i>"]
     end
 
     operator([operator]) -->|"a browser on 127.0.0.1, or a terminal"| interfaces
@@ -23,15 +23,15 @@ flowchart TD
     application -->|"a role turn"| agents
     application -->|"the run's worktree"| workspace
     application -->|"trace rows for a run"| observability
-    application -->|"the policy, the stage contract, the checkout root"| foundation
+    application -->|"the policy, the stage contract, a flow, the checkout root"| foundation
 
     interfaces -->|"the workflows a worker registers, the status query"| orchestration
     interfaces -->|"the repositories a run may start on"| workspace
     interfaces -->|"the terminal server a worker hosts, the page's token"| agents
     interfaces -->|"the trace link"| observability
-    interfaces -->|"the policy, the checkout root"| foundation
+    interfaces -->|"the policy, the flows, the checkout root"| foundation
 
-    orchestration -->|"the stage contract"| foundation
+    orchestration -->|"the stage contract, the flow rules"| foundation
     agents -->|"the stage's ask, and the policy"| foundation
     workspace -->|"the checkout root"| foundation
     observability -->|"the checkout root, and the policy"| foundation

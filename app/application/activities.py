@@ -198,9 +198,11 @@ class Activities:
         state, client = args["state"], self.client()
         trace_id, root = T.open_work_item(client, state)
         ids = dict(state, trace_id=trace_id, trace_root=root)
-        phase = T.open_phase(client, ids, "plan")
+        # The run's first phase, its flow's first work; a run started before flows began with the plan.
+        first = args.get("phase", "plan")
+        phase = T.open_phase(client, ids, first)
         T.flush(client)
-        return {"trace_id": trace_id, "trace_root": root, "trace_phases": {"plan": phase}}
+        return {"trace_id": trace_id, "trace_root": root, "trace_phases": {first: phase}}
 
     @activity.defn
     def open_phase(self, args):
@@ -215,7 +217,9 @@ class Activities:
         state, stage, policy = args["state"], args["stage"], args["policy"]
         role_name = stages.STAGE_ROLE[stage]
         role = dict(policy["roles"][role_name])
-        is_reviewer = role["workspace_access"] == "read"
+        # Whether the stage judges with a verdict is the stages' contract, never the role's access: the
+        # read-only architect researches too, and research answers with its brief.
+        is_review = stage in stages.REVIEWS
         resume_id = (state.get("agent_sessions") or {}).get(role_name)
         rdir = run_dir(state["run_id"])
         attempt, episode = state.get("round", 0) + 1, state.get("episode", 1)
@@ -225,7 +229,7 @@ class Activities:
         client = self.client()
 
         def compose(session_first):
-            return N.compose_prompt(stage, role, is_reviewer, state, session_first=session_first,
+            return N.compose_prompt(stage, role, is_review, state, session_first=session_first,
                                     stage_first=attempt == 1, logs=os.path.join(rdir, "logs"),
                                     skills=policy.get("stage_skills"))
 
@@ -249,7 +253,7 @@ class Activities:
             # The terminals stay live while the architect reviews, so what it judged is the tree as its
             # turn began, and a change during that turn fails the step rather than passing unjudged:
             # a verdict must describe the plan or the change it actually read.
-            judged = self.git.work_tree(worktree) if is_reviewer else None
+            judged = self.git.work_tree(worktree) if is_review else None
             argv, minted = N.build_argv(role_name, role, resume_id, rdir, settings)
             argv = host_argv(argv, role["brain"])
             rc, out = self.runner(worktree, argv, rdir, name, compose(resume_id is None),
@@ -275,12 +279,15 @@ class Activities:
             session = N.extract_session(role, effective_resume, minted, rc, out)
             result = {"agent_sessions": {role_name: session}}
             gate_reason = None
-            if is_reviewer:
+            if stage in stages.ANSWERS:
+                # Its answer is its product, returned to the run — never read back from a log.
+                result["output"] = N.final_message(role, out)
+            if is_review:
                 verdict, feedback = N.parse_review(role, rc, out)
                 result.update(verdict=verdict, feedback=feedback)
                 # The routing is the workflow's; the trace only records what it will be.
                 gate_reason = routing.gate_reason_for(
-                    verdict, state["phase"], attempt, policy["max_rounds"][state["phase"]],
+                    verdict, args.get("gate"), attempt, policy["max_rounds"][state["phase"]],
                     state.get("auto_proceed", False))
                 if verdict == "PASS" and judged is not None:
                     if self.git.work_tree(worktree) != judged:
@@ -308,9 +315,11 @@ class Activities:
         T.end(span, verdict=result.get("verdict"), gate_reason=gate_reason,
               # The verdict routes, but the reasoning behind it is what a person reads first.
               feedback=result.get("feedback"),
-              # The engineer's own account of what it did, where the architect's feedback sits.
-              response=None if is_reviewer else out,
-              reasoning=T.codex_reasoning(role, session) if is_reviewer else None,
+              # The work's own account of what it did — a research brief as the run keeps it — where a
+              # review's feedback sits.
+              response=None if is_review else result.get("output", out),
+              # The architect's reasoning, behind a brief as behind a verdict.
+              reasoning=T.codex_reasoning(role, session) if role_name == "architect" else None,
               session=session)
         T.flush(client)
         return result
@@ -332,6 +341,7 @@ class Activities:
         state, client = args["state"], self.client()
         if state.get("status") in ("ABORTED", "STOPPED"):
             self._stopped.add(state["run_id"])
+        if state.get("status") in ("ABORTED", "STOPPED", "DONE"):
             # A run ended here keeps its worktree but no longer needs its live terminals, and an agent
             # still in one ends with it.
             terminal.close_run(state["run_id"])

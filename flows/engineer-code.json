@@ -1,0 +1,2 @@
+["engineer:plan", "architect:assess", "you:approve",
+ "engineer:build", "architect:verify", "you:merge"]

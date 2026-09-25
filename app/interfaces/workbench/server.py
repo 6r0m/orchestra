@@ -30,6 +30,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from app.application import client as runs
 from app.application import stack
+from app.foundation import flows
 from app.foundation import policy as P
 from app.workspace import repos
 from app.agents import terminal
@@ -145,7 +146,7 @@ def make_handler(call, policy, token, links=None):
         def _error(self, exc):
             if isinstance(exc, (runs.NotWaiting, stack.Busy)):
                 return self._send(HTTPStatus.CONFLICT, {"error": str(exc)})
-            if isinstance(exc, (runs.Refusal, repos.Refused, P.InvalidPolicy)):
+            if isinstance(exc, (runs.Refusal, repos.Refused, P.InvalidPolicy, flows.InvalidFlow)):
                 return self._send(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             self.log_error("request failed: %r", exc)
             return self._send(HTTPStatus.BAD_GATEWAY, {"error": "%s: %s" % (type(exc).__name__, exc)})
@@ -179,6 +180,10 @@ def make_handler(call, policy, token, links=None):
                     return self._send(HTTPStatus.OK, [{"id": name, "target": entry.get("target") or (
                         "windows" if repos.windows_path(entry["path"]) else "wsl")}
                         for name, entry in repos.load().items()])
+                if parts == ["flows"]:
+                    # Read each time the page asks, as the files are: a flow edited shows at once.
+                    return self._send(HTTPStatus.OK, {"default": P.load().get("default_flow"),
+                                                      "flows": flows.available()})
                 if len(parts) >= 2 and parts[0] == "runs" and RUN_ID.match(parts[1]):
                     run_id = parts[1]
                     if len(parts) == 2:
@@ -215,7 +220,8 @@ def make_handler(call, policy, token, links=None):
                     if not task:
                         return self._send(HTTPStatus.BAD_REQUEST, {"error": "a task is required"})
                     handle = call(lambda client: runs.start(client, task, repo=body.get("repo") or None,
-                                                            auto_proceed=bool(body.get("auto_proceed"))))
+                                                            auto_proceed=bool(body.get("auto_proceed")),
+                                                            flow=body.get("flow") or None))
                     return self._send(HTTPStatus.OK, {"run_id": handle.id})
                 if len(parts) == 3 and parts[0] == "runs" and RUN_ID.match(parts[1]) and parts[2] == "answer":
                     answer = {key: value for key, value in body.items() if key in ANSWER_KEYS}

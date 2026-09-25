@@ -1,6 +1,6 @@
 # orchestration
 
-The run itself: its stages, the routes between them, the stops it waits at and the final gate.
+The run itself: its flow's stages in order, the routes between them, the stops it waits at and the final gate.
 
 | concern | owner |
 |---|---|

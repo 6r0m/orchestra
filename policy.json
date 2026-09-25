@@ -18,6 +18,7 @@
     "build": 2
   },
   "auto_proceed": false,
+  "default_flow": "engineer-code",
   "timeout_seconds": 3600,
   "workbench_port": 8390,
   "heartbeat_seconds": 120,

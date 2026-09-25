@@ -10,7 +10,8 @@
 
 ## Purpose
 
-Drive one change through `plan → assess → build → verify` with two agent roles, in a git worktree
+Drive one change through the stages its flow gives — `plan → assess → build → verify` unless the
+operator picks another order — with two agent roles, in a git worktree
 of whichever repository the change is for, with the agents running on the operating system that
 repository needs — stopping for a human whenever a verdict says it should, and merging the verified
 change only when the operator says so.
@@ -21,7 +22,8 @@ The workflow of a run and its durable state, routing between stages, the round b
 and their answers, where a run's roles execute, the run's worktree from creation to merge or
 discard, and the commit and merge of an approved change. What each stage asks for is workflow
 contract and lives in `app/foundation/stages.py`, which `app/agents/nodes.py` renders into a
-vendor prompt; what a role is lives in configuration.
+vendor prompt; what a role is lives in configuration, and so does the order a run takes its stages
+in — its flow, one file in `flows/`.
 
 - **D1** **Temporal owns the workflow.** One workflow execution per run, its Workflow Id the run
   id; a start refuses an id that is open or still retained (`WorkflowIDConflictPolicy.FAIL`,
@@ -30,8 +32,9 @@ vendor prompt; what a role is lives in configuration.
   history is the run's durable state: a process that exits at a stop loses nothing, and any later
   process answers it. The self-hosted server keeps its own PostgreSQL, and its `orchestration`
   namespace keeps closed runs for 90 days.
-- **D5** **`max_rounds`** = architect attempts per phase, counting from 1
-  including the first; `== max` stops for the human. Operator guidance
+- **D5** **`max_rounds`** = architect attempts per phase — the plan's or the
+  build's, the work a review judges; research, which none judges, has none —
+  counting from 1 including the first; `== max` stops for the human. Operator guidance
   re-enters the phase with the counter reset. No other budget class. **Nothing
   runs twice on its own:** a role-run and every git side effect are single-attempt
   activities, and a failure stops the run for the operator.
@@ -61,7 +64,9 @@ A hand-rolled state machine drops reviewer feedback on routing edges, and a type
 of gates, grants and retry episodes is the machinery that exists to catch that and keeps missing
 it. The workflow is ordinary code over one compact state, reading its routes from two pure
 functions; Temporal records every step, so a restart resumes mid-loop rather than re-deriving
-where the run was. Do not re-derive a `states/` layer here.
+where the run was. A run's flow does not bring one back: it is a list the loop walks, one work stage
+and the review that judges it at a time, and feedback and guidance still live in the run's state.
+Do not re-derive a `states/` layer here.
 
 ## Composition
 
@@ -88,6 +93,7 @@ where the run was. Do not re-derive a `states/` layer here.
 | [worker.py](../../app/interfaces/worker.py) · [workers.sh](../../workers.sh) · [workers.ps1](../../workers.ps1) | one Temporal worker per host, and each part of the stack's process mechanics: start, stop, status and the sweep of what a dead worker's stages left |
 | [temporal/](../../temporal/compose.yaml) | the Temporal service: server, its PostgreSQL, the web UI, the namespace |
 | [roles/](../../roles/) | two persona files, sent at session start |
+| [flows/](../../flows/README.md) · [flows.py](../../app/foundation/flows.py) | the order of a run's stages, one file per flow, and the rules a flow keeps |
 | [tests/](../../tests/README.md) | what is proven, and how to run it |
 
 - **D30** **Source is organised by concern, not by a flat root.** Each concern owns a
@@ -104,17 +110,34 @@ where the run was. Do not re-derive a `states/` layer here.
   and `app/agents/turn_hook.py`.
 - **D2** **Two roles**: **engineer** (write access — plans the
   change, then builds it; one session, full context arc) and **architect**
-  (read-only — assesses the plan, then verifies the build; one session, so
-  the judge of the plan is the verifier of its execution). Four stages, one
-  workflow: `plan → assess → build → verify`.
+  (read-only — researches where a flow begins with it, assesses the plan, then
+  verifies the build; one session, so the judge of the plan is the verifier of
+  its execution). Five stages — `research`, `plan`, `assess`, `build`, `verify`
+  — in the order the run's flow gives them, one workflow; `engineer-code`,
+  `plan → assess → build → verify`, is the default.
 - **D13** **Config vs code:** which brain, model and reasoning effort a role
   uses, budgets, access, target hosts, repository descriptors and role
   personalities (`roles/engineer.md`, `roles/architect.md` — sent at session
   start) are configuration; the set of brains that can be bound is code,
   because each CLI has its own flags for session identity, turn completion
   and read-only mode, and none of that is derivable from configuration. Stage
-  asks (which artifact a stage produces or judges) and any new *stage* are
-  code. There is no JSON workflow DSL.
+  asks (which artifact a stage produces or judges), which role takes each,
+  which work each review judges, the rules a flow keeps and any new *stage* are
+  code (`stages.py`, `flows.py`). The order of a run's stages is configuration:
+  its **flow**, one file in `flows/` holding `role:action` steps, read and
+  checked when a run starts and handed to it whole — the workflow never reads a
+  flow, a run keeps the one it started with, and a run started before flows
+  follows `LEGACY_FLOW`, today's default order. A flow keeps these rules: from
+  one to `MAX_FLOW_STEPS` steps, the bound that keeps a run the bounded work one
+  workflow is for; each step's role the one its action is the stages'; every
+  `plan` followed by its `assess` and every `build` by its `verify`, so an
+  engineer's work always reaches a review (D4); an approval only after a review
+  or a `research`; a `research` only before any `plan`, which starts from its
+  brief; a `build` only after a `plan`; and a flow that builds ends with the
+  merge, right after a `verify` (D24). A flow a run is handed that breaks a rule
+  ends the run `REFUSED` before any work. It is one list, with no states,
+  transitions or conditions — Temporal's own pattern for a workflow defined as
+  data, one interpreter given the definition as its input.
 - **D22** **Environments are part of the toolchain.** Every orchestration
   process runs on a uv-managed CPython 3.13 from one `uv.lock`, pinned to one uv
   release by `required-version`; system Pythons are never used. WSL and Windows
@@ -239,10 +262,11 @@ still lands on a checkout.
   what `orchestrate` prints while it follows a run, what `--show <run-id>` prints afterwards, and
   what the Temporal web UI shows. The trace store — a self-hosted Langfuse, written by
   `telemetry.py` — owns the debugging history of a run: one work item per run, its session named
-  by its start time and task, holding its plan and build phases; in each, every round's engineer
-  and architect step, named for its kind of step with the round in its metadata and the
-  architect's verdict scored on it; each stop for a human and the answer given to it, the approval
-  carrying the plan's summary; each agent's own turns and tool calls, nested by that vendor's
+  by its start time and task, holding a phase for each work stage of its flow — research, plan,
+  build; in each, every round's engineer and architect step, named for its kind of step with the
+  round in its metadata and the architect's verdict scored on it; each stop for a human and the
+  answer given to it, an approval carrying the plan's summary or the research brief; each agent's
+  own turns and tool calls, nested by that vendor's
   tracing plugin under the step that caused them; and the final diff as `gdiff -s` copies it, cut
   at a size cap and marked truncated when it exceeds one, redacted and marked when it held a secret.
   The names, levels, scores and dimensions that views and the dashboard select on are the
@@ -330,7 +354,9 @@ still lands on a checkout.
   conflict markers, the engineer resolves the files, the architect verifies, the
   operator merges again, and the run branch gains one reconciliation merge commit.
   After a merge the worktree, its branch and its environment go; a discard removes
-  them unmerged. Every git side effect reads what git already holds first, so an
+  them unmerged. A run whose flow has no build never reaches the final gate: it
+  ends `DONE` after its last stage, merging nothing, and keeps its worktree and
+  branch for the operator, as a stopped run does (D31). Every git side effect reads what git already holds first, so an
   attempt whose worker died after git wrote is adopted when it runs again, never
   applied twice; a merge whose commit was refused after the plan was finished is put
   back to the verified plan and staged nothing, and merges when continued.
@@ -339,15 +365,17 @@ still lands on a checkout.
   lists every run Temporal holds, grouped by whether it waits for the operator, runs or has
   finished — every open run, however old, and the finished ones newest first a page at a time, so a
   run waiting for an answer is never off the list and everything Temporal still retains is reachable; a run shows its stop with that stop's answers as
-  buttons, both roles' live terminals from their host's worker, its plan and build rounds with each
-  verdict and its feedback, its change as its target host's git reads it, and links to its Temporal
+  buttons, both roles' live terminals from their host's worker, its flow with the step it is at, the
+  rounds of each phase with each verdict and its feedback and a research step's brief, its change as
+  its target host's git reads it, and links to its Temporal
   and Langfuse pages. Each run also says what it is doing now — the stage and role at work, or
   the stop it waits at or the failure it stopped on — since when, and which host's worker it is
   blocked by when one is down, with that worker's start beside it; a run whose workflow worker is
   down is still shown, from its listing. Above them the stack panel shows each part of the stack
   and starts, stops and restarts it or the whole stack (D32), the reading `make check` prints. It
   also shows any repository's worktrees, which of them are merged and which run each is. It starts
-  runs, stops or force-terminates them (D31), and removes what a closed run kept. It holds no
+  runs on the flow chosen from `flows/`, read again each time its list is opened, stops or
+  force-terminates them (D31), and removes what a closed run kept. It holds no
   state: every read is Temporal's, a worker's or the stack owner's, and every write is a start, an
   answer Update, a Stop, a force terminate or a removal through `client.py`, which the command line
   uses too, or a stack action through the stack's owner — so the page can do nothing the workflow's
@@ -378,8 +406,9 @@ still lands on a checkout.
   weights pass it, so naming two genuinely different models is the operator's
   part of this invariant.
 - **D6** **A stop waits in the workflow and nowhere else.** Each stop publishes
-  the actions it takes — approve or revise at the plan approval; guide at a
-  blocker or an exhausted budget; continue after a failed stage; merge,
+  the actions it takes — approve or revise at an approval the run's flow
+  schedules, after a review or after research, whose brief it shows;
+  guide at a blocker or an exhausted budget; continue after a failed stage; merge,
   `revise:engineer`, `revise:architect` or discard at the final gate, where a
   revise names the role it goes to — and the page and the command line offer
   exactly those, owning only how each is labelled and typed. Its answer arrives
@@ -387,7 +416,9 @@ still lands on a checkout.
   it reaches history, so no unrecognised answer is ever read as a discard; guide
   and revise carry the operator's words, and a discard must be confirmed. The
   Update's id is `answer:<stop-id>`, so an answer sent twice is applied once. No
-  activity ever waits for a human. Ending a run is no stop's answer: a Stop ends
+  activity ever waits for a human. *Skip approvals* (`auto_proceed`) skips every
+  approval a flow schedules and nothing else: a blocker, an exhausted budget, a
+  failed stage and the final gate still stop. Ending a run is no stop's answer: a Stop ends
   it from any state (D31). No stop offers `abort`; a run that took one ended
   `ABORTED`, and the workflow keeps its handling so those runs still replay.
 - **D10** **Account safety:** human-triggered only (no scheduler may start an
@@ -459,7 +490,7 @@ still lands on a checkout.
   the evidence rules and the verdict vocabulary, through the shared contracts
   they read. A `roles/*.md` file states who the role is in this workflow, defers
   to its skill, and adds only what the skill cannot know — session persistence
-  across its two stages, and that the verdict is what routes (D4). It never
+  across its stages, and that the verdict is what routes (D4). It never
   restates the stance, so the two cannot drift. Each stage invokes its skill
   as the prompt's first characters (the `stage_skills` policy key): the skills are
   model-invocable, but an unattended run must not depend on the model choosing
@@ -503,7 +534,7 @@ constrains.
 |---|---|
 | D1 Temporal owns the workflow, D5 round budget and single attempts, D8 compact state | [Owns](#owns) |
 | D9 no chat-UI automation on critical accounts, D11 agents never stage, commit or push | [Does not own](#does-not-own) |
-| D2 two roles and four stages, D13 config versus code, D22 environments, D30 source organised by concern | [Composition](#composition) |
+| D2 two roles and five stages, D13 config versus code and the flows, D22 environments, D30 source organised by concern | [Composition](#composition) |
 | D4 verdict routing, D7 sessions, D17 execution seam, D18 model as configuration, D20 observability owners, D21 provider session stores, D23 a task queue per host, D32 the stack's one owner, D24 worktree lifecycle and final gate, D29 the workbench | [Relationships and dependency direction](#relationships-and-dependency-direction) |
 | D3, D6, D10, D14, D15, D16, D31 Stop and force terminate, D18b, D19, D25 determinism, D26 repository facts, D27 controller-only git | [Invariants](#invariants) |
 | D28 containment, live-terminal and plugin-build limits | [Risks and technical debt](#risks-and-technical-debt) |

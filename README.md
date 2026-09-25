@@ -41,7 +41,7 @@ Orchestra keeps the agents native and puts a workflow around them:
             └───────────────┬──────────────────────────────┘
                             │ start / status / answer          (one client, also used by the CLI)
             ┌───────────────▼──────────────────────────────┐
-            │  Temporal  — owns the workflow                │  plan → assess → build → verify,
+            │  Temporal  — owns the workflow                │  the stages of the run's flow,
             │  one workflow execution per run               │  stops, routing, retries, replay
             └───────────────┬──────────────────────────────┘
                             │ activities on the run's target queue
@@ -149,6 +149,7 @@ file proves; [docs/history/](docs/history/) records how the system got here.
 |---|---|
 | roles, brains, budgets, timeouts, ports, target hosts | [`policy.json`](policy.json), validated strictly by [`policy.py`](app/foundation/policy.py) |
 | how each role works | [`roles/engineer.md`](roles/engineer.md), [`roles/architect.md`](roles/architect.md) |
+| the order a run's stages take | [`flows/`](flows/README.md), one file per flow; the policy's `default_flow` names the default |
 | the repositories runs may work on | `repos.json` — yours, ignored; copy [`repos.example.json`](repos.example.json) |
 | credentials and machine-specific values | `.env` — see [`.env.example`](.env.example) |
 

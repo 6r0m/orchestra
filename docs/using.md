@@ -55,14 +55,23 @@ page away, so nothing Temporal still retains is out of reach.
 A run starts from the form beside them: on a repository named in `repos.json` — its menu reads the file
 again each time it is opened, and a name that carries its owners, `work/platform/service`, is found
 under `work`, then `platform`, each opening to the right as you hover it — or on any other one typed as
-its path as WSL sees it (`/mnt/e/...` for a Windows drive).
+its path as WSL sees it (`/mnt/e/...` for a Windows drive). It follows the flow chosen in its Flow
+list, whose steps show under it: `engineer-code`, the default — `default_flow` in `policy.json` — has
+the engineer plan from the code; `architect-research` has the architect research first and its brief
+wait for your approval. With no `default_flow`, a run that names no flow takes the order runs took
+before flows, and the list offers that first. Each flow
+is a file in [flows/](../flows/README.md), read again each time the list is opened, so a flow you add
+or edit there shows at once; one that breaks a rule is listed with the reason and cannot be chosen. A
+run keeps the flow it started with. *Skip approvals* skips every approval the flow schedules, never a
+blocker, an exhausted budget, a failed stage or the final gate.
 
 Each run says what it is doing now and for how long — the stage and the agent at work, the question
 it waits on, the failure it stopped on — and, when a host's worker it needs is down, that it is
 blocked by it, with that worker's Start beside it. A run whose worker is down is still shown.
 
-A run shows its stop with that stop's answers as buttons, both roles' terminals, the rounds with
-each verdict and its feedback, the change, and links to its Temporal and (if configured) Langfuse
+A run shows its flow with the step it is at, its stop with that stop's answers as buttons, both
+roles' terminals, the rounds with each verdict and its feedback — or the research brief — the
+change, and links to its Temporal and (if configured) Langfuse
 pages. Each terminal is the vendor's own CLI: press Esc to interrupt a working agent, type to steer
 it. A large change is read in parts, a press each.
 
@@ -73,8 +82,8 @@ terminate* is for a run a Stop cannot finish: it closes the run at once with no 
 stop what the run's host is already doing — a worktree's creation, a merge or a discard already
 running goes on and may still change the repository — and its confirmation says so.
 
-A run that closed keeping its worktree and branch — stopped, force-terminated, or closed any other
-way short of a merge or a discard — says so; look at its change, then *Remove worktree and branch*,
+A run that closed keeping its worktree and branch — stopped, force-terminated, ended `DONE` by a flow
+with no build, or closed any other way short of a merge or a discard — says so; look at its change, then *Remove worktree and branch*,
 confirmed, deletes them through its host's own git as a discard would. It is refused while a merge
 or discard of that run still runs on its host, and when git itself refuses, the page says why.
 *Worktrees* lists any repository's worktrees, which of them are still unmerged and which run each is,
@@ -89,6 +98,7 @@ O="uv run --locked python -m app.interfaces.cli"
 
 $O "<task>"                        # a run on this repository
 $O "<task>" --repo work/webapp     # a run on a repository named in repos.json
+$O "<task>" --flow architect-research   # a run that follows another flow than the default
 $O --resume <run-id> --answer yes  # answer the stop the run waits at
 $O --continue <run-id>             # run a failed stage again, after you fixed its cause
 $O --stop <run-id>                 # end a run from whatever it is doing, keeping its worktree and branch
@@ -97,8 +107,10 @@ $O --show <run-id>                 # the stage table and the architect's words
 $O --worktrees --repo work/webapp  # every worktree, and whether its work is merged
 ```
 
-Each stop prints what it asks and the answers it takes: `yes` or `revise <feedback>` at the plan's
-approval; your guidance at a blocker or an exhausted budget; `continue` after a failed stage. At
+Each stop prints what it asks and the answers it takes: `yes` or `revise <feedback>` at an approval —
+the plan's, with its summary, or the research's, with its brief; your guidance at a blocker or an
+exhausted budget; `continue` after a failed stage. `--auto-proceed` skips the approvals, as the page's
+*skip approvals* does. A run whose flow has no build ends `DONE`, keeping its worktree. At
 `READY_FOR_HUMAN` the run waits for `merge`, `revise engineer <feedback>`, `revise architect
 <feedback>`, or `discard` with `--confirm`. `--stop` ends a run at any of them. Nothing is committed,
 merged or removed before your `merge` or `discard`. A run waiting at a stop waits indefinitely, and

@@ -25,7 +25,9 @@
       <label>Task <textarea id="start-task" rows="4" required placeholder="What should be done"></textarea></label>
       <label>Repository <select id="start-repo"></select></label>
       <label>or its path <input id="start-path" type="text" placeholder="/mnt/e/Repos/name"></label>
-      <label class="inline"><input type="checkbox" id="start-auto"> skip the plan approval</label>
+      <label>Flow <select id="start-flow"></select></label>
+      <p id="start-flow-steps" class="muted"></p>
+      <label class="inline"><input type="checkbox" id="start-auto"> skip approvals</label>
       <button type="submit">Start</button>
       <p id="start-result" class="muted"></p>
     </form>
@@ -51,6 +53,7 @@
     <div class="card">
       <h2 id="run-task"></h2>
       <p id="run-meta" class="muted"></p>
+      <p id="run-flow" class="muted"></p>
       <p id="run-now"></p>
       <div id="run-controls" class="actions" hidden>
         <button id="run-stop" type="button">Stop run</button>

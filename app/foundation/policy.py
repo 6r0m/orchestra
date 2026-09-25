@@ -1,15 +1,15 @@
-"""Policy: two roles, four stages, and every v1 configuration invariant.
+"""Policy: two roles, the stages they take, and every v1 configuration invariant.
 
 - Two roles (D2): engineer (write) plans and builds; architect (read-only)
-  assesses and verifies — the judge of the plan verifies its execution.
+  researches, assesses and verifies — the judge of the plan verifies its execution.
 - Independent-judge rule (D3): the architect must not be the same model as
   the engineer, rejected here. Independence is a property of the model that
   thinks, not of the CLI that launches it.
 - max_rounds (D5): architect attempts per phase, counting from 1.
 - Git authority: all-false — agents never commit or push (D11).
 
-Identifiers are data: rebinding a brain or editing a role's prompt file is
-configuration; a new stage is a graph change (D13).
+Identifiers are data: rebinding a brain, editing a role's prompt file or naming the
+default flow is configuration; a new stage is a change to the code (D13).
 """
 import json
 import os
@@ -32,7 +32,7 @@ ROLE_KEYS = {"brain", "workspace_access", "prompt", "model", "reasoning_effort"}
 PLAIN_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]*")
 TOP_KEYS = {"roles", "max_rounds", "auto_proceed", "timeout_seconds", "heartbeat_seconds",
             "stop_cleanup_seconds", "targets", "target_repo", "workbench_port", "stage_skills",
-            "workflow_queue", "_policy_path"}
+            "workflow_queue", "default_flow", "_policy_path"}
 REPO_KEYS = {"commit_allowed", "push_allowed", "merge_allowed"}
 # A Stop's cleanup waits this long at most, so a host whose worker is gone never holds a Stop; a policy's
 # `stop_cleanup_seconds` may only shorten it.
@@ -227,6 +227,10 @@ def validate(raw):
         raise InvalidPolicy("timeout_seconds must be an int >= 1")
     if not isinstance(raw.get("auto_proceed"), bool):
         raise InvalidPolicy("auto_proceed must be a boolean")
+    # The flow a run starts on when it names none, a file in `flows/`, read only at a run's start.
+    if "default_flow" in raw and not (isinstance(raw["default_flow"], str)
+                                      and PLAIN_TOKEN.fullmatch(raw["default_flow"])):
+        raise InvalidPolicy("default_flow must name a flow in flows/, such as engineer-code")
     heartbeat = raw.get("heartbeat_seconds")
     if not isinstance(heartbeat, int) or isinstance(heartbeat, bool) or heartbeat < 1:
         raise InvalidPolicy("heartbeat_seconds must be an int >= 1")

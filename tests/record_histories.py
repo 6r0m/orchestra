@@ -20,7 +20,7 @@ PKG = os.path.abspath(os.path.join(HERE, os.pardir))
 sys.path[:0] = [PKG, HERE]
 
 import temporal_env as E  # noqa: E402
-from fakes import FakeWorktrees, codex_review_first, codex_review_resumed  # noqa: E402
+from fakes import FakeWorktrees, codex_first_out, codex_review_first, codex_review_resumed  # noqa: E402
 
 HISTORIES = os.path.join(HERE, "histories")
 # Temporal stamps every event with the worker that wrote it — `<pid>@<hostname>`. These files are
@@ -194,8 +194,34 @@ def final_merge_no_worker_continue():
     return run
 
 
+def research_revise_plan_merge():
+    """A run that begins with research: its brief at the approval, research again on a revise, then the
+    plan from the brief, its approval, the build and the merge."""
+    brief, _ = codex_first_out("Brief: the scheduler.\nAbstract todo: one job.")
+    E.host([("research-e1-1", 0, brief), ("research-e2-1", 0, codex_first_out("Brief v2.")[0]),
+            ("plan-e3-1", 0, "p\n"), ("assess-e3-1", 0, codex_review_resumed("PASS", "Direction: A.")),
+            ("build-e4-1", 0, "b\n"), ("verify-e4-1", 0, codex_review_resumed("PASS"))])
+    run = E.Run(flow=["architect:research", "you:approve", "engineer:plan", "architect:assess", "you:approve",
+                      "engineer:build", "architect:verify", "you:merge"])
+    run.answer("revise narrow it")
+    run.answer("yes")
+    run.answer("yes")
+    run.answer("merge")
+    return run
+
+
+def plan_only_done():
+    """A flow that ends at its plan's approval: the run ends DONE, keeping its worktree, merging nothing."""
+    a1, _ = codex_review_first("PASS")
+    E.host([("plan-e1-1", 0, "p\n"), ("assess-e1-1", 0, a1)])
+    run = E.Run(flow=["engineer:plan", "architect:assess", "you:approve"])
+    run.answer("yes")
+    return run
+
+
 RECORDINGS = (patch_loop_approval_merge, blocker_guidance_failure_continue_discard, final_revise_conflict_merge,
-              approval_stop, final_merge_stop_lands, final_merge_no_worker_continue)
+              approval_stop, final_merge_stop_lands, final_merge_no_worker_continue, research_revise_plan_merge,
+              plan_only_done)
 
 
 def main(names):

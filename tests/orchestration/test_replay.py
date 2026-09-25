@@ -38,6 +38,23 @@ class Replay(unittest.TestCase):
             with self.subTest(history.workflow_id):
                 asyncio.run(Replayer(workflows=[WF.FeatureRun]).replay_workflow(history))
 
+    def test_a_history_replays_on_its_own_steps_whatever_the_flow_files_say(self):
+        """The workflow never reads a flow: a run started before flows replays on the order those runs took,
+        though today's `engineer-code` names a different one."""
+        import json
+        import shutil
+        import tempfile
+        from app.foundation import flows
+        folder = tempfile.mkdtemp(prefix="orch-flows-")
+        self.addCleanup(shutil.rmtree, folder, True)
+        self.addCleanup(setattr, flows, "FLOWS_DIR", flows.FLOWS_DIR)
+        flows.FLOWS_DIR = folder
+        with open(os.path.join(folder, "engineer-code.json"), "w", encoding="utf-8") as fh:
+            json.dump(["architect:research", "you:approve"], fh)
+        for history in histories():
+            with self.subTest(history.workflow_id):
+                asyncio.run(Replayer(workflows=[WF.FeatureRun]).replay_workflow(history))
+
     def test_control_an_unpatched_change_fails_replay(self):
         for history in histories():
             with self.subTest(history.workflow_id), self.assertRaises(Exception) as raised:

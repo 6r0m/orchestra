@@ -25,6 +25,7 @@ import textwrap
 
 from app.application import client as runs
 from app.application import stack
+from app.foundation import flows
 from app.foundation import policy as policy_mod
 from app.foundation import paths
 from app.workspace import repos
@@ -117,7 +118,8 @@ def _report(status, run_id, trace_url):
         if trace_url:
             # The stop's own row in the trace carries what you are answering.
             print("trace:    %s" % trace_url)
-        label = {"approval": "summary", "failed": "error", "final": "refused"}.get(stop["reason"], "feedback")
+        label = {"approval": "brief" if stop["phase"] == "research" else "summary", "failed": "error",
+                 "final": "refused"}.get(stop["reason"], "feedback")
         for key, value in (("reason", stop["reason"]), ("phase", stop["phase"]), ("todo", stop["todo"]),
                            ("worktree", state.get("worktree_path") if final else None),
                            (label, stop["feedback"]), ("hint", stop["hint"])):
@@ -134,7 +136,8 @@ def _report(status, run_id, trace_url):
         print("refused:  %s" % state["refusal"])
     if state.get("merge_commit"):
         print("merged:   %s into %s" % (state["merge_commit"], state.get("base_branch")))
-    return 0 if status_name in ("MERGED", "DISCARDED") else 1
+    # A flow that ends without a build ends DONE: its work is kept for you, which is its success.
+    return 0 if status_name in ("MERGED", "DISCARDED", "DONE") else 1
 
 
 def _trace_url(tele, state):
@@ -143,7 +146,7 @@ def _trace_url(tele, state):
 
 async def _start(client, args, tele, check):
     handle = await runs.start(client, args.task, repo=args.repo, auto_proceed=args.auto_proceed,
-                              policy_path=args.policy, check=check)
+                              policy_path=args.policy, check=check, flow=args.flow)
     run_id = handle.id
     print("run-id: %s" % run_id, flush=True)
     status = await follow(handle)
@@ -257,10 +260,10 @@ async def _show(client, run_id):
         events += 1
     state, timeline = status["state"], status["timeline"]
     print("run %s — %s, %d history events" % (run_id, state.get("status", "?"), events))
-    print("%-7s %-6s %-3s %-3s %-9s %-10s %-19s %s" % ("stage", "phase", "ep", "r", "verdict", "gate", "when", "gap"))
+    print("%-8s %-8s %-3s %-3s %-9s %-10s %-19s %s" % ("stage", "phase", "ep", "r", "verdict", "gate", "when", "gap"))
     for index, entry in enumerate(timeline):
         gap = _elapsed(timeline[index - 1]["at"] if index else None, entry["at"])
-        print("%-7s %-6s %-3s %-3s %-9s %-10s %-19s %s" % (
+        print("%-8s %-8s %-3s %-3s %-9s %-10s %-19s %s" % (
             entry["stage"], entry["phase"], entry["episode"], entry["round"], entry.get("verdict") or "-",
             entry.get("gate") or "-", entry["at"][:19], gap))
     if status["stop"]:
@@ -310,8 +313,12 @@ def stack_command(words, policy_path=None):
 def parse_args(argv):
     parser = argparse.ArgumentParser(prog="orchestrate")
     parser.add_argument("task", nargs="?", help="task description (new run)")
-    parser.add_argument("--auto-proceed", action="store_true", help="skip the plan approval stop")
+    parser.add_argument("--auto-proceed", action="store_true",
+                        help="skip approvals: every approval the flow schedules, never an emergency stop or "
+                             "the final merge")
     parser.add_argument("--repo", metavar="NAME|PATH", help="repository to run on (default: this one)")
+    parser.add_argument("--flow", metavar="NAME",
+                        help="the flow to follow, a file in flows/ (default: the policy's default_flow)")
     parser.add_argument("--resume", metavar="RUN_ID", help="answer the stop this run waits at")
     parser.add_argument("--answer", metavar="TEXT")
     parser.add_argument("--confirm", action="store_true", help="confirm a discard")
@@ -366,7 +373,7 @@ async def run(argv=None, client=None, tele=None, check=True):
         if args.continue_:
             return await _answer(client, args.continue_, "continue", False, tele, check, only="failed")
         return await _start(client, args, tele, check)
-    except (Refusal, repos.Refused, policy_mod.InvalidPolicy) as exc:
+    except (Refusal, repos.Refused, policy_mod.InvalidPolicy, flows.InvalidFlow) as exc:
         print("error: %s" % exc, file=sys.stderr)
         return 4
 

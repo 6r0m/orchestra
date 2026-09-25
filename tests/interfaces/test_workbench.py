@@ -31,7 +31,7 @@ from app.orchestration import workflow as WF  # noqa: E402
 import temporal_env as E  # noqa: E402
 from app.agents import terminal  # noqa: E402
 from app.interfaces.workbench import server as workbench  # noqa: E402
-from fakes import FakeWorktrees, codex_review_first, codex_review_resumed  # noqa: E402
+from fakes import FakeWorktrees, codex_first_out, codex_review_first, codex_review_resumed  # noqa: E402
 from tests.application.test_stack import lock_of_its_own  # noqa: E402
 from tests.orchestration.test_workflow import Scenario  # noqa: E402
 
@@ -127,6 +127,7 @@ class Access(unittest.TestCase):
         self.assertEqual(request("GET", "/api/repos")[0], 200)
         self.assertEqual(request("GET", "/api/repos", token=False)[0], 403)
         self.assertEqual(request("GET", "/api/repos", token="wrong")[0], 403)
+        self.assertEqual(request("GET", "/api/flows", token=False)[0], 403)
         self.assertEqual(request("POST", "/api/runs", {"task": "x"}, origin="http://evil.example")[0], 403)
         self.assertEqual(request("GET", "/", host="evil.example:%d" % port())[0], 403, "a rebound name is refused")
         self.assertEqual(request("POST", "/api/runs", {"task": "x"}, token=False)[0], 403)
@@ -444,6 +445,8 @@ class Runs(Scenario):
         self.assertTrue(datetime.datetime.fromisoformat(view["since"]), "since when it waits")
         self.assertEqual(view["blocked_by"], [])
         self.assertTrue(view["worktree"], "where its work is")
+        self.assertEqual((view["flow"]["name"], view["step"]), ("engineer-code", 2),
+                         "none named: the policy's default flow, at its approval")
 
     def test_a_working_run_says_its_stage_its_role_and_since_when(self):
         release = threading.Event()
@@ -506,6 +509,26 @@ class Runs(Scenario):
                 return body
             time.sleep(0.5)
         self.fail("run %s never reached the expected state" % run_id)
+
+    def test_the_page_lists_the_flows_and_starts_a_run_on_the_one_chosen(self):
+        status, body = request("GET", "/api/flows")
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["default"], "engineer-code")
+        listed = {found["name"]: found for found in body["flows"]}
+        self.assertEqual(listed["architect-research"]["steps"][:2], ["architect:research", "you:approve"])
+        status, refused = request("POST", "/api/runs", {"task": "a task", "repo": self.repo, "flow": "no-such-flow"})
+        self.assertEqual(status, 400, refused)
+        self.assertIn("no flow 'no-such-flow'", refused["error"])
+        brief, _ = codex_first_out("Brief: the scheduler.")
+        self.host, self.agent = E.host([("research-e1-1", 0, brief)], git=FakeWorktrees())
+        status, started = request("POST", "/api/runs", {"task": "research first", "repo": self.repo,
+                                                        "flow": "architect-research"})
+        self.assertEqual(status, 200, started)
+        run_id = started["run_id"]
+        self.addCleanup(lambda: E.Run.cleanup(type("R", (), {"run_id": run_id})()))
+        view = self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "approval")["view"]
+        self.assertEqual((view["flow"]["name"], view["step"]), ("architect-research", 1))
+        self.assertEqual(view["stop"]["feedback"], "Brief: the scheduler.", "the approval shows the brief")
 
     def test_start_list_review_and_answer_a_run(self):
         a1, _ = codex_review_first("PASS", "Direction: A.")

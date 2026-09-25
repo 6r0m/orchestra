@@ -51,8 +51,9 @@ DEFAULT_ENVIRONMENT = "dev"
 # these names, so they change only on purpose and never carry a run's own values.
 SCHEMA_VERSION = "observability-schema-v1"
 RUN_NAME = "orchestration-run"
-PHASE_NAMES = {"plan": "plan-phase", "build": "build-phase"}
-PHASE_ROLES = {"plan": "the engineer plans, the architect assesses",
+PHASE_NAMES = {"research": "research-phase", "plan": "plan-phase", "build": "build-phase"}
+PHASE_ROLES = {"research": "the architect researches",
+               "plan": "the engineer plans, the architect assesses",
                "build": "the engineer builds, the architect verifies"}
 GATE_NAME = "human-gate"
 ANSWER_NAME = "human-answer"
@@ -321,8 +322,9 @@ def _mark_work_item(current, values):
 def open_phase(client, values, phase):
     """Open the node one phase's rounds hang from, under the work item in `values`; return its id.
 
-    Plan and build are what the operator moves between, so each gets one node
-    under the work item, opened when that phase starts. Like the work item's own
+    A run's phases — its flow's work stages, research, plan and build — are what the operator
+    moves between, so each gets one node under the work item, opened when that phase starts.
+    Like the work item's own
     root it is opened and closed at once and joined later by the id the workflow keeps.
     """
     if client is None:

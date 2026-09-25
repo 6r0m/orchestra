@@ -5,13 +5,15 @@ so a verdict routes identically wherever it is judged.
 """
 
 
-def gate_reason_for(verdict, phase, rounds, limit, auto_proceed):
+def gate_reason_for(verdict, gate, rounds, limit, auto_proceed):
     """Single owner of 'which gate, if any' — routing and state both use it.
 
+    `gate` is the operator's step after this review in the run's flow — `approve`, `merge` or None;
+    `auto_proceed` skips a scheduled approval and nothing else.
     Returns approval | blocker | exhausted | '' (no gate: proceed or loop).
     """
     if verdict == "PASS":
-        if phase == "plan" and not auto_proceed:
+        if gate == "approve" and not auto_proceed:
             return "approval"
         return ""
     if verdict == "BLOCKER":
@@ -21,10 +23,9 @@ def gate_reason_for(verdict, phase, rounds, limit, auto_proceed):
     return ""
 
 
-def route_label(stage, verdict, gate_reason):
-    """Where this verdict sends the run — one owner for console and trace."""
+def route_label(verdict, gate_reason, onward, back):
+    """Where this verdict sends the run — one owner for console and trace: `onward` on a PASS (the next
+    work, READY_FOR_HUMAN at the final gate, or DONE), `back` — the work it judged — otherwise."""
     if gate_reason:
         return "human (%s)" % gate_reason
-    if verdict == "PASS":
-        return "build" if stage == "assess" else "READY_FOR_HUMAN"
-    return "plan" if stage == "assess" else "build"
+    return onward if verdict == "PASS" else back

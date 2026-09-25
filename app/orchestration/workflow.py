@@ -1,9 +1,11 @@
-"""The workflow of one run: plan and assess, the approval, build and verify, the final gate.
+"""The workflow of one run: its flow's stages in order — work, the review that judges it, the
+operator's approval where the flow schedules one — and the final gate.
 
 Temporal owns it: one workflow execution per run, its Workflow Id the run id. The code
 here decides every transition, deterministically — no clock, file, network or process;
 every effect is an activity on the run's target host, and every route comes from
-`routing`.
+`routing`. The run's flow is in its start input, so it never reads one; a run started
+before flows follows the order that code took (`flows.LEGACY_FLOW`).
 
 A stop waits for an Update carrying one of that stop's named actions, with the stable id
 `answer:<stop-id>`, so a repeated answer is applied once. The run's
@@ -21,6 +23,7 @@ from temporalio.common import RetryPolicy
 from temporalio.exceptions import ActivityError, TimeoutError, is_cancelled_exception
 
 with workflow.unsafe.imports_passed_through():
+    from app.foundation import flows
     from app.foundation import policy as P
     from app.foundation import stages
     from app.orchestration import routing
@@ -79,6 +82,7 @@ def _heard():
 class FeatureRun:
     def __init__(self):
         self.state = {}
+        self.segments = []
         self.queue = None
         self.policy = None
         self.stop = None
@@ -103,9 +107,19 @@ class FeatureRun:
     async def _run(self, start):
         self.policy, self.queue = start["policy"], start["queue"]
         repository = start["repository"]
+        flow = start.get("flow") or {"name": None, "steps": list(flows.LEGACY_FLOW)}
         s = self.state = {"run_id": start["run_id"], "task": start["task"], "label": start["label"],
                           "created": start["created"], "auto_proceed": start["auto_proceed"],
-                          "repo": repository["id"], "target": repository["target"], "status": "RUNNING"}
+                          "repo": repository["id"], "target": repository["target"], "flow": flow,
+                          "status": "RUNNING"}
+        try:
+            # The client checked it; a run started past the client is checked here, and a broken flow
+            # ends the run refused rather than failing it at every step.
+            self.segments = flows.segments(flows.check(list(flow["steps"])))
+        except flows.InvalidFlow as error:
+            s.update(status="REFUSED", refusal="its flow: %s" % error)
+            self._line("refused: %s" % s["refusal"])
+            return s
         try:
             s.update(await self._activity("prepare", {"repository": repository, "policy": self.policy},
                                           READS, SHORT_TIMEOUT))
@@ -120,60 +134,99 @@ class FeatureRun:
         if created is None:
             return await self._end("ABORTED")
         s.update(created)
-        s.update(await self._trace("open_run", {"state": s}) or {})
-        s.update(phase="plan", round=0, phase_rounds=0, episode=1, agent_sessions={})
+        first = self.segments[0]["work"][1]
+        s.update(await self._trace("open_run", {"state": s, "phase": first}) or {})
+        s.update(phase=first, round=0, phase_rounds=0, episode=1, agent_sessions={})
         return await self._loop()
 
     async def _loop(self):
+        """The run's flow, one segment at a time: a work stage, the review that judges it, and the
+        operator's step after them, where the flow has them (`flows.segments`)."""
         s = self.state
-        review_next = False
+        at, review_next = 0, False
         while True:
-            worker, reviewer = ("plan", "assess") if s["phase"] == "plan" else ("build", "verify")
-            if not review_next and not await self._stage(worker):
-                return await self._end("ABORTED")
+            segment = self.segments[at]
+            work, review, gate = (part and part[1] for part in (segment["work"], segment["review"], segment["gate"]))
+            last = at == len(self.segments) - 1
+            onward = "READY_FOR_HUMAN" if gate == "merge" else "DONE" if last else self.segments[at + 1]["work"][1]
+            if not review_next:
+                s["step"] = segment["work"][0]
+                if not await self._stage(work):
+                    return await self._end("ABORTED")
             review_next = False
-            if not await self._stage(reviewer):
-                return await self._end("ABORTED")
+            if review:
+                s["step"] = segment["review"][0]
+                if not await self._stage(review, gate, onward):
+                    return await self._end("ABORTED")
+            else:
+                # Work no review judges — research: its answer goes to the operator's approval, if the
+                # flow schedules one and the run does not skip it.
+                s["gate_reason"] = routing.gate_reason_for("PASS", gate, 1, 1, s["auto_proceed"])
             if s["gate_reason"]:
-                answer = await self._stop(s["gate_reason"])
+                shown = {}
+                if s["gate_reason"] == "approval":
+                    s["step"] = segment["gate"][0]
+                    shown = self._approval(work, last, onward)
+                answer = await self._stop(s["gate_reason"], **shown)
                 if answer["action"] == "abort":
                     return await self._end("ABORTED")
                 if answer["action"] == "approve":
-                    stands = await self._plan_stands()
+                    stands = await self._plan_stands() if work == "plan" else True
                     if stands is None:
                         return await self._end("ABORTED")
                     if stands:
-                        await self._to_build()
+                        if last:
+                            return await self._end("DONE")
+                        at += 1
+                        await self._next(self.segments[at]["work"][1])
                     review_next = not stands      # the plan changed: the architect judges it again
                     continue
-                # Guidance, or a revised plan: a new bounded episode. The operator's words
+                # Guidance, or a revised plan or research: a new bounded episode. The operator's words
                 # survive the worker and are consumed by the architect that judges next.
                 s.update(guidance=answer["text"], round=0, gate_reason="", episode=s["episode"] + 1)
                 continue
-            if s["verdict"] != "PASS":
+            if review and s["verdict"] != "PASS":
                 continue
-            if s["phase"] == "plan":
-                stands = await self._plan_stands()
-                if stands is None:
-                    return await self._end("ABORTED")
-                if stands:
-                    await self._to_build()
-                review_next = not stands
+            if gate == "merge":
+                s["step"] = segment["gate"][0]
+                outcome = await self._final_gate()
+                if outcome == "done":
+                    return s
+                review_next = outcome == "review"
                 continue
-            outcome = await self._final_gate()
-            if outcome == "done":
-                return s
-            review_next = outcome == "review"
+            stands = await self._plan_stands() if work == "plan" else True
+            if stands is None:
+                return await self._end("ABORTED")
+            if stands:
+                if last:
+                    return await self._end("DONE")
+                at += 1
+                await self._next(self.segments[at]["work"][1])
+            review_next = not stands
 
-    async def _stage(self, stage):
-        """Run one stage to a result, stopping for the operator on each failure. False when aborted."""
+    def _approval(self, work, last, onward):
+        """What an approval shows besides the run's own feedback — after research, its brief — and where
+        approving goes: on to `onward`, or to the run's end."""
+        going = "end the run" if last else "go on to the %s" % onward
+        if work in stages.ANSWERS:
+            return {"text": self.state.get("brief") or "",
+                    "hint": "approve to %s, or revise with feedback for new research" % going}
+        if work == "plan" and onward == "build":
+            return {}                     # HINTS["approval"], as a plan's approval has always read
+        return {"hint": "approve to %s, or revise with feedback for a new %s" % (going, work)}
+
+    async def _stage(self, stage, gate=None, onward=None):
+        """Run one stage to a result, stopping for the operator on each failure. False when aborted.
+
+        A review's verdict is routed by `gate`, the operator's step after it, and a PASS goes `onward`."""
         s = self.state
         label = "[%s e%d r%d]" % (stage, s["episode"], s["round"] + 1)
         self._unless_stopping()
         self._line("%s %s started" % (label, stages.STAGE_ROLE[stage]))
         self._doing(stage, stages.STAGE_ROLE[stage])
         result = await self._until_done(label, lambda: workflow.execute_activity(
-            "run_role", {"stage": stage, "state": s, "policy": self.policy}, task_queue=self.queue,
+            "run_role", {"stage": stage, "state": s, "policy": self.policy, "gate": gate},
+            task_queue=self.queue,
             start_to_close_timeout=timedelta(seconds=self.policy["timeout_seconds"] + 600),
             heartbeat_timeout=timedelta(seconds=self.policy["heartbeat_seconds"]),
             retry_policy=ONCE))
@@ -184,17 +237,22 @@ class FeatureRun:
                  "at": workflow.now().isoformat()}
         if "verdict" in result:
             rounds = s["round"] + 1
-            gate = routing.gate_reason_for(result["verdict"], s["phase"], rounds,
-                                           self.policy["max_rounds"][s["phase"]], s["auto_proceed"])
+            reason = routing.gate_reason_for(result["verdict"], gate, rounds,
+                                             self.policy["max_rounds"][s["phase"]], s["auto_proceed"])
             s.update(verdict=result["verdict"], feedback=result["feedback"], round=rounds,
-                     phase_rounds=s.get("phase_rounds", 0) + 1, guidance="", gate_reason=gate)
+                     phase_rounds=s.get("phase_rounds", 0) + 1, guidance="", gate_reason=reason)
             for judged in ("assessed_tree", "verified_tree"):
                 if judged in result:
                     s[judged] = result[judged]
-            self._line("%s %s -> %s" % (label, result["verdict"],
-                                        routing.route_label(stage, result["verdict"], gate)))
-            entry.update(verdict=result["verdict"], gate=gate, feedback=result["feedback"])
+            self._line("%s %s -> %s" % (label, result["verdict"], routing.route_label(
+                result["verdict"], reason, onward, stages.REVIEWS[stage])))
+            entry.update(verdict=result["verdict"], gate=reason, feedback=result["feedback"])
         else:
+            if "output" in result:
+                # The work's answer is its product: the run keeps it, the approval shows it and the next
+                # stage's prompt carries it.
+                s["brief"] = result["output"]
+                entry["brief"] = result["output"]
             self._line("%s completed" % label)
         self.timeline.append(entry)
         return True
@@ -241,12 +299,14 @@ class FeatureRun:
                           "Judge it as it stands now.")
         return False
 
-    async def _to_build(self):
+    async def _next(self, work):
+        """On to the flow's next work stage, in a phase of its own."""
         s = self.state
-        s.update(phase="build", round=0, phase_rounds=0, feedback="", gate_reason="",
+        # The operator's words were for the stage just approved, never for the next one.
+        s.update(phase=work, round=0, phase_rounds=0, feedback="", guidance="", gate_reason="",
                  episode=s["episode"] + 1)
-        opened = await self._trace("open_phase", {"state": s, "phase": "build"})
-        s["trace_phases"] = dict(s.get("trace_phases") or {}, build=(opened or {}).get("id"))
+        opened = await self._trace("open_phase", {"state": s, "phase": work})
+        s["trace_phases"] = dict(s.get("trace_phases") or {}, **{work: (opened or {}).get("id")})
 
     async def _final_gate(self):
         """READY_FOR_HUMAN, then the operator's merge, revise or discard."""
@@ -289,13 +349,14 @@ class FeatureRun:
             s["merge_refusal"] = merged["reason"]
             self._line("merge refused: %s" % merged["reason"])
 
-    async def _stop(self, reason):
+    async def _stop(self, reason, text=None, hint=None):
         s = self.state
         self._unless_stopping()
         self.stops += 1
-        feedback = {"failed": s.get("error"), "final": s.get("merge_refusal")}.get(reason, s.get("feedback"))
+        feedback = text if text is not None else {"failed": s.get("error"), "final": s.get("merge_refusal")}.get(
+            reason, s.get("feedback"))
         self.stop = {"id": "%s:%d" % (s["run_id"], self.stops), "reason": reason, "phase": s.get("phase"),
-                     "todo": s.get("todo_path"), "feedback": feedback or "", "hint": HINTS[reason],
+                     "todo": s.get("todo_path"), "feedback": feedback or "", "hint": hint or HINTS[reason],
                      "actions": list(ACTIONS[reason]), "since": workflow.now().isoformat()}
         self._line("stopped: %s" % reason)
         if reason in TRACED_STOPS:

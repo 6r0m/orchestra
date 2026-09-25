@@ -7,8 +7,11 @@ Its `--stack` forms, which the Makefile runs, only print what the stack's one ow
 import asyncio
 import contextlib
 import io
+import json
 import os
+import shutil
 import sys
+import tempfile
 import unittest
 
 HERE = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))
@@ -101,6 +104,32 @@ class TheStack(unittest.TestCase):
 
 
 class Forms(unittest.TestCase):
+    def test_a_run_names_its_flow_and_one_that_ended_without_a_build_succeeded(self):
+        self.assertEqual(cli.parse_args(["a task", "--flow", "architect-research"]).flow, "architect-research")
+        self.assertIsNone(cli.parse_args(["a task"]).flow, "none named: the policy's default")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(cli._report({"state": {"status": "DONE"}, "stop": None}, "run-1", None), 0)
+        self.assertIn("finished: DONE", out.getvalue())
+
+    def test_a_flow_that_does_not_hold_starts_nothing_and_says_why(self):
+        from app.foundation import flows
+        folder = tempfile.mkdtemp(prefix="orch-flows-")
+        self.addCleanup(shutil.rmtree, folder, True)
+        self.addCleanup(setattr, flows, "FLOWS_DIR", flows.FLOWS_DIR)
+        flows.FLOWS_DIR = folder
+        with open(os.path.join(folder, "broken.json"), "w", encoding="utf-8") as fh:
+            json.dump(["engineer:plan", "you:approve"], fh)
+        for name, said in (("no-such-flow", "no flow 'no-such-flow'"),
+                           ("broken", "flow 'broken': step 1, 'engineer:plan': the engineer's work goes to its "
+                                      "review, assess, next")):
+            out = io.StringIO()
+            with contextlib.redirect_stderr(out):
+                # A client that can start nothing: the flow is refused before one is needed.
+                code = asyncio.run(cli.run(["a task", "--flow", name], client=object(), tele=object(), check=False))
+            self.assertEqual(code, 4, name)
+            self.assertIn(said, out.getvalue())
+
     def test_the_stack_is_not_a_runs_form(self):
         """`--stack` is `main`'s own command; a caller of the run forms is refused it, never sent to a start."""
         out = io.StringIO()

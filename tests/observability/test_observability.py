@@ -1311,12 +1311,38 @@ class TraceContract(Scenario):
         return client
 
     def test_every_row_is_one_of_the_contracts_kinds_and_carries_its_version(self):
+        """Every kind but research's, which a run that begins with research writes (the next test)."""
         from app.observability import telemetry
         client = self._flow()
         names = [event["name"] for event in client.events]
-        self.assertEqual(set(names), set(telemetry.ROW_NAMES))
+        self.assertEqual(set(names), set(telemetry.ROW_NAMES) - {"research-phase", "architect-research"})
         self.assertEqual(names.count("orchestration-run"), 1, "one work item per run")
         self.assertEqual({event.get("version") for event in client.events}, {telemetry.SCHEMA_VERSION})
+
+    def test_a_run_that_begins_with_research_writes_its_phase_and_its_brief(self):
+        from unittest import mock
+        from app.observability import telemetry
+        from fakes import codex_first_out, codex_review_resumed
+        client = _Events()
+        brief, _ = codex_first_out("Brief: the scheduler.")
+        # Reasoning for whoever is asked: only the architect's steps ask, a brief's as a verdict's.
+        with mock.patch.object(telemetry, "codex_reasoning", return_value="why"):
+            run = self.drive([("research-e1-1", 0, brief), ("plan-e2-1", 0, "planned\n"),
+                              ("assess-e2-1", 0, codex_review_resumed("PASS"))], telemetry=client,
+                             flow=["architect:research", "you:approve", "engineer:plan", "architect:assess"])
+            self.assertEqual(run.stop["reason"], "approval")
+            names = [event["name"] for event in client.events]
+            self.assertEqual(names[:3], ["orchestration-run", "research-phase", "architect-research"])
+            code, out = run.answer("yes")
+        self.assertEqual((code, run.state["status"]), (0, "DONE"), out)
+        steps = {event["name"]: event["output"] for event in client.events
+                 if event["name"] in ("architect-research", "engineer-plan", "architect-assess")}
+        research = steps["architect-research"]
+        self.assertEqual((research["response"], research["reasoning"]), ("Brief: the scheduler.", "why"),
+                         "the brief, as the run keeps it")
+        self.assertEqual(steps["architect-assess"]["reasoning"], "why")
+        self.assertNotIn("reasoning", steps["engineer-plan"])
+        self.assertLessEqual(set(event["name"] for event in client.events), set(telemetry.ROW_NAMES))
 
     def test_quality_is_scored_where_it_is_judged(self):
         client = self._flow()

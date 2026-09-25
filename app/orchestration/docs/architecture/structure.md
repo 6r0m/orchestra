@@ -7,7 +7,7 @@ do so deterministically, so Temporal can replay the decision and reach the same 
 
 ## Owns
 
-- `workflow` — the run: `plan → assess → build → verify`, the stops and their named answers, the final gate, what a Stop does to it, and the `status` query — which also says what the run is doing now, since when, and which queues it needs. Beside it, three short workflows that reach a target host's git for a client, because only a workflow can start an activity: a run's change read for review, a repository's worktrees, and the removal of what a closed run kept.
+- `workflow` — the run: the steps of its flow in order — each work stage, the review that judges it and the operator's approval where the flow schedules one — the stops and their named answers, the final gate, what a Stop does to it, and the `status` query — which also says what the run is doing now, since when, and which queues it needs. Beside it, three short workflows that reach a target host's git for a client, because only a workflow can start an activity: a run's change read for review, a repository's worktrees, and the removal of what a closed run kept.
 - `routing` — which stop a verdict asks for and where it sends the run: two pure functions with no dependencies at all.
 
 ## Does not own
@@ -23,7 +23,7 @@ architect's verdict routes (D4), and the architect runs in
 
 | part | responsibility |
 |---|---|
-| `workflow.py` | one run's execution: stages, stops, answers, the final gate, the status query |
+| `workflow.py` | one run's execution: its flow's stages, stops, answers, the final gate or its `DONE` end, the status query |
 | `routing.py` | which gate a verdict asks for and where it sends the run — no dependencies |
 
 ## Relationships
@@ -34,7 +34,9 @@ Through Temporal's workflow API: this package *is* the workflow. Its event histo
 run's durable state, so a process that exits at a stop loses nothing and any later process
 answers it.
 
-Through `app.foundation.stages`: the stage vocabulary a route is expressed in.
+Through `app.foundation.stages` and `app.foundation.flows`: the stage vocabulary a route is
+expressed in, and the rules of the flow a run is handed — checked again when the run begins, and
+`LEGACY_FLOW` for a run started before flows. The workflow never reads a flow's file.
 
 Through an activity name and its payload: every effect. This package names the activity and
 the queue; what the activity does is the other side's.
@@ -45,6 +47,7 @@ the queue; what the activity does is the other side's.
 - **A stop waits here and nowhere else (D6).** Each stop publishes the actions it takes, a revise at the final gate named per role, and its answer arrives as an Update carrying one of them, with the stable id `answer:<stop-id>`, so an answer sent twice is applied once. No activity ever waits for a human.
 - **A Stop is Temporal's cancellation, heard wherever the run waits (D31).** It ends the run `STOPPED` and runs no git; a git side effect already running lands first and decides how the run ends, and one no worker has taken fails within the policy's heartbeat interval, never having run; the cleanup waits a bounded time, so a host whose worker is gone never holds it.
 - **Only architect verdicts route (D4).** An engineer's blocker reaches a human only through the architect.
+- **A run keeps the flow it started with (D13).** Its steps are in its start input; a flow that breaks a rule ends it `REFUSED` before any work, and one without a build ends it `DONE`, merging nothing.
 - **There is no state machine layer**, deliberately. Do not re-derive one; the reasoning is in [the project's structure document](../../../../docs/architecture/structure.md).
 
 ## Accepted decisions
