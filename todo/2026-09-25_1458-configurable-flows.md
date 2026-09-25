@@ -1,7 +1,7 @@
 # Configurable flows: the order of a run's work, chosen per task
 
-**Status:** IN PROGRESS — the external review passed; the final suite ran; the operator's live check
-next
+**Status:** IN PROGRESS — the external review passed, the containment fix with it; the operator's
+live check next
 **Scope:** the order of a run's steps — a new `flows/` folder and its reader `app/foundation/flows.py`;
 [workflow.py](../app/orchestration/workflow.py), [routing.py](../app/orchestration/routing.py),
 [stages.py](../app/foundation/stages.py), [policy.py](../app/foundation/policy.py) and `policy.json`, the
@@ -733,4 +733,5 @@ the external reviewer's PASS, and a real `architect-research` run in the operato
   process skipped in silence, every failed opening raising — and the five before; Windows 68 classes,
   329 tests, green; `make public-check` passed; the stack restarted on it. The change is Windows only,
   so WSL's last run, 446 tests, stands.
-- **Next:** the external review's PASS; then the operator's live `architect-research` run.
+- **Review:** PASS — the containment is fail-closed, and code review stops here.
+- **Next:** the operator's live `architect-research` run through the Workbench.
