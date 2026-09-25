@@ -222,7 +222,9 @@ still lands on a checkout.
   process is created already inside a job object that kills every process in it when its last
   handle, the worker's, closes, and its ConPTY is created by that process, inside the same job.
   A turn's end, a timeout, a cancellation, the run's close and the worker's own death all end
-  the tree. A Claude engineer runs in `dontAsk` mode with edits allowed inside its worktree and
+  the tree; on Windows the end waits for each of its processes, whose termination only begins
+  with the kill and which hold the directory they worked in until it finishes, so a worktree is
+  free to remove the moment its agents are ended. A Claude engineer runs in `dontAsk` mode with edits allowed inside its worktree and
   the host's skills directory added for reading, so a turn never waits on a permission prompt:
   what is not allowed is denied and the agent works on. A Codex role never asks either. The
   prompt follows `--`, so no option that takes several values can swallow it. On Windows a Codex role-run uses Codex's unelevated sandbox: the elevated one

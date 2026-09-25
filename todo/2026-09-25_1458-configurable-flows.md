@@ -1,7 +1,7 @@
 # Configurable flows: the order of a run's work, chosen per task
 
-**Status:** IN PROGRESS — built; the agents' review round and the external review's third and fourth
-passes fixed; its PASS next
+**Status:** IN PROGRESS — the external review passed; the final suite ran; the operator's live check
+next
 **Scope:** the order of a run's steps — a new `flows/` folder and its reader `app/foundation/flows.py`;
 [workflow.py](../app/orchestration/workflow.py), [routing.py](../app/orchestration/routing.py),
 [stages.py](../app/foundation/stages.py), [policy.py](../app/foundation/policy.py) and `policy.json`, the
@@ -678,3 +678,29 @@ the external reviewer's PASS, and a real `architect-research` run in the operato
   and the replay — 10 classes, 67 tests each; controls, each red then green: null taken as legacy
   again, the legacy order read from a file, the steps made into a list, the check taken out.
 - **Next:** the external review's PASS; then the full suite once per host.
+
+### 2026-09-25 — the external review: PASS; the final suite
+
+- **Suite, on the committed tree:** WSL, `make test` — 99 classes, 439 tests, green. Windows, the host
+  suite — 68 classes, 320 tests, one error: `test_terminal.Turns.test_a_timeout_ends_the_agent`'s
+  cleanup met `WinError 32` on its temporary worktree, which the timed-out agent still held for a
+  moment. Not this change: that test and the code it drives are untouched; alone it passed three
+  times of three, and its class passed whole; no agent was left running.
+- **Gate:** `git diff --check` clean; `make public-check` passed.
+- **Next:** the operator's call on that Windows race; then the Workbench and the whole stack
+  restarted together, and a live `architect-research` run.
+
+### 2026-09-25 — the Windows race the final suite found, fixed
+
+- **Cause:** the containment, not the test. `TerminateJobObject` only begins termination, and
+  `_WindowsTree.kill()` returned at once: a process has its exit code while it still holds its
+  handles, the directory it worked in among them. A discard or merge, which ends the run's terminals
+  right before git removes the worktree, could meet the same refusal on a busy Windows host.
+- **Fixed** in `launch.py`, on the operator's word: each process of the job is taken hold of before
+  the termination and waited for, within `GRACE_SECONDS`; D17 and the module say so.
+- **Evidence:** a new containment test — the tree ended, the folder it worked in removed at once — red
+  three times of three before the fix, `WinError 32` though the process had its exit code, and green
+  three of three after; the final suite again on this tree: WSL 99 classes, 441 tests, Windows
+  68 classes, 322 tests, both green; `make public-check` passed; the stack restarted again, so its
+  Windows worker runs the fix.
+- **Next:** the operator's live `architect-research` run.

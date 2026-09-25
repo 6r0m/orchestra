@@ -17,7 +17,9 @@ because killing the direct child leaves its tool processes running:
   systemd call on any path waits without a bound.
 - Windows: the agent is created already inside a job object that kills every process
   in it when its last handle closes — one `CreateProcess` call, so no moment exists in
-  which it lives outside the job. We hold that handle, so our death closes it.
+  which it lives outside the job. We hold that handle, so our death closes it. Ending
+  the tree waits for each of its processes: until one's termination finishes it still
+  holds the directory it worked in, which Windows will not remove.
 
 Whichever way the run ends — its exit, a timeout, a Stop raised by `on_tick`, or our
 death — the tree is gone afterwards.
@@ -305,7 +307,10 @@ class _WindowsProcess:
 
 class _WindowsTree:
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+    JOB_OBJECT_BASIC_PROCESS_ID_LIST = 3
     JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
+    SYNCHRONIZE = 0x00100000
+    ERROR_MORE_DATA = 234
     EXTENDED_STARTUPINFO_PRESENT = 0x00080000
     CREATE_UNICODE_ENVIRONMENT = 0x00000400
     STARTF_USESTDHANDLES = 0x00000100
@@ -322,6 +327,10 @@ class _WindowsTree:
         self.kernel32.SetInformationJobObject.argtypes = (wintypes.HANDLE, ctypes.c_int,
                                                           wintypes.LPVOID, wintypes.DWORD)
         self.kernel32.TerminateJobObject.argtypes = (wintypes.HANDLE, wintypes.UINT)
+        self.kernel32.QueryInformationJobObject.argtypes = (wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID,
+                                                            wintypes.DWORD, wintypes.LPDWORD)
+        self.kernel32.OpenProcess.restype = wintypes.HANDLE
+        self.kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
         self.kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
         self.kernel32.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
         self.kernel32.WaitForSingleObject.restype = wintypes.DWORD
@@ -486,7 +495,36 @@ class _WindowsTree:
 
     def kill(self):
         if self.job:
-            self.kernel32.TerminateJobObject(self.job, 1)
+            # Termination only begins it: a process has its exit code while it still holds its handles —
+            # the directory it worked in among them, which Windows then refuses to remove. So each process
+            # is taken hold of while still in the job, and the tree is gone, within a bound, on return.
+            members = []
+            try:
+                members = self._members()
+            finally:
+                self.kernel32.TerminateJobObject(self.job, 1)
+            deadline = time.monotonic() + GRACE_SECONDS
+            for handle in members:
+                self.kernel32.WaitForSingleObject(handle, int(max(0.0, deadline - time.monotonic()) * 1000))
+                self.kernel32.CloseHandle(handle)
+
+    def _members(self):
+        """A handle to wait on for each process in the job now; one already gone needs none."""
+        ctypes = self.ctypes
+        from ctypes import wintypes
+        room = 64
+        while True:
+            class IdList(ctypes.Structure):
+                _fields_ = [("assigned", wintypes.DWORD), ("listed", wintypes.DWORD),
+                            ("ids", ctypes.c_size_t * room)]
+            ids = IdList()
+            if self.kernel32.QueryInformationJobObject(self.job, self.JOB_OBJECT_BASIC_PROCESS_ID_LIST,
+                                                       ctypes.byref(ids), ctypes.sizeof(ids), None):
+                break
+            self._check(ctypes.get_last_error() == self.ERROR_MORE_DATA, "QueryInformationJobObject")
+            room = max(room * 2, ids.assigned)
+        handles = (self.kernel32.OpenProcess(self.SYNCHRONIZE, False, pid) for pid in ids.ids[:ids.listed])
+        return [handle for handle in handles if handle]
 
     def close(self):
         if self.job:

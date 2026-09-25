@@ -151,6 +151,22 @@ class ProcessTree(unittest.TestCase):
         pid = self._grandchild()[0]
         self.assertTrue(gone_within(pid, 5), "the grandchild outlived Stop")
 
+    @unittest.skipUnless(WINDOWS, "Windows removes no directory a process still works in")
+    def test_the_tree_is_gone_when_its_end_returns(self):
+        """Ending the tree waits for every process in it: the directory they worked in is free at once, as
+        removing a worktree right after its agent's end needs. Termination alone only begins it."""
+        work = tempfile.mkdtemp(prefix="orch-launch-cwd-", dir=self.tmp)
+        tree = launch._Tree()
+        self.addCleanup(tree.close)
+        tree.start(self._argv("sleep"), work, subprocess.DEVNULL, subprocess.DEVNULL, subprocess.DEVNULL, None)
+        deadline = time.monotonic() + 30
+        while not self._grandchild(optional=True) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        pid = self._grandchild()[0]
+        tree.kill()
+        self.assertFalse(alive(pid), "a process of the tree outlived its end")
+        os.rmdir(work)
+
     def test_the_owners_death_ends_the_whole_tree(self):
         """Killed outright, the process that launched the agent takes the tree with it."""
         owner_script = os.path.join(self.tmp, "owner.py")
