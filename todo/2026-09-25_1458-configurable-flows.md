@@ -177,9 +177,10 @@ this convention keep their wording: in D5 and Q2, D11, D13 and D24 are the archi
 - **A10 [ACTIVE]:** which flow is the default is `policy.json`'s `default_flow`, checked to name a file
   in `flows/`: the policy already owns the defaults of a run, `auto_proceed` among them. Only the client
   reads it, when a new run names no flow (A7).
-- **A11 [RESOLVED by D14]:** a flow without a build ends `DONE` after its last step and never merges: its worktree
-  and branch are kept for the operator, as a stopped run's are, with the Workbench's existing removal
-  (architecture D31); a research brief stays in the run's logs.
+- **A11 [RESOLVED by D14]:** a flow without a build ends `DONE` after its last step and never merges: its
+  worktree and branch are kept for the operator, as a stopped run's are, with the Workbench's existing
+  removal (architecture D31); a research brief stays in the run's state and is mirrored in the logs and
+  the trace.
 - **A12 [ACTIVE]:** `research` is the architect's action, as `assess` and `verify` are, so an engineer's
   work always goes to an architect's review (architecture D4) — owned by the action contract in
   `stages.py` (Decision item 3), where `research` is a work step and not a review.
@@ -290,6 +291,9 @@ this convention keep their wording: in D5 and Q2, D11, D13 and D24 are the archi
   refute it.
 - The history's lesson holds for any order: feedback and guidance stay in the run's state and reach the
   next step's prompt; a flow never carries them on its edges.
+- What a run does on its own is bounded by its steps and `max_rounds`; `policy.validate` gives
+  `max_rounds` no upper limit today — an existing setting this change leaves as it is. Past that, a run
+  grows only by the operator's own answers.
 
 **Assumptions / unverified**
 
@@ -344,7 +348,10 @@ release. Architecture D13 says so by design; the operator has asked for that des
    flags of the agent's command stay with access (`nodes.build_argv`). A flow's `role:action` is checked
    against the contract, never trusted over it. The rules, checked when a flow is read and refused with
    their reason:
-   - known roles and actions, and at least one step;
+   - known roles and actions; at least one step and at most `MAX_FLOW_STEPS`, 32, in `flows.py` — the
+     bound that keeps a run the bounded work one workflow is recommended for (verified evidence), with
+     room to spare over the six to eight steps a flow takes; a flow that ever needs more is the evidence
+     to reconsider continue-as-new or child workflows, not a reason for them now;
    - each step's role is the one the contract gives its action (A12), so a review is never done by the
      role whose work it judges (architecture D3);
    - every `plan` is directly followed by an `assess`, every `build` by a `verify`: an engineer's work
@@ -374,7 +381,8 @@ release. Architecture D13 says so by design; the operator has asked for that des
    still stop, because the run has no way on without the operator.
 8. **A flow without a build (D11, D14):** after its last step the run ends `DONE`; it never merges; its
    worktree and branch are kept for the operator, and removed from the Workbench as a stopped run's are
-   (architecture D31); a research brief stays in the run's logs.
+   (architecture D31); a research brief stays in the run's state and is mirrored in the logs and the
+   trace.
 9. **Reused from Temporal, unchanged (D10):** the run stays one workflow type, `FeatureRun`, whose
    start input carries its flow — recorded in its history and shown in Temporal's web UI; the gates stay
    Updates, a Stop stays cancellation, the Workbench's run list stays Temporal's visibility query, and
@@ -404,6 +412,9 @@ release. Architecture D13 says so by design; the operator has asked for that des
   interpreter reads every flow.
 - **Temporal's dynamic workflows, a type per flow:** for types unknown when a worker registers; every run
   here is one type, and the flow is its input.
+- **Temporal's sample language itself:** activity, sequence and parallel statements, parsed from YAML with
+  `yaml` and `dacite` ([starter](https://github.com/temporalio/samples-python/blob/main/dsl/starter.py))
+  — far more than a strict linear list needs. Its pattern is taken, not its language.
 - **YAML:** easier to read, but a new dependency, and every configuration file here is JSON.
 - **A `flows` key in `policy.json`:** not taken (D7).
 
@@ -432,12 +443,15 @@ release. Architecture D13 says so by design; the operator has asked for that des
     returns as its activity's result and lives in the run's state (A5).
 14. One action contract owns each action's role and whether it is a review; access decides only the
     agent's read-only flags (Decision item 3).
+15. A flow holds from one to `MAX_FLOW_STEPS` steps, so a run stays the bounded work one workflow is
+    meant for (D10).
 
 ## Implementation tasks
 
 0. [x] **The operator's questions** answered: Q1–Q5, closed by D7, D11, D8, D9 and D14.
 1. [ ] **Guards, failing first:** reading and checking `flows/` — both shipped flows accepted, each
-   broken rule refused with its reason; the workflow on the time-skipping server with the fake agents —
+   broken rule refused with its reason, an empty flow and one over `MAX_FLOW_STEPS` among them; the
+   workflow on the time-skipping server with the fake agents —
    `engineer-code` issuing today's sequence, `architect-research` end to end (research returning its brief
    with no verdict parsed and no tree judged, its gate showing the brief, revise back to research,
    approve, a plan whose prompt carries the brief, assess, build, verify, merge), a flow without a build
@@ -447,9 +461,9 @@ release. Architecture D13 says so by design; the operator has asked for that des
    `flows/engineer-code.json` differs from it; the page's Flow list; the CLI's `--flow`.
 2. [ ] **The action contract:** `research` and its ask in `stages.py`, `STAGE_ROLE` extended to it, and a
    mapping of each review to the work it judges; the plan's ask carrying a brief when state holds one.
-3. [ ] **Flows:** `flows/` with its two files and README; `app/foundation/flows.py` reading them and
-   checking each step against the contract; `policy.json`'s `default_flow`; `stage_skills` and
-   `max_rounds` keyed by action.
+3. [ ] **Flows:** `flows/` with its two files and README; `app/foundation/flows.py` reading them,
+   checking each step against the contract and the length against `MAX_FLOW_STEPS`; `policy.json`'s
+   `default_flow`; `stage_skills` and `max_rounds` keyed by action.
 4. [ ] **Start:** `client.start(flow=…)` reads and checks the flow, the default when none is named, and
    puts `{name, steps}` in the start input; the Workbench's run start and its flows read; the CLI's
    `--flow`; `auto_proceed` kept as it is, worded *skip approvals* on the page and in the CLI's help.
@@ -484,6 +498,7 @@ release. Architecture D13 says so by design; the operator has asked for that des
 | a history without a flow replays on `LEGACY_FLOW` while the flow file differs | permanent guard | no flows |
 | an architect's research step returns its brief: no verdict parsed, no tree judged | permanent guard | read access makes it a reviewer; the parse fails |
 | a flow giving an action a role the contract does not is refused | permanent guard | no flows |
+| an empty flow and one of `MAX_FLOW_STEPS` + 1 steps are refused | permanent guard | no flows |
 | `engineer-code` issues today's commands: the eight histories replay | acceptance | passes today; must still pass |
 | the page lists flows and shows the chosen one's steps | permanent guard, in a browser | no Flow list |
 
@@ -571,3 +586,15 @@ the external reviewer's PASS, and a real `architect-research` run in the operato
 - **Refuted:** nothing; the review's claim about Temporal's guidance on child workflows was checked at
   its source.
 - **Next:** the operator's approval, then implementation.
+
+### 2026-09-25 — the external review, second pass: PATCH, two fixes
+
+- **Fixed:** the one-workflow premise is now enforced — a flow holds at most `MAX_FLOW_STEPS`, 32, beside
+  its minimum of one, with a guard for both (invariant 15); A11 and Decision item 8 said the research
+  brief stays in the logs, contradicting A5 and invariant 13 — both now keep it in the run's state,
+  mirrored in the logs and the trace.
+- **Added:** Temporal's sample language rejected in its own right — its pattern is taken, not its
+  language, which the review's claim about it checked out against (activity, sequence and parallel
+  statements; YAML read with `yaml` and `dacite`).
+- **Refuted:** nothing.
+- **Next:** the review's go was on these two fixes; the go to implement is the operator's.
