@@ -379,6 +379,10 @@ still lands on a checkout.
   the operator opens it; its flow with the step it is at, the rounds of each phase with each verdict and
   its feedback and a research step's brief, its change as its target host's git reads it, and links to
   its Temporal and Langfuse pages. The page's address names the run open, so a reload keeps it.
+  A terminal connected again adds only what its record gained — the record only grows, and every
+  connection streams it from its start — so what the operator reads is never drawn again under them; a
+  worker holds a role's terminal only from that role's first turn on it, so after a restart the page
+  connects again once the run reads the role at work, or moves on, never on a timer.
   Each run also says what it is doing now — the stage and role at work, or
   the stop it waits at or the failure it stopped on — since when, and which host's worker it is
   blocked by when one is down, with that worker's start beside it; a run whose workflow worker is

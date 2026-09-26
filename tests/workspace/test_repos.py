@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 # The suite's own folder, reached from this concern's folder inside it, and the
 # checkout above both: the shared harness and the fixtures live at the suite root.
@@ -134,6 +135,33 @@ class Selection(unittest.TestCase):
         detected = repos.select(drive, {"onwindows": {"path": drive}})
         self.assertEqual(detected["target"], "windows" if repos.windows_path(drive) else "wsl")
         self.assertEqual(repos.select(drive, {"onwsl": {"path": drive, "target": "wsl"}})["target"], "wsl")
+
+    def test_a_windows_drive_path_spelled_back_as_wsl_sees_it(self):
+        for path in ("/mnt/e/Projects/Sample", "/mnt/c"):
+            self.assertEqual(repos.wsl_path(repos.windows_path(path)), path)
+        self.assertEqual(repos.wsl_path("E:\\Projects\\Sample\\"), "/mnt/e/Projects/Sample")
+        self.assertIsNone(repos.wsl_path("/home/user/repos/x"))
+        self.assertIsNone(repos.wsl_path("\\\\server\\share\\x"))
+
+    def test_a_runs_repository_chosen_again_by_its_name_only_while_its_entry_is_still_that_repository(self):
+        """What the Workbench's Worktrees view opens for a run: the repository the run chose, never another
+        of its name."""
+        listed = {"tool": {"path": self.tmp}}
+        self.assertEqual(repos.selector("tool", self.tmp, "wsl", listed), "tool")
+        # A repository given by its path is named for its folder, a name repos.json may give another, or none.
+        elsewhere = os.path.join(self.tmp, "elsewhere", "tool")
+        self.assertEqual(repos.selector("tool", elsewhere, "wsl", listed), elsewhere)
+        self.assertEqual(repos.selector("tool", self.tmp, "wsl", {}), self.tmp)
+        # A Windows run's path is in its host's spelling; `select` takes the client's.
+        self.assertEqual(repos.selector("sample", "E:\\Projects\\Sample", "windows", {}), "/mnt/e/Projects/Sample")
+        # A repos.json that cannot be read cannot vouch for the name; the path still names the repository.
+        with unittest.mock.patch.object(repos, "load", side_effect=repos.Refused("repos.json is broken")):
+            self.assertEqual(repos.selector("tool", self.tmp, "wsl"), self.tmp)
+
+    @unittest.skipIf(WINDOWS, "the client, which chooses a run's repository, runs on WSL")
+    def test_a_windows_runs_listed_repository_chosen_again_by_its_name(self):
+        entry = {"sample": {"path": "/mnt/e/Projects/Sample"}}
+        self.assertEqual(repos.selector("sample", "E:\\Projects\\Sample", "windows", entry), "sample")
 
     def test_a_windows_target_on_a_linux_path_is_refused(self):
         """A Windows process cannot use a Linux path as its working directory."""

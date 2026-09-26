@@ -350,6 +350,11 @@ def make_handler(call, policy, token, links=None):
                                                      "closed": None, "task_queue": None},
                                        None if unreadable else status, health)
             status["view"]["kept"] = not unreadable and runs.not_kept(execution, status, removal) is None
+            if status["view"]["kept"]:
+                # What its Worktrees view is opened on: the repository as the worktree view takes it again.
+                state = status["state"]
+                status["view"]["worktrees_of"] = repos.selector(state.get("repo"), state.get("repo_path"),
+                                                                state.get("target"))
             trace_id = status["state"].get("trace_id")
             status["links"] = {"temporal": "%s/namespaces/%s/workflows/%s" % (TEMPORAL_UI, runs.NAMESPACE, run_id),
                                "trace": links(trace_id) if links and trace_id else None}

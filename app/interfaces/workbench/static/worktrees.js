@@ -2,18 +2,20 @@
 
 import { api } from "./api.js";
 import { $, code, confirmAction, copyButton, el, report, wrote } from "./ui.js";
-import { chooseListed, reposRead, sourceChoice } from "./picker.js";
+import { chooseListed, choosePath, reposRead, sourceChoice } from "./picker.js";
 
 const chosenRepo = sourceChoice("worktrees");
 // What each state means, beside it.
 const MEANS = { base: "the base branch itself", merged: "nothing in it the base lacks",
   unmerged: "commits the base lacks", uncommitted: "changes not yet committed", detached: "on no branch" };
 
-// The view `#worktrees`, or `#worktrees=<repo>` with that listed repository's worktrees read at once.
+// The view `#worktrees`, or `#worktrees=<repo>` with that repository's worktrees read at once: a name the
+// list offers chosen from it, anything else given as its path.
 export async function openWorktrees(repo) {
   if (!repo) return;
   await reposRead();
-  chooseListed("worktrees", repo);
+  if ([...$("worktrees-repo").options].some((option) => option.value === repo)) chooseListed("worktrees", repo);
+  else choosePath("worktrees", repo);
   loadWorktrees();
 }
 
@@ -73,20 +75,23 @@ $("worktrees-form").onsubmit = (event) => {
 };
 
 // What a closed run kept — its worktree and branch, unmerged — removed through its host's own git, once
-// the operator confirms it.
-export async function removeKept(runId, line, then, button) {
+// the operator confirms it. What came of it is said at `line`, and `then` follows, only while `here` holds:
+// while the page still shows what it was asked from.
+export async function removeKept(runId, line, then, button, here = () => true) {
   const go = await confirmAction({ title: "Remove this run's worktree and branch?",
     body: "Remove deletes run " + runId + "'s worktree and its branch, with any of its work that is not merged.",
     confirm: "Remove", danger: true, returnTo: button });
-  if (!go) return;
+  if (!go || !here()) return;
   report(line, "sending…");
   try {
     await api("/api/runs/" + encodeURIComponent(runId) + "/remove", { confirm: true });
-    report(line, "removed");
   } catch (error) {
-    report(line, "not accepted: " + error.message, true);
+    if (here()) report(line, "not accepted: " + error.message, true);
     return;
   }
-  then();
+  if (here()) {
+    report(line, "removed");
+    then();
+  }
   wrote();
 }

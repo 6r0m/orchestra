@@ -109,7 +109,8 @@ export async function refreshRun() {
   showTerminals(runId, state.target);
   // A failed step's terminal is where its failure shows.
   const failedRole = view.state === "failed" && state.current ? state.current.role : null;
-  updateTerminals(view.state !== "closed", view.role || failedRole || null);
+  updateTerminals({ open: view.state !== "closed", shown: view.role || failedRole || null, working: view.role || null,
+    since: view.since || null });
 }
 
 // ---- what the run is --------------------------------------------------------------------------
@@ -220,17 +221,18 @@ function renderControls(view) {
 
 async function lifecycle(kind, button) {
   const control = LIFECYCLE[kind];
-  // The run asked about is the run the answer goes to, whatever the page opens meanwhile.
+  // The run asked about is the run the answer goes to, whatever the page opens meanwhile, and the only run
+  // its result is said on.
   const runId = selected;
   if (!(await confirmAction({ ...control, returnTo: button })) || runId !== selected) return;
   report($("run-control-result"), "sending…");
   try {
     await api("/api/runs/" + encodeURIComponent(runId) + "/" + kind, control.sent || {});
-    report($("run-control-result"), control.said);
   } catch (error) {
-    report($("run-control-result"), "not accepted: " + error.message, true);
+    if (runId === selected) report($("run-control-result"), "not accepted: " + error.message, true);
     return;
   }
+  if (runId === selected) report($("run-control-result"), control.said);
   wrote();
 }
 $("run-stop").onclick = () => lifecycle("stop", $("run-stop"));
@@ -239,11 +241,13 @@ $("run-terminate").onclick = () => lifecycle("terminate", $("run-terminate"));
 // What a closed run kept — its worktree and branch, unmerged — until the operator removes them.
 function renderKept(runId, view) {
   $("run-kept").hidden = !view.kept;
-  if (!view.kept || unchanged($("run-kept"), [runId, view.worktree, view.repo])) return;
+  if (!view.kept || unchanged($("run-kept"), [runId, view.worktree, view.worktrees_of])) return;
   $("run-kept-text").replaceChildren("It keeps its worktree ", code(view.worktree), " and its branch ", code(runId),
     ". Read its change, then remove them once you are done with them.");
-  $("run-kept-show").href = "#worktrees=" + encodeURIComponent(view.repo);
-  $("run-remove").onclick = () => removeKept(runId, $("run-kept-result"), refreshRun, $("run-remove"));
+  // Its repository as the Worktrees view takes it: its repos.json name, or its path.
+  $("run-kept-show").href = "#worktrees=" + encodeURIComponent(view.worktrees_of);
+  $("run-remove").onclick = () => removeKept(runId, $("run-kept-result"), refreshRun, $("run-remove"),
+    () => runId === selected);
 }
 
 // ---- the decision ---------------------------------------------------------------------------
@@ -326,11 +330,13 @@ async function answer(stop, action, button) {
   for (const id of ["stop-note-alert", "stop-alert"]) $(id).textContent = "";
   for (const each of $("stop-actions").children) each.disabled = true;
   $("stop-result").textContent = "sending…";
+  // What came of it is said only where it was asked — this run, at this stop — never on whatever the page
+  // shows when the answer comes back.
+  const here = () => runId === selected && shownStop === stop.id;
   try {
     await api("/api/runs/" + encodeURIComponent(runId) + "/answer", body);
-    drafts.delete(stop.id);
-    $("stop-result").textContent = "answered: " + action;
   } catch (error) {
+    if (!here()) return;
     $("stop-result").textContent = "";
     // A refusal is said beside what it concerns: at the note for an answer the note is sent with.
     if (WORDED[action]) {
@@ -342,6 +348,8 @@ async function answer(stop, action, button) {
     for (const each of $("stop-actions").children) each.disabled = false;
     return;
   }
+  drafts.delete(stop.id);
+  if (here()) $("stop-result").textContent = "answered: " + action;
   wrote();
 }
 

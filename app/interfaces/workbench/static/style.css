@@ -84,7 +84,7 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--you); width: 1
   padding: 0 20px; background: var(--ground); border-bottom: 1px solid var(--rule); }
 .brand { font-weight: 700; font-size: 15px; text-decoration: none; letter-spacing: 0.01em; white-space: nowrap; }
 .brand span { font-weight: 400; color: var(--quiet); }
-.stack-button { anchor-name: --stack; background: transparent; border-color: var(--rule); min-height: 34px; }
+.stack-button { anchor-name: --stack; background: transparent; min-height: 34px; }
 .chips { display: inline-flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
 .chip { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-weight: 500; }
 .chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--pass); }
@@ -239,11 +239,11 @@ main:focus { outline: none; }
 .agents { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .agents h2, .history h2 { font-size: 14px; color: var(--quiet); }
 .terminal { border: 1px solid var(--rule); border-radius: 8px; background: var(--surface); }
-.terminal > summary { display: flex; gap: 12px; align-items: baseline; padding: 9px 14px; cursor: pointer; }
+.terminal > summary { padding: 9px 14px; cursor: pointer; }
 .terminal > summary:hover { background: var(--raised); }
 summary:hover { color: var(--ink); }
 .terminal > summary .role { font-weight: 600; }
-.term-state { color: var(--quiet); font-size: 13px; }
+.term-state { margin-left: 12px; color: var(--quiet); font-size: 13px; }
 .term { padding: 8px; background: #000; overflow-x: auto; border-radius: 0 0 8px 8px; }
 
 /* History: every round, its verdict and its words, kept whole. */
@@ -276,21 +276,30 @@ summary:hover { color: var(--ink); }
   overflow-wrap: anywhere; }
 .worktrees .gloss { display: block; color: var(--quiet); font-size: 12px; }
 
-/* The repository picker: a menu of owners, opening to the right. */
+/* The repository picker: a menu of owners, each list as wide as its names. An owner's list opens beside its
+   row — to the right, else to the left — and under the row where neither side has room: the browser tries
+   each placement in turn and keeps the first that fits the window, above the row if below does not. */
 .picker { position: relative; }
 .picker-button { width: 100%; justify-content: space-between; background: var(--surface); font-weight: 400; }
 .picker-button::after { content: "\25BE" / ""; color: var(--quiet); }
 .menu { list-style: none; margin: 0; padding: 4px 0; position: absolute; left: 0; top: 100%; z-index: 30;
-  min-width: 100%; background: var(--raised); border: 1px solid var(--control); border-radius: 8px;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4); }
-.menu li { position: relative; }
+  min-width: 180px; max-width: 100%; background: var(--raised); border: 1px solid var(--control);
+  border-radius: 8px; box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4); }
 .menu li.muted { padding: 5px 12px; white-space: nowrap; color: var(--quiet); }
 .menu button { width: 100%; border: 0; border-radius: 0; background: none; justify-content: flex-start;
   white-space: nowrap; font-weight: 400; min-height: 30px; }
 .menu button:hover, .menu button:focus-visible, .menu .owner:hover > button, .menu .owner:focus-within > button {
   background: #26303b; }
+/* A repository's name cut short, not spilled, where its list is narrower than it; its title holds it whole. */
+.menu li:not(.owner) > button { display: block; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+.menu .owner { anchor-scope: --owner; }
+.menu .owner > button { anchor-name: --owner; }
 .menu .owner > button::after { content: "\25B8" / ""; margin-left: auto; padding-left: 16px; color: var(--quiet); }
-.menu .menu { display: none; left: 100%; top: -5px; min-width: 180px; }
+.menu .menu { display: none; position: fixed; left: auto; top: auto; max-width: calc(100vw - 32px);
+  position-anchor: --owner; position-area: inline-end span-block-end; margin-block-start: -5px;
+  position-try-fallbacks: flip-inline, flip-block, flip-block flip-inline, --under, --under flip-block; }
+/* Under its row the list may narrow to the room there, the last place it can go. */
+@position-try --under { position-area: block-end span-inline-end; margin: 0; max-width: 100%; }
 .menu .owner:hover > .menu, .menu .owner:focus-within > .menu { display: block; }
 
 /* The page's own confirmation. */

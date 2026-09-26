@@ -59,8 +59,8 @@ the page's address names the run open, so a reload keeps it and a new tab opens 
 
 *New run* opens the form that starts one — and with no runs at all, the page opens on it: on a
 repository named in `repos.json` — its menu reads the file again each time it is opened, and a name that
-carries its owners, `work/platform/service`, is found under `work`, then `platform`, each opening to the
-right as you hover it — or on any other one given as its path as WSL sees it (`/mnt/e/...` for a Windows
+carries its owners, `work/platform/service`, is found under `work`, then `platform`, each opening in
+view as you hover it — or on any other one given as its path as WSL sees it (`/mnt/e/...` for a Windows
 drive); only the one chosen is sent. The task's first words name the run and its branch. It follows the
 flow chosen in its Flow list, whose steps show under it: `engineer-code`, the default — `default_flow`
 in `policy.json` — has the engineer plan from the code; `architect-research` has the architect research
@@ -86,10 +86,11 @@ answers are the stop's own, as buttons. The note is labelled with the answers it
 note typed for a stop stays while you look at other runs; an answer the workflow refuses is said
 beside what it concerns, and a merge or a discard asks first.
 
-Both roles' terminals follow, the one at work open and an idle one closed until you open it. Each is
-the vendor's own CLI: press Esc to interrupt a working agent, type to steer it. The history keeps every
-round with its verdict and its words — closed there when the decision already shows them — and a large
-change is read in parts, a press each.
+Both roles' terminals follow, the one at work open and an idle one closed until you open it. Each is the
+vendor's own CLI: press Esc to interrupt a working agent, type to steer it. What you read in one is
+never drawn again under you: after its worker restarts it keeps its record until its role's next turn,
+which it then adds to. The history keeps every round with its verdict and its words — closed there when
+the decision already shows them — and a large change is read in parts, a press each.
 
 *Stop run* and *Force terminate* come after the decision, and while a run is stopping only *Force
 terminate* is offered. *Stop run* ends a run from whatever it is doing — an agent at work, a stop

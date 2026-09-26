@@ -15,7 +15,8 @@ merge is held in a git hook — and once let go, with its worker still running, 
 termination cannot stop what a host is already doing. Then the worker goes down while an engineer
 works: its stage's settings go with it, the run says it is blocked by it, the run's own button starts
 it again, and the failed stage is continued. A restart of the worker while a run waits leaves the run
-waiting, and that run is discarded. What the run stopped at its approval kept is removed. The demo's
+waiting, and its engineer's terminal, open on its record, is never drawn again until the engineer's next
+turn reaches it; that run is discarded. What the run stopped at its approval kept is removed. The demo's
 worker is stopped from its Workbench, and everything it made is removed, its runs, the reads of their
 changes and the removal from Temporal too: the Workbench lists every run Temporal retains.
 
@@ -494,7 +495,11 @@ class Demo:
         check(state == "up" and pid != before and not alive(before), "a new worker, pid %s, polls" % pid)
         view = self.until(discarded, lambda view: view["state"] == "waiting", 60, "the run read again")
         check(view["stop"]["reason"] == "approval", "the run still waits at its approval")
-        check(self.press(discarded, "Approve", "answered: approve"), "approved")
+        # Its engineer's terminal, read while the new worker holds none for it: left open past the page's old
+        # retry, which drew it again from its record, and reached again by the engineer's next turn.
+        check(self.press(discarded, "hold:engineer:Approve", "answered: approve"),
+              "approved, the engineer's recorded terminal open: never drawn again while it waited, its "
+              "selection kept, and its next turn added to it")
         view = self.until(discarded, lambda view: view["state"] == "waiting" and view["stop"]["reason"] == "final",
                           300, "the final gate")
         check(self.press(discarded, "Discard", "answered: discard"), "Discard pressed, confirmed")

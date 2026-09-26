@@ -700,6 +700,10 @@ class Runs(Scenario):
 
         self.assertEqual(request("POST", "/api/runs/%s/stop" % run_id, {})[0], 200)
         self.wait_for(run_id, lambda body: body["view"]["state"] == "closed")
+        view = request("GET", "/api/runs/%s" % run_id)[1]["view"]
+        # What its Worktrees view opens: a repository given by its path, by the path its host resolved — never
+        # by the name of its folder, which repos.json may give another repository.
+        self.assertEqual((view["kept"], view["worktrees_of"]), (True, "/fake/repo"))
         rows = request("GET", "/api/worktrees?repo=" + urllib.parse.quote(self.repo))[1]["rows"]
         self.assertEqual([(row["run"], row["removable"]) for row in rows], [("CANCELED", True), (None, False)])
         bounds, saved = [], runs.status

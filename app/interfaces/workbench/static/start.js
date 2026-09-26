@@ -66,6 +66,9 @@ $("start").onsubmit = async (event) => {
     report($("start-result"), "Choose a repository, or give its path.", true);
     return;
   }
+  // The run started opens only while the page is still where it was started from: an operator who moved
+  // on meanwhile stays where they went, and finds it in the list.
+  const from = location.hash;
   button.disabled = true;
   report($("start-result"), "starting…");
   try {
@@ -74,7 +77,7 @@ $("start").onsubmit = async (event) => {
     report($("start-result"), "started " + started.run_id);
     $("start-task").value = "";
     wrote();
-    location.hash = "#run=" + encodeURIComponent(started.run_id);
+    if (location.hash === from) location.hash = "#run=" + encodeURIComponent(started.run_id);
   } catch (error) {
     report($("start-result"), "refused: " + error.message, true);
   } finally {

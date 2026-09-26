@@ -1,6 +1,6 @@
 // The repositories of repos.json, each list a menu of their owners: a name that carries its owners —
-// `work/platform/service` — is found under `work`, then `platform`, each opening to the right as it is
-// hovered or reached with Tab. A list stays the <select> its form reads, behind the button that opens it.
+// `work/platform/service` — is found under `work`, then `platform`, each opening as it is hovered or
+// reached with Tab. A list stays the <select> its form reads, behind the button that opens it.
 
 import { api } from "./api.js";
 import { $, el } from "./ui.js";
@@ -35,6 +35,7 @@ function repoMenu(node, choose) {
     const button = el("button", repo.id.split("/").pop() + " (" + repo.target + ")");
     button.type = "button";
     button.translate = false;
+    button.title = repo.id;
     button.onclick = () => choose(repo.id);
     const item = el("li");
     item.appendChild(button);
@@ -99,6 +100,14 @@ export function chooseListed(prefix, id) {
   listed.checked = true;
   listed.onchange();
   setRepo($(prefix + "-repo"), id);
+}
+
+// Chooses the repository at `path`, given as its path.
+export function choosePath(prefix, path) {
+  const byPath = $(prefix + "-source").querySelector("input[value='path']");
+  byPath.checked = true;
+  byPath.onchange();
+  $(prefix + "-path").value = path;
 }
 
 async function loadRepos() {

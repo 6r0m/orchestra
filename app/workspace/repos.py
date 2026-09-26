@@ -39,6 +39,7 @@ NULLABLE = {"todo_done_dir"}
 # then the remote's default branch.
 BASE_CANDIDATES = ("develop", "dev")
 _DRIVE = re.compile(r"^/mnt/([a-zA-Z])(/.*)?$")
+_WINDOWS_DRIVE = re.compile(r"^([a-zA-Z]):(?:[\\/](.*))?$")
 UNC_REASON = ("a Windows process given a Linux path as its working directory silently runs "
               "in C:\\Windows instead")
 
@@ -84,6 +85,35 @@ def windows_path(path):
     if not found:
         return None
     return "%s:%s" % (found.group(1).upper(), (found.group(2) or "/").replace("/", "\\"))
+
+
+def wsl_path(path):
+    """The WSL form of a path on a Windows drive, `windows_path` reversed; None for any other path."""
+    found = _WINDOWS_DRIVE.match(path)
+    if not found:
+        return None
+    rest = (found.group(2) or "").replace("\\", "/").strip("/")
+    return "/mnt/%s" % found.group(1).lower() + ("/" + rest if rest else "")
+
+
+def selector(name, path, target, descriptors=None):
+    """What `select` takes to choose again the repository a run chose as `name` and resolved to `path` on
+    `target`: that name while its entry in repos.json is still that repository, else the path as WSL sees it.
+
+    The name alone is not enough: a repository given by its path is named for its folder, a name repos.json
+    may give another repository, or none.
+    """
+    if not path:
+        return name
+    if target == "windows":
+        path = wsl_path(path) or path
+    try:
+        descriptors = load() if descriptors is None else descriptors
+    except (OSError, ValueError):
+        # A repos.json that cannot be read cannot say the name is still this repository's; the path can.
+        descriptors = {}
+    entry = descriptors.get(name)
+    return name if entry and os.path.abspath(entry["path"]) == path else path
 
 
 def select(repo=None, descriptors=None):
