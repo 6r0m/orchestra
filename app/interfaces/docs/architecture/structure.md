@@ -24,7 +24,7 @@ print, serve and exit. The page holds no state of its own.
 | `cli.py` | the command line over the shared client and the stack's owner |
 | `worker.py` | this host's Temporal worker and the queues it polls |
 | `workbench/server.py` | the page's HTTP server and its small JSON API |
-| `workbench/static/` | the page itself: HTML, CSS, JavaScript and a pinned xterm.js |
+| `workbench/static/` | the page itself: HTML, CSS, its JavaScript as native modules — the stack, the runs, a new run, the run open with its terminals and its change, the worktrees, and `app.js` their entry — and a pinned xterm.js |
 | `workbench/orchestra-workbench.service` | the systemd user unit the page runs as, rendered for a checkout by `make workbench-install` |
 
 ## Relationships

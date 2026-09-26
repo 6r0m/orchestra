@@ -38,9 +38,22 @@ from app.agents import terminal
 # The page is this server's own, served from beside it.
 PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 TEMPORAL_UI = os.environ.get("TEMPORAL_UI", "http://localhost:8080")
-STATIC = {"/": ("index.html", "text/html; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+JS = "text/javascript; charset=utf-8"
+# Every file the page loads, and nothing else: its modules each by name, served as the type a browser runs.
+STATIC = {"/": ("index.html", "text/html; charset=utf-8"),
           "/style.css": ("style.css", "text/css; charset=utf-8"),
-          "/vendor/xterm.js": ("vendor/xterm/xterm.js", "text/javascript; charset=utf-8"),
+          "/app.js": ("app.js", JS),
+          "/api.js": ("api.js", JS),
+          "/ui.js": ("ui.js", JS),
+          "/stack.js": ("stack.js", JS),
+          "/picker.js": ("picker.js", JS),
+          "/start.js": ("start.js", JS),
+          "/rail.js": ("rail.js", JS),
+          "/run.js": ("run.js", JS),
+          "/change.js": ("change.js", JS),
+          "/terminals.js": ("terminals.js", JS),
+          "/worktrees.js": ("worktrees.js", JS),
+          "/vendor/xterm.js": ("vendor/xterm/xterm.js", JS),
           "/vendor/xterm.css": ("vendor/xterm/xterm.css", "text/css; charset=utf-8")}
 RUN_ID = re.compile(r"^[\w-]{1,64}$")
 MAX_BODY = 1 << 20

@@ -3,110 +3,236 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Orchestration workbench</title>
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#101419">
+<title>Orchestra Workbench</title>
 <link rel="stylesheet" href="/vendor/xterm.css">
 <link rel="stylesheet" href="/style.css">
 <script id="config" type="application/json">{{CONFIG}}</script>
 </head>
 <body>
-<header class="bar">
-  <h1>Orchestration workbench</h1>
-  <span id="connection" class="muted"></span>
+<a class="skip" id="skip" href="#main">Skip to the main view</a>
+<header class="top" id="top">
+  <a class="brand" href="#" translate="no">Orchestra <span>Workbench</span></a>
+  <button type="button" class="stack-button" id="stack-button" popovertarget="stack-panel"
+    aria-describedby="stack-button-hint"><span class="chips" id="stack-chips">Reading the stack…</span></button>
+  <span class="visually-hidden" id="stack-button-hint">Opens the stack's controls</span>
+  <div class="panel" id="stack-panel" popover="auto" aria-labelledby="stack-panel-title">
+    <h2 id="stack-panel-title">The stack</h2>
+    <p class="hint">Temporal holds every run; each host's worker runs that host's agents. Stopping or
+      restarting a part asks first, and says what it interrupts.</p>
+    <div class="parts" id="stack-parts"></div>
+    <div class="stack-all" id="stack-all"></div>
+  </div>
+  <nav class="top-nav" aria-label="Views">
+    <a href="#worktrees" id="nav-worktrees">Worktrees</a>
+    <a class="button primary" href="#new" id="nav-new">New run</a>
+  </nav>
 </header>
-<section id="stack" class="card stack-panel">
-  <div id="stack-parts" class="stack-parts"></div>
-  <div id="stack-all" class="actions"></div>
-  <p id="stack-result" class="muted"></p>
-</section>
-<main class="layout">
-  <aside class="sidebar">
-    <form id="start" class="card">
-      <h2>Start a run</h2>
-      <label>Task <textarea id="start-task" rows="4" required placeholder="What should be done"></textarea></label>
-      <label>Repository <select id="start-repo"></select></label>
-      <label>or its path <input id="start-path" type="text" placeholder="/mnt/e/Repos/name"></label>
-      <label>Flow <select id="start-flow"></select></label>
-      <p id="start-flow-steps" class="muted"></p>
-      <label class="inline"><input type="checkbox" id="start-auto"> skip approvals</label>
-      <button type="submit">Start</button>
-      <p id="start-result" class="muted"></p>
-    </form>
-    <section>
-      <h2>Needs you</h2>
-      <ul id="runs-waiting" class="runs"></ul>
-      <h2>Running</h2>
-      <ul id="runs-running" class="runs"></ul>
-      <h2>Finished</h2>
-      <ul id="runs-finished" class="runs"></ul>
-      <button id="runs-older" type="button" hidden>Load older runs</button>
+<div class="banners" id="banners">
+  <p class="result stack-result" id="stack-result" role="status"></p>
+  <p class="banner bad" id="connection" hidden></p>
+</div>
+<div class="layout">
+  <nav class="rail" aria-label="Runs">
+    <section class="group" aria-labelledby="runs-waiting-title">
+      <h2 id="runs-waiting-title">Needs you <span class="count" id="runs-waiting-count"></span></h2>
+      <ul class="runs" id="runs-waiting"></ul>
     </section>
-    <section>
-      <h2>Worktrees <button id="worktrees-load" type="button">Show</button></h2>
-      <label>Repository <select id="worktrees-repo"></select></label>
-      <label>or its path <input id="worktrees-path" type="text" placeholder="/mnt/e/Repos/name"></label>
-      <p id="worktrees-base" class="muted"></p>
-      <ul id="worktrees" class="runs"></ul>
-      <p id="worktrees-result" class="muted"></p>
+    <section class="group" aria-labelledby="runs-running-title">
+      <h2 id="runs-running-title">Working <span class="count" id="runs-running-count"></span></h2>
+      <ul class="runs" id="runs-running"></ul>
     </section>
-  </aside>
-  <section id="run" class="content" hidden>
-    <div class="card">
-      <h2 id="run-task"></h2>
-      <p id="run-meta" class="muted"></p>
-      <p id="run-flow" class="muted"></p>
-      <p id="run-now"></p>
-      <div id="run-controls" class="actions" hidden>
-        <button id="run-stop" type="button">Stop run</button>
-        <button id="run-terminate" type="button" class="danger">Force terminate</button>
-      </div>
-      <div id="run-blocked" class="actions" hidden></div>
-      <div id="run-kept" hidden>
-        <p id="run-kept-text" class="muted"></p>
-        <div class="actions">
-          <button id="run-kept-show" type="button">Show in Worktrees</button>
-          <button id="run-remove" type="button" class="danger">Remove worktree and branch</button>
+    <section class="group" aria-labelledby="runs-finished-title">
+      <h2 id="runs-finished-title">Finished</h2>
+      <ul class="runs" id="runs-finished"></ul>
+      <button type="button" class="quiet" id="runs-older" hidden>Load older runs</button>
+    </section>
+  </nav>
+  <main id="main" tabindex="-1">
+    <section class="view empty" id="view-empty" hidden aria-labelledby="empty-title">
+      <h1 id="empty-title">Select a run</h1>
+      <p id="empty-said">Reading the runs…</p>
+    </section>
+
+    <section class="view" id="view-new" hidden aria-labelledby="new-title">
+      <h1 id="new-title">Start a run</h1>
+      <form class="form" id="start" autocomplete="off">
+        <div class="field">
+          <label for="start-task">Task</label>
+          <textarea id="start-task" name="task" rows="4" required
+            placeholder="Rename the flaky retry helper and cover it with a regression test…"
+            aria-describedby="start-task-hint"></textarea>
+          <p class="hint" id="start-task-hint">Say what should be true when it is done. Its first words name
+            the run and its branch.</p>
         </div>
+        <fieldset class="field source" id="start-source">
+          <legend>Repository</legend>
+          <div class="choices">
+            <label><input type="radio" name="start-source" value="listed" checked> From repos.json</label>
+            <label><input type="radio" name="start-source" value="path"> A path</label>
+          </div>
+          <div class="source-listed"><select id="start-repo" name="repo" aria-label="Repository"></select></div>
+          <div class="source-path" hidden>
+            <input id="start-path" name="path" type="text" spellcheck="false" aria-label="Repository path"
+              placeholder="/mnt/e/Repos/name…" aria-describedby="start-path-hint">
+            <p class="hint" id="start-path-hint">As WSL sees it: <span translate="no">/mnt/e/…</span> for a
+              Windows drive.</p>
+          </div>
+        </fieldset>
+        <div class="field">
+          <label for="start-flow">Flow</label>
+          <select id="start-flow" name="flow" aria-describedby="start-flow-hint"></select>
+          <ol class="score compact" id="start-flow-steps" aria-label="The flow's steps"></ol>
+          <p class="hint" id="start-flow-hint">The order the roles work in, and where you approve. Each flow is
+            a file in <span translate="no">flows/</span>; the list reads them again each time it opens.</p>
+        </div>
+        <div class="field">
+          <label class="check"><input type="checkbox" id="start-auto" name="auto_proceed"> Skip approvals</label>
+          <p class="hint">Skips each “you approve” step of the flow. A blocker, a spent round budget, a failed
+            step and the merge still wait for you.</p>
+        </div>
+        <div class="form-end">
+          <button type="submit" class="primary">Start run</button>
+          <p class="result" id="start-result" role="status"></p>
+        </div>
+      </form>
+    </section>
+
+    <section class="view" id="view-worktrees" hidden aria-labelledby="worktrees-title">
+      <h1 id="worktrees-title">Worktrees</h1>
+      <p class="lead">Every worktree of a repository, and whether its work is merged. What a closed run kept can
+        be removed here.</p>
+      <form class="form inline" id="worktrees-form" autocomplete="off">
+        <fieldset class="field source" id="worktrees-source">
+          <legend>Repository</legend>
+          <div class="choices">
+            <label><input type="radio" name="worktrees-source" value="listed" checked> From repos.json</label>
+            <label><input type="radio" name="worktrees-source" value="path"> A path</label>
+          </div>
+          <div class="source-listed"><select id="worktrees-repo" name="repo" aria-label="Repository"></select></div>
+          <div class="source-path" hidden>
+            <input id="worktrees-path" name="path" type="text" spellcheck="false" aria-label="Repository path"
+              placeholder="/mnt/e/Repos/name…">
+          </div>
+        </fieldset>
+        <div class="form-end">
+          <button type="submit" id="worktrees-load">Show worktrees</button>
+        </div>
+      </form>
+      <p class="hint" id="worktrees-base"></p>
+      <div class="table-wrap">
+        <table class="worktrees" id="worktrees-table" hidden>
+          <thead><tr><th scope="col">Branch</th><th scope="col">State</th><th scope="col">Run</th>
+            <th scope="col">Path</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+          <tbody id="worktrees"></tbody>
+        </table>
       </div>
-      <p id="run-control-result" class="muted"></p>
-      <p class="links"><a id="link-temporal" target="_blank" rel="noopener">Temporal</a>
-        <a id="link-trace" target="_blank" rel="noopener">Langfuse trace</a></p>
-    </div>
-    <div id="stop" class="card stop" hidden>
-      <h2 id="stop-title"></h2>
-      <p id="stop-hint" class="muted"></p>
-      <p id="stop-todo" class="muted"></p>
-      <pre id="stop-feedback" class="text"></pre>
-      <label>Your note <textarea id="stop-note" rows="3" placeholder="Feedback or guidance for the action that needs it"></textarea></label>
-      <div id="stop-actions" class="actions"></div>
-      <p id="stop-result" class="muted"></p>
-    </div>
-    <div class="terminals">
-      <div class="terminal-card">
-        <h3>engineer <span id="state-engineer" class="muted"></span></h3>
-        <div id="term-engineer" class="term"></div>
+      <p class="result" id="worktrees-result" role="status"></p>
+    </section>
+
+    <article class="view run" id="run" hidden aria-labelledby="run-task">
+      <header class="run-head">
+        <h1 id="run-task"></h1>
+        <dl class="facts" id="run-facts"></dl>
+        <ol class="score" id="run-score" aria-label="Its flow"></ol>
+        <p class="now" id="run-now"></p>
+        <div class="notice bad" id="run-blocked" hidden>
+          <p id="run-blocked-said"></p>
+          <div class="actions" id="run-blocked-actions"></div>
+          <p class="result" id="run-blocked-result" role="status"></p>
+        </div>
+      </header>
+
+      <section class="decision" id="stop" hidden aria-labelledby="stop-title">
+        <h2 id="stop-title"></h2>
+        <p class="hint" id="stop-hint"></p>
+        <div class="evidence" id="stop-evidence"></div>
+        <div class="field" id="stop-note-field">
+          <label for="stop-note" id="stop-note-label">Your note</label>
+          <textarea id="stop-note" name="note" rows="3" autocomplete="off"></textarea>
+          <p class="alert" id="stop-note-alert" role="alert"></p>
+        </div>
+        <div class="actions" id="stop-actions"></div>
+        <p class="alert" id="stop-alert" role="alert"></p>
+        <p class="result" id="stop-result" role="status"></p>
+      </section>
+
+      <section class="change" id="change" hidden aria-labelledby="change-title">
+        <div class="section-head">
+          <h2 id="change-title">Change</h2>
+          <button type="button" id="diff-load">Read the change</button>
+          <p class="result" id="change-result" role="status"></p>
+        </div>
+        <p class="hint" id="change-said"></p>
+        <pre class="stat" id="diff-summary"></pre>
+        <pre class="patch" id="diff-patch" tabindex="0" aria-label="The change's patch"></pre>
+        <button type="button" id="diff-more" hidden></button>
+      </section>
+
+      <div class="controls" id="run-controls" hidden>
+        <button type="button" id="run-stop">Stop run</button>
+        <button type="button" class="danger quiet" id="run-terminate">Force terminate</button>
+        <p class="hint" id="run-controls-hint"></p>
+        <p class="result" id="run-control-result" role="status"></p>
       </div>
-      <div class="terminal-card">
-        <h3>architect <span id="state-architect" class="muted"></span></h3>
-        <div id="term-architect" class="term"></div>
-      </div>
+
+      <section class="kept" id="run-kept" hidden aria-label="What it kept">
+        <p id="run-kept-text"></p>
+        <div class="actions">
+          <a class="button" id="run-kept-show">Show in Worktrees</a>
+          <button type="button" class="danger" id="run-remove">Remove worktree and branch</button>
+        </div>
+        <p class="result" id="run-kept-result" role="status"></p>
+      </section>
+
+      <section class="agents" id="agents" aria-labelledby="agents-title">
+        <h2 id="agents-title">Terminals</h2>
+        <details class="terminal" id="terminal-engineer" data-role="engineer">
+          <summary><span class="role engineer">engineer</span><span class="term-state" id="state-engineer"></span></summary>
+          <div class="term" id="term-engineer"></div>
+        </details>
+        <details class="terminal" id="terminal-architect" data-role="architect">
+          <summary><span class="role architect">architect</span><span class="term-state" id="state-architect"></span></summary>
+          <div class="term" id="term-architect"></div>
+        </details>
+      </section>
+
+      <section class="history" id="history" aria-labelledby="history-title">
+        <h2 id="history-title">History</h2>
+        <div id="timeline"></div>
+        <details class="legend">
+          <summary>What the verdicts mean</summary>
+          <dl>
+            <dt><span class="verdict PASS">PASS</span></dt><dd>The architect accepts the work, and it goes on — to your
+              approval where the flow has one.</dd>
+            <dt><span class="verdict PATCH">PATCH</span></dt><dd>The work goes back to its author with findings, for
+              another round, until the rounds are used up.</dd>
+            <dt><span class="verdict UNVERIFIED">UNVERIFIED</span></dt><dd>The architect could not verify it; it goes
+              back as a PATCH does.</dd>
+            <dt><span class="verdict BLOCKER">BLOCKER</span></dt><dd>The run stops for your guidance.</dd>
+          </dl>
+        </details>
+      </section>
+
+      <details class="log" id="log">
+        <summary>Workflow log</summary>
+        <pre id="lines"></pre>
+      </details>
+    </article>
+  </main>
+</div>
+<dialog class="confirm" id="confirm" aria-labelledby="confirm-title" aria-describedby="confirm-body">
+  <form method="dialog">
+    <h2 id="confirm-title"></h2>
+    <p id="confirm-body"></p>
+    <div class="actions">
+      <button type="submit" id="confirm-no" value="cancel">Cancel</button>
+      <button type="submit" id="confirm-yes" value="confirm"></button>
     </div>
-    <div class="card">
-      <h2>Plan and build</h2>
-      <div id="timeline"></div>
-    </div>
-    <div class="card">
-      <h2>Change <button id="diff-load" type="button">Load the diff</button></h2>
-      <pre id="diff-summary" class="text"></pre>
-      <pre id="diff-patch" class="text diff"></pre>
-      <button id="diff-more" type="button" hidden></button>
-    </div>
-    <details class="card">
-      <summary>Workflow lines</summary>
-      <pre id="lines" class="text"></pre>
-    </details>
-  </section>
-</main>
+  </form>
+</dialog>
 <script src="/vendor/xterm.js"></script>
-<script src="/app.js"></script>
+<script type="module" src="/app.js"></script>
 </body>
 </html>

@@ -8,6 +8,8 @@ import http.client
 import http.server
 import json
 import os
+import posixpath
+import re
 import shutil
 import subprocess
 import sys
@@ -144,8 +146,29 @@ class Access(unittest.TestCase):
         response = connection.getresponse()
         response.read()
         self.assertIn("frame-ancestors 'none'", response.getheader("Content-Security-Policy"))
-        for path in ("/app.js", "/style.css", "/vendor/xterm.js", "/vendor/xterm.css"):
-            self.assertEqual(request("GET", path, token=False)[0], 200, path)
+
+    def test_every_file_the_page_loads_is_served_as_its_type(self):
+        """The scripts and styles the page names, and every module those scripts import, each served as the
+        type a browser runs it as: a module the server does not serve is a page that never starts."""
+        kinds = {".js": "text/javascript", ".css": "text/css"}
+        page = request("GET", "/", token=False)[1].decode("utf-8")
+        wanted, served = re.findall(r'(?:src|href)="(/[^"]+\.(?:js|css))"', page), set()
+        while wanted:
+            path = wanted.pop()
+            if path in served:
+                continue
+            connection = http.client.HTTPConnection("127.0.0.1", port(), timeout=60)
+            connection.request("GET", path, headers={"Host": "127.0.0.1:%d" % port()})
+            response = connection.getresponse()
+            body = response.read().decode("utf-8")
+            connection.close()
+            self.assertEqual(response.status, 200, path)
+            self.assertTrue(response.getheader("Content-Type").startswith(kinds[posixpath.splitext(path)[1]]), path)
+            served.add(path)
+            if path.endswith(".js") and not path.startswith("/vendor/"):
+                wanted += [posixpath.normpath(posixpath.join(posixpath.dirname(path), module)) for module in
+                           re.findall(r'''^\s*(?:import|export)\b[^;]*?["'](\.{1,2}/[^"']+)["']''', body, re.MULTILINE)]
+        self.assertIn("/app.js", served)
 
 
 class Ports(unittest.TestCase):

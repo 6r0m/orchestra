@@ -384,6 +384,8 @@ class Demo:
         check(view["status"] == "MERGED", "the run ended merged")
         check("greeting.txt" in git(self.repo, "ls-tree", "--name-only", "develop"),
               "the base branch holds the change")
+        check(self.press(merged, "absent:Stop run,Force terminate", "absent"),
+              "the page offers the closed run neither Stop run nor Force terminate")
 
         step("a run stopped while its engineer works")
         self.hold("hold-turn")

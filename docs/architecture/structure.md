@@ -373,15 +373,20 @@ still lands on a checkout.
 - **D29** **The workbench is the operator's surface.** One page on `http://127.0.0.1:<workbench_port>`
   lists every run Temporal holds, grouped by whether it waits for the operator, runs or has
   finished — every open run, however old, and the finished ones newest first a page at a time, so a
-  run waiting for an answer is never off the list and everything Temporal still retains is reachable; a run shows its stop with that stop's answers as
-  buttons, both roles' live terminals from their host's worker, its flow with the step it is at, the
-  rounds of each phase with each verdict and its feedback and a research step's brief, its change as
-  its target host's git reads it, and links to its Temporal
-  and Langfuse pages. Each run also says what it is doing now — the stage and role at work, or
+  run waiting for an answer is never off the list and everything Temporal still retains is reachable. A
+  run that waits shows its stop first, with that stop's answers as buttons and what to judge them by;
+  then both roles' terminals from their host's worker, the one at work open and an idle one opened when
+  the operator opens it; its flow with the step it is at, the rounds of each phase with each verdict and
+  its feedback and a research step's brief, its change as its target host's git reads it, and links to
+  its Temporal and Langfuse pages. The page's address names the run open, so a reload keeps it.
+  Each run also says what it is doing now — the stage and role at work, or
   the stop it waits at or the failure it stopped on — since when, and which host's worker it is
   blocked by when one is down, with that worker's start beside it; a run whose workflow worker is
-  down is still shown, from its listing. Above them the stack panel shows each part of the stack
-  and starts, stops and restarts it or the whole stack (D32), the reading `make check` prints. It
+  down is still shown, from its listing. Above them the stack's chips show each part of the stack,
+  the reading `make check` prints, and open its start, stop and restart of each part or of the whole
+  stack (D32) — the whole stack's start and restart only while every part is in a state that is safe
+  for them, since they act on every part — and a part that is down raises a banner, with its start
+  where this side can start it. It
   also shows any repository's worktrees, which of them are merged and which run each is. It starts
   runs on the flow chosen from `flows/`, read again each time its list is opened, stops or
   force-terminates them (D31), and removes what a closed run kept. It holds no
@@ -396,8 +401,8 @@ still lands on a checkout.
   own origin, and the page only from its own loopback host name, so neither another site in the
   browser nor a rebound DNS name can use them; the terminal sockets take that token in the
   handshake's own header, never in a URL, which browsers print and proxies log. Everything listens
-  on `127.0.0.1`. It is plain HTML, CSS and JavaScript with a pinned, vendored xterm.js and no
-  build step; agent text reaches it only as terminal bytes or as text, never as markup.
+  on `127.0.0.1`. It is plain HTML, CSS and JavaScript — native modules, one per concern — with a
+  pinned, vendored xterm.js and no build step; agent text reaches it only as terminal bytes or as text, never as markup.
 
 ## Invariants
 
