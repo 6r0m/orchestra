@@ -135,6 +135,18 @@ reach only runs started afterwards, and keep personal ones out of the public rep
     "policy" keep that meaning.
   - **Paths are from the checkout's root.** A path inside settings — a persona file, for one — resolves
     from the checkout's root, never from `.orchestra/`.
+  - **The settings' identity is their source, never the patch.**
+    - A layered load's origin is `.orchestra/settings.json`, with or without a local patch.
+    - With `ORCHESTRA_SETTINGS`, the origin is the file it names.
+    - `stack.own()` compares that origin (fact 32), so no Apply ever turns the deployment into
+      another stack.
+  - **Repositories are read from `.orchestra/repos.json` alone.**
+    - The file at the old place is never read, and no load moves a file.
+    - A `repos.json` left at the checkout's root, with no `.orchestra/repos.json`, is refused, saying to
+      move it there.
+    - Both present is refused as ambiguous.
+    - Neither present is today's "no descriptors".
+    - This checkout's own file is moved once, by hand, as part of the change (task 2).
 - **A2 [ACTIVE]:** What the Settings view edits:
   - agents: named profiles — the kind, and the model and effort where the kind takes them;
   - each role's profile, persona and per-stage skills;
@@ -177,6 +189,14 @@ reach only runs started afterwards, and keep personal ones out of the public rep
     apply.
   - The page gets kinds and capabilities from that boundary through the API, never from a list of its
     own.
+  - **The loader's `available()` is how kinds are found.**
+    - It enumerates the package's public modules: `__init__` and any name starting with `_` are
+      skipped.
+    - It turns each module's name back into its kind by the same one-to-one rule, loads it through the
+      same contract check, and returns its capabilities: `claude_code.py` is `claude-code`, and
+      `codex.py` is `codex`.
+    - No production module and no page code holds a list of kinds. Tests may name the kinds they test
+      — an adapter's own tests must.
   - Every kind runs its agent interactively in the role's live terminal (D7), with its own turn-end
     signal, read-only mode, and environment hygiene — the variables a parent session of its own
     leaves, which its agent must not inherit.
@@ -195,7 +215,9 @@ reach only runs started afterwards, and keep personal ones out of the public rep
       from — stdin or its last argument — becomes a mode the adapter passes, and the adapter alone
       decides how its CLI invokes the sink and which events end a turn.
 - **A8 [ACTIVE]:** The contract's openness is proven in the suite by a test-only kind.
-  - Its module is handed to the loader for the test, and never shipped.
+  - Its module is planted for the test only, in a temporary folder added to the adapters package's own
+    search path. `available()` finds it with no production file edited and nothing written into the
+    checkout, and it is never shipped.
   - It runs a fake agent interactively through the real terminal, takes typed keys, and ends its turn
     on its own signal.
   - That module is its only code. pi follows later (D8).
@@ -335,6 +357,15 @@ Any of these can follow as a change of its own:
     (`policy.py:32-33, 181-184`).
 31. **The standing test rule.** An iteration runs only the modules it touches, named; the whole suite runs
     once, after the reviewer's final pass, before the operator's live check ([tests/README.md](../tests/README.md)).
+32. **Which stack a policy's is.** `stack.own()` compares a policy's recorded origin (`_policy_path`) with
+    the deployment file's (`stack.py:54-57`). Only the deployment's stack manages Temporal and the
+    Windows worker (`stack.py:60-62`).
+33. **With no `repos.json`, a named repository is refused, misleadingly.**
+    - `repos.load()` then gives no descriptors — "not an error" (`app/workspace/repos.py:50-57`).
+    - A repository named from the old list is then taken as a path from the process's folder, and refused
+      as one that "does not exist" (`repos.py:123-133`).
+    - Only a start that names no repository works on Orchestra's own checkout, and it does so today too.
+    - In the page, the picker offers no repositories, and says only that repos.json has none.
 
 **Inferences**
 
@@ -387,7 +418,8 @@ Any of these can follow as a change of its own:
 ## Decision
 
 1. **Adapters** (A7) in `app/agents/adapters/`:
-   - a contract and a generic loader, and one module per kind;
+   - a contract and a generic loader, and one module per kind. The loader's `available()` finds the
+     kinds by their modules (A7), so a new kind is its module alone;
    - `claude-code` and `codex` are today's code moved behind the contract, behaving exactly as now.
 
    An adapter answers, for one turn of its kind of agent:
@@ -424,6 +456,10 @@ Any of these can follow as a change of its own:
 5. **The layers of A1.**
    - The loader reads the shared file, applies the local patch, and validates the result; or it takes
      `ORCHESTRA_SETTINGS` alone.
+   - The result's origin is its source: `.orchestra/settings.json`, or the file `ORCHESTRA_SETTINGS`
+     names, and never the patch (A1).
+   - Repositories come from `.orchestra/repos.json` alone. The loader refuses a root `repos.json` left
+     behind, and refuses both being present (A1).
    - A writer beside it:
      - edits the existing local patch only at the paths of the settings submitted, never rebuilding it
        from the effective settings. So:
@@ -516,7 +552,9 @@ kind does not declare cannot be passed to it.
 6. **An Apply reaches only runs started after it.**
    - A run's policy is whole from its start, persona text included, so no Apply and no edit to a
      persona file changes an open run.
-   - The stack stays the checkout's own (D32), and `ORCHESTRA_SETTINGS` takes no patch.
+   - The stack stays the checkout's own (D32): with a local patch present, `stack.own()` is true of the
+     loaded settings, and `stack.managed()` is still Temporal and both workers.
+   - `ORCHESTRA_SETTINGS` takes no patch.
 7. **The suite never reads the operator's local patch,** and the shared settings bind no skill.
 8. **Writes are atomic, checked and sparse.**
    - A refused Apply, or one against a stale revision of either file, leaves both as they were.
@@ -529,7 +567,11 @@ kind does not declare cannot be passed to it.
     the persona in effect — `persona` when present, else `persona_file`'s text — and refused, naming
     the role, one byte past it.
 11. **No `ORCH_*` name, and no root `policy.json` or `repos.json`, is left** in code, configuration or
-    current documents. Finished todos keep theirs as history.
+    current documents; finished todos keep theirs as history.
+    - A root `repos.json` in a checkout is refused, naming its new place, and so are both being present.
+    - The loader never reads the old place and never moves a file.
+11a. **A new kind is its module alone.** `available()` finds kinds from the package's modules, and no
+     production module and no page code lists them.
 12. **D18 still holds:** no model registry; an empty model is the provider's default, shown as such.
 13. **D29:** the page holds no run state, and a settings change goes through the policy's owner, under
     the page's token and origin checks.
@@ -540,6 +582,9 @@ kind does not declare cannot be passed to it.
 1. [ ] Red guards, each observed failing first (Test-first and verification plan).
 2. [ ] The move and the rename (A1): `.orchestra/`, and the `ORCHESTRA_*` variables. Mechanical, checked
    by the tests of the modules it touches.
+   - This checkout's own `repos.json`, ignored and private, is moved once into `.orchestra/` by hand,
+     never printed, because git will not carry it.
+   - The loader's refusal of a root one covers every other checkout.
 3. [ ] The adapter package: the contract, the loader, and `claude-code` and `codex` moved behind them,
    behaviour unchanged. That includes:
    - `turn_hook.py` made a vendor-blind sink;
@@ -632,6 +677,21 @@ kind does not declare cannot be passed to it.
      - the generic validator takes a value it does not know the meaning of, and leaves it to the kind.
 
      Control: the plain-token rule kept generic, refusing the test-only kind's own value.
+  8. **A local patch leaves the stack the deployment's** (`application/test_stack.py`). With a local
+     patch present, the loaded settings are `stack.own()` and `stack.managed()` is Temporal and both
+     workers; with `ORCHESTRA_SETTINGS`, they are that file's. Control: an origin taken from
+     `settings.local.json`, which makes the stack another's.
+  9. **Kinds found, not listed** (`agents/test_terminal.py` or the adapters' own test module). A valid
+     test-only module, planted on the package's search path (A8), is returned by `available()`;
+     `__init__` and a `_`-prefixed module are not, and a module failing the contract is refused, saying
+     what it lacks. Control: a fixed list of kinds, which misses the planted one.
+  10. **The repositories' move is refused, never guessed** (`workspace/test_repos.py`):
+      - a root `repos.json` alone is refused, naming `.orchestra/repos.json`;
+      - both present is refused as ambiguous;
+      - neither present is "no descriptors", as today;
+      - no load reads or moves the root file.
+
+      Control: a loader that falls back to the root file, which the first case catches.
 - **Reviewer-checked judgements:**
   - the view's words;
   - that nothing in it reads as a model registry;
@@ -677,8 +737,9 @@ kind does not declare cannot be passed to it.
 
 - **The move and the rename:** the stack's scripts, the Makefile, the systemd unit and the demo change
   with the code, so a stack restarted on the new checkout finds its settings.
-- **The operator's own `repos.json`:** moved once into `.orchestra/`. A loader that finds none names the
-  new place.
+- **The operator's own `repos.json`:** moved once into `.orchestra/`, by hand, in this checkout (task 2).
+  In any other checkout, the loader refuses the one left at the root and names where it goes. It
+  neither reads it nor moves it.
 - **Open runs** keep working through the change (invariant 2).
 - **Rollback of personal settings:** delete `.orchestra/settings.local.json`. A rollback of the code is
   a revert; open runs survive it because the old shape stays readable.
@@ -752,3 +813,23 @@ kind does not declare cannot be passed to it.
   out.
 - **Authority:** A4 and A7 rewritten in place; invariants 3, 3a, 3b, 8 and 10 rewritten. No decision
   changed.
+
+### 2026-09-27 — the external review: PATCH, three integration details
+
+- **Accepted, each checked against the code:**
+  1. **A local patch never changes which stack the settings are.** `stack.own()` compares the recorded
+     origin (fact 32), so a layered load's origin is `.orchestra/settings.json`, never the patch. It
+     comes with its guard and control.
+  2. **`available()` in the loader.** It finds kinds by the package's public modules, through the same
+     naming rule and contract check, and nothing lists them. Proven by a module planted on the
+     package's search path.
+  3. **The repositories' move fails safe.** A root `repos.json` alone, or both files, is refused; the
+     loader never reads or moves the old one; this checkout's own file is moved by hand in task 2.
+- **Refined:**
+  - "No hard-coded list of kinds, including tests": tests may name the kinds they test, and an
+    adapter's own tests must. The ban holds for production code and the page, as the review's closing
+    instruction says.
+  - "A run may fall back to Orchestra's own checkout": not for a named repository, which is refused as
+    one that "does not exist" (fact 33). The harm is that refusal's misleading reason and a picker
+    offering nothing — the fix stands as given.
+- **Authority:** A1, A7 and A8 rewritten in place; invariants 6, 11 and 11a. No decision changed.
