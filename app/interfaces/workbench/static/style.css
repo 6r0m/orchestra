@@ -124,7 +124,8 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--you); width: 1
 .banners > .result, .banners > .alert { padding: 8px 20px; border-bottom: 1px solid var(--rule); }
 
 /* The rail: the runs, what needs you first. */
-.layout { display: grid; grid-template-columns: minmax(260px, 330px) minmax(0, 1fr); min-height: calc(100vh - var(--top)); }
+/* The runs list narrows with the window, so a narrow or portrait one leaves the run its room. */
+.layout { display: grid; grid-template-columns: clamp(240px, 22vw, 330px) minmax(0, 1fr); min-height: calc(100vh - var(--top)); }
 .rail { position: sticky; top: var(--top); align-self: start; height: calc(100vh - var(--top)); overflow: auto;
   padding: 16px 12px 24px; border-right: 1px solid var(--rule); background: var(--surface); }
 .group + .group { margin-top: 18px; }
@@ -150,6 +151,8 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--you); width: 1
   overflow-wrap: anywhere; }
 .row-meta { display: flex; justify-content: space-between; gap: 8px; color: var(--quiet); font-size: 12px; min-width: 0; }
 .row-meta > :first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* How long, whole on one line: the repository's name gives way to it. */
+.row-meta > :last-child { flex-shrink: 0; white-space: nowrap; }
 .row-blocked { color: var(--bad); font-size: 12px; }
 #runs-older { margin: 8px 0 0 4px; }
 
