@@ -4,8 +4,9 @@
 **Scope:**
 - `app/agents/adapters/`: one generic loader and contract, and a module per kind of agent;
 - the modules that hold agent mechanics today: `nodes.py`, `terminal.py`, `turn_hook.py`, `trust.py`,
-  `activities.py`, `telemetry.py`, `policy.py`;
-- the settings, moved into `.orchestra/` and layered;
+  `activities.py`, `telemetry.py`, `policy.py`, and the preflight in `repos.py`;
+- the settings, moved into `.orchestra/` and layered, with the public check following them;
+- every `orch` name, spelled `orchestra` (D12);
 - the run's policy, made whole at its start;
 - the Workbench's settings API and view.
 
@@ -104,6 +105,11 @@ reach only runs started afterwards, and keep personal ones out of the public rep
     by common practice. The pick is delegated to this investigation (A1).
   - Reason: stated.
   - Date/source: operator, 2026-09-27.
+- **D12** "we need proper name orchestra, not some ugly orch".
+  - Effect: every name Orchestra gives spells `orchestra` in full — its variables, and also its
+    containment's units, its temporary folders and its tools' constants (A1, invariant 11).
+  - Reason: stated — the proper name.
+  - Date/source: operator, 2026-09-27.
 
 ### Operator gates
 
@@ -117,7 +123,8 @@ reach only runs started afterwards, and keep personal ones out of the public rep
 
 ### Working assumptions
 
-- **A1 [ACTIVE]:** The settings hierarchy and names, picked under D11 from how comparable tools do it:
+- **A1 [ACTIVE]:** The settings hierarchy and names, picked under D11 and D12 from how comparable tools
+  do it:
 
   | today | picked | the precedent |
   |---|---|---|
@@ -125,7 +132,8 @@ reach only runs started afterwards, and keep personal ones out of the public rep
   | none | `.orchestra/settings.local.json`: yours, ignored by git, written by the Settings view — a JSON Merge Patch over the shared file | `.claude/settings.local.json`, "you, this project"; `.env.local`; `compose.override.yaml` |
   | `ORCH_POLICY` | `ORCHESTRA_SETTINGS`: one complete settings file, for a stack of its own — the demo, the acceptance — with no patch applied to it | an application-prefixed variable naming what it points at: `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GIT_CONFIG_GLOBAL` |
   | `repos.json`, `repos.example.json` | `.orchestra/repos.json` (yours, ignored), `.orchestra/repos.example.json` | the same folder, for the similar case D11 names |
-  | `ORCH_REPOS`, `ORCH_WORKFLOW_UNDER_TEST` | `ORCHESTRA_REPOS`, `ORCHESTRA_WORKFLOW_UNDER_TEST` (the suite's own) | the same prefix, whole |
+  | `ORCH_REPOS`, `ORCH_WORKFLOW_UNDER_TEST` | `ORCHESTRA_REPOS`: one complete descriptor file, taken alone — the demo's, the acceptance's, the suite's; `ORCHESTRA_WORKFLOW_UNDER_TEST` (the suite's own) | the same prefix, whole |
+  | `orch-` and `ORCH` elsewhere: the containment's units, temporary folders' prefixes, a constant in two tools (fact 22) | `orchestra-`: `orchestra-<id>` units, `orchestra-claude-settings-`, `orchestra-index-`, and the tests' and tools' folders; the tools' constant named for what it holds, the checkout | D12; a unit named for its application, as Docker's `docker-<id>.scope` |
 
   - **The local file is a JSON Merge Patch** (RFC 7396, fact 26): an object merges into the one below
     it member by member; any other value, a list included, replaces; `null` removes the member. A
@@ -140,13 +148,27 @@ reach only runs started afterwards, and keep personal ones out of the public rep
     - With `ORCHESTRA_SETTINGS`, the origin is the file it names.
     - `stack.own()` compares that origin (fact 32), so no Apply ever turns the deployment into
       another stack.
-  - **Repositories are read from `.orchestra/repos.json` alone.**
-    - The file at the old place is never read, and no load moves a file.
-    - A `repos.json` left at the checkout's root, with no `.orchestra/repos.json`, is refused, saying to
-      move it there.
-    - Both present is refused as ambiguous.
-    - Neither present is today's "no descriptors".
+  - **Repositories come from one file, chosen as settings are.**
+    - With `ORCHESTRA_REPOS` set, exactly the file it names. Neither `.orchestra/repos.json` nor a root
+      `repos.json` is looked at, so the demo's, the acceptance's and the suite's descriptors never meet
+      the operator's. A named file that does not exist is refused, naming it: an explicit choice that
+      names nothing is a mistake, and "no descriptors" would surface later as fact 33's misleading
+      refusal.
+    - Without it, `.orchestra/repos.json`:
+      - a `repos.json` left at the checkout's root, with no `.orchestra/repos.json`, is refused, saying
+        to move it there;
+      - both present is refused as ambiguous;
+      - neither present is today's "no descriptors".
+    - The file at the old place is never read, and no load moves a file. The choice is made when
+      descriptors are loaded, so a refused layout fails what needs them — a start, the picker — with
+      its reason, never a process's import.
     - This checkout's own file is moved once, by hand, as part of the change (task 2).
+  - **The sweep keeps removing what an older worker left.** A Claude role-run's tracing settings hold
+    the trace store's key, and the sweep removes those a dead worker left, by their prefix
+    (`app/observability/telemetry.py:683-715`). A worker that died before the upgrade left them under
+    `orch-claude-settings-`, so the sweep removes both prefixes. That old prefix is the one `orch` left
+    in code (invariant 11), and it goes once every host has started on the new code (Not in this
+    change).
 - **A2 [ACTIVE]:** What the Settings view edits:
   - agents: named profiles — the kind, and the model and effort where the kind takes them;
   - each role's profile, persona and per-stage skills;
@@ -220,6 +242,7 @@ reach only runs started afterwards, and keep personal ones out of the public rep
     checkout, and it is never shipped.
   - It runs a fake agent interactively through the real terminal, takes typed keys, and ends its turn
     on its own signal.
+  - Its kind's name differs from its executable's, so nothing can take one for the other (guard 11).
   - That module is its only code. pi follows later (D8).
 - **A9 [REJECTED by D7]:** An agent driven one turn per process shows its turn live, but takes no
   typing mid-turn.
@@ -240,6 +263,7 @@ Any of these can follow as a change of its own:
 - finding out which skills each host has installed;
 - removing the persona-path resolver kept for old runs (`prompt_path`, and the copy check behind it),
   once no run of the old shape is open;
+- dropping the sweep's old prefix, once every host has started on the new code (A1);
 - renaming `policy.py`, or the word "policy".
 
 ## Verified evidence
@@ -294,8 +318,12 @@ Any of these can follow as a change of its own:
     `$skill-name`; user skills in `~/.agents/skills`.
 16. **The page shows no agent, model or skill today.**
 17. **`.gitignore` ignores `repos.json`** — "yours".
-18. **Where agent mechanics sit today.** Agent-specific branches are spread over eight places:
+18. **Where agent mechanics sit today.** Agent-specific branches are spread over nine places:
     - the bindable list: `policy.KNOWN_BRAINS`;
+    - the preflight: `repos.resolve` looks up `git` and each brain's name as a command, refusing before
+      any work when one is missing (`app/workspace/repos.py:185-187`). `activities.prepare` hands it
+      the brains (`activities.py:173-176`). It holds only while a brain's name is its executable,
+      which `claude-code` running `claude` breaks;
     - launch flags, sessions and failures: `nodes.build_argv`, `extract_session` and
       `classify_failure`;
     - host differences: `activities.host_argv`;
@@ -307,7 +335,9 @@ Any of these can follow as a change of its own:
     - trust records: `trust.ensure` and `forget`;
     - tracing: `telemetry.py`.
 
-    `telemetry.py:447` also records a role's brain as plain data.
+    `telemetry.py:447` also records a role's brain as plain data. Two names are prose, not branches:
+    `ptyhost.py` sends a lone Esc as Windows key events for every agent, naming Codex only as the reason
+    (`app/agents/ptyhost.py:10-12`); and `stages.py:11` names a brain in its docstring.
 19. **pi** runs interactively, in print mode, as JSON or over RPC, and its RPC mode says when a turn
     ends ([pi's RPC document](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/rpc.md)).
     It is not installed on either host.
@@ -323,11 +353,21 @@ Any of these can follow as a change of its own:
     - Result, the same on 0.155.1 (WSL) and 0.153.4 (Windows):
       - both forms quoted the `architect` skill's first sentence verbatim;
       - the prompt naming none answered `NO SKILL LOADED`.
-22. **The rename's reach, beyond finished todos, which keep their history:**
-    - `policy.json`: 18 files, 47 lines;
-    - `ORCH_POLICY`: 15 files, 48 lines;
-    - `ORCH_REPOS`: 4 files;
-    - `ORCH_WORKFLOW_UNDER_TEST`: 2 files.
+22. **The rename's reach, outside `todo/`,** whose files keep their wording as history:
+    - `policy.json`: 14 files, 26 lines;
+    - `ORCH_POLICY`: 14 files, 34 lines;
+    - `ORCH_REPOS`: 5 files, 7 lines;
+    - `ORCH_WORKFLOW_UNDER_TEST`: 2 files, 3 lines;
+    - `repos.json` and `repos.example.json`: 27 files, 52 lines;
+    - the other `orch` names (D12): 24 files, 68 lines. Most are temporary folders' prefixes in tests.
+      The rest are:
+      - the containment's unit (`app/agents/launch.py:136`), which nothing finds by its prefix;
+      - Claude's tracing settings folders (`app/observability/telemetry.py:616`), which the sweep does
+        find by their prefix;
+      - a private index's folder (`app/workspace/worktrees.py:162`);
+      - a constant in `tools/trust_probe.py` and `tools/ui_fixture.py`;
+      - the public check's debris glob (`tools/public_check.sh:53`), which follows the acceptance's
+        folder prefix (`tests/acceptance_restart.py:129`).
 23. **How comparable tools layer their settings:**
     - Claude Code, highest first: managed; the command line; `.claude/settings.local.json` — "you, this
       project", kept out of git; `.claude/settings.json` — shared; `~/.claude/settings.json`. It is
@@ -366,11 +406,24 @@ Any of these can follow as a change of its own:
       as one that "does not exist" (`repos.py:123-133`).
     - Only a start that names no repository works on Orchestra's own checkout, and it does so today too.
     - In the page, the picker offers no repositories, and says only that repos.json has none.
+34. **The public check guards private files by their paths** — the only automated check (AGENTS.md).
+    - It fails when `.env`, `secrets`, `repos.json` or `tmp` is tracked (`tools/public_check.sh:30-36`),
+      and its `repos.json` is the root's alone.
+    - Measured in a throwaway repository: with `.orchestra/repos.json` and
+      `.orchestra/settings.local.json` tracked, its pathspec found neither. Control: a tracked root
+      `repos.json`, which it found.
+    - `.gitignore`'s `repos.json` matches at any depth (`.gitignore:9`), so `.orchestra/repos.json` is
+      ignored already. Nothing ignores or guards `.orchestra/settings.local.json` yet.
+35. **The suite reads the operator's descriptors today.**
+    - The Workbench's access test calls `/api/repos` on the checkout's default file
+      (`tests/interfaces/test_workbench.py:128`).
+    - The example test loads it whenever it exists (`tests/workspace/test_repos.py:190-192`).
+    - Neither prints it. A root file left there would fail both once the loader refuses it (A1).
 
 **Inferences**
 
 - **I1 — Codex-run stages can take a skill already** (fact 21), in the exec form.
-- **I2 — A third agent costs edits across the code.** Today it means editing all eight places in fact 18.
+- **I2 — A third agent costs edits across the code.** Today it means editing all nine places in fact 18.
 - **I3 — The `ORCH_POLICY` route degrades the live deployment** (facts 8–9).
 - **I4 — "An Apply reaches only new runs" is false for personas today** (fact 4). It holds only once a
   run's policy carries each persona's text from its start.
@@ -400,17 +453,17 @@ Any of these can follow as a change of its own:
 - **A run's copy:** each run keeps the policy it started with, except for persona text, which is read
   from its file when a role's session is born (fact 4).
 - **The execution seam (D17):** a role's turn runs in its live terminal. How each agent is launched,
-  resumed, finished, trusted, traced and given its environment is spread over eight places, keyed by
-  the brain's name (fact 18).
+  resumed, finished, trusted, traced, checked for on the host and given its environment is spread over
+  nine places, keyed by the brain's name (fact 18).
 - **The page's writes:** D29. **The stack:** the checkout's own settings' (D32).
 
 ## Problem and capability gap
 
-1. **Binding an agent is fixed.** Only two agents can be bound, and a third costs edits in eight places
-   (I2), against D5.
+1. **Binding an agent is fixed.** Only two agents can be bound, and a third costs edits in nine places
+   (I2), against D5. One of them, the preflight, takes a brain's name for the command it runs.
 2. **Nothing shows or edits the setup** (D1).
 3. **The settings have no personal layer,** and their one override is a badly named variable that
-   degrades the stack (D11, I3).
+   degrades the stack (D11, I3). Many of Orchestra's names shorten its own to `orch` (D12, fact 22).
 4. **A run's personas can change after it starts** (I4).
 5. **Two rules go against the operator's decisions:** the independent-judge refusal (D9), and a skill
    syntax fixed for every agent (D5).
@@ -430,8 +483,18 @@ Any of these can follow as a change of its own:
    - how the end of its turn is signalled, and where its final message and session come from;
    - how a lost session shows;
    - how a skill is invoked, or that it has none;
+   - the commands its turn needs on this host, for the preflight. It names its executable once, and
+     its launch command runs that same name;
    - optionally, trust setup and tracing;
    - its capabilities, for the page.
+
+   **The preflight stays before any work, and knows no kind.**
+   - `prepare` runs on the target host (`app/orchestration/workflow.py:128, 389`). It asks each bound
+     role's adapter for its commands, for that host, as the launch command is built there.
+   - It hands those names to `repos.resolve`, which looks up `git` and the names it is given, as
+     today, and holds no kind and no executable of its own.
+   - A missing command refuses the run before its worktree and any agent, naming the command. A
+     refused preparation already creates nothing (`tests/orchestration/test_stops.py:209-215`).
 2. **The settings' shape.** In `.orchestra/settings.json`, and the local patch over it:
    - `agents`: a profile's name maps to its `kind` and, where the kind takes them, `model` and `effort`.
      Two ship, matching today's bindings.
@@ -458,8 +521,11 @@ Any of these can follow as a change of its own:
      `ORCHESTRA_SETTINGS` alone.
    - The result's origin is its source: `.orchestra/settings.json`, or the file `ORCHESTRA_SETTINGS`
      names, and never the patch (A1).
-   - Repositories come from `.orchestra/repos.json` alone. The loader refuses a root `repos.json` left
-     behind, and refuses both being present (A1).
+   - Repositories come from the file `ORCHESTRA_REPOS` names, alone, which must exist; else from
+     `.orchestra/repos.json`, where the loader refuses a root `repos.json` left behind, and both being
+     present (A1).
+   - The public check follows the move: it fails on a tracked `repos.json` wherever it is, and on a
+     tracked `.orchestra/settings.local.json`, which `.gitignore` gains (fact 34).
    - A writer beside it:
      - edits the existing local patch only at the paths of the settings submitted, never rebuilding it
        from the effective settings. So:
@@ -502,16 +568,17 @@ stays `client.start`, which now makes it whole.
 - agent profiles;
 - the merge patch;
 - two endpoints;
-- one page module.
+- one page module;
+- one old prefix the sweep still removes, until every host has started on the new code (A1).
 
 **It removes:**
 
-- eight places' agent branches;
+- nine places' agent branches, the preflight's taking a brain's name for its command among them;
 - the fixed list of bindable agents;
 - one skill syntax for every agent;
 - the independent-judge refusal;
 - a persona read long after a run started;
-- the `ORCH_*` names.
+- every `orch` name (D12).
 
 **It knowingly gives up:** a new kind of agent still needs one adapter module, because each CLI signals
 a turn's end and runs read-only in its own way, and typing needs its interactive mode (D7). A setting a
@@ -545,6 +612,9 @@ kind does not declare cannot be passed to it.
     check in `test_architecture.py` stays green.
 3b. **A kind owns its profile's values.** The generic validator checks shape and references, and the
     kind's adapter checks whether `model` and `effort` apply and which values they take.
+3c. **The preflight stays early and generic.** A run whose agent's command is missing on its target
+    host is refused before its worktree and any agent, naming that command. The command is the
+    adapter's answer, the one its launch runs; `repos.py` looks up only the names it is handed.
 4. **Every agent's terminal takes typing (D7),** and the reviewing role is read-only, through its kind's
    own mode and the step's failure on a changed tree (D10).
 5. **One loader and one validator** for the page, the command line and both workers. A refusal in the
@@ -555,7 +625,8 @@ kind does not declare cannot be passed to it.
    - The stack stays the checkout's own (D32): with a local patch present, `stack.own()` is true of the
      loaded settings, and `stack.managed()` is still Temporal and both workers.
    - `ORCHESTRA_SETTINGS` takes no patch.
-7. **The suite never reads the operator's local patch,** and the shared settings bind no skill.
+7. **The suite never reads the operator's local patch or descriptors** (fact 35): it names descriptors
+   of its own through `ORCHESTRA_REPOS`. The shared settings bind no skill.
 8. **Writes are atomic, checked and sparse.**
    - A refused Apply, or one against a stale revision of either file, leaves both as they were.
    - An Apply changes the local patch only at the settings it carries: every other member survives, and
@@ -566,12 +637,17 @@ kind does not declare cannot be passed to it.
 10. **A persona is at most `MAX_PERSONA_BYTES = 64 * 1024` bytes of UTF-8.** The bound is measured on
     the persona in effect — `persona` when present, else `persona_file`'s text — and refused, naming
     the role, one byte past it.
-11. **No `ORCH_*` name, and no root `policy.json` or `repos.json`, is left** in code, configuration or
-    current documents; finished todos keep theirs as history.
+11. **No `orch` name (D12), and no root `policy.json` or `repos.json`, is left** in code, configuration,
+    tools, tests or current documents; `todo/` keeps its wording as history.
+    - Only what the change must recognise from before it keeps an old name: the sweep's old prefix
+      (A1), and the loader's refusal of a root `repos.json`.
     - A root `repos.json` in a checkout is refused, naming its new place, and so are both being present.
+    - `ORCHESTRA_REPOS` takes the file it names alone, and refuses one that does not exist.
     - The loader never reads the old place and never moves a file.
 11a. **A new kind is its module alone.** `available()` finds kinds from the package's modules, and no
      production module and no page code lists them.
+11b. **The public check covers what moved** (fact 34). A tracked `repos.json` anywhere, a tracked
+     `.orchestra/settings.local.json`, and acceptance debris under the new prefix each fail it.
 12. **D18 still holds:** no model registry; an empty model is the provider's default, shown as such.
 13. **D29:** the page holds no run state, and a settings change goes through the policy's owner, under
     the page's token and origin checks.
@@ -580,15 +656,19 @@ kind does not declare cannot be passed to it.
 
 0. [x] Q1–Q7 answered (D5–D11). Codex's skills measured (fact 21).
 1. [ ] Red guards, each observed failing first (Test-first and verification plan).
-2. [ ] The move and the rename (A1): `.orchestra/`, and the `ORCHESTRA_*` variables. Mechanical, checked
-   by the tests of the modules it touches.
+2. [ ] The move and the rename (A1, D12): `.orchestra/`, the `ORCHESTRA_*` variables, and every other
+   `orch` name (fact 22). Mechanical, checked by the tests of the modules it touches.
    - This checkout's own `repos.json`, ignored and private, is moved once into `.orchestra/` by hand,
      never printed, because git will not carry it.
    - The loader's refusal of a root one covers every other checkout.
+   - The suite names descriptors of its own (invariant 7).
+   - The public check's private paths and debris glob follow the move (invariant 11b).
+   - The sweep removes both prefixes (A1).
 3. [ ] The adapter package: the contract, the loader, and `claude-code` and `codex` moved behind them,
    behaviour unchanged. That includes:
    - `turn_hook.py` made a vendor-blind sink;
-   - `telemetry` given the adapter's tracing data by the application, and branching on no kind.
+   - `telemetry` given the adapter's tracing data by the application, and branching on no kind;
+   - the preflight given the adapters' commands rather than brains (Decision 1).
 
    Checked by the touched concerns' tests — the agents', the application's, observability's — and by
    the recorded histories' replay.
@@ -627,8 +707,9 @@ kind does not declare cannot be passed to it.
       typing;
     - an Apply made while a run is open leaves that run as it started.
 - **Permanent regression guards,** each written and run failing before any production code:
-  1. **Mechanics only in the adapters** (`test_architecture.py`). Red today in eight places, the turn
-     hook and telemetry among them. Control: a kind's branch planted outside the package.
+  1. **Mechanics only in the adapters** (`test_architecture.py`). Red today in nine places, the turn
+     hook, telemetry and the preflight among them. It reads code, not prose (fact 18). Control: a
+     kind's branch planted outside the package.
   2. **A new kind is one module** (`agents/test_terminal.py`). A test-only kind, handed to the loader:
      - runs a fake agent interactively through the real terminal;
      - takes typed keys;
@@ -685,19 +766,45 @@ kind does not declare cannot be passed to it.
      test-only module, planted on the package's search path (A8), is returned by `available()`;
      `__init__` and a `_`-prefixed module are not, and a module failing the contract is refused, saying
      what it lacks. Control: a fixed list of kinds, which misses the planted one.
-  10. **The repositories' move is refused, never guessed** (`workspace/test_repos.py`):
-      - a root `repos.json` alone is refused, naming `.orchestra/repos.json`;
-      - both present is refused as ambiguous;
-      - neither present is "no descriptors", as today;
-      - no load reads or moves the root file.
+  10. **The repositories' source is chosen, never guessed** (`workspace/test_repos.py`, over a
+      temporary checkout):
+      - without `ORCHESTRA_REPOS`:
+        - a root `repos.json` alone is refused, naming `.orchestra/repos.json`;
+        - both present is refused as ambiguous;
+        - neither present is "no descriptors", as today;
+        - no load reads or moves the root file;
+      - with `ORCHESTRA_REPOS`:
+        - its file's entries are the descriptors, with a root `repos.json` and a `.orchestra/repos.json`
+          both present, and neither is read nor refused;
+        - a file it names that does not exist is refused, naming it;
+      - under the suite, the descriptors are the suite's own, never the checkout's (invariant 7).
 
-      Control: a loader that falls back to the root file, which the first case catches.
+      Controls: a loader that falls back to the root file, which the first case catches; one that
+      looks at the checkout's files before the variable, which the first explicit case catches; and the
+      suite without its variable, whose descriptors are then the checkout's.
+  11. **A kind's command, not its name, is looked up** (`application/test_activities.py`, new: the
+      concern's own folder). The test-only kind's name differs from its executable (A8):
+      - its executable found: `prepare` succeeds;
+      - missing: `prepare` is refused, naming the executable, not the kind — and a refused
+        preparation creates no worktree and starts no agent, as `test_stops.py` already shows;
+      - for `claude-code`, `codex` and the test-only kind, the command the launch runs is one the
+        adapter declares.
+
+      Control: today's lookup of the kind's name, which refuses the first case.
+  12. **The sweep still removes what an older worker left** (`observability/test_stale_settings.py`).
+      A dead worker's settings folder is removed under the new prefix and under the old. Control: a
+      sweep knowing only the new prefix, which leaves the old folder and its key.
 - **Reviewer-checked judgements:**
   - the view's words;
   - that nothing in it reads as a model registry;
   - that no kind is named in the page's own code;
-  - that no `ORCH_*` or root `policy.json` / `repos.json` is left where invariant 11 says, checked by one
-    scripted search at the end rather than a permanent test.
+  - that no `orch` name and no root `policy.json` / `repos.json` is left where invariant 11 says,
+    checked by one scripted search at the end rather than a permanent test. Outside `todo/` and the
+    vendored scripts, `git grep -P -i '(?<![a-z])orch(?!estra)'` finds nothing but the sweep's old
+    prefix;
+  - that the public check covers what moved (invariant 11b), proven once in a throwaway clone that
+    tracks `.orchestra/repos.json`, `.orchestra/settings.local.json` or acceptance debris under the new
+    prefix, each of which fails it.
 
 ### Green evidence
 
@@ -728,7 +835,10 @@ kind does not declare cannot be passed to it.
     start;
   - [docs/using.md](../docs/using.md): the Settings view, and the new names;
   - [README.md](../README.md): the configuration table — `.orchestra/settings.json`, the local patch,
-    `.orchestra/repos.json`, `ORCHESTRA_SETTINGS` — and the skills route, now the Settings view.
+    `.orchestra/repos.json`, `ORCHESTRA_SETTINGS`, `ORCHESTRA_REPOS` — and the skills route, now the
+    Settings view;
+  - [tests/README.md](../tests/README.md): the rows of the modules whose guards change, and one for
+    `application/test_activities.py`.
 - **Duplication avoided:** the schemas are the validator's, and documents name them rather than list
   them. RFC 7396 is cited, never restated.
 - Stable docs, code, comments, tests and configuration will not reference this todo.
@@ -740,6 +850,12 @@ kind does not declare cannot be passed to it.
 - **The operator's own `repos.json`:** moved once into `.orchestra/`, by hand, in this checkout (task 2).
   In any other checkout, the loader refuses the one left at the root and names where it goes. It
   neither reads it nor moves it.
+- **A variable set by hand under an old name** is renamed by hand; the code reads only the new names.
+  `.env` never passed one to Orchestra's processes: they read only Langfuse's keys from it
+  (`app/observability/telemetry.py:42-45, 91-97`), and Temporal's compose its own settings
+  (`workers.sh:33-35`).
+- **The settings folders a worker left before the upgrade** are removed by each host's first start on
+  the new code (A1).
 - **Open runs** keep working through the change (invariant 2).
 - **Rollback of personal settings:** delete `.orchestra/settings.local.json`. A rollback of the code is
   a revert; open runs survive it because the old shape stays readable.
@@ -833,3 +949,26 @@ kind does not declare cannot be passed to it.
     one that "does not exist" (fact 33). The harm is that refusal's misleading reason and a picker
     offering nothing — the fix stands as given.
 - **Authority:** A1, A7 and A8 rewritten in place; invariants 6, 11 and 11a. No decision changed.
+
+### 2026-09-27 — the external review: PATCH, two integration gaps; the operator's naming
+
+- **Accepted, each checked against the code:**
+  1. **`ORCHESTRA_REPOS` against "`.orchestra/repos.json` alone".** The two contradicted each other.
+     The variable now takes its file alone, and the checkout's files, legacy included, are looked at
+     only without it. It comes with guards for the explicit case.
+  2. **The preflight's `brain == executable`.** `repos.resolve` looks up each brain's name as a
+     command (`repos.py:185-187`). That is a ninth coupling edge (fact 18), which the adapter's
+     commands answer now removes (Decision 1, invariant 3c, guard 11).
+- **Refined:**
+  - The preflight needs no host argument. `prepare` runs on the target host itself (`workflow.py:128,
+    389`), so an adapter answers for its own host, as it does for its launch command. The adapter names
+    its executable once, so its preflight and its launch cannot disagree.
+  - A file `ORCHESTRA_REPOS` names that does not exist is refused, rather than read as "no
+    descriptors".
+- **Added here:**
+  - the public check misses the moved private files, measured (fact 34; invariant 11b);
+  - the suite reads the operator's descriptors (fact 35; invariant 7);
+  - under D12, the sweep also removes the old prefix, because those folders hold the trace store's
+    key (A1, guard 12).
+- **Authority:** D12 added. A1 and A8 rewritten in place; Decision 1 and 5; invariants 3c, 7, 11 and
+  11b.
