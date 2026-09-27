@@ -150,10 +150,12 @@ reach only runs started afterwards, and keep personal ones out of the public rep
   This mapping is for the acceptance evidence only. The shared settings bind no skill.
 - **A4 [ACTIVE]:** Personas:
   - the shared settings name each role's persona file, `roles/*.md`, which the page never edits;
-  - the local patch may give a role its persona's text instead, which the view marks, and Revert
-    removes, going back to the shipped file;
-  - a persona's text has an upper size, so a run's policy stays well within what Temporal takes as
-    its input (fact 27).
+  - a role's `persona` text, when present, takes the place of its `persona_file`. Otherwise its
+    persona is that file's text. The Settings view writes `persona` into the local patch, marks it, and
+    Revert removes it, so the file serves again;
+  - the persona in effect is at most `MAX_PERSONA_BYTES = 64 * 1024` bytes of UTF-8, a constant of the
+    repository's own. That keeps a run's policy far inside what Temporal takes (fact 27), without tying
+    correctness to that service's limit.
 - **A5 [ACTIVE]:** Skills:
   - settings name a skill and nothing else, by a strict name grammar, never an invocation;
   - each kind renders the invocation: `/name` for Claude, `$name` for Codex;
@@ -178,6 +180,20 @@ reach only runs started afterwards, and keep personal ones out of the public rep
   - Every kind runs its agent interactively in the role's live terminal (D7), with its own turn-end
     signal, read-only mode, and environment hygiene — the variables a parent session of its own
     leaves, which its agent must not inherit.
+  - **A kind validates its own profile.** The generic owner, `policy.py`, validates what every
+    profile shares: the names, the `kind` and its grammar, the shape, and the roles' references.
+    The loaded adapter validates what it owns: whether `model` and `effort` apply to it, and which
+    values it takes. Today's plain-token rule (fact 30) moves into `claude-code` and `codex`, because
+    they put those values on a command line; it is not the contract for a kind that does not.
+  - **The packages keep their direction** (fact 28).
+    - `app/agents`, adapters included, never imports `app/observability`, and `telemetry` never
+      branches on a kind.
+    - `app/application` loads the adapter, uses it for the agent's mechanics, and hands `telemetry`
+      what the adapter provides for tracing — its environment for a tracing plugin, and the records
+      of a session to upload — as plain data. `telemetry` records a kind only as data.
+    - `turn_hook.py` stays outside the adapters as a sink that knows no vendor. Where a payload comes
+      from — stdin or its last argument — becomes a mode the adapter passes, and the adapter alone
+      decides how its CLI invokes the sink and which events end a turn.
 - **A8 [ACTIVE]:** The contract's openness is proven in the suite by a test-only kind.
   - Its module is handed to the loader for the test, and never shipped.
   - It runs a fake agent interactively through the real terminal, takes typed keys, and ends its turn
@@ -197,6 +213,8 @@ Any of these can follow as a change of its own:
 - a global "skip approvals" — the Start form's per-run choice stays;
 - a list of models to choose from (D18: no model registry);
 - settings per repository or per run — `.orchestra/` in a target repository is where they would live;
+- editing repositories in the Settings view — `.orchestra/repos.json` moves, and stays a file edited by
+  hand;
 - finding out which skills each host has installed;
 - removing the persona-path resolver kept for old runs (`prompt_path`, and the copy check behind it),
   once no run of the old shape is open;
@@ -305,6 +323,18 @@ Any of these can follow as a change of its own:
 26. **JSON Merge Patch** ([RFC 7396](https://www.rfc-editor.org/rfc/rfc7396)): a patch's object members
     merge recursively, `null` removes the member, and any other value replaces it.
 27. **Temporal refuses a payload past its own limit** (D29). Today's persona files are 28 and 31 lines.
+28. **The packages' direction today.** `app/agents` and `app/observability` import nothing of each other;
+    `app/application` imports both (`activities.py:20-28`).
+29. **The turn hook names its vendors.**
+    - `turn_hook.py` records whatever payload a vendor's hook hands it. It reads that payload from its
+      last argument when its label is `notify` — Codex's word — and from stdin otherwise, as Claude's
+      hooks send it (`app/agents/turn_hook.py:17`).
+    - Its docstring names both.
+    - It is launched by path and imports nothing of ours (`app/agents/README.md`).
+30. **Model and effort share one rule today:** a plain token, because both reach a command line
+    (`policy.py:32-33, 181-184`).
+31. **The standing test rule.** An iteration runs only the modules it touches, named; the whole suite runs
+    once, after the reviewer's final pass, before the operator's live check ([tests/README.md](../tests/README.md)).
 
 **Inferences**
 
@@ -374,12 +404,15 @@ Any of these can follow as a change of its own:
    - `agents`: a profile's name maps to its `kind` and, where the kind takes them, `model` and `effort`.
      Two ship, matching today's bindings.
    - `roles`: each role's `agent` — a profile's name — its `workspace_access`, its `persona_file`, and,
-     from the local patch only, its `persona` text (A4).
+     when given, its `persona` text, which takes the file's place (A4).
    - `stage_skills`: a stage maps to a skill's name (A5).
    - Everything else as today: rounds, the default flow, and the stack's keys.
-3. **The run's policy, made whole at its start (A6).** `client.start` resolves each role to its kind,
-   model, effort, access and persona text, and each stage's skill to its name, and hands the run that
-   copy.
+3. **The run's policy, made whole at its start (A6).**
+   - `client.start` resolves each role to its kind, model, effort, access and persona text, and each
+     stage's skill to its name, and hands the run that copy.
+   - The persona text is `persona` when present, else `persona_file`'s text, checked against
+     `MAX_PERSONA_BYTES` there.
+   - No later Apply, and no later edit to a persona file, changes that run.
 
    A role-run reads the old shape as well:
    - a `brain` of `claude` is the `claude-code` kind;
@@ -392,6 +425,15 @@ Any of these can follow as a change of its own:
    - The loader reads the shared file, applies the local patch, and validates the result; or it takes
      `ORCHESTRA_SETTINGS` alone.
    - A writer beside it:
+     - edits the existing local patch only at the paths of the settings submitted, never rebuilding it
+       from the effective settings. So:
+       - a member the view does not show — a hand-written target or timeout — survives an Apply;
+       - an unchanged shared value is never copied into the patch, where it would hide a later shared
+         change;
+       - a submitted value equal to what lies below removes its member, rather than keeping a copy;
+       - removing a shipped member writes RFC 7396's `null`;
+       - Revert removes only that setting's member, pruning objects it leaves empty;
+       - a patch left empty removes the file;
      - validates the whole result;
      - refuses an Apply made against a revision of either file other than the current one;
      - replaces the local patch atomically;
@@ -407,6 +449,8 @@ Any of these can follow as a change of its own:
    - D3: the reviewer is read-only; whether it is another model is the operator's choice;
    - D13: kinds of agent are code, one module each, and which agent a role runs is configuration;
    - D17: the seam runs through an adapter;
+   - D18: model and effort stay configuration, and no registry. Their accepted values are their kind's
+     adapter's to check;
    - D19: a skill is named, and rendered by its kind;
    - D29: a settings change through the policy's owner joins the page's writes;
    - the README and using.md: `.orchestra/` and the new names.
@@ -457,9 +501,14 @@ kind does not declare cannot be passed to it.
 2. **Old runs keep running.** A run started before the change completes on the policy of the shape it
    started with (Decision 3).
 3. **Agent mechanics live only in the adapters.** No production module outside `app/agents/adapters/`
-   contains agent-specific mechanics or branches. A kind may travel elsewhere only as opaque data —
-   for settings, the page, telemetry — and the page learns kinds and capabilities from the adapter
-   boundary. A guard in `test_architecture.py` enforces it.
+   contains agent-specific mechanics or branches — `turn_hook.py` and `telemetry.py` included. A kind
+   may travel elsewhere only as opaque data — for settings, the page, telemetry — and the page learns
+   kinds and capabilities from the adapter boundary. A guard in `test_architecture.py` enforces it.
+3a. **The packages keep their direction.** `app/agents` never imports `app/observability`;
+    `app/application` joins them, handing on the adapter's tracing data (A7). The existing boundary
+    check in `test_architecture.py` stays green.
+3b. **A kind owns its profile's values.** The generic validator checks shape and references, and the
+    kind's adapter checks whether `model` and `effort` apply and which values they take.
 4. **Every agent's terminal takes typing (D7),** and the reviewing role is read-only, through its kind's
    own mode and the step's failure on a changed tree (D10).
 5. **One loader and one validator** for the page, the command line and both workers. A refusal in the
@@ -469,12 +518,16 @@ kind does not declare cannot be passed to it.
      persona file changes an open run.
    - The stack stays the checkout's own (D32), and `ORCHESTRA_SETTINGS` takes no patch.
 7. **The suite never reads the operator's local patch,** and the shared settings bind no skill.
-8. **Writes are atomic and checked.** A refused Apply, or one against a stale revision of either file,
-   leaves both as they were. A patch whose result does not validate stops the loader with the file's
-   name and the reason.
+8. **Writes are atomic, checked and sparse.**
+   - A refused Apply, or one against a stale revision of either file, leaves both as they were.
+   - An Apply changes the local patch only at the settings it carries: every other member survives, and
+     no unchanged shared value is copied in.
+   - A patch whose result does not validate stops the loader with the file's name and the reason.
 9. **Settings hold names, never mechanics or secrets.** A skill is a name; a profile has no raw
    arguments or environment; keys stay in `.env`.
-10. **A persona's text is bounded,** so a run's policy stays within Temporal's payload limit.
+10. **A persona is at most `MAX_PERSONA_BYTES = 64 * 1024` bytes of UTF-8.** The bound is measured on
+    the persona in effect — `persona` when present, else `persona_file`'s text — and refused, naming
+    the role, one byte past it.
 11. **No `ORCH_*` name, and no root `policy.json` or `repos.json`, is left** in code, configuration or
     current documents. Finished todos keep theirs as history.
 12. **D18 still holds:** no model registry; an empty model is the provider's default, shown as such.
@@ -485,23 +538,32 @@ kind does not declare cannot be passed to it.
 
 0. [x] Q1–Q7 answered (D5–D11). Codex's skills measured (fact 21).
 1. [ ] Red guards, each observed failing first (Test-first and verification plan).
-2. [ ] The move and the rename (A1): `.orchestra/`, and the `ORCHESTRA_*` variables. Mechanical, with the
-   suite and `make demo` green after it.
-3. [ ] The adapter package: the contract, the loader, and `claude-code` and `codex` moved behind them.
-   Behaviour unchanged, with the suite and `make demo` green at every step.
+2. [ ] The move and the rename (A1): `.orchestra/`, and the `ORCHESTRA_*` variables. Mechanical, checked
+   by the tests of the modules it touches.
+3. [ ] The adapter package: the contract, the loader, and `claude-code` and `codex` moved behind them,
+   behaviour unchanged. That includes:
+   - `turn_hook.py` made a vendor-blind sink;
+   - `telemetry` given the adapter's tracing data by the application, and branching on no kind.
+
+   Checked by the touched concerns' tests — the agents', the application's, observability's — and by
+   the recorded histories' replay.
 4. [ ] The settings' new shape, and the run's policy made whole at `client.start`:
-   - validation: read-only for the architect's kind; no independent-judge refusal; skill names; the
-     persona bound;
-   - the old shape still read by role-runs.
-5. [ ] The merge patch: the loader, the writer, the `.gitignore` entries, and the suite's isolation.
+   - validation: the generic shape, and each kind's own values through its adapter; read-only for the
+     architect's kind; no independent-judge refusal; skill names; `MAX_PERSONA_BYTES`;
+   - the old shape still read by role-runs, with the replay of recorded histories.
+5. [ ] The merge patch: the loader, the sparse writer, the `.gitignore` entries, and the suite's
+   isolation.
 6. [ ] The settings API — kinds and capabilities from the adapter boundary — and the Settings view,
    through `frontend-design`, with each field saying what it changes and when.
 7. [ ] Documentation (Documentation plan).
-8. [ ] Verification matrix:
+8. [ ] Verification, in the standing order (fact 31):
+   - tasks 2–6 each iterate on the tests of the concerns they touch, named, with the replay of recorded
+     histories wherever a run's policy is read, and focused browser probes for the view;
+   - `make demo` once, on the finished implementation;
    - `web-design-review`;
    - one agent review round, fixed without further agents;
    - the external review;
-   - the whole suite once per host;
+   - after its PASS, the whole suite once on WSL and once on Windows;
    - the operator's live check, including U1.
 
 ## Test-first and verification plan
@@ -520,8 +582,8 @@ kind does not declare cannot be passed to it.
       typing;
     - an Apply made while a run is open leaves that run as it started.
 - **Permanent regression guards,** each written and run failing before any production code:
-  1. **Mechanics only in the adapters** (`test_architecture.py`). Red today in eight places. Control: a
-     kind's branch planted outside the package.
+  1. **Mechanics only in the adapters** (`test_architecture.py`). Red today in eight places, the turn
+     hook and telemetry among them. Control: a kind's branch planted outside the package.
   2. **A new kind is one module** (`agents/test_terminal.py`). A test-only kind, handed to the loader:
      - runs a fake agent interactively through the real terminal;
      - takes typed keys;
@@ -535,6 +597,12 @@ kind does not declare cannot be passed to it.
      is changed after a run starts and before its architect's session is born, and the architect still
      receives the text the run started with. Red today (fact 4). Control: the persona read at the
      session, as today.
+
+     The persona in effect:
+     - `persona` wins over `persona_file`;
+     - one of exactly `MAX_PERSONA_BYTES` is taken;
+     - one byte more is refused, naming the role, and bytes of UTF-8 are what is counted — a persona of
+       multi-byte characters is refused by its bytes, not its characters.
   4. **Any profile under any role, and the old shape:**
      - both roles on one profile plan, review and build (D9);
      - the architect on a kind with no read-only mode is refused (D10);
@@ -547,10 +615,23 @@ kind does not declare cannot be passed to it.
      - a path in settings resolves from the checkout's root.
   6. **The writer and the API:**
      - a refused Apply changes nothing, and so does a stale one after a hand edit of either file;
+     - a hand-written `targets` or timeout override survives an Apply that changes a role's agent;
+     - an Apply changing one setting copies no unrelated shared value into the patch;
+     - Revert removes that setting's member alone;
+     - removing a shipped profile writes a `null`;
+     - removing the last override removes the file;
      - no token, no write;
      - kinds and capabilities come from the adapter boundary;
      - a skill's invocation per kind: `/name` for Claude, `$name` for Codex, none for a kind without
        skills.
+
+     Control: a writer that rebuilds the patch from the effective settings.
+  7. **A kind validates its own values** (`foundation/test_policy.py`, with a test-only kind):
+     - a kind that takes no effort refuses one;
+     - `claude-code` and `codex` refuse a model that is not a plain token;
+     - the generic validator takes a value it does not know the meaning of, and leaves it to the kind.
+
+     Control: the plain-token rule kept generic, refusing the test-only kind's own value.
 - **Reviewer-checked judgements:**
   - the view's words;
   - that nothing in it reads as a model registry;
@@ -560,11 +641,12 @@ kind does not declare cannot be passed to it.
 
 ### Green evidence
 
-- The same guards green, and the whole existing suite green at every step of tasks 2 and 3.
-- `make demo` passes whole.
-- `make public-check` and `git diff --check` are clean.
+- The same guards green, and each task's touched concerns green as it goes (task 8), with the recorded
+  histories replaying wherever a run's policy is read.
 - Browser probes of the view.
-- The whole suite once per host, after the external PASS.
+- `make demo` passes whole, once, on the finished implementation.
+- `make public-check` and `git diff --check` are clean.
+- The whole suite once on WSL and once on Windows, after the external PASS.
 - The operator's live check:
   - skills bound in the view reach a real turn, for Claude and for Codex (U1);
   - either agent is swapped under either role;
@@ -577,9 +659,13 @@ kind does not declare cannot be passed to it.
   - [the architecture](../docs/architecture/structure.md): D3, D13, D17, D19 and D29, as in the
     Decision;
   - [the agents' structure](../app/agents/docs/architecture/structure.md): the adapter package, its
-    contract, its loader and naming rule, and how to add a kind;
+    contract, its loader and naming rule, a kind's own validation, the turn hook as a sink that knows
+    no vendor, and how to add a kind;
+  - [the application's structure](../app/application/docs/architecture/structure.md): the adapter's
+    tracing data handed to observability, with the packages' direction unchanged;
   - [the foundation's structure](../app/foundation/docs/architecture/structure.md): `.orchestra/`, the
-    merge patch, and the run's policy made whole at its start;
+    merge patch and its sparse writer, `MAX_PERSONA_BYTES`, and the run's policy made whole at its
+    start;
   - [docs/using.md](../docs/using.md): the Settings view, and the new names;
   - [README.md](../README.md): the configuration table — `.orchestra/settings.json`, the local patch,
     `.orchestra/repos.json`, `ORCHESTRA_SETTINGS` — and the skills route, now the Settings view.
@@ -599,9 +685,10 @@ kind does not declare cannot be passed to it.
 
 ## Completion criteria
 
-- Every guard observed red, then green, and the existing suite green throughout.
-- `make demo`, `make public-check` and `git diff --check` pass. The whole suite passes on each host
-  after the external PASS.
+- Every guard observed red, then green, and each task's touched concerns green as it goes.
+- `make demo`, `make public-check` and `git diff --check` pass on the finished implementation. The whole
+  suite passes once on each host after the external PASS, and a failure there is reported as one,
+  never counted as a pass.
 - The operator's live check passes, U1 included.
 - The documentation plan is done, with nothing unrelated in the diff.
 
@@ -645,3 +732,23 @@ kind does not declare cannot be passed to it.
   - `repos.json` moved beside the settings, as D11's similar case;
   - the note that a vendor's skills folder stays inside the adapter that needs it (fact 25).
 - **Authority:** A1, A2 and A4–A8 rewritten in place. No decision changed.
+
+### 2026-09-27 — the external review: PATCH, five corrections
+
+- **Accepted, each checked against the code:**
+  1. **The standing test rule (fact 31).** Iteration runs only the touched concerns, with the histories'
+     replay; `make demo` runs once at the end; the whole suite runs once per host after the external
+     PASS. Tasks, green evidence and completion criteria had said otherwise.
+  2. **The sparse writer.** An Apply edits the patch only at the settings it carries, so hand-written
+     and out-of-view members survive and no shared value is copied in. It comes with its controls.
+  3. **The persona's exact contract.** `persona` wins over `persona_file`, resolved once at the start,
+     and `MAX_PERSONA_BYTES = 64 * 1024` bytes of UTF-8, guarded at the limit and one past it.
+  4. **The packages' direction.** `app/agents` and `app/observability` import nothing of each other
+     (fact 28). The application hands the adapter's tracing data to telemetry, which branches on no
+     kind, and the turn hook becomes a sink that knows no vendor (fact 29).
+  5. **A kind validates its own profile values.** The plain-token rule moves into today's two adapters
+     (fact 30).
+- **Also:** the reviewer accepted `.orchestra/repos.json`, and editing repositories in the view is left
+  out.
+- **Authority:** A4 and A7 rewritten in place; invariants 3, 3a, 3b, 8 and 10 rewritten. No decision
+  changed.
