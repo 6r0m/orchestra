@@ -108,7 +108,7 @@ class ProcessTree(unittest.TestCase):
     DETACH = "plain"
 
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="orch-launch-")
+        self.tmp = tempfile.mkdtemp(prefix="orchestra-launch-")
         for name, text in (("child.py", CHILD), ("grandchild.py", GRANDCHILD)):
             with open(os.path.join(self.tmp, name), "w", encoding="utf-8") as fh:
                 fh.write(text)
@@ -169,7 +169,7 @@ class ProcessTree(unittest.TestCase):
     def test_the_tree_is_gone_when_its_end_returns(self):
         """Ending the tree waits for every process in it: the directory they worked in is free at once, as
         removing a worktree right after its agent's end needs. Termination alone only begins it."""
-        work = tempfile.mkdtemp(prefix="orch-launch-cwd-", dir=self.tmp)
+        work = tempfile.mkdtemp(prefix="orchestra-launch-cwd-", dir=self.tmp)
         tree = launch._Tree()
         self.addCleanup(tree.close)
         tree.start(self._argv("sleep"), work, subprocess.DEVNULL, subprocess.DEVNULL, subprocess.DEVNULL, None)
@@ -188,7 +188,7 @@ class ProcessTree(unittest.TestCase):
         worked in; so the job is closed to newcomers first, and such a one never starts."""
         with open(os.path.join(self.tmp, "late.py"), "w", encoding="utf-8") as fh:
             fh.write(LATE)
-        work = tempfile.mkdtemp(prefix="orch-launch-cwd-", dir=self.tmp)
+        work = tempfile.mkdtemp(prefix="orchestra-launch-cwd-", dir=self.tmp)
         trigger = os.path.join(self.tmp, "go")
         tree = launch._Tree()
         self.addCleanup(tree.close)
@@ -314,7 +314,7 @@ class StartupDeath(unittest.TestCase):
     DELAYS = (0.02, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.12, 0.3, 1.0)
 
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="orch-startup-")
+        self.tmp = tempfile.mkdtemp(prefix="orchestra-startup-")
         import shutil
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         with open(os.path.join(self.tmp, "child.py"), "w", encoding="utf-8") as fh:
@@ -405,7 +405,7 @@ class SuspendedOrphan(unittest.TestCase):
     """)
 
     def test_an_owner_killed_before_the_agent_is_in_its_job_leaves_nothing(self):
-        tmp = tempfile.mkdtemp(prefix="orch-orphan-")
+        tmp = tempfile.mkdtemp(prefix="orchestra-orphan-")
         import shutil
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         marker = "orphan-%d" % os.getpid()
@@ -436,7 +436,7 @@ class NoScope(unittest.TestCase):
     """Without a systemd user manager to create its scope, the agent is refused before it runs."""
 
     def test_the_agent_never_runs_without_a_scope(self):
-        tmp = tempfile.mkdtemp(prefix="orch-noscope-")
+        tmp = tempfile.mkdtemp(prefix="orchestra-noscope-")
         import shutil
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         sentinel = os.path.join(tmp, "RAN")
@@ -462,7 +462,7 @@ class HungSystemd(unittest.TestCase):
     """
 
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="orch-hung-")
+        self.tmp = tempfile.mkdtemp(prefix="orchestra-hung-")
         import shutil
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.shims = os.path.join(self.tmp, "shims")
@@ -546,7 +546,7 @@ class NoShell(unittest.TestCase):
     """Operator text reaches the agent byte for byte and executes nothing."""
 
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="orch-argv-")
+        self.tmp = tempfile.mkdtemp(prefix="orchestra-argv-")
         import shutil
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.sentinel = os.path.join(self.tmp, "EXECUTED")

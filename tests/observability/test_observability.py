@@ -2,7 +2,7 @@
 
 The trace is proven the way the workflow is — the real workflow and activities on the
 time-skipping test server, with no agent CLI and no network — and its row shapes, masking,
-credentials and uploads directly against `telemetry.py`.
+credentials and uploads directly against `telemetry.py` and the kinds' own tracing.
 """
 import contextlib
 import io
@@ -17,6 +17,7 @@ import threading
 import time
 import unittest
 import uuid
+from unittest import mock
 
 # The suite's own folder, reached from this concern's folder inside it, and the
 # checkout above both: the shared harness and the fixtures live at the suite root.
@@ -26,6 +27,7 @@ REPO = PKG
 sys.path[:0] = [PKG, HERE]
 
 from app.application import activities as A  # noqa: E402
+from app.application import settings  # noqa: E402
 from app.interfaces import cli  # noqa: E402
 from app.agents import launch  # noqa: E402
 from app.foundation import policy as policy_mod  # noqa: E402
@@ -36,7 +38,8 @@ from fakes import (FakeAgent, FakeWorktrees, Recorder, codex_review_first,  # no
                    codex_review_resumed)
 from tests.orchestration.test_workflow import Scenario  # noqa: E402
 
-POL = policy_mod.load()
+# The policy a run on the shipped settings is handed.
+POL = settings.run_policy(settings.load())
 WINDOWS = sys.platform.startswith("win")
 
 
@@ -106,7 +109,7 @@ class Hermetic(Scenario):
         original = telemetry.resolve
         telemetry.resolve = lambda *args, **kwargs: calls.append(args) or (_ for _ in ()).throw(
             AssertionError("real telemetry.resolve called from a test"))
-        repo = tempfile.mkdtemp(prefix="orch-herm-")
+        repo = tempfile.mkdtemp(prefix="orchestra-herm-")
         self.addCleanup(shutil.rmtree, repo, ignore_errors=True)
         a1, _ = codex_review_first("PASS")
         E.host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)])
@@ -126,7 +129,7 @@ class RunIds(unittest.TestCase):
 
     def test_a_start_that_meets_a_retained_run_id_starts_under_a_fresh_one(self):
         from app.workspace import worktrees
-        repo = tempfile.mkdtemp(prefix="orch-ids-")
+        repo = tempfile.mkdtemp(prefix="orchestra-ids-")
         self.addCleanup(shutil.rmtree, repo, ignore_errors=True)
         taken = "toy-task-%s" % uuid.uuid4().hex[:8]
         fresh = "toy-task-%s" % uuid.uuid4().hex[:8]
@@ -192,7 +195,7 @@ class Preflight(unittest.TestCase):
             async def start_workflow(self, *args, **kwargs):
                 Client.started.append(args)
 
-        repo = tempfile.mkdtemp(prefix="orch-preflight-")
+        repo = tempfile.mkdtemp(prefix="orchestra-preflight-")
         self.addCleanup(shutil.rmtree, repo, ignore_errors=True)
         code, out = captured(cli.run(["toy task", "--repo", repo], client=Client(), tele=object()))
         self.assertEqual(code, 4, out)
@@ -249,7 +252,7 @@ class EntryPoint(unittest.TestCase):
     """The operator's task text reaches argv byte-for-byte."""
 
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="orch-make-")
+        self.tmp = tempfile.mkdtemp(prefix="orchestra-make-")
         self.capture = os.path.join(self.tmp, "argv.json")
         self.stub = os.path.join(self.tmp, "stub.py")
         # A payload that is detectable but harmless: if Make or the shell ever
@@ -359,7 +362,7 @@ class FinalDiff(unittest.TestCase):
     """
 
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="orch-final-diff-")
+        self.tmp = tempfile.mkdtemp(prefix="orchestra-final-diff-")
         self.repo = os.path.join(self.tmp, "worktree")
         os.makedirs(self.repo)
         _git(self.repo, "init", "-q")
@@ -447,7 +450,7 @@ class SecretsFileCredentials(unittest.TestCase):
     def setUp(self):
         from app.observability import telemetry
         self.telemetry = telemetry
-        self.tmp = tempfile.mkdtemp(prefix="orch-secrets-")
+        self.tmp = tempfile.mkdtemp(prefix="orchestra-secrets-")
         self.saved = {k: os.environ.get(k) for k in
                       ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_HOST",
                        "LANGFUSE_LOGIN_PASSWORD", "POSTGRES_PASSWORD")}
@@ -586,45 +589,52 @@ class ClaudeTracingGate(unittest.TestCase):
         return host.run_role({"stage": stage, "state": base, "policy": POL}), agent
 
     def test_only_a_traced_claude_role_run_enables_the_plugin(self):
-        """The run's own settings carry both keys, and only this user can read them."""
+        """The run's own settings carry both keys, in the turn's private folder, which only this user can
+        enter."""
         import stat
         from app.agents import nodes as N
+        from app.agents.adapters import claude_code, codex
         from app.observability import telemetry
-        tmp = tempfile.mkdtemp(prefix="orch-cc-gate-")
-        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
-        engineer, architect = POL["roles"]["engineer"], POL["roles"]["architect"]
+        engineer = POL["roles"]["engineer"]
         traced = telemetry._Span(traceparent="00-%032x-%016x-01" % (1, 2))
-        path = telemetry.harness_settings(engineer, traced)
+        state = {"run_id": "r1"}
+
+        def settings(span, client=object()):
+            private = telemetry.Private()
+            self.addCleanup(private.discard)
+            context = telemetry.trace_context(client, span, state, "plan", "engineer")
+            return private, claude_code.trace_settings(context, private)
+        private, path = settings(traced)
         with open(path, encoding="utf-8") as fh:
             self.assertEqual(json.load(fh), {
-                "enabledPlugins": {telemetry.CLAUDE_PLUGIN: True},
-                "pluginConfigs": {telemetry.CLAUDE_PLUGIN: {"options": {
+                "enabledPlugins": {claude_code.PLUGIN: True},
+                "pluginConfigs": {claude_code.PLUGIN: {"options": {
                     "LANGFUSE_PUBLIC_KEY": "pk-lf-test",
                     "LANGFUSE_SECRET_KEY": "sk-lf-test",
                     "LANGFUSE_BASE_URL": "http://localhost:3000"}}}})
+        self.assertEqual(os.path.dirname(path), private.folder)
         if not WINDOWS:
             self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
             self.assertEqual(stat.S_IMODE(os.stat(os.path.dirname(path)).st_mode), 0o700)
-        argv, _ = N.build_argv("engineer", engineer, None, tmp, path)
+        argv, _ = N.build_argv(engineer, None, path)
         self.assertEqual(argv[argv.index("--settings") + 1], path)
         self.assertNotIn("sk-lf-test", " ".join(argv), "the secret never reaches the command line")
-        telemetry.discard_settings(path)
+        private.discard()
         self.assertFalse(os.path.exists(path) or os.path.exists(os.path.dirname(path)))
-        telemetry.discard_settings(path)
+        private.discard()
         for name in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"):
             value = os.environ.pop(name)
-            self.assertIsNone(telemetry.harness_settings(engineer, traced))
+            self.assertIsNone(settings(traced)[1])
             os.environ[name] = value
-        self.assertIsNone(telemetry.harness_settings(engineer, telemetry._Span()))
-        argv, _ = N.build_argv("engineer", engineer, None, tmp, None)
+        self.assertIsNone(settings(telemetry._Span())[1], "a step with no trace switches nothing on")
+        self.assertIsNone(settings(traced, client=None)[1], "nor a run with tracing off")
+        argv, _ = N.build_argv(engineer, None, None)
         self.assertNotIn("--settings", argv)
-        self.assertIsNone(telemetry.harness_settings(architect, traced))
+        self.assertFalse(hasattr(codex, "trace_settings"), "Codex traces through its own uploader instead")
 
     def _fake_settings(self, made):
-        from app.observability import telemetry
-
-        def settings(role, span):
-            path = os.path.join(tempfile.mkdtemp(prefix=telemetry.SETTINGS_DIR_PREFIX), telemetry.SETTINGS_FILE)
+        def settings(context, private):
+            path = private.path("settings.json")
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write("{}")
             made.append(path)
@@ -632,55 +642,47 @@ class ClaudeTracingGate(unittest.TestCase):
         return settings
 
     def test_the_settings_file_survives_a_rehydrate_and_goes_after_it(self):
-        from app.observability import telemetry
+        from app.agents.adapters import claude_code
         made, present = [], {}
 
         class Watching(FakeAgent):
-            def __call__(self, worktree, argv, rdir, name, prompt, timeout, env, *, brain):
+            def __call__(self, worktree, argv, rdir, name, prompt, timeout, env, *, kind):
                 present[name] = bool(made) and os.path.exists(made[-1])
                 return FakeAgent.__call__(self, worktree, argv, rdir, name, prompt, timeout, env,
-                                          brain=brain)
+                                          kind=kind)
 
-        original = telemetry.harness_settings
-        telemetry.harness_settings = self._fake_settings(made)
-        try:
+        with mock.patch.object(claude_code, "trace_settings", self._fake_settings(made)):
             self.role_run([("build-e2-2", 1, "Error: No conversation found with session ID: dead\n"),
                            ("build-e2-2-rehydrated", 0, "rebuilt\n")],
                           {"phase": "build", "round": 1, "episode": 2, "agent_sessions": {"engineer": "dead"}},
                           "build", runner_class=Watching)
-        finally:
-            telemetry.harness_settings = original
         self.assertTrue(present["build-e2-2"] and present["build-e2-2-rehydrated"])
         self.assertFalse(any(os.path.exists(os.path.dirname(p)) for p in made))
 
     def test_the_settings_file_lives_only_as_long_as_its_role_run(self):
         """It carries the secret, so a stage removes it on the way out, failure included."""
-        from app.observability import telemetry
+        from app.agents.adapters import claude_code
         made = []
-        original = telemetry.harness_settings
-        telemetry.harness_settings = self._fake_settings(made)
-        try:
+        with mock.patch.object(claude_code, "trace_settings", self._fake_settings(made)):
             self.role_run([("plan-e1-1", 0, "p\n")], {}, "plan")
             self.assertFalse(any(os.path.exists(os.path.dirname(p)) for p in made), "left behind after a stage")
             with self.assertRaises(Exception):
                 self.role_run([("plan-e1-1", 1, "boom\n")], {}, "plan")
             self.assertEqual(len(made), 2)
             self.assertFalse(any(os.path.exists(os.path.dirname(p)) for p in made), "left behind after a failure")
-        finally:
-            telemetry.harness_settings = original
 
     def test_a_role_runs_settings_are_private_and_off_the_repository_drive(self):
         import stat
         seen = []
 
         class Watching(FakeAgent):
-            def __call__(self, worktree, argv, rdir, name, prompt, timeout, env, *, brain):
+            def __call__(self, worktree, argv, rdir, name, prompt, timeout, env, *, kind):
                 if "--settings" in argv:
                     path = argv[argv.index("--settings") + 1]
                     seen.append((path, stat.S_IMODE(os.stat(path).st_mode),
                                  stat.S_IMODE(os.stat(os.path.dirname(path)).st_mode)))
                 return FakeAgent.__call__(self, worktree, argv, rdir, name, prompt, timeout, env,
-                                          brain=brain)
+                                          kind=kind)
 
         with contextlib.redirect_stderr(io.StringIO()):
             self.role_run([("plan-e1-1", 0, "p\n")], {}, "plan", telemetry=Recorder(), runner_class=Watching)
@@ -692,38 +694,43 @@ class ClaudeTracingGate(unittest.TestCase):
         self.assertFalse(os.path.exists(path) or os.path.exists(os.path.dirname(path)))
 
     def test_a_failed_write_leaves_no_secret_behind(self):
-        """A settings file that could not be written whole is removed, not abandoned.
+        """A settings file that could not be written whole is removed, not abandoned, and the failure is
+        raised for the step to say and go on untraced.
 
-        The caller deletes only a file it was handed, so a half-written one that
-        already holds the secret has to go before `harness_settings` gives up.
+        The folder is the turn's, and goes when the turn ends; a half-written file that already holds the
+        secret goes at once.
         """
+        from app.agents.adapters import claude_code
         from app.observability import telemetry
-        tmp = tempfile.mkdtemp(prefix="orch-cc-partial-")
-        saved = {k: os.environ.get(k) for k in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY")}
-        os.environ.update(LANGFUSE_PUBLIC_KEY="pk-lf-test", LANGFUSE_SECRET_KEY="sk-lf-test")
-        original, tempdir = json.dump, tempfile.tempdir
-        # Where the private directory is made, so the test can see what is left.
-        tempfile.tempdir = tmp
+        real = os.fdopen
 
-        def partial(obj, fh, *args, **kwargs):
-            fh.write('{"pluginConfigs": {"secret": "sk-lf-test')
-            raise OSError("disk full")
+        class Partial:
+            def __init__(self, fh):
+                self.fh = fh
 
-        json.dump = partial
-        try:
-            with contextlib.redirect_stderr(io.StringIO()):
-                path = telemetry.harness_settings(
-                    POL["roles"]["engineer"], telemetry._Span(traceparent="00-%032x-%016x-01" % (1, 2)))
-            self.assertIsNone(path)
-            self.assertEqual(os.listdir(tmp), [], "the half-written secret and its directory are gone")
-        finally:
-            json.dump, tempfile.tempdir = original, tempdir
-            for key, value in saved.items():
-                if value is None:
-                    os.environ.pop(key, None)
-                else:
-                    os.environ[key] = value
-            shutil.rmtree(tmp, ignore_errors=True)
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                self.fh.close()
+                return False
+
+            def write(self, text):
+                self.fh.write(text[:len(text) // 2])
+                self.fh.flush()
+                raise OSError("disk full")
+
+        private = telemetry.Private()
+        self.addCleanup(private.discard)
+        context = telemetry.trace_context(object(), telemetry._Span(traceparent="00-%032x-%016x-01" % (1, 2)),
+                                          {"run_id": "r1"}, "plan", "engineer")
+        with mock.patch.object(os, "fdopen", lambda fd, *args, **kwargs: Partial(real(fd, *args, **kwargs))):
+            with self.assertRaisesRegex(OSError, "disk full"):
+                claude_code.trace_settings(context, private)
+        folder = private.folder
+        self.assertEqual(os.listdir(folder), [], "the half-written secret is gone")
+        private.discard()
+        self.assertFalse(os.path.exists(folder), "and so is its folder, when the turn ends")
 
 
 class _FakeSpan:
@@ -1008,7 +1015,8 @@ class TraceShape(Scenario):
             state = {"run_id": "r1", "label": "the label", "task": "t", "trace_root": "a" * 16,
                      "phase": "plan", "episode": 2, "round": 0, "phase_rounds": 2,
                      "guidance": "use B"}
-            telemetry.begin(Client(), state, "plan", "engineer", {"brain": "claude"})
+            telemetry.begin(Client(), state, "plan", "engineer",
+                            {"kind": "claude-code", "agent": "claude", "model": "opus", "effort": "high"})
         finally:
             otel.get_current_span = original
         self.assertEqual(span.attributes.get(attrs.TRACE_SESSION_ID), "the label")
@@ -1024,10 +1032,13 @@ class TraceShape(Scenario):
                          (3, "plan", "plan", "engineer"))
         self.assertFalse({"episode", "attempt"} & set(metadata),
                          "two more counters beside the round read as a contradiction")
+        self.assertEqual({key: metadata[key] for key in ("kind", "agent", "model", "effort")},
+                         {"kind": "claude-code", "agent": "claude", "model": "opus", "effort": "high"},
+                         "the step's agent, as data")
         span.updates.clear()
         otel.get_current_span = lambda: span
         try:
-            telemetry.begin(Client(), state, "plan", "engineer", {"brain": "claude"},
+            telemetry.begin(Client(), state, "plan", "engineer", {"kind": "claude-code"},
                             log="tmp/orchestration/r1/logs/plan-e2-1")
         finally:
             otel.get_current_span = original
@@ -1121,8 +1132,16 @@ class ApprovalSummary(Scenario):
         self.assertEqual(answers["approval"]["trace_context"]["trace_id"], "%032x" % 1)
 
 
+def codex_upload(session, state, stage, role, span=None):
+    """What a finished Codex step uploads: the uploader its kind describes, run by the trace."""
+    from app.agents.adapters import codex
+    from app.observability import telemetry
+    context = telemetry.trace_context(_Events(), span, state, stage, role)
+    telemetry.run_upload(codex.upload(session, context), span)
+
+
 class CodexUpload(unittest.TestCase):
-    """The architect's upload is the Stop hook Codex itself would send.
+    """A Codex step's upload is the Stop hook Codex itself would send.
 
     Regression for empty `Codex Turn` rows: a resumed session writes a record
     before its next turn starts, the plugin opens an id-less turn for it, and
@@ -1132,8 +1151,9 @@ class CodexUpload(unittest.TestCase):
     def test_upload_names_the_turn_that_just_stopped(self):
         import subprocess as sp
         from app.observability import telemetry
-        tmp = tempfile.mkdtemp(prefix="orch-codex-upload-")
-        saved = (telemetry.CODEX_PLUGIN, telemetry.CODEX_ROLLOUTS, sp.run)
+        tmp = tempfile.mkdtemp(prefix="orchestra-codex-upload-")
+        from app.agents.adapters import codex
+        saved = (codex.PLUGIN, codex.ROLLOUTS, sp.run)
         calls = []
         try:
             bundle = os.path.join(tmp, "plugin", "dist", "index.mjs")
@@ -1148,14 +1168,13 @@ class CodexUpload(unittest.TestCase):
                                {"type": "event_msg", "payload": {"type": "task_started", "turn_id": "turn-b"}},
                                {"type": "event_msg", "payload": {"type": "task_complete"}}):
                     fh.write(json.dumps(record) + "\n")
-            telemetry.CODEX_PLUGIN = bundle
-            telemetry.CODEX_ROLLOUTS = os.path.join(tmp, "rollout-*-%s.jsonl")
+            codex.PLUGIN = bundle
+            codex.ROLLOUTS = os.path.join(tmp, "rollout-*-%s.jsonl")
             sp.run = lambda *args, **kwargs: calls.append(kwargs) or sp.CompletedProcess(args, 0, "", "")
-            telemetry.upload_codex_session(_Events(), {"brain": "codex"}, "thread-1",
-                                           {"run_id": "r1", "label": "l"}, "verify", "architect",
-                                           telemetry._Span(traceparent="00-%032x-%016x-01" % (1, 2)))
+            codex_upload("thread-1", {"run_id": "r1", "label": "l"}, "verify", "architect",
+                         telemetry._Span(traceparent="00-%032x-%016x-01" % (1, 2)))
         finally:
-            telemetry.CODEX_PLUGIN, telemetry.CODEX_ROLLOUTS, sp.run = saved
+            codex.PLUGIN, codex.ROLLOUTS, sp.run = saved
             shutil.rmtree(tmp, ignore_errors=True)
         self.assertEqual(len(calls), 1)
         payload = json.loads(calls[0]["input"])
@@ -1173,8 +1192,9 @@ class CodexUpload(unittest.TestCase):
         """
         import subprocess as sp
         from app.observability import telemetry
-        tmp = tempfile.mkdtemp(prefix="orch-codex-host-")
-        saved = (telemetry.CODEX_PLUGIN, telemetry.CODEX_ROLLOUTS, sp.run, os.environ.get("LANGFUSE_HOST"),
+        tmp = tempfile.mkdtemp(prefix="orchestra-codex-host-")
+        from app.agents.adapters import codex
+        saved = (codex.PLUGIN, codex.ROLLOUTS, sp.run, os.environ.get("LANGFUSE_HOST"),
                  os.environ.get("LANGFUSE_TRACING_ENVIRONMENT"), os.environ.get("LANGFUSE_RELEASE"))
         calls = []
         try:
@@ -1185,16 +1205,15 @@ class CodexUpload(unittest.TestCase):
             with open(os.path.join(tmp, "rollout-x-thread-1.jsonl"), "w", encoding="utf-8") as fh:
                 fh.write(json.dumps({"type": "event_msg",
                                      "payload": {"type": "task_started", "turn_id": "t"}}) + "\n")
-            telemetry.CODEX_PLUGIN = bundle
-            telemetry.CODEX_ROLLOUTS = os.path.join(tmp, "rollout-*-%s.jsonl")
+            codex.PLUGIN = bundle
+            codex.ROLLOUTS = os.path.join(tmp, "rollout-*-%s.jsonl")
             os.environ["LANGFUSE_HOST"] = "http://langfuse.test:3000"
             os.environ["LANGFUSE_TRACING_ENVIRONMENT"] = "dev"
             os.environ["LANGFUSE_RELEASE"] = "0123456789ab"
             sp.run = lambda *args, **kwargs: calls.append(kwargs) or sp.CompletedProcess(args, 0, "", "")
-            telemetry.upload_codex_session(_Events(), {"brain": "codex"}, "thread-1",
-                                           {"run_id": "r1"}, "verify", "architect")
+            codex_upload("thread-1", {"run_id": "r1"}, "verify", "architect")
         finally:
-            telemetry.CODEX_PLUGIN, telemetry.CODEX_ROLLOUTS, sp.run, host, environment, release = saved
+            codex.PLUGIN, codex.ROLLOUTS, sp.run, host, environment, release = saved
             for name, value in (("LANGFUSE_HOST", host), ("LANGFUSE_TRACING_ENVIRONMENT", environment),
                                 ("LANGFUSE_RELEASE", release)):
                 if value is None:
@@ -1211,8 +1230,9 @@ class CodexUpload(unittest.TestCase):
     def test_a_plugin_build_missing_either_change_is_reported(self):
         import subprocess as sp
         from app.observability import telemetry
-        tmp = tempfile.mkdtemp(prefix="orch-codex-caps-")
-        saved = (telemetry.CODEX_PLUGIN, telemetry.CODEX_ROLLOUTS, sp.run, set(telemetry._warned))
+        tmp = tempfile.mkdtemp(prefix="orchestra-codex-caps-")
+        from app.agents.adapters import codex
+        saved = (codex.PLUGIN, codex.ROLLOUTS, sp.run, set(telemetry._warned))
         reports = {}
         try:
             bundle = os.path.join(tmp, "plugin", "dist", "index.mjs")
@@ -1220,8 +1240,8 @@ class CodexUpload(unittest.TestCase):
             with open(os.path.join(tmp, "rollout-x-thread-1.jsonl"), "w", encoding="utf-8") as fh:
                 fh.write(json.dumps({"type": "event_msg",
                                      "payload": {"type": "task_started", "turn_id": "t"}}) + "\n")
-            telemetry.CODEX_PLUGIN = bundle
-            telemetry.CODEX_ROLLOUTS = os.path.join(tmp, "rollout-*-%s.jsonl")
+            codex.PLUGIN = bundle
+            codex.ROLLOUTS = os.path.join(tmp, "rollout-*-%s.jsonl")
             sp.run = lambda *args, **kwargs: sp.CompletedProcess(args, 0, "", "")
             for name, content in (("both", "LANGFUSE_CODEX_TRACEPARENT finalizeTurnId"),
                                   ("no turn fix", "LANGFUSE_CODEX_TRACEPARENT"),
@@ -1231,11 +1251,10 @@ class CodexUpload(unittest.TestCase):
                 telemetry._warned.clear()
                 err = io.StringIO()
                 with contextlib.redirect_stderr(err):
-                    telemetry.upload_codex_session(_Events(), {"brain": "codex"}, "thread-1",
-                                                   {"run_id": "r1"}, "verify", "architect")
+                    codex_upload("thread-1", {"run_id": "r1"}, "verify", "architect")
                 reports[name] = err.getvalue()
         finally:
-            telemetry.CODEX_PLUGIN, telemetry.CODEX_ROLLOUTS, sp.run, warned = saved
+            codex.PLUGIN, codex.ROLLOUTS, sp.run, warned = saved
             telemetry._warned.clear()
             telemetry._warned.update(warned)
             shutil.rmtree(tmp, ignore_errors=True)
@@ -1321,12 +1340,13 @@ class TraceContract(Scenario):
 
     def test_a_run_that_begins_with_research_writes_its_phase_and_its_brief(self):
         from unittest import mock
+        from app.agents.adapters import codex
         from app.observability import telemetry
         from fakes import codex_first_out, codex_review_resumed
         client = _Events()
         brief, _ = codex_first_out("Brief: the scheduler.")
         # Reasoning for whoever is asked: only the architect's steps ask, a brief's as a verdict's.
-        with mock.patch.object(telemetry, "codex_reasoning", return_value="why"):
+        with mock.patch.object(codex, "reasoning", return_value="why"):
             run = self.drive([("research-e1-1", 0, brief), ("plan-e2-1", 0, "planned\n"),
                               ("assess-e2-1", 0, codex_review_resumed("PASS"))], telemetry=client,
                              flow=["architect:research", "you:approve", "engineer:plan", "architect:assess"])
@@ -1452,7 +1472,7 @@ class TraceContract(Scenario):
             def __init__(self, **kwargs):
                 made.append(kwargs)
 
-        tmp = tempfile.mkdtemp(prefix="orch-dimensions-")
+        tmp = tempfile.mkdtemp(prefix="orchestra-dimensions-")
         try:
             for name in names[:2]:
                 os.environ.pop(name, None)
@@ -1464,8 +1484,10 @@ class TraceContract(Scenario):
                              ("dev", "0123456789ab-dirty"))
             self.assertIs(made[0].get("mask"), telemetry.mask, "what this component writes is masked")
             traceparent = "00-%032x-%016x-01" % (1, 2)
-            self.assertEqual(telemetry.harness_env(POL["roles"]["engineer"], telemetry._Span(traceparent=traceparent),
-                                                   {}, "plan", "engineer"),
+            from app.agents.adapters import claude_code
+            context = telemetry.trace_context(object(), telemetry._Span(traceparent=traceparent), {"run_id": "r1"},
+                                              "plan", "engineer")
+            self.assertEqual(claude_code.trace_env(context),
                              {"CC_LANGFUSE_TRACEPARENT": traceparent,
                               "LANGFUSE_TRACING_ENVIRONMENT": "dev",
                               "LANGFUSE_RELEASE": "0123456789ab-dirty"})
@@ -1483,7 +1505,7 @@ class TraceContract(Scenario):
 
     def test_the_release_names_the_orchestrator_code_that_ran(self):
         from app.observability import telemetry
-        tmp = tempfile.mkdtemp(prefix="orch-release-")
+        tmp = tempfile.mkdtemp(prefix="orchestra-release-")
         saved_root, warned = telemetry.REPO_ROOT, set(telemetry._warned)
         code = os.path.join(tmp, "workflow.py")
         try:
@@ -1527,7 +1549,7 @@ class TraceContract(Scenario):
                  "-----BEGIN OPENSSH " + "PRIVATE KEY-----\nAAAA\n-----END OPENSSH " + "PRIVATE KEY-----",
                  "stack-database-password", "the-secret-key-from-the-environment"]
         benign = "scikit sk-learn | token = get_token() | an AKIA prefix | Bearer auth | ghp_short"
-        tmp = tempfile.mkdtemp(prefix="orch-mask-")
+        tmp = tempfile.mkdtemp(prefix="orchestra-mask-")
         saved = (telemetry.SECRETS_FILE, telemetry._SECRETS, os.environ.get("LANGFUSE_SECRET_KEY"))
         try:
             telemetry.SECRETS_FILE = os.path.join(tmp, "langfuse.env")
@@ -1577,8 +1599,9 @@ class TraceContract(Scenario):
     def test_a_failed_codex_upload_marks_its_stage_degraded(self):
         import subprocess as sp
         from app.observability import telemetry
-        tmp = tempfile.mkdtemp(prefix="orch-codex-degraded-")
-        saved = (telemetry.CODEX_PLUGIN, telemetry.CODEX_ROLLOUTS, sp.run, set(telemetry._warned))
+        tmp = tempfile.mkdtemp(prefix="orchestra-codex-degraded-")
+        from app.agents.adapters import codex
+        saved = (codex.PLUGIN, codex.ROLLOUTS, sp.run, set(telemetry._warned))
         levels = {}
         try:
             bundle = os.path.join(tmp, "plugin", "dist", "index.mjs")
@@ -1588,20 +1611,19 @@ class TraceContract(Scenario):
             with open(os.path.join(tmp, "rollout-x-thread-1.jsonl"), "w", encoding="utf-8") as fh:
                 fh.write(json.dumps({"type": "event_msg",
                                      "payload": {"type": "task_started", "turn_id": "t"}}) + "\n")
-            telemetry.CODEX_PLUGIN = bundle
-            telemetry.CODEX_ROLLOUTS = os.path.join(tmp, "rollout-*-%s.jsonl")
+            codex.PLUGIN = bundle
+            codex.ROLLOUTS = os.path.join(tmp, "rollout-*-%s.jsonl")
             for outcome, rc in (("uploaded", 0), ("failed", 1)):
                 sp.run = lambda *args, _rc=rc, **kwargs: sp.CompletedProcess(args, _rc, "", "boom")
                 span = _FakeSpan()
                 telemetry._warned.clear()
                 with contextlib.redirect_stderr(io.StringIO()):
-                    telemetry.upload_codex_session(
-                        _Events(), {"brain": "codex"}, "thread-1", {"run_id": "r1"}, "verify", "architect",
-                        telemetry._Span(_FakeContext(), span, "00-%032x-%016x-01" % (1, 2)))
+                    codex_upload("thread-1", {"run_id": "r1"}, "verify", "architect",
+                                 telemetry._Span(_FakeContext(), span, "00-%032x-%016x-01" % (1, 2)))
                 levels[outcome] = [(update["level"], update["metadata"]["error_type"])
                                    for update in span.updates if "level" in update]
         finally:
-            telemetry.CODEX_PLUGIN, telemetry.CODEX_ROLLOUTS, sp.run, warned = saved
+            codex.PLUGIN, codex.ROLLOUTS, sp.run, warned = saved
             telemetry._warned.clear()
             telemetry._warned.update(warned)
             shutil.rmtree(tmp, ignore_errors=True)
@@ -1648,7 +1670,7 @@ class CutShort(Scenario):
         """An agent at work: its turn heartbeats, as a real one does, until `until` holds or it is cancelled."""
         from app.agents import terminal
 
-        def runner(worktree, argv, rdir, name, prompt, timeout, env, *, brain):
+        def runner(worktree, argv, rdir, name, prompt, timeout, env, *, kind):
             started.set()
             while not self.release.is_set() and not (until and until()):
                 terminal._activity_tick(name)
@@ -1740,7 +1762,7 @@ class CutShort(Scenario):
         from app.agents import terminal
         from app.orchestration import workflow as WF
 
-        def silent(worktree, argv, rdir, name, prompt, timeout, env, *, brain):
+        def silent(worktree, argv, rdir, name, prompt, timeout, env, *, kind):
             from temporalio import activity
             handle = E.client().get_workflow_handle(activity.info().workflow_id)
             terminal._activity_tick(name)

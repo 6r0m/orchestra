@@ -1,137 +1,68 @@
-"""Role stages: compose the prompt, launch the brain, ingest the explicit result.
+"""Role stages: compose the prompt, launch the role's agent, ingest the explicit result.
 
 Contract highlights:
-- One persistent CLI session per (run_id, role_id): Claude ids are minted by
-  us (--session-id), Codex ids are the thread of its first turn; resume is
-  always by exact id, never --last.
-- Each role turn is the vendor's interactive CLI in the role's live terminal
-  (`terminal`, beside this module), the prompt its argument. A read-only role runs under
-  native flags (--permission-mode plan / --sandbox read-only); a review ends its final
-  message with the {verdict, feedback} JSON, which is validated here, and research
-  answers with its final message.
-- The workflow never treats hidden session history as its state: only the
-  explicit output parsed here enters state. Malformed reviewer output is a
-  content error, never a verdict: unparseable output says nothing about the work.
-- Fresh-rehydrate happens only on a definitive session-not-found *before*
-  work begins; every other failure surfaces as an error.
+- One persistent CLI session per (run_id, role_id), resumed always by exact id, never --last. Whether an id
+  is minted before a session's first turn or learned from it is the role's kind's (`app.agents.adapters`).
+- Each role turn is the agent's interactive CLI in the role's live terminal (`terminal`, beside this
+  module), the prompt its argument, built by its kind. A read-only role runs under its kind's read-only
+  mode; a review ends its final message with the {verdict, feedback} JSON, which is validated here, for
+  every kind alike, and research answers with its final message.
+- The workflow never treats hidden session history as its state: only the explicit output parsed here
+  enters state. Malformed reviewer output is a content error, never a verdict: unparseable output says
+  nothing about the work.
+- Fresh-rehydrate happens only on a definitive session-not-found *before* work begins; every other
+  failure surfaces as an error.
 """
 import json
 import re
 import subprocess
-import uuid
 
+from app.agents import adapters
 from app.foundation import stages
 
 # What may follow the verdict object and still leave it the reviewer's last word.
 _ENDS_THERE = re.compile(r"\s*(?:```)?\s*")
-# Definitive "that session does not exist, nothing ran" signatures, as each
-# interactive CLI shows them in its terminal before exiting without any work —
-# the only condition that permits auto-rehydration. Measured on the installed binaries.
-_NOT_FOUND = ("no saved session found with id",              # codex resume
-              "no conversation found with session id")       # claude --resume
 
 
 class TransportError(RuntimeError):
-    """The brain could not be reached/completed; never a verdict: a brain we could not
-    reach has not judged anything, so the run stops instead of routing."""
-    # All the trace can say for certain is that the agent CLI exited non-zero: no
-    # measured signature tells a rate limit or a network fault from any other exit.
+    """The agent could not be reached/completed; never a verdict: an agent we could not reach has not judged
+    anything, so the run stops instead of routing."""
+    # All the trace can say for certain is that the agent CLI exited non-zero: no measured signature tells a
+    # rate limit or a network fault from any other exit.
     error_type = "agent_exit"
 
 
 class ContentError(RuntimeError):
-    """The brain answered but the answer is unusable; never a verdict."""
+    """The agent answered but the answer is unusable; never a verdict."""
     error_type = "malformed_output"
 
 
-def build_argv(role_name, role, resume_id, run_dir, settings=None):
-    """Compose the CLI invocation. Returns (argv, minted_session_or_None).
+def build_argv(role, resume_id, traced=None):
+    """The role's agent CLI for one turn, as its kind builds it, and the session id it minted, if any.
 
-    An argv list, launched without a shell: no value here is ever parsed as shell
-    syntax, whatever it contains. The interactive CLI of each vendor; the runner adds
-    the turn's completion hook and the prompt as the last argument. `settings` is a
-    Claude settings file that switches the tracing plugin on for this role-run only.
+    An argv list, launched without a shell: no value here is ever parsed as shell syntax, whatever it
+    contains. The runner adds the turn's completion wiring and the prompt as the last argument. `traced` is
+    what the kind's own tracing gave this turn, which only it reads.
     """
-    # Access alone decides the read-only flags: the read-only role researches as well as it reviews.
-    read_only = role["workspace_access"] == "read"
-    model = role.get("model")
-    effort = role.get("reasoning_effort")
-    if role["brain"] == "claude":
-        parts = ["claude"]
-        if settings:
-            parts += ["--settings", settings]
-        minted = None
-        if resume_id:
-            parts += ["--resume", resume_id]
-        else:
-            minted = str(uuid.uuid4())
-            parts += ["--session-id", minted]
-        if model:
-            parts += ["--model", model]
-        if effort:
-            parts += ["--effort", effort]
-        if read_only:
-            parts += ["--permission-mode", "plan"]
-        else:
-            # A role turn never waits on a permission prompt: what is not allowed is denied and
-            # the agent works on, as a run with no one to ask always did. Edits in the worktree
-            # are allowed; an Edit rule also governs writes.
-            parts += ["--permission-mode", "dontAsk", "--allowedTools", "Edit(./**)"]
-        return parts, minted
-    if role["brain"] == "codex":
-        sandbox = "read-only" if read_only else "workspace-write"
-        parts = ["codex", "resume", resume_id] if resume_id else ["codex"]
-        # Both forms take the flag. An interactive Codex would otherwise ask before
-        # commands; a role turn runs them under its sandbox or not at all, as `exec` did.
-        sandbox_args = ["--sandbox", sandbox, "--ask-for-approval", "never"]
-        # Live web search on: the roles are told to prefer current out-of-the-box
-        # practice over folklore, and the architect may challenge the task itself
-        # (D15). Set explicitly rather than relying on the provider default, and
-        # through the validated config key — an unknown key or value is rejected
-        # at startup, so a vendor rename fails loudly instead of silently
-        # downgrading the architect to stale knowledge.
-        # Reasoning summaries are OFF by default on this account — measured:
-        # 23,253 stored reasoning records carried encrypted content and not one
-        # readable summary, because the vendor ran with `reasoning summaries:
-        # none`. They are what makes a verdict legible, so ask for them
-        # explicitly; the same strict config validation applies, so a rename
-        # fails loudly instead of quietly returning us to opaque reviews.
-        parts += ["-c", 'model_reasoning_summary="detailed"']
-        parts += ["-c", 'web_search="live"'] + sandbox_args
-        if model:
-            parts += ["--model", model]
-        if effort:
-            # No flag for this; the documented config key is validated
-            # strictly, so a vendor rename fails loudly.
-            parts += ["-c", 'model_reasoning_effort="%s"' % effort]
-        return parts, None
-    raise ContentError("unknown brain %r" % role["brain"])
+    return adapters.for_role(role).command(adapters.view(role), resume_id, traced)
 
 
 def extract_session(role, resume_id, minted, rc, out):
-    """Return this role-run's agent_session_id, honouring the fallback rule."""
+    """This role-run's agent_session_id, honouring the fallback rule."""
     if resume_id:
         return resume_id
-    if role["brain"] == "claude":
-        return minted
-    for line in out.splitlines():
-        line = line.strip()
-        if not line.startswith("{"):
-            continue
-        try:
-            event = json.loads(line)
-        except ValueError:
-            continue
-        if event.get("type") == "thread.started" and event.get("thread_id"):
-            return event["thread_id"]
-    raise TransportError("codex emitted no thread.started event (rc=%d)" % rc)
+    found = adapters.for_role(role).session(out, minted)
+    if not found:
+        raise TransportError("the agent's turn named no session (rc=%d)" % rc)
+    return found
 
 
 def classify_failure(role, resume_id, rc, out, err_text):
-    """Definitive session-not-found before work → rehydrate; else error."""
+    """Definitive session-not-found before work → rehydrate; else error. How a lost session shows is the
+    role's kind's, as its CLI says it in its terminal before exiting without any work (measured)."""
     if resume_id and rc != 0:
         haystack = ((err_text or "") + out).lower()
-        if any(sig in haystack for sig in _NOT_FOUND):
+        if any(sig in haystack for sig in adapters.for_role(role).LOST_SESSION):
             return "session_lost"
     return "error"
 
@@ -167,9 +98,11 @@ def parse_review(role, rc, out):
                 candidates.append((json.loads(line), number == ends))
             except ValueError:
                 pass
+    # Where the agent's own message sits in its output is its kind's; the verdict it ends with is read here,
+    # one grammar for every kind.
+    message_of = adapters.for_role(role).message_of
     for obj, last in reversed(candidates):
-        # A Codex turn's output wraps the final message as an agent_message item.
-        for probe in (obj if last else None, obj.get("result"), _codex_item(obj)):
+        for probe in (obj if last else None, message_of(obj)):
             probe = _verdict_object(probe)
             if probe is not None:
                 payload = probe
@@ -177,7 +110,7 @@ def parse_review(role, rc, out):
         if payload:
             break
     if payload is None:
-        # A Claude turn's output is the final message itself.
+        # An output that is the final message itself.
         payload = _verdict_object(out)
     if payload is None:
         raise ContentError("reviewer returned no parseable {verdict, feedback}")
@@ -187,24 +120,12 @@ def parse_review(role, rc, out):
 
 
 def final_message(role, out):
-    """A work stage's answer when its product is that answer: its final message — Claude's output itself,
-    a Codex turn's last agent message. An empty one is no answer."""
-    text = out
-    if role["brain"] == "codex":
-        said = []
-        for line in out.splitlines():
-            line = line.strip()
-            if line.startswith("{"):
-                try:
-                    said.append(_codex_item(json.loads(line)))
-                except ValueError:
-                    pass
-        # A turn's answer is its agent message, and nothing else it printed is one.
-        said = [message for message in said if message]
-        text = said[-1] if said else ""
-    text = (text or "").strip()
+    """A work stage's answer when its product is that answer: its final message, as the role's kind finds
+    it in the turn's output. An empty one is no answer."""
+    adapter = adapters.for_role(role)
+    text = (adapter.final_message(out) or "").strip()
     if not text:
-        raise ContentError("the %s gave no answer" % role.get("brain"))
+        raise ContentError("the %s gave no answer" % adapter.NAME)
     return text
 
 
@@ -238,8 +159,9 @@ def compose_prompt(stage, stage_cfg, is_review, state, session_first,
                    stage_first, logs="the run's logs", skills=None):
     """Everything a stage needs, explicitly from state — no hidden memory.
 
-    HOW a role acts lives in its persona file (read every invocation, so an
-    edit applies from the next session). Mechanics — task at session birth,
+    HOW a role acts lives in its persona, which the run carries from its start, so
+    no later edit reaches it (a run started before agent profiles still reads its
+    persona file when a session is born). Mechanics — task at session birth,
     the stage ask, feedback/re-check deltas, operator guidance — stay here:
     workflow, not personality. A role's session persists across its stages
     (engineer: plan→build; architect: research→assess→verify), so the stage ask
@@ -252,13 +174,14 @@ def compose_prompt(stage, stage_cfg, is_review, state, session_first,
     """
     todo = state["todo_path"]
     lines = []
-    # A host may bind its own skill to a stage (`stage_skills` in the policy): its methodology,
-    # which this component does not own. An invocation only takes effect as the prompt's very
-    # first characters (measured: a trailing `/name` is inert), so it leads the composed prompt
-    # and everything after it — task, persona, stage ask — is its argument. Only when the skill
-    # is not already loaded in this session: a session persists across its stages, but a role's
-    # stages can each be bound to a different skill.
-    skill = (skills or {}).get(stage)
+    # The operator may bind a skill to a stage (`stage_skills`): its methodology, which this component
+    # does not own. An invocation only takes effect as the prompt's very first characters (measured: a
+    # trailing one is inert), so it leads the composed prompt and everything after it — task, persona,
+    # stage ask — is its argument; how it is spelled is the role's kind's. Only when the skill is not
+    # already loaded in this session: a session persists across its stages, but a role's stages can each
+    # be bound to a different skill. A run of the old shape named it `/name`.
+    named = (skills or {}).get(stage)
+    skill = adapters.skill(adapters.for_role(stage_cfg), named[1:] if named and named.startswith("/") else named)
     if skill and (session_first or stage_first):
         lines += [skill, ""]
     if session_first:
@@ -300,12 +223,11 @@ def compose_prompt(stage, stage_cfg, is_review, state, session_first,
 
 
 def _template(role_cfg, todo_path):
-    with open(role_cfg["prompt_path"], encoding="utf-8") as fh:
-        return fh.read().replace("{{TODO_PATH}}", todo_path).rstrip("\n")
-
-
-def _codex_item(obj):
-    item = obj.get("item") if isinstance(obj, dict) else None
-    if isinstance(item, dict) and item.get("type") == "agent_message":
-        return item.get("text")
-    return None
+    """The role's persona: the text its run's policy carries from the run's start, or — for a run of the
+    old shape — the file this host resolved for it."""
+    if "persona" in role_cfg:
+        text = role_cfg["persona"]
+    else:
+        with open(role_cfg["prompt_path"], encoding="utf-8") as fh:
+            text = fh.read()
+    return text.replace("{{TODO_PATH}}", todo_path).rstrip("\n")

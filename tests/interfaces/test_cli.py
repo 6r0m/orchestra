@@ -114,7 +114,7 @@ class Forms(unittest.TestCase):
 
     def test_a_flow_that_does_not_hold_starts_nothing_and_says_why(self):
         from app.foundation import flows
-        folder = tempfile.mkdtemp(prefix="orch-flows-")
+        folder = tempfile.mkdtemp(prefix="orchestra-flows-")
         self.addCleanup(shutil.rmtree, folder, True)
         self.addCleanup(setattr, flows, "FLOWS_DIR", flows.FLOWS_DIR)
         flows.FLOWS_DIR = folder

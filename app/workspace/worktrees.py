@@ -159,7 +159,7 @@ def guard(path, run_id):
 def work_tree(path):
     """The tree `git add -A` would commit, computed on a private copy of the index."""
     index = git(path, "rev-parse", "--path-format=absolute", "--git-path", "index").stdout.strip()
-    with tempfile.TemporaryDirectory(prefix="orch-index-") as private:
+    with tempfile.TemporaryDirectory(prefix="orchestra-index-") as private:
         env = dict(os.environ, GIT_INDEX_FILE=os.path.join(private, "index"))
         if os.path.exists(index):
             shutil.copyfile(index, env["GIT_INDEX_FILE"])

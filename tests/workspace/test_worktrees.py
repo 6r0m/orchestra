@@ -42,7 +42,7 @@ class Repo(unittest.TestCase):
     """A repository on `develop`, checked out in its main checkout, with its own worktree root."""
 
     def setUp(self):
-        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="orch-git-"))
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="orchestra-git-"))
         self.addCleanup(folders.remove, self.tmp)
         self.repo = os.path.join(self.tmp, "repo")
         self.root = os.path.join(self.tmp, "worktrees")
@@ -194,17 +194,17 @@ class Guard(Repo):
     def test_a_role_that_stages_fails_its_stage(self):
         path = self.worktree("run1")
 
-        def staging_agent(worktree, argv, rdir, name, prompt, timeout, env, *, brain):
+        def staging_agent(worktree, argv, rdir, name, prompt, timeout, env, *, kind):
             git(worktree, "add", "-A")
             return 0, "done\n"
 
-        from app.foundation import policy as P
+        from app.application import settings as S
         host = A.Activities(runner=staging_agent, telemetry=None)
         state = {"run_id": "run1-guard", "task": "t", "phase": "plan", "round": 0, "episode": 1,
                  "worktree_path": path, "todo_path": os.path.join(path, "todo", "x.md"), "agent_sessions": {}}
         self.addCleanup(shutil.rmtree, A.run_dir("run1-guard"), ignore_errors=True)
         with self.assertRaises(Exception) as raised:
-            host.run_role({"stage": "plan", "state": state, "policy": P.load()})
+            host.run_role({"stage": "plan", "state": state, "policy": S.run_policy(S.load())})
         self.assertIn("git_violation", str(raised.exception))
 
     def test_an_agents_git_can_neither_push_nor_reach_a_remote(self):

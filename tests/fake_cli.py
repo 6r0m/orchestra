@@ -1,10 +1,11 @@
-"""A stand-in for the interactive `claude` and `codex` CLIs in a terminal, for `test_terminal.py`.
+"""A stand-in for the interactive `claude` and `codex` CLIs in a terminal, for `test_terminal.py`, and
+for the program of the suite's own kind of agent (`stand_in.py`).
 
-    fake_cli.py claude|codex <the argv the real CLI would get>
+    fake_cli.py claude|codex|stand-in <the argv the real program would get>
 
 It reads the turn's completion wiring exactly as the vendor does — Claude's hooks from its
-`--settings`, Codex's `notify` from `-c` — and its last argument is the prompt. What it does
-is named by a word in the prompt:
+`--settings`, Codex's `notify` from `-c`, the stand-in's `--on-finish` — and its last argument is the
+prompt. What it does is named by a word in the prompt:
 
     complete     report the prompt submitted, draw a line, complete it
     foreign      first complete something else: another prompt, another session or thread
@@ -12,7 +13,8 @@ is named by a word in the prompt:
     exit         exit 3 without completing
     hang         never complete
     interrupt    wait for Esc, draw "Interrupted" and complete nothing; a typed line is a new prompt,
-                 which completes — under its own prompt id for Claude, with every input so far for Codex
+                 which completes — under its own prompt id for Claude, with every input so far for Codex,
+                 and as the interrupted prompt's answer for the stand-in
     background   Claude only: first a Stop while a background task still runs, then the real one
     lost         say the session to resume does not exist, as each CLI does, and exit 1
     detach:<file>  start a detached process that writes its pid to <file>, then complete
@@ -52,6 +54,13 @@ def codex_notify(argv, payload):
         if value == "-c" and argv[index + 1].startswith("notify="):
             command = json.loads(argv[index + 1][len("notify="):])
             subprocess.run(command + [json.dumps(payload)])
+
+
+def on_finish(argv, payload):
+    # A program given nowhere to say its turn ended says nothing, and runs on.
+    if "--on-finish" in argv:
+        command = json.loads(argv[argv.index("--on-finish") + 1])
+        subprocess.run(command, input=json.dumps(payload).encode("utf-8"))
 
 
 def draw(text):
@@ -119,6 +128,15 @@ def completer(brain, argv, prompt, foreign=False):
                                         "last_assistant_message": "another session"})
         claude_emit(hooks, "UserPromptSubmit", {"session_id": session, "prompt_id": prompt_id, "prompt": prompt})
         return complete
+    elif brain == "stand-in":
+        thread = argv[argv.index("--thread") + 1] if "--thread" in argv else str(uuid.uuid4())
+
+        def complete(message, failure=False, typed=None, running=False):
+            on_finish(argv, {"thread": thread, "prompt": prompt, "answer": message})
+
+        if foreign:
+            on_finish(argv, {"thread": thread, "prompt": "something else", "answer": "someone else's turn"})
+        return complete
     else:
         resumed = len(argv) > 1 and argv[0] == "resume"
         thread = argv[1] if resumed else str(uuid.uuid4())
@@ -152,8 +170,9 @@ def main():
     raw_input_mode()
     draw("fake %s ready" % brain)
     if "lost" in words:
-        draw("No conversation found with session ID: x" if brain == "claude"
-             else "ERROR: No saved session found with ID x. Run `codex resume` without an ID")
+        draw({"claude": "No conversation found with session ID: x",
+              "stand-in": "Error: no such thread x"}.get(
+            brain, "ERROR: No saved session found with ID x. Run `codex resume` without an ID"))
         sys.exit(1)
     complete = completer(brain, argv, prompt, foreign="foreign" in words)
     time.sleep(0.3)

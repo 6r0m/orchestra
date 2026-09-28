@@ -5,7 +5,8 @@
 It serves `static/` beside it and a small JSON API over `app.application` on `http://127.0.0.1:<workbench_port>`:
 the stack's reading and its start, stop and restart; the runs and what each is doing now, a run's
 status and timeline, its change; starting a run, answering its stop, stopping or force-terminating
-it, and removing what a closed run kept. The page opens each run's agent terminals directly on the
+it, and removing what a closed run kept; and the settings, read and applied through
+`app.application.settings`, which reach only the runs started after them. The page opens each run's agent terminals directly on the
 worker of the run's host (`app.agents.terminal`). It holds no state of its own: stopping it changes
 no run and stops no part of the stack. WSL's systemd runs it (`orchestra-workbench.service`); it
 never manages its own process.
@@ -29,8 +30,10 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from app.application import client as runs
+from app.application import settings
 from app.application import stack
 from app.foundation import flows
+from app.foundation import paths
 from app.foundation import policy as P
 from app.workspace import repos
 from app.agents import terminal
@@ -53,6 +56,7 @@ STATIC = {"/": ("index.html", "text/html; charset=utf-8"),
           "/change.js": ("change.js", JS),
           "/terminals.js": ("terminals.js", JS),
           "/worktrees.js": ("worktrees.js", JS),
+          "/settings.js": ("settings.js", JS),
           "/vendor/xterm.js": ("vendor/xterm/xterm.js", JS),
           "/vendor/xterm.css": ("vendor/xterm/xterm.css", "text/css; charset=utf-8")}
 RUN_ID = re.compile(r"^[\w-]{1,64}$")
@@ -101,7 +105,9 @@ def trace_links():
     return lambda trace_id: telemetry.trace_url(langfuse, trace_id)
 
 
-def make_handler(call, policy, token, links=None):
+def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.environ):
+    """The page and its API over `call`, the Temporal client's loop, for the stack of `policy`. The settings
+    the page reads and applies are the checkout's at `root`, as `environ` names them."""
     port = policy["workbench_port"]
     # What a run that Temporal no longer runs said the last time it was read: it says nothing else now,
     # and the list is read again every few seconds.
@@ -193,9 +199,12 @@ def make_handler(call, policy, token, links=None):
                     return self._send(HTTPStatus.OK, [{"id": name, "target": entry.get("target") or (
                         "windows" if repos.windows_path(entry["path"]) else "wsl")}
                         for name, entry in repos.load().items()])
+                if parts == ["settings"]:
+                    return self._send(HTTPStatus.OK, settings.read(root, environ))
                 if parts == ["flows"]:
                     # Read each time the page asks, as the files are: a flow edited shows at once.
-                    return self._send(HTTPStatus.OK, {"default": P.load().get("default_flow"),
+                    return self._send(HTTPStatus.OK, {"default": settings.load(root=root, environ=environ).get(
+                        "default_flow"),
                                                       "flows": flows.available()})
                 if len(parts) >= 2 and parts[0] == "runs" and RUN_ID.match(parts[1]):
                     run_id = parts[1]
@@ -258,6 +267,8 @@ def make_handler(call, policy, token, links=None):
                     call(lambda client: runs.remove_worktree(client, parts[1]),
                          timeout=runs.REMOVAL.total_seconds() + 60)
                     return self._send(HTTPStatus.OK, {"removed": parts[1]})
+                if parts == ["settings"]:
+                    return self._apply(body)
                 if parts == ["stack"]:
                     action = body.get("action")
                     if action not in stack.ACTIONS:
@@ -274,6 +285,17 @@ def make_handler(call, policy, token, links=None):
                 return self._send(HTTPStatus.UNPROCESSABLE_ENTITY, {"error": str(exc)})
             except Exception as exc:                # noqa: BLE001 - every failure is answered
                 return self._error(exc)
+
+        def _apply(self, body):
+            """The Settings view's Apply: what it read, as it is now; 409 when the settings changed since it read
+            them, 403 where no Apply writes them, else a refusal with the JSON Pointer of its setting."""
+            try:
+                return self._send(HTTPStatus.OK, settings.apply(body.get("changes"), body.get("revision"),
+                                                                root, environ))
+            except P.InvalidPolicy as exc:
+                status = (HTTPStatus.CONFLICT if isinstance(exc, settings.Stale)
+                          else HTTPStatus.FORBIDDEN if isinstance(exc, settings.ReadOnly) else HTTPStatus.BAD_REQUEST)
+                return self._send(status, {"error": exc.reason, "pointer": exc.pointer})
 
         def _run_page(self, cursor):
             """One page of runs with each one's state, and the cursor for the page of older runs."""
@@ -371,7 +393,7 @@ def serve(policy, call, links=None, host="127.0.0.1"):
 
 
 def main():
-    policy = P.load()
+    policy = settings.load()
     server = serve(policy, Loop().call, trace_links())
     print("workbench on http://127.0.0.1:%d" % policy["workbench_port"], flush=True)
     try:

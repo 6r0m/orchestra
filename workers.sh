@@ -7,7 +7,8 @@
 #   bash workers.sh wsl|windows start|stop|status|sweep <name> [the pid a sweep knows is gone]
 #   bash workers.sh workbench install|uninstall|start|stop|restart|status
 # <name> is the worker's name on this machine (stack.worker_name): its pid file and log in
-# tmp/orchestration, and its systemd scope. ORCH_POLICY, when set, is the policy the WSL worker runs.
+# tmp/orchestration, and its systemd scope. ORCHESTRA_SETTINGS, when set, names the settings the WSL worker
+# runs.
 # The Windows side is workers.ps1. Invoke through `bash`: the Windows drive mounts without execute bits.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -1,5 +1,5 @@
 // The page's one way to its server: every request carries the page's token, and a refusal comes back as
-// an Error carrying the server's own words.
+// an Error carrying the server's own words, its status, and the JSON Pointer of the setting it names.
 
 export const CONFIG = JSON.parse(document.getElementById("config").textContent);
 
@@ -12,6 +12,11 @@ export async function api(path, body) {
   }
   const response = await fetch(path, options);
   const data = await response.json().catch(() => ({ error: response.statusText }));
-  if (!response.ok) throw new Error(data.error || response.statusText);
+  if (!response.ok) {
+    const error = new Error(data.error || response.statusText);
+    error.status = response.status;
+    error.pointer = data.pointer || null;
+    throw error;
+  }
   return data;
 }

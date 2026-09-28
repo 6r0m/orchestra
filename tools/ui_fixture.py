@@ -21,8 +21,8 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ORCH = os.path.dirname(HERE)
-sys.path[:0] = [ORCH, os.path.join(ORCH, "tests")]
+CHECKOUT = os.path.dirname(HERE)
+sys.path[:0] = [CHECKOUT, os.path.join(CHECKOUT, "tests")]
 
 from app.foundation import paths  # noqa: E402
 from app.observability import telemetry as T  # noqa: E402
@@ -140,9 +140,9 @@ def main():
     if tele is None:
         print("no Langfuse keys (.env) - nothing to emit", file=sys.stderr)
         return 1
-    # A fixture has no agent transcripts: its fake architect writes no rollout, so an upload
-    # would only mark every architect step as missing its turns.
-    T.upload_codex_session = lambda *args, **kwargs: None
+    # A fixture has no agent transcripts: its fake agents write no session of their own, so an upload
+    # would only mark every step it was asked for as missing its turns.
+    T.run_upload = lambda *args, **kwargs: None
 
     tmp = tempfile.mkdtemp(prefix="ui-fixture-")
     try:

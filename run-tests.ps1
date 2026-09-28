@@ -8,12 +8,12 @@ $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $uv = Join-Path $env:USERPROFILE ".local\bin\uv.exe"
 
 $hostTests = @(
-    "tests.agents.test_launch", "tests.agents.test_terminal", "tests.agents.test_trust",
+    "tests.agents.test_launch", "tests.agents.test_terminal", "tests.agents.test_trust", "tests.agents.test_adapters",
     "tests.workspace.test_repos", "tests.workspace.test_worktrees",
     "tests.orchestration.test_workflow", "tests.orchestration.test_stops", "tests.orchestration.test_replay",
     "tests.observability.test_trace_parity", "tests.observability.test_stale_settings", "tests.foundation.test_policy",
     "tests.foundation.test_flows",
-    "tests.application.test_stack", "tests.test_architecture", "tests.test_harness"
+    "tests.application.test_stack", "tests.application.test_activities", "tests.test_architecture", "tests.test_harness"
 )
 if (-not $Tests) { $Tests = $hostTests }
 

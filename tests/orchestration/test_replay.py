@@ -45,7 +45,7 @@ class Replay(unittest.TestCase):
         import shutil
         import tempfile
         from app.foundation import flows
-        folder = tempfile.mkdtemp(prefix="orch-flows-")
+        folder = tempfile.mkdtemp(prefix="orchestra-flows-")
         self.addCleanup(shutil.rmtree, folder, True)
         self.addCleanup(setattr, flows, "FLOWS_DIR", flows.FLOWS_DIR)
         flows.FLOWS_DIR = folder

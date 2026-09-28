@@ -29,7 +29,7 @@ class Layout(unittest.TestCase):
     """`<tmp>/Projects/<name>` beside a worktree root holding `projects`."""
 
     def setUp(self):
-        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="orch-repos-"))
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="orchestra-repos-"))
         self.addCleanup(folders.remove, self.tmp)
         self.repo = os.path.join(self.tmp, "Projects", "tool")
         os.makedirs(self.repo)
@@ -40,7 +40,7 @@ class Layout(unittest.TestCase):
         self.selected = {"id": "tool", "path": self.repo, "target": "windows" if WINDOWS else "wsl"}
 
     def resolve(self, selected=None, which=shutil.which):
-        return repos.resolve(selected or self.selected, [], self.root, which=which)
+        return repos.resolve(selected or self.selected, self.root, which=which)
 
     def branch(self, name):
         git(self.repo, "branch", name)
@@ -92,11 +92,18 @@ class WorktreeRoot(Layout):
 class Refusals(Layout):
     """Whatever is missing refuses before any work."""
 
-    def test_a_missing_tool_refuses_before_git_is_read(self):
+    def test_a_missing_git_refuses_before_git_is_read(self):
+        """Git is the repository's one tool; whether a run's agents can run on the host is asked before
+        this, by the run's preparation."""
         self.branch("develop")
-        with self.assertRaisesRegex(repos.Refused, "codex is not installed"):
-            repos.resolve(self.selected, ["claude", "codex"], self.root,
-                          which=lambda tool: None if tool == "codex" else "/bin/" + tool)
+        asked = []
+
+        def which(tool):
+            asked.append(tool)
+            return None if tool == "git" else "/bin/" + tool
+        with self.assertRaisesRegex(repos.Refused, "git is not installed on the %s host" % self.selected["target"]):
+            self.resolve(which=which)
+        self.assertEqual(asked, ["git"], "no agent's program is looked for here")
 
     def test_a_directory_that_is_not_a_repository_refuses(self):
         plain = os.path.join(self.tmp, "Projects", "plain")
@@ -115,7 +122,7 @@ class Refusals(Layout):
 
 class Selection(unittest.TestCase):
     def setUp(self):
-        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="orch-select-"))
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="orchestra-select-"))
         self.addCleanup(folders.remove, self.tmp)
 
     def test_a_named_entry_its_path_or_the_orchestrations_own_repository(self):
@@ -182,14 +189,12 @@ class Selection(unittest.TestCase):
         with self.assertRaisesRegex(repos.Refused, "unknown keys"):
             repos.load(path)
 
-    def test_the_example_descriptors_are_valid_and_none_of_your_own_are_shipped(self):
-        example = repos.load(os.path.join(PKG, "repos.example.json"))
+    def test_the_example_descriptors_are_valid(self):
+        example = repos.load(os.path.join(PKG, ".orchestra", "repos.example.json"))
         self.assertEqual(sorted(example), ["service", "work/webapp"])
         self.assertEqual(example["work/webapp"]["target"], "windows")
         self.assertEqual(example["service"]["base_branch"], "main")
-        # The file a run actually reads is yours and is never committed; absent means no descriptors.
-        self.assertFalse(os.path.exists(os.path.join(PKG, "repos.json")) and
-                         repos.load() and False, "a descriptor file is optional")
+        # A file named that is not there holds no descriptors.
         self.assertEqual(repos.load(os.path.join(self.tmp, "absent.json")), {})
 
     def test_only_the_done_folder_may_be_null(self):
@@ -209,6 +214,55 @@ class Selection(unittest.TestCase):
             json.dump({"tool": {"path": self.tmp, "lfs_pointers": "yes"}}, fh)
         with self.assertRaisesRegex(repos.Refused, "true or false"):
             repos.load(path)
+
+
+class Source(unittest.TestCase):
+    """The one file descriptors come from: the one `ORCHESTRA_REPOS` names, alone, else the checkout's
+    `.orchestra/repos.json` — where a `repos.json` left at its root is refused, never read, never moved."""
+
+    def setUp(self):
+        self.root = os.path.realpath(tempfile.mkdtemp(prefix="orchestra-source-"))
+        self.addCleanup(folders.remove, self.root)
+        os.makedirs(os.path.join(self.root, ".orchestra"))
+
+    def write(self, relative, entries):
+        path = os.path.join(self.root, *relative.split("/"))
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(entries, fh)
+        return path
+
+    def source(self, **environ):
+        return repos.descriptor_file(self.root, environ)
+
+    def test_without_the_variable_the_folder_s_file_and_one_left_at_the_root_is_refused_not_read(self):
+        self.assertIsNone(self.source(), "neither there: no descriptors, as a fresh checkout has none")
+        legacy = self.write("repos.json", {"old": {"path": self.root}})
+        with self.assertRaisesRegex(repos.Refused, r"move it to .*\.orchestra.repos\.json"):
+            self.source()
+        with open(legacy, encoding="utf-8") as fh:
+            self.assertIn("old", fh.read(), "left where it was, as it was")
+        current = self.write(".orchestra/repos.json", {"new": {"path": self.root}})
+        with self.assertRaisesRegex(repos.Refused, "both"):
+            self.source()
+        os.remove(legacy)
+        self.assertEqual(self.source(), current)
+
+    def test_the_variable_takes_its_file_alone_and_one_that_is_not_there_is_refused(self):
+        self.write("repos.json", {"old": {"path": self.root}})
+        self.write(".orchestra/repos.json", {"new": {"path": self.root}})
+        named = self.write("mine.json", {"mine": {"path": self.root}})
+        # Neither of the checkout's files is looked at, the one left at its root included.
+        self.assertEqual(self.source(ORCHESTRA_REPOS=named), named)
+        self.assertEqual(sorted(repos.load(named)), ["mine"])
+        with self.assertRaisesRegex(repos.Refused, "does not exist"):
+            self.source(ORCHESTRA_REPOS=os.path.join(self.root, "absent.json"))
+
+    def test_the_suite_reads_descriptors_of_its_own_never_the_operator_s(self):
+        named = os.environ.get("ORCHESTRA_REPOS")
+        self.assertTrue(named, "the suite's harness names descriptors of its own")
+        self.assertNotEqual(os.path.normcase(os.path.dirname(os.path.abspath(named))),
+                            os.path.normcase(os.path.join(paths.REPO, ".orchestra")))
+        self.assertEqual(os.path.abspath(repos.descriptor_file()), os.path.abspath(named))
 
 
 if __name__ == "__main__":

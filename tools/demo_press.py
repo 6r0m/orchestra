@@ -138,7 +138,7 @@ YES = "document.getElementById('confirm-yes').click(); true"
 
 
 def main(url, run_id, label, said, note=None):
-    profile = tempfile.mkdtemp(prefix="orch-demo-edge-")
+    profile = tempfile.mkdtemp(prefix="orchestra-demo-edge-")
     edge = subprocess.Popen([EDGE, "--headless=new", "--disable-gpu", "--no-first-run", "--remote-debugging-port=0",
                              "--user-data-dir=" + profile, "about:blank"],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

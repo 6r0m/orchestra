@@ -1,16 +1,21 @@
 """Which repository a run targets, where its agents run, and where its worktree goes.
 
 The one owner of a run's repository, base branch, execution target and worktree
-root. A value comes from the repository's entry in `repos.json` when one is
+root. A value comes from the repository's entry in the descriptor file when one is
 configured and is detected otherwise; a value that is neither refuses the run before
 any work.
+
+The descriptors come from one file: the one `ORCHESTRA_REPOS` names, alone — a stack of
+its own, the demo's or the acceptance run's — else this checkout's `.orchestra/repos.json`.
+A `repos.json` left at the checkout's root, where it once lived, is refused rather than
+read, and so is one beside the new file: the move is the operator's, made once, by hand.
 
 The client selects the repository and its target, which is all it needs to route the
 run. The rest is resolved on the target host, with that host's own git and paths.
 
 This owns the repositories a run operates on. Where Orchestra itself is installed and
 where its runs write is `app.foundation.paths`, which is a different fact: a descriptor
-file happens to sit beside this checkout, and the default target happens to be it.
+file happens to sit in this checkout, and the default target happens to be it.
 """
 import json
 import ntpath
@@ -21,8 +26,9 @@ import subprocess
 
 from app.foundation import paths
 
-# ORCH_REPOS names another descriptor file, as the acceptance run's throwaway repository needs.
-DESCRIPTORS = os.environ.get("ORCH_REPOS") or os.path.join(paths.REPO, "repos.json")
+# Names a descriptor file of a stack's own, taken alone.
+VARIABLE = "ORCHESTRA_REPOS"
+DESCRIPTORS = os.path.join(paths.REPO, ".orchestra", "repos.json")
 TARGETS = ("wsl", "windows")
 ENTRY_KEYS = {"path", "target", "base_branch", "worktree_root", "todo_dir", "todo_done_dir", "todo_name",
               "lfs_pointers"}
@@ -48,13 +54,35 @@ class Refused(ValueError):
     """The run cannot start as configured; nothing has been changed."""
 
 
-def load(path=DESCRIPTORS):
+def descriptor_file(root=paths.REPO, environ=os.environ):
+    """The one file the descriptors come from, or None when there is none.
+
+    Decided each time descriptors are loaded, never at import: a layout it refuses fails what needs the
+    descriptors — a start, the picker — with its reason, and no process's start.
+    """
+    named = environ.get(VARIABLE)
+    if named:
+        # Named on purpose: a file that is not there is a mistake, not a stack with no repositories.
+        if not os.path.isfile(named):
+            raise Refused("%s names %s, which does not exist" % (VARIABLE, named))
+        return named
+    current = os.path.join(root, ".orchestra", "repos.json")
+    legacy = os.path.join(root, "repos.json")
+    if os.path.exists(legacy):
+        if os.path.exists(current):
+            raise Refused("both %s and %s hold repositories; keep only %s" % (legacy, current, current))
+        raise Refused("%s is where repositories were listed before; move it to %s" % (legacy, current))
+    return current if os.path.exists(current) else None
+
+
+def load(path=None):
     """The descriptor entries, validated strictly: an unknown key is a typo that would do nothing.
 
     No file at all means no descriptors, not an error: the file names the operator's own
     repositories, so a fresh checkout has none and a run then works on this repository itself.
     """
-    if not os.path.exists(path):
+    path = path or descriptor_file()
+    if path is None or not os.path.exists(path):
         return {}
     with open(path, encoding="utf-8") as fh:
         raw = json.load(fh)
@@ -98,9 +126,9 @@ def wsl_path(path):
 
 def selector(name, path, target, descriptors=None):
     """What `select` takes to choose again the repository a run chose as `name` and resolved to `path` on
-    `target`: that name while its entry in repos.json is still that repository, else the path as WSL sees it.
+    `target`: that name while its entry in the descriptors is still that repository, else the path as WSL sees it.
 
-    The name alone is not enough: a repository given by its path is named for its folder, a name repos.json
+    The name alone is not enough: a repository given by its path is named for its folder, a name the descriptors
     may give another repository, or none.
     """
     if not path:
@@ -110,7 +138,7 @@ def selector(name, path, target, descriptors=None):
     try:
         descriptors = load() if descriptors is None else descriptors
     except (OSError, ValueError):
-        # A repos.json that cannot be read cannot say the name is still this repository's; the path can.
+        # Descriptors that cannot be read cannot say the name is still this repository's; the path can.
         descriptors = {}
     entry = descriptors.get(name)
     return name if entry and os.path.abspath(entry["path"]) == path else path
@@ -154,7 +182,7 @@ def detect_base(path):
     if branch and _git(path, "show-ref", "--verify", "--quiet", "refs/heads/" + branch).returncode == 0:
         return branch
     raise Refused("%s has no develop or dev branch and no local branch for the remote's default; "
-                  "set base_branch in repos.json" % path)
+                  "set base_branch in .orchestra/repos.json" % path)
 
 
 def detect_worktree_root(path, target_root):
@@ -166,15 +194,16 @@ def detect_worktree_root(path, target_root):
     matches = [entry for entry in os.listdir(root)
                if entry.lower() == category.lower() and os.path.isdir(os.path.join(root, entry))]
     if len(matches) != 1:
-        raise Refused("%s: %d folders under %s match the category %r; set worktree_root in repos.json"
+        raise Refused("%s: %d folders under %s match the category %r; set worktree_root in .orchestra/repos.json"
                       % (path, len(matches), root, category))
     return os.path.join(root, matches[0], os.path.basename(path))
 
 
-def resolve(selected, brains, target_root, which=shutil.which):
+def resolve(selected, target_root, which=shutil.which):
     """Resolve the rest on the target host: its path there, the base branch and the worktree root.
 
-    Refuses before any work when a tool, the repository or a value is missing.
+    Refuses before any work when git, the repository or a value is missing. Whether the run's agents can
+    run on this host is not a repository's fact, and the run's preparation asks it first.
     """
     target = selected["target"]
     path = selected["path"]
@@ -182,9 +211,8 @@ def resolve(selected, brains, target_root, which=shutil.which):
         path = windows_path(path)
         if path is None:
             raise Refused("%s cannot run on Windows: %s" % (selected["path"], UNC_REASON))
-    for tool in ("git",) + tuple(sorted(set(brains))):
-        if not which(tool):
-            raise Refused("%s is not installed on the %s host" % (tool, target))
+    if not which("git"):
+        raise Refused("git is not installed on the %s host" % target)
     if _git(path, "rev-parse", "--show-toplevel").returncode != 0:
         raise Refused("%s is not a git repository" % path)
     base = selected.get("base_branch")

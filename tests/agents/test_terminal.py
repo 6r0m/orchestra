@@ -25,32 +25,37 @@ for path in (PKG, HERE):
         sys.path.insert(0, path)
 
 from app.application import activities  # noqa: E402
+from app.application import settings as S  # noqa: E402
 from app.agents import launch  # noqa: E402
 from app.agents import nodes as N  # noqa: E402
 from app.agents import terminal  # noqa: E402
+from app.agents import adapters  # noqa: E402
+from app.agents.adapters import claude_code, codex  # noqa: E402
 from tests.agents.test_launch import alive, force_kill, gone_within  # noqa: E402
 import folders  # noqa: E402
+import stand_in  # noqa: E402
 
 WINDOWS = sys.platform.startswith("win")
 FAKE = os.path.join(HERE, "fake_cli.py")
 
 
 def install_fakes(directory):
-    for brain in ("claude", "codex"):
+    # Each program a kind runs, as `fake_cli.py` plays it.
+    for program, plays in (("claude", "claude"), ("codex", "codex"), (stand_in.PROGRAM, "stand-in")):
         if WINDOWS:
-            with open(os.path.join(directory, brain + ".cmd"), "w", encoding="utf-8") as fh:
-                fh.write('@"%s" "%s" %s %%*\r\n' % (sys.executable, FAKE, brain))
+            with open(os.path.join(directory, program + ".cmd"), "w", encoding="utf-8") as fh:
+                fh.write('@"%s" "%s" %s %%*\r\n' % (sys.executable, FAKE, plays))
         else:
-            path = os.path.join(directory, brain)
+            path = os.path.join(directory, program)
             with open(path, "w", encoding="utf-8") as fh:
-                fh.write('#!/bin/sh\nexec "%s" "%s" %s "$@"\n' % (sys.executable, FAKE, brain))
+                fh.write('#!/bin/sh\nexec "%s" "%s" %s "$@"\n' % (sys.executable, FAKE, plays))
             os.chmod(path, 0o755)
 
 
 class Turns(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.bin = tempfile.mkdtemp(prefix="orch-fake-cli-")
+        cls.bin = tempfile.mkdtemp(prefix="orchestra-fake-cli-")
         install_fakes(cls.bin)
         cls.path = os.environ["PATH"]
         os.environ["PATH"] = cls.bin + os.pathsep + cls.path
@@ -63,20 +68,20 @@ class Turns(unittest.TestCase):
     def setUp(self):
         self.run_id = "test-terminal-%s" % uuid.uuid4().hex[:8]
         self.rdir = terminal.run_dir(self.run_id)
-        self.worktree = tempfile.mkdtemp(prefix="orch-term-wt-")
+        self.worktree = tempfile.mkdtemp(prefix="orchestra-term-wt-")
         self.addCleanup(folders.remove, self.worktree)
         self.addCleanup(shutil.rmtree, self.rdir, True)
         self.addCleanup(terminal.close_run, self.run_id)
 
-    def turn(self, prompt, brain="claude", stage="build", resume=None, timeout=60, name=None):
-        if brain == "claude":
+    def turn(self, prompt, kind="claude-code", stage="build", resume=None, timeout=60, name=None):
+        if kind == "claude-code":
             argv = ["claude", "--resume" if resume else "--session-id", resume or str(uuid.uuid4()),
                     "--permission-mode", "dontAsk", "--allowedTools", "Edit(./**)"]
         else:
             argv = ["codex", "resume", resume] if resume else ["codex"]
             argv += ["--sandbox", "read-only", "--ask-for-approval", "never"]
         return terminal.run_turn(self.worktree, argv, self.rdir, name or "%s-e1-1" % stage, prompt, timeout,
-                                 activities.agent_env({}), brain=brain)
+                                 activities.agent_env({}), kind=kind)
 
     def record(self, role="engineer"):
         try:
@@ -95,11 +100,11 @@ class Turns(unittest.TestCase):
             self.assertTrue(os.path.exists(os.path.join(logs, "build-e1-1.%s" % ext)), ext)
 
     def test_the_prompt_survives_an_option_that_takes_several_values(self):
-        worktree_skills = tempfile.mkdtemp(prefix="orch-skills-")
+        worktree_skills = tempfile.mkdtemp(prefix="orchestra-skills-")
         self.addCleanup(shutil.rmtree, worktree_skills, True)
         argv = ["claude", "--session-id", str(uuid.uuid4()), "--add-dir", worktree_skills]
         rc, out = terminal.run_turn(self.worktree, argv, self.rdir, "build-e1-1", "complete this", 60,
-                                    activities.agent_env({}), brain="claude")
+                                    activities.agent_env({}), kind="claude-code")
         self.assertEqual((rc, out), (0, "done complete"))
 
     def test_a_multiline_prompt_reaches_the_agent_whole(self):
@@ -115,7 +120,7 @@ class Turns(unittest.TestCase):
     def test_completions_of_anything_else_never_end_the_turn(self):
         rc, out = self.turn("foreign then mine")
         self.assertEqual((rc, out), (0, "done foreign"))
-        rc, out = self.turn("foreign then mine", brain="codex", stage="verify")
+        rc, out = self.turn("foreign then mine", kind="codex", stage="verify")
         self.assertEqual(rc, 0)
         lines = [json.loads(line) for line in out.splitlines()]
         self.assertEqual(lines[1]["item"]["text"], "done foreign")
@@ -124,47 +129,47 @@ class Turns(unittest.TestCase):
         self.assertEqual(self.turn("background task"), (0, "done background"))
 
     def test_a_lost_session_says_so_for_rehydration(self):
-        for brain, stage in (("claude", "build"), ("codex", "verify")):
+        for kind, stage in (("claude-code", "build"), ("codex", "verify")):
             resume = str(uuid.uuid4())
-            rc, out = self.turn("lost it", brain=brain, stage=stage, resume=resume, name="%s-e1-9" % stage)
+            rc, out = self.turn("lost it", kind=kind, stage=stage, resume=resume, name="%s-e1-9" % stage)
             with open(os.path.join(self.rdir, "logs", "%s-e1-9.err" % stage), encoding="utf-8") as fh:
                 err = fh.read()
-            self.assertEqual(N.classify_failure({"brain": brain}, resume, rc, out, err), "session_lost", brain)
+            self.assertEqual(N.classify_failure({"kind": kind}, resume, rc, out, err), "session_lost", kind)
 
     def test_control_the_matcher_refuses_what_a_first_event_rule_would_accept(self):
         session, mine, other = str(uuid.uuid4()), str(uuid.uuid4()), str(uuid.uuid4())
         events = [{"_hook": "Stop", "session_id": session, "prompt_id": other, "last_assistant_message": "theirs"},
                   {"_hook": "UserPromptSubmit", "session_id": session, "prompt_id": mine, "prompt": "p"}]
         self.assertEqual(events[0]["last_assistant_message"], "theirs", "a first-Stop rule would end the turn here")
-        self.assertIsNone(terminal.completion("claude", events, "p", session))
+        self.assertIsNone(claude_code.completion(events, "p", session))
         events.append({"_hook": "Stop", "session_id": "elsewhere", "prompt_id": mine, "last_assistant_message": "x"})
-        self.assertIsNone(terminal.completion("claude", events, "p", session))
+        self.assertIsNone(claude_code.completion(events, "p", session))
         events.append({"_hook": "Stop", "session_id": session, "prompt_id": mine, "last_assistant_message": "wait",
                        "background_tasks": [{"status": "running"}]})
-        self.assertIsNone(terminal.completion("claude", events, "p", session), "a background task still runs")
+        self.assertIsNone(claude_code.completion(events, "p", session), "a background task still runs")
         events.append({"_hook": "Stop", "session_id": session, "prompt_id": mine, "last_assistant_message": "mine"})
-        self.assertEqual(terminal.completion("claude", events, "p", session), (True, "mine", session))
+        self.assertEqual(claude_code.completion(events, "p", session), (True, "mine", session))
         redirected = [events[1], {"_hook": "UserPromptSubmit", "session_id": session, "prompt_id": other,
                                   "prompt": "do this instead"},
                       {"_hook": "Stop", "session_id": session, "prompt_id": other, "last_assistant_message": "steered"}]
-        self.assertEqual(terminal.completion("claude", redirected, "p", session), (True, "steered", session),
+        self.assertEqual(claude_code.completion(redirected, "p", session), (True, "steered", session),
                          "a prompt submitted after ours in this turn completes it")
-        self.assertIsNone(terminal.completion("claude", redirected[1:], "p", session), "not before ours")
+        self.assertIsNone(claude_code.completion(redirected[1:], "p", session), "not before ours")
         title = {"_hook": "notify", "type": "agent-turn-complete", "thread-id": "t1",
                  "input-messages": ["Generate a title: p"], "last-assistant-message": "{}"}
-        self.assertIsNone(terminal.completion("codex", [title], "p", None))
+        self.assertIsNone(codex.completion([title], "p", None))
         resumed = dict(title, **{"thread-id": "t2", "input-messages": ["p"], "last-assistant-message": "ok"})
-        self.assertIsNone(terminal.completion("codex", [resumed], "p", "t1"), "another thread when resuming")
-        self.assertEqual(terminal.completion("codex", [title, resumed], "p", None), (True, "ok", "t2"))
+        self.assertIsNone(codex.completion([resumed], "p", "t1"), "another thread when resuming")
+        self.assertEqual(codex.completion([title, resumed], "p", None), (True, "ok", "t2"))
         later = dict(resumed, **{"input-messages": ["earlier", "p", "steer"]})
-        self.assertEqual(terminal.completion("codex", [later], "p", "t2"), (True, "ok", "t2"),
+        self.assertEqual(codex.completion([later], "p", "t2"), (True, "ok", "t2"),
                          "a thread's inputs are cumulative")
 
     def test_the_codex_thread_comes_from_its_turn_and_resumes_by_it(self):
-        rc, out = self.turn("complete first", brain="codex", stage="assess")
-        thread = N.extract_session({"brain": "codex"}, None, None, rc, out)
+        rc, out = self.turn("complete first", kind="codex", stage="assess")
+        thread = N.extract_session({"kind": "codex"}, None, None, rc, out)
         self.assertNotEqual(thread, None)
-        rc, out = self.turn("complete again", brain="codex", stage="verify", resume=thread, name="verify-e2-1")
+        rc, out = self.turn("complete again", kind="codex", stage="verify", resume=thread, name="verify-e2-1")
         self.assertEqual(rc, 0)
         self.assertIn("done complete", out)
 
@@ -194,16 +199,16 @@ class Turns(unittest.TestCase):
         self.assertEqual(text.count("fake claude ready"), 2)
 
     def test_esc_and_typing_reach_the_agent_and_an_interrupt_completes_nothing(self):
-        for brain, stage in (("claude", "build"), ("codex", "verify")):
-            with self.subTest(brain=brain):
-                self.steer(brain, stage)
+        for kind, stage in (("claude-code", "build"), ("codex", "verify")):
+            with self.subTest(kind=kind):
+                self.steer(kind, stage)
 
-    def steer(self, brain, stage):
+    def steer(self, kind, stage):
         result = {}
         role = "engineer" if stage == "build" else "architect"
-        resume = str(uuid.uuid4()) if brain == "codex" else None
+        resume = str(uuid.uuid4()) if kind == "codex" else None
         worker = threading.Thread(target=lambda: result.update(
-            value=self.turn("interrupt me", brain=brain, stage=stage, resume=resume, timeout=60)))
+            value=self.turn("interrupt me", kind=kind, stage=stage, resume=resume, timeout=60)))
         worker.start()
         term = self._wait_for(lambda: terminal.get(self.run_id, role))
         self._wait_for(lambda: "working" in self.record(role))
@@ -237,6 +242,92 @@ class Turns(unittest.TestCase):
         self.fail("timed out")
 
 
+class ANewKind(unittest.TestCase):
+    """A kind of agent is its module alone: one planted for the test runs through the real terminal as the
+    shipped kinds do — typed into, ended by its own signal, resumed — and its review is read by the one
+    parser every kind shares."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.bin = tempfile.mkdtemp(prefix="orchestra-fake-cli-")
+        install_fakes(cls.bin)
+        cls.path = os.environ["PATH"]
+        os.environ["PATH"] = cls.bin + os.pathsep + cls.path
+
+    @classmethod
+    def tearDownClass(cls):
+        os.environ["PATH"] = cls.path
+        shutil.rmtree(cls.bin, ignore_errors=True)
+
+    def setUp(self):
+        # Beside it, the same kind with nothing wired to say its turn ended.
+        stand_in.plant(self, {stand_in.MODULE: stand_in.SOURCE,
+                              "silent_stand_in": stand_in.variant(wire="def wire(argv, events, sink):\n"
+                                                                       "    return list(argv)\n")})
+        self.role = {"kind": stand_in.KIND}
+        self.run_id = "test-terminal-%s" % uuid.uuid4().hex[:8]
+        self.rdir = terminal.run_dir(self.run_id)
+        self.worktree = tempfile.mkdtemp(prefix="orchestra-term-wt-")
+        self.addCleanup(folders.remove, self.worktree)
+        self.addCleanup(shutil.rmtree, self.rdir, True)
+        self.addCleanup(terminal.close_run, self.run_id)
+
+    def turn(self, prompt, resume=None, name="build-e1-1", timeout=60, kind=stand_in.KIND):
+        adapter = adapters.load(kind)
+        argv, _ = adapter.command({"workspace_access": "write"}, resume)
+        return terminal.run_turn(self.worktree, adapter.host(argv), self.rdir, name, prompt, timeout,
+                                 activities.agent_env({}), kind=kind)
+
+    def record(self):
+        try:
+            with open(terminal.record_path(self.run_id, "engineer"), "rb") as fh:
+                return terminal.plain(fh.read())
+        except FileNotFoundError:
+            return ""
+
+    def _wait_for(self, check, seconds=30):
+        return Turns._wait_for(self, check, seconds)
+
+    def test_it_ends_its_turn_on_its_own_signal_and_resumes_its_session(self):
+        rc, out = self.turn("complete this")
+        self.assertEqual((rc, N.final_message(self.role, out)), (0, "done complete"))
+        self.assertIn("fake stand-in ready", self.record(), "its own program ran in the role's terminal")
+        thread = N.extract_session(self.role, None, None, rc, out)
+        rc, out = self.turn("complete again", resume=thread, name="build-e1-2")
+        self.assertEqual((rc, adapters.load(stand_in.KIND).session(out, None)), (0, thread),
+                         "the second turn went on in the first one's session")
+
+    def test_it_takes_typed_keys(self):
+        result = {}
+        worker = threading.Thread(target=lambda: result.update(value=self.turn("interrupt me")))
+        worker.start()
+        term = self._wait_for(lambda: terminal.get(self.run_id, "engineer"))
+        self._wait_for(lambda: "working" in self.record())
+        term.type(b"\x1b")
+        self._wait_for(lambda: "Interrupted" in self.record())
+        term.type(b"go on\r")
+        worker.join(30)
+        rc, out = result["value"]
+        self.assertEqual((rc, N.final_message(self.role, out)), (0, "resumed with go on"))
+
+    def test_control_a_kind_that_never_signals_its_end_times_out(self):
+        with self.assertRaises(launch.RoleTimeout):
+            self.turn("complete this", timeout=3, kind="silent-stand-in")
+        self.assertFalse(terminal.get(self.run_id, "engineer").live())
+
+    def test_its_review_is_read_by_the_one_parser_which_refuses_text_after_the_verdict(self):
+        adapter = adapters.load(stand_in.KIND)
+        verdict = '{"verdict": "PASS", "feedback": "sound"}'
+        self.assertEqual(N.parse_review(self.role, 0, adapter.output("Reasoning first.\n" + verdict, "t1")),
+                         ("PASS", "sound"))
+        written_past = verdict + "\nOn second thought, the tests are missing."
+        with self.assertRaises(N.ContentError):
+            N.parse_review(self.role, 0, adapter.output(written_past, "t1"))
+        # The control: a parser of the kind's own, taking the first object it finds, lets that answer through.
+        message = adapter.message_of(json.loads(adapter.output(written_past, "t1")))
+        self.assertEqual(json.JSONDecoder().raw_decode(message)[0]["verdict"], "PASS")
+
+
 OWNER = textwrap.dedent("""
     import os, sys, time, uuid
     sys.path[:0] = [%(pkg)r]
@@ -257,7 +348,7 @@ OWNER = textwrap.dedent("""
     else:
         terminal.run_turn(worktree, ["claude", "--session-id", str(uuid.uuid4())], terminal.run_dir(run_id),
                           "build-e1-1", "complete detach:" + pid_file, 60, activities.agent_env({}),
-                          brain="claude")
+                          kind="claude-code")
     print("ready", flush=True)
     time.sleep(600)
 """)
@@ -267,9 +358,9 @@ class OwnerDeath(unittest.TestCase):
     """The worker's death ends a live terminal's agent and everything it started."""
 
     def setUp(self):
-        self.bin = tempfile.mkdtemp(prefix="orch-fake-cli-")
+        self.bin = tempfile.mkdtemp(prefix="orchestra-fake-cli-")
         install_fakes(self.bin)
-        self.work = tempfile.mkdtemp(prefix="orch-term-owner-")
+        self.work = tempfile.mkdtemp(prefix="orchestra-term-owner-")
         self.addCleanup(shutil.rmtree, self.bin, True)
         self.addCleanup(shutil.rmtree, self.work, True)
 
@@ -479,7 +570,7 @@ class Lifecycle(unittest.TestCase):
 
     def test_a_change_while_the_architect_judges_fails_the_step_and_is_never_the_verified_tree(self):
         from app.workspace import worktrees
-        repo = tempfile.mkdtemp(prefix="orch-verify-")
+        repo = tempfile.mkdtemp(prefix="orchestra-verify-")
         self.addCleanup(folders.remove, repo)
         for args in (["init", "-q", "-b", "develop"], ["config", "user.email", "t@t"], ["config", "user.name", "t"]):
             subprocess.run(["git", "-C", repo] + args, check=True)
@@ -490,7 +581,7 @@ class Lifecycle(unittest.TestCase):
         with open(os.path.join(repo, "app.txt"), "w") as fh:
             fh.write("one\nverified\n")
         from fakes import codex_review_resumed
-        policy = json.loads(json.dumps(activities.P.load()))
+        policy = json.loads(json.dumps(S.run_policy(S.load())))
         state = {"run_id": self.run_id, "task": "t", "phase": "build", "round": 0, "episode": 2,
                  "worktree_path": repo, "todo_path": os.path.join(repo, "todo.md"),
                  "agent_sessions": {"architect": "thread-1"}}
@@ -520,7 +611,7 @@ class Lifecycle(unittest.TestCase):
 
     def test_a_step_failed_by_its_checks_leaves_no_agent(self):
         ended = self.live("architect")
-        policy = json.loads(json.dumps(activities.P.load()))
+        policy = json.loads(json.dumps(S.run_policy(S.load())))
         state = {"run_id": self.run_id, "task": "t", "phase": "plan", "round": 0, "episode": 1,
                  "worktree_path": "/fake/worktree", "todo_path": "/fake/worktree/todo/x.md", "agent_sessions": {}}
         from fakes import FakeWorktrees, codex_first_out
@@ -535,15 +626,27 @@ class Lifecycle(unittest.TestCase):
 class Hook(unittest.TestCase):
     def test_a_payload_on_stdin_is_read_as_utf8_whatever_the_locale(self):
         # Claude pipes its hook payload as UTF-8; a Windows locale such as cp1251 would decode it wrongly.
-        events = os.path.join(tempfile.mkdtemp(prefix="orch-hook-"), "turn.events")
+        events = os.path.join(tempfile.mkdtemp(prefix="orchestra-hook-"), "turn.events")
         self.addCleanup(shutil.rmtree, os.path.dirname(events), True)
         payload = {"session_id": "s", "prompt_id": "p", "prompt": "plan — then build \u00e9"}
-        done = subprocess.run([sys.executable, terminal.TURN_HOOK, events, "UserPromptSubmit"],
+        done = subprocess.run([sys.executable, terminal.TURN_HOOK, events, "UserPromptSubmit", "stdin"],
                               input=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
                               env=dict(os.environ, PYTHONIOENCODING="cp1251"), capture_output=True)
         self.assertEqual(done.returncode, 0)
         with open(events, encoding="utf-8") as fh:
             self.assertEqual(json.loads(fh.readline())["prompt"], payload["prompt"])
+
+    def test_a_payload_given_as_the_last_argument_is_read_from_there_and_labelled(self):
+        # Codex appends its notification to the command it is given; nothing arrives on stdin.
+        events = os.path.join(tempfile.mkdtemp(prefix="orchestra-hook-"), "turn.events")
+        self.addCleanup(shutil.rmtree, os.path.dirname(events), True)
+        payload = {"type": "agent-turn-complete", "last-assistant-message": "done é"}
+        done = subprocess.run([sys.executable, terminal.TURN_HOOK, events, "notify", "argument",
+                               json.dumps(payload, ensure_ascii=False)], stdin=subprocess.DEVNULL,
+                              capture_output=True)
+        self.assertEqual((done.returncode, done.stdout, done.stderr), (0, b"", b""))
+        with open(events, encoding="utf-8") as fh:
+            self.assertEqual(json.loads(fh.readline()), dict(payload, _hook="notify"))
 
 
 class Environment(unittest.TestCase):

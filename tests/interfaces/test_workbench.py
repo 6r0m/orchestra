@@ -72,7 +72,7 @@ class Server:
     def get(cls):
         if cls._instance is None:
             server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), http.server.BaseHTTPRequestHandler)
-            policy = dict(E.POLICY, workbench_port=server.server_port)
+            policy = dict(E.SETTINGS, workbench_port=server.server_port)
             server.RequestHandlerClass = workbench.make_handler(
                 lambda work, timeout=300: E.run(work(E.client()), timeout), policy, terminal.token(),
                 links=lambda trace_id: "http://langfuse.test/trace/%s" % trace_id)
@@ -86,9 +86,11 @@ def port():
     return Server.get().server_port
 
 
-def request(method, path, body=None, token=True, host=None, origin=None):
-    connection = http.client.HTTPConnection("127.0.0.1", port(), timeout=120)
-    host = host or "127.0.0.1:%d" % port()
+def request(method, path, body=None, token=True, host=None, origin=None, at=None):
+    """`method` on `path` of the workbench on port `at`, the process's own by default."""
+    at = at or port()
+    connection = http.client.HTTPConnection("127.0.0.1", at, timeout=120)
+    host = host or "127.0.0.1:%d" % at
     headers = {"Host": host}
     if token:
         headers["X-Workbench-Token"] = terminal.token() if token is True else token
@@ -104,6 +106,97 @@ def request(method, path, body=None, token=True, host=None, origin=None):
     connection.close()
     kind = response.getheader("Content-Type") or ""
     return response.status, (json.loads(raw) if "json" in kind else raw)
+
+
+def settings_server(test, root, environ):
+    """A workbench of the test's own over the settings of the checkout at `root`, as `environ` names them;
+    its port. Reading and applying settings asks Temporal nothing."""
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), http.server.BaseHTTPRequestHandler)
+    server.RequestHandlerClass = workbench.make_handler(
+        lambda work, timeout=300: None, dict(E.SETTINGS, workbench_port=server.server_port), terminal.token(),
+        root=root, environ=environ)
+    server.daemon_threads = True
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    test.addCleanup(server.server_close)
+    test.addCleanup(server.shutdown)
+    return server.server_port
+
+
+class SettingsApi(unittest.TestCase):
+    """The Settings view's read and Apply, over a checkout of the test's own: behind the page's token, a
+    conflict when the settings changed since they were read, a refusal naming its setting, and nothing
+    applied where a stack of its own was named its settings."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="orchestra-settings-api-")
+        self.addCleanup(shutil.rmtree, self.root, True)
+        os.makedirs(os.path.join(self.root, ".orchestra"))
+        self.shared = {key: value for key, value in E.SETTINGS.items()
+                       if not key.startswith("_") and key != "stage_skills"}
+        with open(os.path.join(self.root, ".orchestra", "settings.json"), "w", encoding="utf-8") as fh:
+            json.dump(self.shared, fh)
+        self.local = os.path.join(self.root, ".orchestra", "settings.local.json")
+        self.at = settings_server(self, self.root, {})
+
+    def ask(self, method, body=None, token=True, at=None):
+        return request(method, "/api/settings", body, token=token, at=at or self.at)
+
+    def apply(self, revision, *changes, at=None):
+        return self.ask("POST", {"revision": revision, "changes": list(changes)}, at=at)
+
+    def test_without_the_token_nothing_is_read_or_written(self):
+        self.assertEqual(self.ask("GET", token=False)[0], 403)
+        status, _ = self.ask("POST", {"revision": "x", "changes": [{"pointer": "/max_rounds/plan", "value": 3}]},
+                             token=False)
+        self.assertEqual(status, 403)
+        self.assertFalse(os.path.exists(self.local))
+
+    def test_a_read_lists_the_kinds_and_an_apply_writes_only_what_it_changes(self):
+        from app.agents import adapters
+        status, shown = self.ask("GET")
+        self.assertEqual((status, shown["writable"]), (200, True))
+        self.assertEqual(shown["kinds"], adapters.available(), "the kinds come from the adapters, not the page")
+        status, after = self.apply(shown["revision"], {"pointer": "/max_rounds/plan", "value": 3})
+        self.assertEqual((status, after["settings"]["max_rounds"]), (200, {"plan": 3, "build": 2}))
+        with open(self.local, encoding="utf-8") as fh:
+            self.assertEqual(json.load(fh), {"max_rounds": {"plan": 3}})
+
+    def test_a_stale_apply_is_a_conflict_and_a_refused_one_names_its_setting(self):
+        _, shown = self.ask("GET")
+        self.assertEqual(self.apply(shown["revision"], {"pointer": "/max_rounds/plan", "value": 3})[0], 200)
+        status, answer = self.apply(shown["revision"], {"pointer": "/max_rounds/build", "value": 3})
+        self.assertEqual(status, 409, answer)
+        _, now = self.ask("GET")
+        status, answer = self.apply(now["revision"], {"pointer": "/agents/codex/model", "value": "a b"})
+        self.assertEqual((status, answer["pointer"]), (400, "/agents/codex/model"))
+        with open(self.local, encoding="utf-8") as fh:
+            self.assertEqual(json.load(fh), {"max_rounds": {"plan": 3}}, "neither refusal wrote anything")
+
+    def test_a_workbench_named_its_settings_applies_nothing_and_leaves_the_checkouts_alone(self):
+        with open(self.local, "w", encoding="utf-8") as fh:
+            json.dump({"timeout_seconds": 90}, fh)
+        with open(self.local, "rb") as fh:
+            before = fh.read()
+        named = os.path.join(self.root, "a-stack-of-its-own.json")
+        with open(named, "w", encoding="utf-8") as fh:
+            json.dump(self.shared, fh)
+        at = settings_server(self, self.root, {"ORCHESTRA_SETTINGS": named})
+        status, shown = self.ask("GET", at=at)
+        self.assertEqual((status, shown["writable"]), (200, False))
+        status, answer = self.apply(shown["revision"], {"pointer": "/max_rounds/plan", "value": 3}, at=at)
+        self.assertEqual(status, 403, answer)
+        with open(self.local, "rb") as fh:
+            self.assertEqual(fh.read(), before, "the operator's own settings, byte for byte")
+
+    def test_the_page_offers_the_view_and_serves_its_module(self):
+        host = "127.0.0.1:%d" % self.at
+        status, page = request("GET", "/", token=False, host=host, at=self.at)
+        self.assertEqual(status, 200)
+        self.assertIn(b'href="#settings"', page)
+        self.assertIn(b'id="view-settings"', page)
+        status, module = request("GET", "/settings.js", token=False, host=host, at=self.at)
+        self.assertEqual(status, 200)
+        self.assertIn(b"/api/settings", module)
 
 
 class Calls(unittest.TestCase):
@@ -140,7 +233,7 @@ class Access(unittest.TestCase):
         config = json.loads(page.split(b'<script id="config" type="application/json">')[1].split(b"</script>")[0])
         self.assertEqual(config["token"], terminal.token())
         self.assertEqual(config["terminal_ports"], {name: target["terminal_port"]
-                                                    for name, target in E.POLICY["targets"].items()})
+                                                    for name, target in E.SETTINGS["targets"].items()})
         connection = http.client.HTTPConnection("127.0.0.1", port())
         connection.request("GET", "/", headers={"Host": "127.0.0.1:%d" % port()})
         response = connection.getresponse()
@@ -443,7 +536,7 @@ class Runs(Scenario):
         self.addCleanup(skipping.__exit__, None, None, None)
         # A repository of this test's own, on a path this host runs: where the checkout happens to
         # live must not decide which worker the page's run waits for.
-        self.repo = tempfile.mkdtemp(prefix="orch-page-")
+        self.repo = tempfile.mkdtemp(prefix="orchestra-page-")
         self.addCleanup(shutil.rmtree, self.repo, True)
 
     def workers_down(self, *hosts):
@@ -476,7 +569,7 @@ class Runs(Scenario):
         self.addCleanup(release.set)
         self.host, self.agent = E.host([], git=FakeWorktrees())
 
-        def working(worktree, argv, rdir, name, prompt, timeout, env, *, brain):
+        def working(worktree, argv, rdir, name, prompt, timeout, env, *, kind):
             release.wait(60)
             return 1, ""
         self.host.runner = working
@@ -660,7 +753,7 @@ class Runs(Scenario):
         self.addCleanup(release.set)
         self.host, self.agent = E.host([], git=FakeWorktrees())
 
-        def working(worktree, argv, rdir, name, prompt, timeout, env, *, brain):
+        def working(worktree, argv, rdir, name, prompt, timeout, env, *, kind):
             release.wait(60)
             return 1, ""
         self.host.runner = working

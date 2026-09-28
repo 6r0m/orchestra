@@ -11,12 +11,14 @@ operator, and the operator's Continue is the only way anything runs again.
 """
 import contextlib
 import os
-import sys
+import shutil
 import threading
 
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
+from app.agents import adapters
+from app.agents import launch
 from app.agents import nodes as N
 from app.foundation import paths
 from app.foundation import policy as P
@@ -45,17 +47,6 @@ AGENT_GIT = {"GIT_CONFIG_COUNT": "2",
 # Set for this worker only: inherited, they would point an agent's tools at the
 # environment the worker itself imports from.
 WORKER_ONLY = ("UV_PROJECT_ENVIRONMENT", "VIRTUAL_ENV")
-# A worker started from inside a Claude Code session inherits that session's markers, and a
-# Claude agent carrying them runs as its child: measured, it saves no transcript, so its
-# session cannot be resumed by id.
-PARENT_SESSION = ("CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT", "CLAUDE_AGENT_SDK_VERSION")
-PARENT_SESSION_PREFIX = "CLAUDE_CODE_"
-WINDOWS = sys.platform.startswith("win")
-# Codex's elevated Windows sandbox starts its helper through an administrator prompt,
-# which a worker running outside the interactive desktop can never show: every command
-# the agent runs then fails with error 1223. The unelevated sandbox needs no prompt, and
-# the read-only and workspace-write policies still hold inside it.
-WINDOWS_CODEX = ["-c", 'windows.sandbox="unelevated"']
 
 
 class GitViolation(RuntimeError):
@@ -67,25 +58,37 @@ def run_dir(run_id):
     return os.path.join(paths.RUNTIME_ROOT, run_id)
 
 
-def host_argv(argv, brain, windows=WINDOWS, skills=None):
-    """The agent's argv as this host must launch it."""
-    if windows and brain == "codex":
-        return list(argv) + WINDOWS_CODEX
-    if brain == "claude":
-        # The skills a stage invokes read their references from this host's skills directory,
-        # outside the worktree; as a working directory it needs no approval to read.
-        skills = skills or os.path.join(os.path.expanduser("~"), ".claude", "skills")
-        if os.path.isdir(skills):
-            return list(argv) + ["--add-dir", os.path.realpath(skills)]
-    return list(argv)
-
-
 def agent_env(extra):
+    """An agent's environment: the worker's, less what is the worker's alone and every marker a session of
+    any kind leaves — never only the agent's own kind's, so no agent runs as a child of a session it was
+    started from — with its git kept from any remote, and what its kind adds for tracing."""
+    names, prefixes = adapters.session_markers()
     env = {key: value for key, value in os.environ.items()
-           if key not in WORKER_ONLY and key not in PARENT_SESSION and not key.startswith(PARENT_SESSION_PREFIX)}
+           if key not in WORKER_ONLY and key not in names and not key.startswith(prefixes)}
     env.update(AGENT_GIT)
     env.update(extra or {})
     return env
+
+
+def bound(policy):
+    """The kinds a run's roles run, each once, whichever shape its policy has."""
+    found = []
+    for role in policy["roles"].values():
+        adapter = adapters.for_role(role)
+        if adapter not in found:
+            found.append(adapter)
+    return found
+
+
+def holds_skill(folder):
+    """Whether `folder` holds a skill: the folder its `SKILL.md` is in."""
+    return os.path.isfile(os.path.join(folder, "SKILL.md"))
+
+
+def _answer(adapter, name, *args):
+    """What an optional part of a kind's contract answers, or None when the kind has none."""
+    part = getattr(adapter, name, None)
+    return part(*args) if part is not None else None
 
 
 def _read(path):
@@ -126,10 +129,14 @@ def _cut_short(stopped):
 class Activities:
     """The activities of one host, with the seams tests replace: execution, git, repositories, trace."""
 
-    def __init__(self, runner=terminal.run_turn, git=W, repositories=repos, telemetry=T.resolve):
+    def __init__(self, runner=terminal.run_turn, git=W, repositories=repos, telemetry=T.resolve, which=shutil.which,
+                 holds_skill=holds_skill):
         self.runner = runner
         self.git = git
         self.repositories = repositories
+        # What this host has installed: an agent's program, a skill's folder.
+        self.which = which
+        self.holds_skill = holds_skill
         self._telemetry = telemetry
         self._client = None
         self._resolved = False
@@ -168,17 +175,38 @@ class Activities:
 
     @activity.defn
     def prepare(self, args):
-        """Resolve the repository on this host, refusing before any work."""
+        """Refuse before any work what this host cannot run: first each bound agent's program, then the
+        repository, as this host resolves it, then a skill the run's stages invoke that is not here."""
         selected, policy = args["repository"], args["policy"]
-        brains = [role["brain"] for role in policy["roles"].values()]
         try:
-            resolved = self.repositories.resolve(
-                selected, brains, policy["targets"][selected["target"]]["worktree_root"])
+            kinds = bound(policy)
+        except adapters.Refused as exc:
+            raise ApplicationError(str(exc), type="Refused", non_retryable=True)
+        # The agents' programs are theirs to name; that one is missing is this host's to say, before any git
+        # is read, any worktree made or any agent started.
+        for adapter in kinds:
+            if not self.which(adapter.EXECUTABLE):
+                raise ApplicationError("%s is not installed on the %s host" % (adapter.EXECUTABLE, selected["target"]),
+                                       type="Refused", non_retryable=True)
+        try:
+            resolved = self.repositories.resolve(selected, policy["targets"][selected["target"]]["worktree_root"])
         except repos.Refused as exc:
             raise ApplicationError(str(exc), type="Refused", non_retryable=True)
-        # The CLIs' trust dialog asks what repos.json already answers, and would stop this run's
-        # first turn until someone answered it in the page. Best effort; never fails the run.
-        trust.ensure(resolved["repo_path"], brains)
+        # Neither CLI fails a turn whose skill no folder holds — one drops it without a word, the other waits
+        # at its prompt until the turn's timeout (measured) — so every skill the run's stages invoke is looked
+        # for where its kind finds skills. The run was handed only its flow's stages' skills.
+        for stage, skill in sorted((policy.get("stage_skills") or {}).items()):
+            adapter = adapters.for_role(policy["roles"][stages.STAGE_ROLE[stage]])
+            # A run started before agent profiles named it `/name`.
+            skill = skill[1:] if skill.startswith("/") else skill
+            folders = adapter.skill_folders(skill, resolved["repo_path"])
+            if not any(self.holds_skill(folder) for folder in folders):
+                raise ApplicationError("the %s stage's skill %s is in none of %s on the %s host"
+                                       % (stage, skill, ", ".join(folders), selected["target"]),
+                                       type="Refused", non_retryable=True)
+        # A CLI's trust dialog asks what starting a run on this repository already answered, and would stop
+        # this run's first turn until someone answered it in the page. Best effort; never fails the run.
+        trust.ensure(resolved["repo_path"], [adapters.kind_name(adapter) for adapter in kinds])
         return resolved
 
     @activity.defn
@@ -217,6 +245,13 @@ class Activities:
         state, stage, policy = args["state"], args["stage"], args["policy"]
         role_name = stages.STAGE_ROLE[stage]
         role = dict(policy["roles"][role_name])
+        # The kind this role runs is the run's: its `kind`, or for a run of the old shape its `brain`. One this
+        # host cannot load starts no agent.
+        try:
+            adapter = adapters.for_role(role)
+        except adapters.Refused as exc:
+            raise _failure(launch.ExecutorError(str(exc))) from exc
+        kind = adapters.kind_name(adapter)
         # Whether the stage judges with a verdict is the stages' contract, never the role's access: the
         # read-only architect researches too, and research answers with its brief.
         is_review = stage in stages.REVIEWS
@@ -233,31 +268,34 @@ class Activities:
                                     stage_first=attempt == 1, logs=os.path.join(rdir, "logs"),
                                     skills=policy.get("stage_skills"))
 
-        span = T.begin(client, state, stage, role_name, role,
+        span = T.begin(client, state, stage, role_name, dict(adapters.view(role), kind=kind, agent=role.get("agent")),
                        log=os.path.relpath(os.path.join(rdir, "logs", name), paths.REPO))
-        settings = None
+        # Whatever the kind writes for its tracing — the trace store's keys among it — lives here, and only
+        # while this stage runs.
+        private = T.Private()
+        context = T.trace_context(client, span, state, stage, role_name)
         try:
-            # The persona file as this host sees it, from the one resolver: the policy crossed
-            # from the client as data, and this host's own ORCH_POLICY may only be a copy of it. A
-            # policy this host cannot map, or a copy that differs, fails the step before an agent starts.
-            role["prompt_path"] = P.prompt_path(policy, role_name, os.environ.get("ORCH_POLICY"))
-            # Holds the trace store's secret, so it exists only while this stage runs.
-            settings = T.harness_settings(role, span)
-            env = agent_env(T.harness_env(role, span, state, stage, role_name))
-            # Again before every turn, not once per run: a CLI that was running when the record was
-            # written rewrites that file from its own copy when it exits, and takes the record with
-            # it (measured). Re-recording costs one small read; losing it costs a stopped turn.
+            if "persona" not in role:
+                # A run started before agent profiles: its persona file as this host sees it, from the one
+                # resolver. A policy this host cannot map fails the step before an agent starts.
+                role["prompt_path"] = P.prompt_path(policy, role_name)
+            # A kind's tracing is the trace's, never the run's: one that fails is said once, and the turn
+            # runs untraced.
+            traced = T.optional("trace settings", lambda: _answer(adapter, "trace_settings", context, private))
+            env = agent_env(T.optional("trace environment", lambda: _answer(adapter, "trace_env", context)))
+            # Again before every turn, not once per run: a CLI that was running when the record was written
+            # may rewrite that file from its own copy when it exits, and take the record with it (measured).
+            # Re-recording costs one small read; losing it costs a stopped turn.
             if state.get("repo_path"):
-                trust.ensure(state["repo_path"], [role["brain"]])
+                trust.ensure(state["repo_path"], [kind])
             before = self.git.guard(worktree, state["run_id"])
             # The terminals stay live while the architect reviews, so what it judged is the tree as its
             # turn began, and a change during that turn fails the step rather than passing unjudged:
             # a verdict must describe the plan or the change it actually read.
             judged = self.git.work_tree(worktree) if is_review else None
-            argv, minted = N.build_argv(role_name, role, resume_id, rdir, settings)
-            argv = host_argv(argv, role["brain"])
-            rc, out = self.runner(worktree, argv, rdir, name, compose(resume_id is None),
-                                  policy["timeout_seconds"], env, brain=role["brain"])
+            argv, minted = N.build_argv(role, resume_id, traced)
+            rc, out = self.runner(worktree, adapter.host(argv), rdir, name, compose(resume_id is None),
+                                  policy["timeout_seconds"], env, kind=kind)
             effective_resume = resume_id
             if rc != 0 and N.classify_failure(role, resume_id, rc, out,
                                               _read(os.path.join(rdir, "logs", name + ".err"))) == "session_lost":
@@ -267,10 +305,9 @@ class Activities:
                        "the %s session to resume was not found; a fresh one was started and "
                        "given the whole task again" % role_name)
                 effective_resume = None
-                argv, minted = N.build_argv(role_name, role, None, rdir, settings)
-                argv = host_argv(argv, role["brain"])
-                rc, out = self.runner(worktree, argv, rdir, name + "-rehydrated", compose(True),
-                                      policy["timeout_seconds"], env, brain=role["brain"])
+                argv, minted = N.build_argv(role, None, traced)
+                rc, out = self.runner(worktree, adapter.host(argv), rdir, name + "-rehydrated", compose(True),
+                                      policy["timeout_seconds"], env, kind=kind)
             if rc != 0:
                 raise N.TransportError("%s failed rc=%d — inspect %s/logs/%s.*" % (stage, rc, rdir, name))
             if self.git.guard(worktree, state["run_id"]) != before:
@@ -310,8 +347,9 @@ class Activities:
             T.flush(client)
             raise _failure(exc) from exc
         finally:
-            T.discard_settings(settings)
-        T.upload_codex_session(client, role, session, state, stage, role_name, span)
+            private.discard()
+        # What the kind uploads of its session itself, and the reasoning it keeps where a trace can read it.
+        T.run_upload(T.optional("upload", lambda: _answer(adapter, "upload", session, context)), span)
         T.end(span, verdict=result.get("verdict"), gate_reason=gate_reason,
               # The verdict routes, but the reasoning behind it is what a person reads first.
               feedback=result.get("feedback"),
@@ -319,7 +357,8 @@ class Activities:
               # review's feedback sits.
               response=None if is_review else result.get("output", out),
               # The architect's reasoning, behind a brief as behind a verdict.
-              reasoning=T.codex_reasoning(role, session) if role_name == "architect" else None,
+              reasoning=(T.optional("reasoning", lambda: _answer(adapter, "reasoning", session))
+                         if role_name == "architect" else None),
               session=session)
         T.flush(client)
         return result
@@ -403,7 +442,7 @@ class Activities:
     def worktree_view(self, args):
         """Every worktree the target's git reports, and whether it is merged. Reads only."""
         try:
-            resolved = self.repositories.resolve(args["repository"], [], args["worktree_root"])
+            resolved = self.repositories.resolve(args["repository"], args["worktree_root"])
             return {"base_branch": resolved["base_branch"],
                     "rows": self.git.view(resolved["repo_path"], resolved["base_branch"])}
         except repos.Refused as exc:

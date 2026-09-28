@@ -1,5 +1,5 @@
-"""A worker killed mid-stage leaves that stage's settings, which hold the trace store's key; the next
-worker to start removes them, and never a stage's that still runs.
+"""A worker killed mid-stage leaves that stage's private folder, whose settings hold the trace store's key;
+the next worker to start removes it, and never a stage's that still runs.
 
 Real processes, in a temporary folder of the test's own: a stage that makes its settings as
 `run_role` does and is killed while it runs, and the worker's own entry point, started after it as a
@@ -15,18 +15,21 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from unittest import mock
 
 HERE = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))
 PKG = os.path.abspath(os.path.join(HERE, os.pardir))
 
-# A process in the middle of a traced Claude stage: its settings made, as `run_role` makes them.
+# A process in the middle of a traced stage: its kind's settings made in the turn's private folder, as
+# `run_role` makes them — Claude Code's, whose settings hold both keys.
 STAGE = textwrap.dedent("""\
     import sys, time
     sys.path.insert(0, %r)
-    from app.foundation import policy as P
+    from app.agents.adapters import claude_code
     from app.observability import telemetry
     span = telemetry._Span(traceparent="00-%%032x-%%016x-01" %% (1, 2))
-    print(telemetry.harness_settings(P.load()["roles"]["engineer"], span), flush=True)
+    context = telemetry.trace_context(object(), span, {"run_id": "r1"}, "plan", "engineer")
+    print(claude_code.trace_settings(context, telemetry.Private()), flush=True)
     time.sleep(600)
 """) % PKG
 
@@ -47,20 +50,18 @@ def port_for_another_process(used):
 
 class StaleSettings(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="orch-sweep-")
+        self.tmp = tempfile.mkdtemp(prefix="orchestra-sweep-")
         self.addCleanup(shutil.rmtree, self.tmp, True)
-        with open(os.path.join(PKG, "policy.json"), encoding="utf-8") as fh:
+        with open(os.path.join(PKG, ".orchestra", "settings.json"), encoding="utf-8") as fh:
             policy = json.load(fh)
-        for role in policy["roles"].values():
-            role["prompt"] = os.path.join(PKG, role["prompt"])
         used = set()
         for target in policy["targets"].values():
             target.update(host="sweep%s" % os.urandom(3).hex(), terminal_port=port_for_another_process(used))
         policy.update(workbench_port=port_for_another_process(used), workflow_queue="orchestration:sweep")
-        path = os.path.join(self.tmp, "policy.json")
+        path = os.path.join(self.tmp, "settings.json")
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(policy, fh)
-        self.env = dict(os.environ, TMPDIR=self.tmp, TMP=self.tmp, TEMP=self.tmp, ORCH_POLICY=path,
+        self.env = dict(os.environ, TMPDIR=self.tmp, TMP=self.tmp, TEMP=self.tmp, ORCHESTRA_SETTINGS=path,
                         LANGFUSE_PUBLIC_KEY="pk-lf-test", LANGFUSE_SECRET_KEY="sk-lf-test",
                         # Nothing listens here: the worker gets as far as its connection and stops.
                         TEMPORAL_ADDRESS="127.0.0.1:9")
@@ -122,16 +123,19 @@ class NamedGone(unittest.TestCase):
     """The sweep after the stack has stopped a worker names that worker's pid, and takes its settings even
     when the pid already belongs to another process — Windows gives a pid away within moments."""
 
-    def settings_of(self, pid):
-        """Settings a stage of process `pid` left, where the sweep looks: a temporary folder of the test's own."""
-        from app.observability import telemetry
-        root = tempfile.mkdtemp(prefix="orch-sweep-")
+    def setUp(self):
+        # Where the sweep looks: a temporary folder of the test's own.
+        root = tempfile.mkdtemp(prefix="orchestra-sweep-")
         self.addCleanup(shutil.rmtree, root, True)
         self.addCleanup(setattr, tempfile, "tempdir", tempfile.tempdir)
         tempfile.tempdir = root
-        folder = tempfile.mkdtemp(prefix="%s%d-" % (telemetry.SETTINGS_DIR_PREFIX, pid))
-        with open(os.path.join(folder, telemetry.SETTINGS_FILE), "w", encoding="utf-8") as fh:
-            fh.write("{}")
+
+    def settings_of(self, pid, prefix=None):
+        """The private folder a stage of process `pid` left, a key in it."""
+        from app.observability import telemetry
+        folder = tempfile.mkdtemp(prefix="%s%d-" % (prefix or telemetry.TRACE_DIR_PREFIX, pid))
+        with open(os.path.join(folder, "settings.json"), "w", encoding="utf-8") as fh:
+            fh.write('{"secret": "sk-lf-test"}')
         return folder
 
     def test_a_pid_named_gone_is_taken_at_its_word_even_while_another_process_holds_it(self):
@@ -144,6 +148,19 @@ class NamedGone(unittest.TestCase):
         self.assertTrue(os.path.isdir(folder), "nor for a pid named that is not its own")
         telemetry.discard_stale_settings(gone=(os.getpid(),))
         self.assertFalse(os.path.exists(folder), "named gone, its settings go, key and all")
+
+    def test_a_folder_a_worker_left_before_the_rename_goes_too(self):
+        """A worker that died before the upgrade left its folder under the old prefix, key and all."""
+        from app.observability import telemetry
+        old = self.settings_of(os.getpid(), telemetry.OLD_DIR_PREFIXES[0])
+        self.assertTrue(os.path.basename(old).startswith("orch-claude-settings-"))
+        # The control: a sweep that knows only the new prefix leaves it.
+        with mock.patch.object(telemetry, "OLD_DIR_PREFIXES", ()):
+            telemetry.discard_stale_settings(gone=(os.getpid(),))
+        self.assertTrue(os.path.isdir(old), "the control: the old folder, and its key, left behind")
+        new = self.settings_of(os.getpid())
+        removed, left = telemetry.discard_stale_settings(gone=(os.getpid(),))
+        self.assertEqual((sorted(removed), left), (sorted([old, new]), []))
 
 
 if __name__ == "__main__":

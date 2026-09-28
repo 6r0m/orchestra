@@ -2,12 +2,12 @@
 
     python -m app.interfaces.worker wsl | windows | sweep [pid ...]
 
-The WSL worker runs its policy's workflows and the WSL host's activities; the Windows worker
+The WSL worker runs its settings' workflows and the WSL host's activities; the Windows worker
 runs only the Windows host's activities. Each polls its own host's task queue and no other. It
 records its process id while it runs where the stack's lifecycle scripts look for it
 (`stack.pid_file`), and names itself `<pid>@<host>` to Temporal, so the stack can tell its polls
-from a dead worker's. ORCH_POLICY names another policy file: a stack of its own, on queues of its
-own. `sweep` removes what the stages of dead workers on this host left, as a worker does when it
+from a dead worker's. ORCHESTRA_SETTINGS names another settings file: a stack of its own, on queues
+of its own. `sweep` removes what the stages of dead workers on this host left, as a worker does when it
 starts and the stack does once it has stopped one — naming the worker it has proven gone.
 """
 import asyncio
@@ -21,6 +21,7 @@ from temporalio.worker import Worker
 
 from app.application import activities
 from app.application import client as runs
+from app.application import settings
 from app.application import stack
 from app.foundation import policy as P
 from app.foundation import paths
@@ -42,7 +43,7 @@ def sweep(gone=()):
 
 
 async def main(target):
-    policy = P.load()
+    policy = settings.load()
     sweep()
     # This host's live agent terminals, for the workbench page. Before the pid file: a second worker
     # of this policy stops here, on the port the first holds, and never touches the first one's record.

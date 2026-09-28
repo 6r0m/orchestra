@@ -26,6 +26,7 @@
   </div>
   <nav class="top-nav" aria-label="Views">
     <a href="#worktrees" id="nav-worktrees">Worktrees</a>
+    <a href="#settings" id="nav-settings">Settings</a>
     <a class="button primary" href="#new" id="nav-new">New run</a>
   </nav>
 </header>
@@ -129,6 +130,71 @@
         </table>
       </div>
       <p class="result" id="worktrees-result" role="status"></p>
+    </section>
+
+    <section class="view settings" id="view-settings" hidden aria-labelledby="settings-title">
+      <h1 id="settings-title">Settings</h1>
+      <p class="lead">Who plays each role, what each is told, and how the roles work together. A run keeps the
+        settings it started with: what you apply here reaches the runs started after it.</p>
+      <div class="notice" id="settings-notice" hidden>
+        <p id="settings-notice-said"></p>
+        <div class="actions"><button type="button" id="settings-reread">Read the settings again</button></div>
+      </div>
+      <form class="settings-form" id="settings-form" autocomplete="off" novalidate hidden>
+        <section class="settings-part" aria-labelledby="settings-roles-title">
+          <h2 id="settings-roles-title">Roles</h2>
+          <div class="cast" id="settings-roles"></div>
+        </section>
+        <section class="settings-part" aria-labelledby="settings-agents-title">
+          <h2 id="settings-agents-title">Agents</h2>
+          <p class="hint">A profile names a kind of agent and what it runs with. Each role above runs one.</p>
+          <div class="table-wrap">
+            <table class="profiles">
+              <thead><tr><th scope="col">Profile</th><th scope="col">Kind</th><th scope="col">Model</th>
+                <th scope="col">Effort</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+              <tbody id="settings-profiles"></tbody>
+            </table>
+          </div>
+          <div class="add-agent">
+            <div class="field">
+              <label for="settings-add-name">New profile</label>
+              <input id="settings-add-name" type="text" spellcheck="false" placeholder="codex-fast…"
+                aria-describedby="settings-add-hint" data-pointer="/agents">
+            </div>
+            <div class="field">
+              <label for="settings-add-kind">Kind</label>
+              <select id="settings-add-kind"></select>
+            </div>
+            <button type="button" id="settings-add">Add profile</button>
+            <p class="hint" id="settings-add-hint">Lowercase letters and digits, words joined by single hyphens.</p>
+            <p class="alert" id="settings-add-alert" role="alert"></p>
+          </div>
+          <ul class="unusable" id="settings-unusable"></ul>
+        </section>
+        <section class="settings-part" aria-labelledby="settings-together-title">
+          <h2 id="settings-together-title">How the roles work together</h2>
+          <fieldset class="field rounds">
+            <legend>Review rounds</legend>
+            <p class="hint">How many times the architect may send a phase's work back before it stops for you.</p>
+            <div class="choices" id="settings-rounds"></div>
+          </fieldset>
+          <div class="field">
+            <label for="settings-flow">Default flow</label>
+            <select id="settings-flow" data-pointer="/default_flow" aria-describedby="settings-flow-hint"></select>
+            <ol class="score compact" id="settings-flow-steps" aria-label="The flow's steps"></ol>
+            <p class="hint" id="settings-flow-hint">What a run follows when it names no flow of its own.</p>
+            <p class="alert" role="alert"></p>
+          </div>
+        </section>
+        <div class="apply-bar">
+          <p id="settings-pending">No changes.</p>
+          <div class="actions">
+            <button type="button" class="quiet" id="settings-discard">Discard changes</button>
+            <button type="submit" class="primary" id="settings-apply">Apply</button>
+          </div>
+          <p class="result" id="settings-result" role="status"></p>
+        </div>
+      </form>
     </section>
 
     <article class="view run" id="run" hidden aria-labelledby="run-task">

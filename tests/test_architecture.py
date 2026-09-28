@@ -1,10 +1,11 @@
 """The rules this repository keeps about its own source, made enforceable.
 
-Four of them: the package boundaries its imports already respect, that the checkout root
+Five of them: the package boundaries its imports already respect, that the checkout root
 the whole tree derives from still lands on a checkout, that no `app/` module escapes a
-package, and the one incident this suite has actually caused — a unit run that wrote a
-fake repository into the operator's real CLI configuration. Every check carries a
-control, because a checker that looks at nothing passes every suite.
+package, that what differs between kinds of agent stays in their adapters, and the one
+incident this suite has actually caused — a unit run that wrote a fake repository into the
+operator's real CLI configuration. Every check carries a control, because a checker that
+looks at nothing passes every suite.
 
 The boundaries:
 
@@ -281,19 +282,22 @@ class TheCheckoutRootIsStillTheCheckout(unittest.TestCase):
     def test_every_other_root_is_derived_from_that_one(self):
         """No module builds a second root: every path below is `paths.REPO` plus a name.
 
-        `repos.DESCRIPTORS` is checked as its default. `ORCH_REPOS` may point it anywhere,
-        which is the acceptance run's throwaway repository and not a second definition.
+        `repos.DESCRIPTORS` is the descriptors' default place. `ORCHESTRA_REPOS` may name a file
+        anywhere, which is a stack's own — the acceptance run's, the suite's — and not a second
+        definition.
         """
         from app.foundation import paths, policy
         from app.workspace import repos
-        default_descriptors = os.path.join(paths.REPO, "repos.json")
-        for value in (paths.RUNTIME_ROOT, paths.SECRETS, policy.POLICY_FILE, default_descriptors):
+        default_descriptors = os.path.join(paths.REPO, ".orchestra", "repos.json")
+        for value in (paths.RUNTIME_ROOT, paths.SECRETS, policy.SETTINGS_FILE, default_descriptors):
             self.assertTrue(under(paths.REPO, value), "%s does not lie under %s" % (value, paths.REPO))
-        self.assertIn(repos.DESCRIPTORS, (default_descriptors, os.environ.get("ORCH_REPOS")))
+        self.assertEqual(repos.DESCRIPTORS, default_descriptors)
 
 
 def unguarded_trust_writes(paths):
-    """Every `trust.ensure`/`forget` in a unit test that does not name a home, as (file, line).
+    """Every trust write in a unit test that does not name a home, as (file, line): a call to
+    `trust.ensure` or `trust.forget`, or to a kind's own `trust_ensure` or `trust_forget`, whatever
+    it is called on.
 
     A trust record is written into the CLI's own store, so a unit test that leaves the home
     to its default edits the operator's real configuration. `acceptance_restart.py` is not a
@@ -304,17 +308,81 @@ def unguarded_trust_writes(paths):
         with open(path, encoding="utf-8") as handle:
             tree = ast.parse(handle.read(), filename=path)
         for node in ast.walk(tree):
-            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            if not isinstance(node, ast.Call):
                 continue
-            if node.func.attr not in ("ensure", "forget"):
-                continue
-            target = node.func.value
-            if not isinstance(target, ast.Name) or target.id != "trust":
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+            # The position the home takes: after the repository, and for `trust` after the kinds too.
+            if name in ("trust_ensure", "trust_forget"):
+                home_at = 1
+            elif (name in ("ensure", "forget") and isinstance(func, ast.Attribute)
+                  and isinstance(func.value, ast.Name) and func.value.id == "trust"):
+                home_at = 2
+            else:
                 continue
             named = any(kw.arg == "home" for kw in node.keywords)
-            if len(node.args) < 3 and not named:
+            if len(node.args) <= home_at and not named:
                 found.append((os.path.basename(path), node.lineno))
     return sorted(found)
+
+
+# The one string outside the adapters that may still name a kind: the prefix a worker from before the
+# rename left its private folders under, which the sweep still removes (`telemetry.OLD_DIR_PREFIXES`).
+VENDOR_EXCEPTIONS = frozenset({"orch-claude-settings-"})
+
+
+def _docstrings(tree):
+    """The strings a module, class or function opens with: prose, not code."""
+    found = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body:
+            first = node.body[0]
+            if (isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant)
+                    and isinstance(first.value.value, str)):
+                found.add(first.value)
+    return found
+
+
+def vendor_strings(source, words, exempt=frozenset()):
+    """Every string in the code under `source`, outside `agents/adapters`, that holds one of `words` in
+    any case, as (file, line, string). Docstrings and comments are prose, and are not read."""
+    pattern = re.compile("|".join(re.escape(word) for word in sorted(words)), re.IGNORECASE)
+    adapters = os.path.join(source, "agents", "adapters")
+    found = []
+    for path in source_files(source):
+        if under(adapters, path):
+            continue
+        with open(path, encoding="utf-8") as handle:
+            tree = ast.parse(handle.read(), filename=path)
+        prose = _docstrings(tree)
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Constant) and isinstance(node.value, str) and node not in prose
+                    and node.value not in exempt and pattern.search(node.value)):
+                found.append((os.path.relpath(path, source).replace(os.sep, "/"), node.lineno, node.value))
+    return sorted(set(found))
+
+
+def kind_words():
+    """Every kind the adapters hold, by its name and by its executable's."""
+    from app.agents import adapters
+    words = {entry["kind"] for entry in adapters.available()}
+    words.update(module.EXECUTABLE for module in adapters.usable())
+    return words
+
+
+class MechanicsStayInTheAdapters(unittest.TestCase):
+    """What differs between kinds of agent lives in their adapters; everything else takes a kind as data."""
+
+    def test_no_code_outside_the_adapters_names_a_kind(self):
+        words = kind_words()
+        self.assertTrue(words, "no kind was found to look for")
+        found = vendor_strings(SOURCE, words, VENDOR_EXCEPTIONS)
+        self.assertEqual(found, [], "\n".join("%s:%d names a kind: %r" % row for row in found))
+
+    def test_the_exception_is_still_the_sweeps(self):
+        """An exception its owner no longer holds would let the name back in for nothing."""
+        from app.observability import telemetry
+        self.assertEqual(VENDOR_EXCEPTIONS, frozenset(telemetry.OLD_DIR_PREFIXES))
 
 
 def unit_tests(root):
@@ -487,13 +555,42 @@ class TheCheckersCanFail(unittest.TestCase):
                 fh.write("trust.ensure(repo, ['claude'])\n")
             self.assertEqual(unguarded_trust_writes([path]), [("test_bad.py", 1)])
 
+    def test_it_sees_a_kinds_own_trust_answer_with_no_home(self):
+        """A kind writes the record `trust` would, so a call straight to its answer is the same risk."""
+        with tempfile.TemporaryDirectory() as root:
+            path = os.path.join(root, "test_bad.py")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write("claude_code.trust_ensure(repo)\n"
+                         "adapters.load('codex').trust_forget(repo)\n"
+                         "trust_ensure(repo)\n")
+            self.assertEqual(unguarded_trust_writes([path]),
+                             [("test_bad.py", 1), ("test_bad.py", 2), ("test_bad.py", 3)])
+
     def test_it_accepts_a_trust_write_that_names_a_home(self):
         with tempfile.TemporaryDirectory() as root:
             path = os.path.join(root, "test_ok.py")
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write("trust.ensure(repo, ['claude'], home)\n"
-                         "trust.forget(repo, ['codex'], home=home)\n")
+                         "trust.forget(repo, ['codex'], home=home)\n"
+                         "claude_code.trust_ensure(repo, home)\n"
+                         "codex.trust_forget(repo, home=home)\n")
             self.assertEqual(unguarded_trust_writes([path]), [])
+
+    def test_it_sees_a_kind_named_outside_the_adapters(self):
+        """A kind's branch planted outside its adapter, which is what the adapters are there to hold."""
+        with tempfile.TemporaryDirectory() as root:
+            _tree(root, {"agents/nodes.py": '"""Claude, in prose."""\n'
+                                            "def argv(kind):\n"
+                                            '    """Codex, in prose."""\n'
+                                            '    if kind == "claude-code":\n'
+                                            '        return [f"{kind}", "--Codex-flag"]\n'
+                                            "    # claude, in a comment\n",
+                         "agents/adapters/claude_code.py": 'EXECUTABLE = "claude"\n',
+                         "observability/sweep.py": 'OLD = ("orch-claude-settings-",)\n'
+                                                   'NEW = "orch-claude-settings-2"\n'})
+            self.assertEqual(vendor_strings(root, {"claude-code", "claude", "codex"}, {"orch-claude-settings-"}),
+                             [("agents/nodes.py", 4, "claude-code"), ("agents/nodes.py", 5, "--Codex-flag"),
+                              ("observability/sweep.py", 2, "orch-claude-settings-2")])
 
     def test_it_finds_a_nested_unit_test(self):
         with tempfile.TemporaryDirectory() as root:
@@ -511,14 +608,10 @@ class TheVendorIsTheRunsDecision(unittest.TestCase):
         with tempfile.TemporaryDirectory() as rdir:
             with self.assertRaises(launch.ExecutorError) as raised:
                 terminal.run_turn(rdir, ["claude"], rdir, "build-e1-1", "hi", 60, {},
-                                  brain="deepseek")
+                                  kind="deepseek")
             self.assertIn("deepseek", str(raised.exception))
             # Refused before the turn left anything behind.
             self.assertEqual(os.listdir(rdir), [])
-
-    def test_the_policy_names_the_agents_a_turn_accepts(self):
-        from app.foundation import policy
-        self.assertEqual(sorted(policy.KNOWN_BRAINS), ["claude", "codex"])
 
 
 if __name__ == "__main__":

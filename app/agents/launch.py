@@ -133,7 +133,7 @@ class _PosixTree:
         self.reaper = None
 
     def start(self, argv, cwd, stdin, stdout, stderr, env):
-        self.unit = "orch-%s" % uuid.uuid4().hex[:12]
+        self.unit = "orchestra-%s" % uuid.uuid4().hex[:12]
         self.reaper = subprocess.Popen([sys.executable, "-c", self.REAPER, self.unit,
                                         str(SYSTEMCTL_SECONDS)],
                                        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
@@ -421,7 +421,8 @@ class _WindowsTree:
         owned.append(fd)
         return msvcrt.get_osfhandle(fd), None
 
-    def start(self, argv, cwd, stdin, stdout, stderr, env):
+    def start(self, argv, cwd, stdin, stdout, stderr, env, flags=0):
+        """The process, created inside the tree's job. `flags` adds creation flags of the caller's own."""
         ctypes = self.ctypes
         from ctypes import wintypes
 
@@ -483,7 +484,7 @@ class _WindowsTree:
                 wintypes.DWORD, wintypes.LPVOID, wintypes.LPCWSTR, wintypes.LPVOID, wintypes.LPVOID)
             ok = self.kernel32.CreateProcessW(
                 None, command, None, None, True,
-                self.EXTENDED_STARTUPINFO_PRESENT | self.CREATE_UNICODE_ENVIRONMENT,
+                self.EXTENDED_STARTUPINFO_PRESENT | self.CREATE_UNICODE_ENVIRONMENT | flags,
                 ctypes.cast(block, wintypes.LPVOID) if block is not None else None, cwd,
                 ctypes.byref(info), ctypes.byref(process))
             if not ok:
@@ -511,11 +512,13 @@ class _WindowsTree:
         except subprocess.TimeoutExpired:
             pass
 
-    def kill(self):
+    def kill(self, grace=None):
         """End every process of the tree and return once each has ended — or raise, when that is not
-        proved within GRACE_SECONDS, so nothing goes on as though the tree were gone."""
+        proved within `grace` seconds (GRACE_SECONDS unless given), so nothing goes on as though the tree
+        were gone."""
         if not self.job:
             return
+        grace = GRACE_SECONDS if grace is None else grace
         # Termination only begins the end: a process has its exit code while it still holds its handles —
         # the directory it worked in among them, which Windows then refuses to remove — and the job drops
         # every process from its own list the moment it is terminated, so none can be found afterwards
@@ -530,7 +533,7 @@ class _WindowsTree:
             finally:
                 terminated = self.kernel32.TerminateJobObject(self.job, 1)
             self._check(terminated, "TerminateJobObject")
-            self._wait(held, time.monotonic() + GRACE_SECONDS)
+            self._wait(held, time.monotonic() + grace, grace)
         finally:
             for handle in held.values():
                 self.kernel32.CloseHandle(handle)
@@ -566,14 +569,14 @@ class _WindowsTree:
             self._check(ctypes.get_last_error() == self.ERROR_MORE_DATA, "QueryInformationJobObject")
             room = max(room * 2, ids.assigned)
 
-    def _wait(self, held, deadline):
+    def _wait(self, held, deadline, grace):
         """Each held process ended by `deadline`; TimeoutError naming one that has not."""
         for pid, handle in held.items():
             waited = self.kernel32.WaitForSingleObject(handle, int(max(0.0, deadline - time.monotonic()) * 1000))
             self._check(waited != self.WAIT_FAILED, "WaitForSingleObject")
             if waited != self.WAIT_OBJECT_0:
                 raise TimeoutError("the agent's process tree did not end within %ds of its kill: process %d is "
-                                   "still there" % (GRACE_SECONDS, pid))
+                                   "still there" % (grace, pid))
 
     def close(self):
         if self.job:

@@ -1,7 +1,7 @@
 # One Windows worker, for the stack owner through workers.sh:
 #   powershell -File workers.ps1 start|stop|status|sweep <name> [the pid a sweep knows is gone]
 # <name> is the worker's name on this machine: its pid file and log in tmp\orchestration. It runs
-# this checkout's own policy, in this checkout's uv-managed Windows environment (app\foundation\envpath.py).
+# this checkout's own settings, in this checkout's uv-managed Windows environment (app\foundation\envpath.py).
 param([ValidateSet("start", "stop", "status", "sweep")][string] $Action, [Parameter(Mandatory)][string] $Name,
       [string] $Gone = "", [switch] $Handed)
 $ErrorActionPreference = "Stop"

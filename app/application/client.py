@@ -16,6 +16,7 @@ from temporalio.common import WorkflowIDConflictPolicy, WorkflowIDReusePolicy
 from temporalio.exceptions import TimeoutError as StepTimeout, TimeoutType, WorkflowAlreadyStartedError
 from temporalio.service import RPCError, RPCStatusCode
 
+from app.application import settings as S
 from app.foundation import flows
 from app.foundation import policy as policy_mod
 from app.workspace import repos
@@ -195,17 +196,19 @@ def view(listed, status, health):
             "actions": list(stop["actions"]) if stop and not closed else []}
 
 
-async def start(client, task, repo=None, auto_proceed=False, policy_path=None, check=True, flow=None):
-    """Start a run on `repo` (a repos.json name, a path, or this repository), following `flow` (a file in
-    `flows/`, the policy's `default_flow` when none is named); returns its handle.
+async def start(client, task, repo=None, auto_proceed=False, settings_path=None, check=True, flow=None):
+    """Start a run on `repo` (a descriptor's name, a path, or this repository), following `flow` (a file in
+    `flows/`, the settings' `default_flow` when none is named); returns its handle.
 
-    The flow is read and checked here, once, and the run is handed its steps: it never reads a flow, so
-    a flow edited later changes only the runs started after it."""
-    pol = policy_mod.load(policy_path)
+    The flow is read and checked here, once, and the run is handed its steps and its policy made whole —
+    each role's agent and persona's text among it: it never reads a flow, settings or a persona file, so
+    none edited later changes a run already started."""
+    settings = S.load(settings_path)
     selected = repos.select(repo)
-    queue = policy_mod.queue(pol, selected["target"])
-    name = flow or pol.get("default_flow")
+    queue = policy_mod.queue(settings, selected["target"])
+    name = flow or settings.get("default_flow")
     chosen = {"name": name, "steps": flows.load(name)} if name else None
+    pol = S.run_policy(settings, chosen["steps"] if chosen else None)
     if check:
         await preflight(client, queues(policy_mod.workflow_queue(pol), queue))
     now = datetime.datetime.now()
@@ -402,9 +405,9 @@ async def remove_worktree(client, run_id):
         raise Refusal("run %s's worktree was not removed: %s" % (run_id, getattr(cause, "message", cause))) from error
 
 
-async def worktrees_of(client, repo=None, policy_path=None, check=True):
+async def worktrees_of(client, repo=None, settings_path=None, check=True):
     """Every worktree of a repository and whether it is merged, read by its target host's git."""
-    pol = policy_mod.load(policy_path)
+    pol = S.load(settings_path)
     selected = repos.select(repo)
     queue = policy_mod.queue(pol, selected["target"])
     if check:

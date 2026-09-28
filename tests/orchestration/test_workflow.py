@@ -1,12 +1,14 @@
 """The workflow's contract on Temporal, over the fake seams: routes, rounds, gates, sessions, failures.
 
-Run on Temporal's time-skipping test server. With ORCH_WORKFLOW_UNDER_TEST=empty every
+Run on Temporal's time-skipping test server. With ORCHESTRA_WORKFLOW_UNDER_TEST=empty every
 scenario fails: they prove the workflow, not the harness.
 """
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 
 # The suite's own folder, reached from this concern's folder inside it, and the
@@ -20,6 +22,7 @@ import temporal_env  # noqa: E402
 from fakes import codex_first_out, codex_review_first, codex_review_resumed  # noqa: E402
 
 from app.application import client as runs  # noqa: E402
+from app.application import settings as S  # noqa: E402
 from app.foundation import policy as policy_mod  # noqa: E402
 from app.orchestration import workflow as WF  # noqa: E402
 
@@ -177,16 +180,16 @@ class Sessions(Scenario):
                 self.assertEqual(argv[argv.index("--allowedTools") + 1], "Edit(./**)")
 
     def test_a_windows_host_runs_codex_in_the_unelevated_sandbox(self):
-        from app.application import activities
-        codex = ["codex", "resume", "t1", "--sandbox", "read-only"]
-        self.assertEqual(activities.host_argv(codex, "codex", windows=True),
+        from app.agents.adapters import claude_code, codex
+        argv = ["codex", "resume", "t1", "--sandbox", "read-only"]
+        self.assertEqual(codex.host(argv, windows=True),
                          ["codex", "resume", "t1", "--sandbox", "read-only", "-c", 'windows.sandbox="unelevated"'],
                          "the override is added, and the sandbox policy stays")
-        self.assertEqual(activities.host_argv(codex, "codex", windows=False), codex)
+        self.assertEqual(codex.host(argv, windows=False), argv)
         claude = ["claude", "--permission-mode", "plan"]
-        self.assertEqual(activities.host_argv(claude, "claude", windows=True, skills="/no/such/dir"), claude)
+        self.assertEqual(claude_code.host(claude, windows=True, skills="/no/such/dir"), claude)
         skills = os.path.dirname(os.path.abspath(__file__))
-        self.assertEqual(activities.host_argv(claude, "claude", skills=skills), claude + ["--add-dir", skills],
+        self.assertEqual(claude_code.host(claude, skills=skills), claude + ["--add-dir", skills],
                          "a Claude role reads its skills' references without a prompt")
 
     def test_stage_template_reanchors_on_stage_switch(self):
@@ -303,20 +306,27 @@ class Sessions(Scenario):
         self.assertEqual(len(names), len(set(names)), "a reset episode must not overwrite earlier transcripts")
 
     def test_a_stage_skill_leads_the_prompt_only_where_the_policy_binds_one(self):
-        """A host's own methodology is a binding, not something this component carries."""
+        """A host's own methodology is a binding, not something this component carries: named in the
+        settings, and invoked as the role's kind invokes one."""
         from app.agents import nodes as N
-        from app.foundation import policy as P
         state = {"task": "t", "todo_path": "/w/todo/x.md", "run_id": "r1", "worktree_path": "/w",
                  "phase": "plan", "round": 0, "episode": 1, "feedback": "", "guidance": ""}
-        role = dict(P.load()["roles"]["engineer"], prompt_path=os.path.join(PKG, "roles", "engineer.md"))
-        bound = N.compose_prompt("plan", role, False, state, True, True,
-                                 skills={"plan": "/investigate-change"})
+        roles = S.run_policy(S.load())["roles"]
+        bound = N.compose_prompt("plan", roles["engineer"], False, state, True, True,
+                                 skills={"plan": "investigate-change"})
         self.assertTrue(bound.startswith("/investigate-change\n"),
                         "a bound skill invokes only as the prompt's first characters")
+        self.assertTrue(N.compose_prompt("assess", roles["architect"], True, state, True, True,
+                                         skills={"assess": "architect"}).startswith("$architect\n"),
+                        "each kind invokes it its own way: Codex by `$name`")
         self.assertNotIn("/investigate-change",
-                         N.compose_prompt("plan", role, False, state, True, True, skills=None),
-                         "and the shipped policy binds none, so no invocation appears")
-        self.assertEqual(P.load().get("stage_skills"), None, "nothing is bound by default")
+                         N.compose_prompt("plan", roles["engineer"], False, state, True, True, skills=None),
+                         "and the shipped settings bind none, so no invocation appears")
+        self.assertEqual(S.load().get("stage_skills"), None, "nothing is bound by default")
+        old = {"brain": "claude", "workspace_access": "write", "prompt_path": os.path.join(PKG, "roles", "engineer.md")}
+        self.assertTrue(N.compose_prompt("plan", old, False, state, True, True,
+                                         skills={"plan": "/investigate-change"}).startswith("/investigate-change\n"),
+                        "a run started before agent profiles named it `/name`, and still invokes it")
 
     def test_prompt_files_reach_composed_prompts(self):
         a1, _ = codex_review_first("PASS")
@@ -380,45 +390,112 @@ class AnotherProcess(Scenario):
         self.assertEqual(len(self.agent.calls), 4, "the refused resume must execute nothing")
 
 
+# A run's policy as a run started before agent profiles carries it: a brain for each role, the access it
+# stored, a persona file's path and where the policy was loaded, and each skill as `/name`.
+OLD_SHAPE = dict(json.loads(json.dumps(POLICY)), _policy_path="policy.json",
+                 roles={"engineer": {"brain": "claude", "workspace_access": "write", "prompt": "roles/engineer.md"},
+                        "architect": {"brain": "codex", "workspace_access": "read", "prompt": "roles/architect.md",
+                                      "model": "gpt-5.6-sol", "reasoning_effort": "high"}},
+                 stage_skills={"plan": "/investigate-change", "assess": "/architect",
+                               "build": "/implement-approved-change", "verify": "/architect"})
+
+
+class ARunKeepsItsPersonas(Scenario):
+    """A persona edited after a run started never reaches it: the run carries the text it started with."""
+
+    def persona_file(self):
+        folder = tempfile.mkdtemp(prefix="orchestra-persona-")
+        self.addCleanup(shutil.rmtree, folder, True)
+        path = os.path.join(folder, "architect.md")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("Judge as first written.\n")
+        return path
+
+    def architects_prompt(self, policy, path):
+        """The architect's first prompt, in a run whose persona file is rewritten while its engineer plans:
+        after the run started, before the architect's session is born."""
+        a1, _ = codex_review_first("PASS")
+        self.host, self.agent = host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)])
+        agent = self.host.runner
+
+        def planning(worktree, argv, rdir, name, prompt, timeout, env, *, kind):
+            if name.startswith("plan"):
+                with open(path, "w", encoding="utf-8") as fh:
+                    fh.write("Judge as edited later.\n")
+            return agent(worktree, argv, rdir, name, prompt, timeout, env, kind=kind)
+        self.host.runner = planning
+        run = Run(policy=policy)
+        self.addCleanup(run.cleanup)
+        self.assertEqual(run.stop["reason"], "approval")
+        return self.agent.calls[1]["prompt"]
+
+    def test_the_architect_is_given_the_persona_the_run_started_with(self):
+        path = self.persona_file()
+        settings = json.loads(json.dumps(temporal_env.SETTINGS))
+        settings["roles"]["architect"]["persona_file"] = path
+        prompt = self.architects_prompt(S.run_policy(settings), path)
+        self.assertIn("Judge as first written.", prompt)
+        self.assertNotIn("edited later", prompt)
+
+    def test_control_a_run_started_before_agent_profiles_reads_its_persona_file_at_the_session(self):
+        path = self.persona_file()
+        old = json.loads(json.dumps(OLD_SHAPE))
+        old["roles"]["architect"]["prompt"] = path
+        self.assertIn("Judge as edited later.", self.architects_prompt(old, path))
+
+
+class AnyProfileUnderAnyRole(Scenario):
+    """D9: any profile runs any role, both roles one profile included, each role with its own access; and a
+    run started before agent profiles runs as it did."""
+
+    def test_both_roles_on_one_profile_plan_review_and_build(self):
+        settings = json.loads(json.dumps(temporal_env.SETTINGS))
+        settings["roles"]["architect"]["agent"] = settings["roles"]["engineer"]["agent"]
+        S.check(settings)
+        verdict = '{"verdict": "PASS", "feedback": "sound"}\n'
+        run = self.drive([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, verdict),
+                          ("build-e2-1", 0, "built\n"), ("verify-e2-1", 0, verdict)],
+                         auto=True, policy=S.run_policy(settings))
+        self.assertEqual(run.state["status"], "READY_FOR_HUMAN")
+        self.assertEqual({call["kind"] for call in self.agent.calls}, {"claude-code"})
+        modes = {call["name"]: call["argv"][call["argv"].index("--permission-mode") + 1] for call in self.agent.calls}
+        self.assertEqual(modes, {"plan-e1-1": "dontAsk", "assess-e1-1": "plan", "build-e2-1": "dontAsk",
+                                 "verify-e2-1": "plan"}, "the reviewer reads only, whatever it runs")
+        sessions = run.state["agent_sessions"]
+        self.assertNotEqual(sessions["engineer"], sessions["architect"], "one profile, two sessions")
+
+    def test_a_run_of_the_old_shape_runs_as_before(self):
+        looked = []
+
+        def which(program):
+            looked.append(program)
+            return "/fake/bin/%s" % program
+        a1, _ = codex_review_first("PASS")
+        self.host, self.agent = host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)], which=which)
+        run = Run(policy=OLD_SHAPE)
+        self.addCleanup(run.cleanup)
+        self.assertEqual(run.stop["reason"], "approval")
+        self.assertEqual(sorted(looked), ["claude", "codex"], "its brains' programs, found through their kinds")
+        self.assertEqual([call["kind"] for call in self.agent.calls], ["claude-code", "codex"])
+        self.assertTrue(self.agent.calls[0]["prompt"].startswith("/investigate-change\n"))
+        self.assertTrue(self.agent.calls[1]["prompt"].startswith("$architect\n"),
+                        "its `/name` skill is the skill `name`, invoked as the architect's kind does")
+        with open(os.path.join(PKG, "roles", "engineer.md"), encoding="utf-8") as fh:
+            self.assertIn(fh.readline().strip(), self.agent.calls[0]["prompt"], "its persona file, as it named it")
+
+
 class Policy(unittest.TestCase):
+    """Settings are validated whole: here their shape and references, and each kind's own values through its
+    adapter (`application/test_settings.py`)."""
+
     def _raw(self):
-        return json.loads(json.dumps(POLICY))
+        return json.loads(json.dumps(temporal_env.SETTINGS))
 
-    def test_d3_same_model_rejected(self):
+    def test_both_roles_may_run_one_profile(self):
+        """D9: whether the reviewer is another model is the operator's choice, and no rule of this one."""
         raw = self._raw()
-        raw["roles"]["architect"]["brain"] = "claude"
-        raw["roles"]["architect"].pop("model", None)
-        with self.assertRaisesRegex(policy_mod.InvalidPolicy, "D3"):
-            policy_mod.validate(raw)
-        raw["roles"]["engineer"]["model"] = "some-model"
-        raw["roles"]["architect"]["model"] = "some-model"
-        with self.assertRaisesRegex(policy_mod.InvalidPolicy, "D3"):
-            policy_mod.validate(raw)
-
-    def test_d3_same_brain_different_models_accepted(self):
-        raw = self._raw()
-        raw["roles"]["architect"]["brain"] = "claude"
-        raw["roles"]["engineer"]["model"] = "model-a"
-        raw["roles"]["architect"]["model"] = "model-b"
-        policy_mod.validate(raw)
-
-    def test_d3_default_model_is_not_a_wildcard(self):
-        raw = self._raw()
-        raw["roles"]["architect"]["brain"] = "claude"
-        raw["roles"]["architect"].pop("model", None)
-        raw["roles"]["engineer"]["model"] = "model-a"
-        policy_mod.validate(raw)
-
-    def test_model_and_effort_are_plain_tokens(self):
-        for key, bad in (("model", "a b"), ("model", "x;rm"), ("reasoning_effort", "high'"),
-                         ("reasoning_effort", "")):
-            raw = self._raw()
-            raw["roles"]["architect"][key] = bad
-            with self.assertRaises(policy_mod.InvalidPolicy, msg=(key, bad)):
-                policy_mod.validate(raw)
-        raw = self._raw()
-        raw["roles"]["engineer"]["reasoning_effort"] = "medium"
-        policy_mod.validate(raw)
+        raw["roles"]["architect"]["agent"] = raw["roles"]["engineer"]["agent"]
+        S.check(policy_mod.validate(raw))
 
     def test_the_workflow_queue_is_required_and_a_plain_token(self):
         """No default: a policy that forgot its own would join the deployment's queue, and its runs."""
@@ -435,31 +512,29 @@ class Policy(unittest.TestCase):
         policy_mod.validate(raw)
 
     def test_shipped_architect_pins_model_and_effort(self):
-        architect = POLICY["roles"]["architect"]
+        settings = temporal_env.SETTINGS
+        architect = settings["agents"][settings["roles"]["architect"]["agent"]]
         self.assertTrue(architect.get("model"))
-        self.assertTrue(architect.get("reasoning_effort"))
+        self.assertTrue(architect.get("effort"))
 
-    def test_architect_must_be_readonly(self):
+    def test_missing_persona_file_rejected(self):
         raw = self._raw()
-        raw["roles"]["architect"]["workspace_access"] = "write"
-        with self.assertRaises(policy_mod.InvalidPolicy):
+        raw["roles"]["engineer"]["persona_file"] = "roles/does-not-exist.md"
+        with self.assertRaisesRegex(policy_mod.InvalidPolicy, "persona file missing") as raised:
             policy_mod.validate(raw)
-
-    def test_missing_prompt_file_rejected(self):
-        raw = self._raw()
-        raw["roles"]["engineer"]["prompt"] = "roles/does-not-exist.md"
-        with self.assertRaisesRegex(policy_mod.InvalidPolicy, "prompt file missing"):
-            policy_mod.validate(raw)
+        self.assertEqual(raised.exception.pointer, "/roles/engineer/persona_file")
 
     def test_unknown_keys_rejected_top_and_role(self):
         raw = self._raw()
         raw["max_round"] = 2
-        with self.assertRaisesRegex(policy_mod.InvalidPolicy, "unknown policy keys"):
+        with self.assertRaisesRegex(policy_mod.InvalidPolicy, "unknown setting") as raised:
             policy_mod.validate(raw)
+        self.assertEqual(raised.exception.pointer, "/max_round")
         raw = self._raw()
         raw["roles"]["engineer"]["modle"] = "x"
-        with self.assertRaisesRegex(policy_mod.InvalidPolicy, "unknown keys"):
+        with self.assertRaisesRegex(policy_mod.InvalidPolicy, "unknown setting") as raised:
             policy_mod.validate(raw)
+        self.assertEqual(raised.exception.pointer, "/roles/engineer/modle")
 
     def test_git_triple_must_be_false(self):
         raw = self._raw()
@@ -665,14 +740,14 @@ class Flows(Scenario):
         import shutil
         import tempfile
         from app.foundation import flows
-        folder = tempfile.mkdtemp(prefix="orch-flows-")
+        folder = tempfile.mkdtemp(prefix="orchestra-flows-")
         self.addCleanup(shutil.rmtree, folder, True)
         self.addCleanup(setattr, flows, "FLOWS_DIR", flows.FLOWS_DIR)
         flows.FLOWS_DIR = folder
         mine = os.path.join(folder, "mine.json")
         with open(mine, "w", encoding="utf-8") as fh:
             json.dump(self.CODE, fh)
-        repo = tempfile.mkdtemp(prefix="orch-flow-repo-")
+        repo = tempfile.mkdtemp(prefix="orchestra-flow-repo-")
         self.addCleanup(shutil.rmtree, repo, True)
         self.host, self.agent = host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, codex_review_first("PASS")[0]),
                                       ("build-e2-1", 0, "built\n"), ("verify-e2-1", 0, codex_review_resumed("PASS"))])

@@ -40,7 +40,7 @@ def now():
 
 def lock_of_its_own(test):
     """The stack's lock in a folder of the test's own: the live stack's is never taken, nor met taken."""
-    folder = tempfile.mkdtemp(prefix="orch-stack-lock-")
+    folder = tempfile.mkdtemp(prefix="orchestra-stack-lock-")
     test.addCleanup(shutil.rmtree, folder, True)
     test.addCleanup(setattr, stack, "LOCK", stack.LOCK)
     stack.LOCK = os.path.join(folder, "stack.lock")
@@ -65,17 +65,15 @@ def other_policy(test, held=None):
     target in `held` on the port the test holds for it."""
     held = held or {}
     used = set(held.values())
-    tmp = tempfile.mkdtemp(prefix="orch-stack-")
+    tmp = tempfile.mkdtemp(prefix="orchestra-stack-")
     test.addCleanup(shutil.rmtree, tmp, True)
-    with open(P.POLICY_FILE, encoding="utf-8") as fh:
+    with open(P.SETTINGS_FILE, encoding="utf-8") as fh:
         policy = json.load(fh)
-    for role in policy["roles"].values():
-        role["prompt"] = os.path.join(PKG, role["prompt"])
     host = "stack%s" % os.urandom(3).hex()
     for name, target in policy["targets"].items():
         target.update(host=host, terminal_port=held.get(name) or port_for_another_process(used))
     policy.update(workbench_port=port_for_another_process(used), workflow_queue="orchestration:%s" % host)
-    path = os.path.join(tmp, "policy.json")
+    path = os.path.join(tmp, "settings.json")
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(policy, fh)
     return P.load(path), path
@@ -115,7 +113,7 @@ class Mechanics:
         self.swept.append(more)
         if component in self.unswept:
             return False, "the sweep could not list the temporary folder"
-        return True, "removed the settings a dead worker's stage left: /tmp/orch-claude-settings-4242-x"
+        return True, "removed the settings a dead worker's stage left: /tmp/orchestra-trace-4242-x"
 
 
 @unittest.skipIf(WINDOWS, "the stack is controlled from WSL")
@@ -128,7 +126,7 @@ class Owner(unittest.TestCase):
         """A host's script call that hangs — an interop call that never returns — ends at its action's limit
         as a part not done, and the stack's lock is let go for the next action."""
         policy, _ = other_policy(self)
-        folder = tempfile.mkdtemp(prefix="orch-hung-script-")
+        folder = tempfile.mkdtemp(prefix="orchestra-hung-script-")
         self.addCleanup(shutil.rmtree, folder, True)
         hung = os.path.join(folder, "workers.sh")
         with open(hung, "w", encoding="utf-8") as fh:
@@ -285,6 +283,29 @@ class Started(unittest.TestCase):
                           "the dead worker's last polls, which Temporal still lists")
 
 
+class ALocalPatchKeepsTheStack(unittest.TestCase):
+    """Settings are known by the file below their patch, so the operator's own changes never make the
+    deployment's stack another's (D32)."""
+
+    def test_settings_with_a_local_patch_are_still_the_deployments_and_a_named_file_its_own(self):
+        root = tempfile.mkdtemp(prefix="orchestra-own-")
+        self.addCleanup(shutil.rmtree, root, True)
+        os.makedirs(os.path.join(root, ".orchestra"))
+        shutil.copy(P.SETTINGS_FILE, os.path.join(root, ".orchestra", "settings.json"))
+        local = os.path.join(root, ".orchestra", "settings.local.json")
+        with open(local, "w", encoding="utf-8") as fh:
+            json.dump({"timeout_seconds": 90}, fh)
+        loaded = P.load(root=root, environ={})
+        self.assertEqual(loaded["timeout_seconds"], 90, "the patch is applied")
+        self.assertTrue(stack.own(loaded))
+        self.assertEqual(stack.managed(loaded), stack.COMPONENTS)
+        # The control: known by the patch instead, the deployment's stack would be another's.
+        self.assertFalse(stack.own(dict(loaded, _policy_path=P.origin(local, root))))
+        named = other_policy(self)[1]
+        self.assertEqual(stack.managed(P.load(root=root, environ={P.VARIABLE: named})), ("wsl",),
+                         "a file ORCHESTRA_SETTINGS names is a stack of its own")
+
+
 class Lifetime(unittest.TestCase):
     def test_no_part_starts_again_by_itself_when_docker_does(self):
         """The stack runs from its owner's start to its stop: Temporal's containers come back when they fail,
@@ -391,12 +412,14 @@ class Reading(unittest.TestCase):
         self.assertIn("not reachable", reading["error"])
 
 
-# A worker in the middle of a traced Claude stage, as far as the lifecycle can tell: its command line
-# reads as the worker's, it records its pid where the worker does, and its stage's settings — the
-# trace store's key in them — are named after it, as `run_role` makes them inside a worker.
+# A worker in the middle of a traced stage, as far as the lifecycle can tell: its command line reads
+# as the worker's, it records its pid where the worker does, and its stage's settings — the trace
+# store's key in them — are in a private folder named after it, as `run_role` makes them inside a
+# worker; Claude Code's, whose settings hold both keys.
 STAND_IN = textwrap.dedent("""\
     import os, sys, time
     sys.path.insert(0, %r)
+    from app.agents.adapters import claude_code
     from app.application import stack
     from app.foundation import policy as P
     from app.observability import telemetry
@@ -404,7 +427,8 @@ STAND_IN = textwrap.dedent("""\
     with open(stack.pid_file(policy, target), "w") as fh:
         fh.write(str(os.getpid()))
     span = telemetry._Span(traceparent="00-%%032x-%%016x-01" %% (1, 2))
-    print(os.getpid(), telemetry.harness_settings(policy["roles"]["engineer"], span), flush=True)
+    context = telemetry.trace_context(object(), span, {"run_id": "r1"}, "plan", "engineer")
+    print(os.getpid(), claude_code.trace_settings(context, telemetry.Private()), flush=True)
     try:
         time.sleep(600)
     except KeyboardInterrupt:
@@ -419,7 +443,7 @@ class RealWorker(unittest.TestCase):
         lock_of_its_own(self)
 
     def stand_in(self, policy_path, target):
-        env = dict(os.environ, ORCH_POLICY=policy_path, LANGFUSE_PUBLIC_KEY="pk-lf-test",
+        env = dict(os.environ, ORCHESTRA_SETTINGS=policy_path, LANGFUSE_PUBLIC_KEY="pk-lf-test",
                    LANGFUSE_SECRET_KEY="sk-lf-test")
         # Where the scripts' sweep looks: the worker's temporary folder, pinned to /tmp on WSL.
         if not WINDOWS:
@@ -433,7 +457,7 @@ class RealWorker(unittest.TestCase):
         worker.stdout.close()
         self.assertTrue(settings and os.path.isfile(settings), "the stand-in made its stage's settings: %r" % settings)
         self.addCleanup(shutil.rmtree, os.path.dirname(settings), True)
-        self.assertTrue(os.path.basename(os.path.dirname(settings)).startswith("orch-claude-settings-%s-" % pid),
+        self.assertTrue(os.path.basename(os.path.dirname(settings)).startswith("orchestra-trace-%s-" % pid),
                         "named after the worker that made them")
         return worker, int(pid), settings
 
@@ -490,7 +514,7 @@ class RealWorker(unittest.TestCase):
         """A second worker of one policy never takes the first one's place: it stops at the terminal port
         the first holds, before it writes a record of its own, so the first one's stays as it was."""
         target = "windows" if WINDOWS else "wsl"
-        temp = tempfile.mkdtemp(prefix="orch-second-")
+        temp = tempfile.mkdtemp(prefix="orchestra-second-")
         self.addCleanup(shutil.rmtree, temp, True)
         with socket.socket() as first:
             first.bind(("127.0.0.1", 0))
@@ -501,7 +525,7 @@ class RealWorker(unittest.TestCase):
                 fh.write("4242")
             # Its own temporary folder, for the sweep it makes as it starts; no Temporal, were it to get there.
             done = subprocess.run([sys.executable, "-m", "app.interfaces.worker", target], cwd=PKG,
-                                  env=dict(os.environ, ORCH_POLICY=path, TMPDIR=temp, TMP=temp, TEMP=temp,
+                                  env=dict(os.environ, ORCHESTRA_SETTINGS=path, TMPDIR=temp, TMP=temp, TEMP=temp,
                                            TEMPORAL_ADDRESS="127.0.0.1:9"),
                                   capture_output=True, text=True, timeout=120)
         self.assertNotEqual(done.returncode, 0, done.stdout + done.stderr)
@@ -517,7 +541,7 @@ class RealWorker(unittest.TestCase):
         target = "windows" if WINDOWS else "wsl"
         # Where each host's sweep looks: the worker's temporary folder, pinned to /tmp on WSL.
         folder = os.path.join(tempfile.gettempdir() if WINDOWS else "/tmp",
-                              "orch-claude-settings-%d-reused" % os.getpid())
+                              "orchestra-trace-%d-reused" % os.getpid())
         os.makedirs(folder)
         self.addCleanup(shutil.rmtree, folder, True)
         with open(os.path.join(folder, "settings.json"), "w", encoding="utf-8") as fh:

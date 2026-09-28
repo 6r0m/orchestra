@@ -4,8 +4,8 @@ Kept: each row's name, type, version, level, whether it has a parent, the keys o
 input, output and metadata, and the values views filter on. Dropped: ids, paths, the
 label and the texts, which differ between any two runs.
 """
-FILTERED = ("phase", "stage", "role", "round", "verdict", "gate_reason", "error_type", "brain", "model",
-            "reasoning_effort")
+FILTERED = ("phase", "stage", "role", "round", "verdict", "gate_reason", "error_type", "kind", "agent", "model",
+            "effort")
 GOLDEN = "fixtures/trace_rows.json"
 
 

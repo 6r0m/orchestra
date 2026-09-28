@@ -71,8 +71,9 @@ class TraceParity(Scenario):
         saved = os.environ.get("LANGFUSE_RELEASE")
         os.environ["LANGFUSE_RELEASE"] = "0123456789ab"
         try:
-            self.assertEqual(telemetry.harness_env({"brain": "claude"}, telemetry._Span(traceparent="00-%032x-%016x-01" % (1, 2)),
-                                                   run.state, "plan", "engineer")["LANGFUSE_RELEASE"], "0123456789ab",
+            context = telemetry.trace_context(object(), telemetry._Span(traceparent="00-%032x-%016x-01" % (1, 2)),
+                                              run.state, "plan", "engineer")
+            self.assertEqual(context["release"], "0123456789ab",
                              "release stays the orchestration code's revision, whatever the repository")
         finally:
             if saved is None:

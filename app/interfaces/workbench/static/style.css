@@ -69,9 +69,10 @@ button.copy { min-height: 24px; padding: 1px 8px; font-size: 12px; font-weight: 
 .field { display: grid; gap: 6px; min-width: 0; }
 fieldset.field { border: 0; margin: 0; padding: 0; }
 .field > label, legend { font-weight: 600; padding: 0; }
-input[type="text"], select, textarea { width: 100%; background: var(--surface); color: var(--ink);
+input[type="text"], input[type="number"], select, textarea { width: 100%; background: var(--surface); color: var(--ink);
   border: 1px solid var(--control); border-radius: 6px; padding: 7px 9px; font: inherit; }
 textarea { resize: vertical; min-height: 64px; }
+input:disabled, select:disabled, textarea:disabled { opacity: 0.6; cursor: default; }
 select { background-color: var(--surface); color: var(--ink); }
 ::placeholder { color: #7d8796; }
 .choices { display: flex; flex-wrap: wrap; gap: 6px 18px; }
@@ -270,14 +271,60 @@ summary:hover { color: var(--ink); }
 .log > summary { cursor: pointer; color: var(--quiet); }
 .log pre { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; color: var(--quiet); }
 
-/* Worktrees. */
+/* Worktrees, and the Settings view's agent profiles. */
 .table-wrap { overflow-x: auto; }
-.worktrees { border-collapse: collapse; width: 100%; font-size: 13px; }
-.worktrees th { text-align: left; color: var(--quiet); font-weight: 600; padding: 6px 12px 6px 0;
+.worktrees, .profiles { border-collapse: collapse; width: 100%; font-size: 13px; }
+.worktrees th, .profiles th { text-align: left; color: var(--quiet); font-weight: 600; padding: 6px 12px 6px 0;
   border-bottom: 1px solid var(--rule); }
-.worktrees td { padding: 8px 12px 8px 0; border-bottom: 1px solid var(--rule); vertical-align: top;
+.worktrees td, .profiles td { padding: 8px 12px 8px 0; border-bottom: 1px solid var(--rule); vertical-align: top;
   overflow-wrap: anywhere; }
-.worktrees .gloss { display: block; color: var(--quiet); font-size: 12px; }
+.worktrees .gloss, .profiles .gloss { display: block; color: var(--quiet); font-size: 12px; }
+
+/* Settings: each role in its colour, as its terminal and its cues are; what is yours, and what you are
+   changing, in yours. Nothing is raised: the sections sit apart by space and rules. */
+.settings { max-width: 960px; }
+.settings-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; }
+.settings-part { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.cast { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 20px 32px; }
+.cast-role { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-content: start;
+  padding: 2px 0 4px 16px; border-left: 3px solid var(--rule); }
+.cast-role[data-role="engineer"] { border-left-color: var(--engineer); }
+.cast-role[data-role="architect"] { border-left-color: var(--architect); }
+.cast-role h3 { font-size: 15px; }
+.cast-role h4 { font-size: 13px; color: var(--quiet); font-weight: 600; margin: 0; }
+.skills { display: grid; gap: 8px; }
+.skills .field { grid-template-columns: 5.5rem minmax(0, 1fr); column-gap: 12px; align-items: center; row-gap: 4px; }
+.skills .field > :not(.field-head) { grid-column: 2; }
+.skills .hint:empty { display: none; }
+.field-head { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.marks { display: inline-flex; gap: 6px; align-items: baseline; }
+.yours { color: var(--you); font-size: 12px; font-weight: 600; }
+.marks button.quiet { min-height: 24px; padding: 0 4px; font-size: 12px; }
+[data-staged] { border-color: var(--you) !important; }
+.persona > summary { cursor: pointer; }
+.persona > summary > span + span { margin-left: 8px; }
+.persona > summary .label { font-weight: 600; }
+.persona textarea { margin-top: 8px; font-family: var(--mono); font-size: 12.5px; line-height: 1.5; }
+.persona .actions { margin-top: 6px; }
+.bytes { color: var(--quiet); font-size: 12px; font-variant-numeric: tabular-nums; }
+.bytes.over { color: var(--bad); font-weight: 600; }
+.profiles { min-width: 38rem; }
+.profiles code, .profiles button { white-space: nowrap; }
+.profiles input[type="text"] { min-width: 12ch; }
+.profiles tr.removed td { color: var(--quiet); }
+.add-agent { display: grid; grid-template-columns: minmax(0, 14rem) minmax(0, 16rem) auto; gap: 6px 12px;
+  align-items: end; justify-content: start; }
+.add-agent .hint, .add-agent .alert { grid-column: 1 / -1; }
+.unusable { margin: 0; padding-left: 18px; color: var(--quiet); font-size: 13px; }
+.unusable:empty { display: none; }
+.rounds .choices { gap: 12px 24px; }
+.rounds .field { grid-template-columns: auto 5rem; align-items: center; column-gap: 10px; }
+.rounds .field .alert { grid-column: 1 / -1; }
+/* The one way the view's changes are written, kept in reach at the foot of the window. */
+.apply-bar { position: sticky; bottom: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px 16px;
+  align-items: center; padding: 12px 0; background: var(--ground); border-top: 1px solid var(--rule); }
+.apply-bar #settings-pending { color: var(--quiet); margin-right: auto; }
+.apply-bar .result, .apply-bar .alert { flex-basis: 100%; }
 
 /* The repository picker: a menu of owners, each list as wide as its names. An owner's list opens beside its
    row — to the right, else to the left — and under the row where neither side has room: the browser tries
@@ -326,6 +373,7 @@ summary:hover { color: var(--ink); }
   .brand span { display: none; }
   .form.inline { grid-template-columns: minmax(0, 1fr); }
   .part { grid-template-columns: 1fr; }
+  .add-agent { grid-template-columns: minmax(0, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }

@@ -1,7 +1,9 @@
 """Does a repository recorded by `trust.py` still raise no dialog in a worktree of it?
 
-    python tools/trust_probe.py claude "$(command -v claude)" --model haiku
-    python tools/trust_probe.py codex  "$(command -v codex)" --sandbox read-only --ask-for-approval never
+    python tools/trust_probe.py claude-code "$(command -v claude)" --model haiku
+    python tools/trust_probe.py codex       "$(command -v codex)" --sandbox read-only --ask-for-approval never
+
+The first argument is the kind whose record is written, the rest the command that runs its CLI.
 
 Run it on a host after either CLI is upgraded: the vendors own that dialog and could change which
 path it is keyed by, and the cost of not noticing is a turn that waits at a dialog nobody sees.
@@ -16,8 +18,8 @@ import os, re, shutil, subprocess, sys, tempfile, time
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir)))
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ORCH = os.path.abspath(os.path.join(HERE, os.pardir))
-sys.path.insert(0, ORCH)
+CHECKOUT = os.path.abspath(os.path.join(HERE, os.pardir))
+sys.path.insert(0, CHECKOUT)
 from app.agents import launch  # noqa: E402
 from app.agents import trust  # noqa: E402
 
@@ -32,8 +34,8 @@ def git(path, *args):
     subprocess.run(["git", "-C", path] + list(args), check=True, capture_output=True)
 
 
-def main(brain, argv):
-    scratch = os.path.join(os.path.dirname(ORCH), os.pardir, "tmp", "trust-probe")
+def main(kind, argv):
+    scratch = os.path.join(os.path.dirname(CHECKOUT), os.pardir, "tmp", "trust-probe")
     os.makedirs(scratch, exist_ok=True)
     root = tempfile.mkdtemp(prefix="trustprobe-", dir=scratch)
     repo, tree = os.path.join(root, "repo"), os.path.join(root, "wt", "run1")
@@ -47,7 +49,7 @@ def main(brain, argv):
         git(repo, "commit", "-qm", "init")
         git(repo, "worktree", "add", "-q", "-b", "run1", tree)
 
-        print("recorded:", trust.ensure(repo, [brain]) or "nothing (already known)")
+        print("recorded:", trust.ensure(repo, [kind]) or "nothing (already known)")
         out = os.path.join(root, "out.txt")
         text = ""
         # Through the same containment a run uses: this probe starts a real agent, and must not
@@ -55,7 +57,7 @@ def main(brain, argv):
         contained = launch._Tree()
         with open(out, "wb") as sink:
             # An interactive CLI does not exit: watch what it draws, then end its whole tree.
-            agent = contained.start([sys.executable, os.path.join(ORCH, "app", "agents", "ptyhost.py"), "160", "48", "--"]
+            agent = contained.start([sys.executable, os.path.join(CHECKOUT, "app", "agents", "ptyhost.py"), "160", "48", "--"]
                                     + argv + ["--", PROMPT],
                                     tree, subprocess.DEVNULL, sink, subprocess.STDOUT, dict(os.environ))
             try:
@@ -77,7 +79,7 @@ def main(brain, argv):
                 contained.close()
         asked = [phrase for phrase in ASKED if phrase in text]
         print("%s in a worktree of a recorded repository: %s" %
-              (brain, "ASKED " + str(asked) if asked else "no dialog"))
+              (kind, "ASKED " + str(asked) if asked else "no dialog"))
         answered = ANSWER in text
         print("answered %s:" % ANSWER, answered)
         if not answered:
@@ -90,7 +92,7 @@ def main(brain, argv):
         subprocess.run(["git", "-C", repo, "worktree", "remove", "--force", tree], capture_output=True)
         shutil.rmtree(root, ignore_errors=True)
         print("probe directory removed:", not os.path.exists(root))
-        print("records removed:", trust.forget(repo, [brain]) or "none")
+        print("records removed:", trust.forget(repo, [kind]) or "none")
 
 
 if __name__ == "__main__":

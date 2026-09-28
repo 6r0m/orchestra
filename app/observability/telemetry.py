@@ -22,19 +22,20 @@ policy and what each score means, is `docs/architecture/trace-contract.md`.
 
 Under each stage span the agent's own harness attaches its turns and tool calls,
 through the vendor's own tracing plugin. This module takes the keys from
-`.env`, and no user-level Claude or Codex configuration holds a
-working one: a Claude role-run receives them through a private settings file
-that exists only while it runs, the Codex uploader through its process
-environment, and the command line we build carries only non-secret correlation
-ids.
+`.env`, and no user-level configuration of an agent holds a working one. It hands
+a traced step's context — its traceparent, the trace store and its keys — to the
+step's agent's kind as plain data (`trace_context`), and knows no vendor: the kind
+decides what its agent is given. Any file that holds a key lives in the turn's
+private folder, which this module makes and removes (`Private`), and whose
+leftovers from a dead worker it sweeps; an uploader a kind describes after its turn,
+this module runs, bounded (`run_upload`). The command line carries only non-secret
+correlation ids.
 """
 import os
 import re
 import sys
 
-from app.foundation import envpath
 from app.foundation import paths
-from app.foundation import policy as P
 from app.foundation import stages
 # The change a human reviews is the worktree's; the trace only records it.
 
@@ -209,7 +210,7 @@ def resolve():
     would make an outage cost the run time it must never cost.
 
     The run's environment and release are set in this process's environment,
-    where our client, the Codex uploader and each Claude role-run's command all
+    where our client, an uploader a kind runs and each role-run's command all
     take them from; a value already set there wins.
     """
     if not configured():
@@ -444,8 +445,8 @@ def begin(client, state, stage, role_name, role, log=None):
         # pointed at directly: the counters that name those files would sit
         # beside the round and read as a second, contradicting count.
         described = {"role": role_name, "stage": stage, "phase": state.get("phase"),
-                     "round": attempt, "logs": log, "brain": role.get("brain"),
-                     "model": role.get("model"), "reasoning_effort": role.get("reasoning_effort"),
+                     "round": attempt, "logs": log, "kind": role.get("kind"), "agent": role.get("agent"),
+                     "model": role.get("model"), "effort": role.get("effort"),
                      "run_id": state["run_id"], "worktree": state.get("worktree")}
         span.update(metadata={k: v for k, v in described.items() if v is not None})
         # Without input/output a span is filtered out of Langfuse's default
@@ -570,127 +571,78 @@ def _score_verdict(span, verdict):
                data_type="BOOLEAN", trace_id=trace_id, score_id="%s-%s" % (trace_id, name))
 
 
-def harness_env(role, span, state, stage, role_name):
-    """Non-secret correlation ids for the agent's own tracing plugin.
+def trace_context(client, span, state, stage, role_name):
+    """What a traced step hands its agent's kind, as plain data, or None when the run is not traced.
 
-    Claude accepts a W3C traceparent, so its turns nest directly under this
-    stage span. Codex documents no equivalent, and its variables here are
-    **inert today**: codex does not pass this environment to its hook
-    subprocess, so the tracing plugin never sees them (measured). They are kept
-    because they are the vendor's documented interface and cost nothing if that
-    changes; the architect's transcript actually arrives through
-    `upload_codex_session`, which the plugin's own sidecar keeps from
-    double-uploading should the hook ever start working.
+    The step's traceparent, so the agent's turns nest under it; the trace store and both of its keys, which
+    a kind may only put in a file of the turn's private folder; the run's environment and release; and the
+    seed, tags and metadata of a session a kind uploads itself.
     """
-    if span is None or span.traceparent is None:
+    if client is None:
         return None
     episode, attempt = state.get("episode", 1), state.get("round", 0) + 1
-    if role.get("brain") == "claude":
-        env = {"CC_LANGFUSE_TRACEPARENT": span.traceparent}
-        # The plugin builds its own client inside the role-run, so the run's
-        # environment and release reach its rows only through that process.
-        for name in ("LANGFUSE_TRACING_ENVIRONMENT", "LANGFUSE_RELEASE"):
-            if os.environ.get(name):
-                env[name] = os.environ[name]
-        return env
-    if role.get("brain") == "codex":
-        # Deliberately nothing. Enabling the vendor hook from here uploads every
-        # turn a second time - measured on run f4756084470c: one copy nested
-        # under this stage span from `upload_codex_session`, and one copy in its
-        # own trace under the codex thread id from the hook. Ingested
-        # observations are immutable, so a duplicate cannot be repaired
-        # afterwards; the only fix is to run one uploader. The explicit one wins
-        # because it is the only one that can carry this stage's parent context.
-        return None
-    return None
+    return {"traceparent": span.traceparent if span is not None else None,
+            "base_url": os.environ.get("LANGFUSE_HOST", DEFAULT_HOST),
+            "public_key": os.environ.get("LANGFUSE_PUBLIC_KEY"),
+            "secret_key": os.environ.get("LANGFUSE_SECRET_KEY"),
+            "environment": os.environ.get("LANGFUSE_TRACING_ENVIRONMENT"),
+            "release": os.environ.get("LANGFUSE_RELEASE"),
+            "seed": "%s-%s-e%d-r%d" % (state["run_id"], stage, episode, attempt),
+            "tags": tags(state),
+            # A vendor's session cannot be renamed, so it carries the work item inside it instead.
+            "metadata": {"work_item": state.get("label") or state["run_id"], "run_id": state["run_id"],
+                         "stage": stage, "role": role_name, "episode": episode, "round": attempt,
+                         "worktree": state.get("worktree")}}
 
 
-# Only role-runs the orchestrator launches may trace. The Claude plugin is
-# installed for the user but disabled there, and no user-level configuration
-# holds a working key: not the settings, and not the plugin's credential store,
-# whose secret outranks any a run supplies (measured). A traced role-run gets
-# both keys through its own settings file, passed with `--settings`, and that
-# file exists only while the role-run does.
-CLAUDE_PLUGIN = "langfuse-observability@langfuse-observability"
-SETTINGS_FILE = "claude-telemetry-settings.json"
-SETTINGS_DIR_PREFIX = "orch-claude-settings-"
+# The folder a traced turn's files live in, and before the rename the one a traced Claude turn's settings
+# lived in: a worker that died before the upgrade left its folders under that name, and they hold the trace
+# store's key, so the sweep removes them as well.
+TRACE_DIR_PREFIX = "orchestra-trace-"
+OLD_DIR_PREFIXES = ("orch-claude-settings-",)
 
 
-def harness_settings(role, span):
-    """Path of a private settings file that lets one Claude role-run trace, or None.
+class Private:
+    """A traced turn's private folder, for what its agent's kind writes there — a settings file with the
+    trace store's keys, say.
 
-    None unless this stage is actually traced and both keys are configured, so a
-    run with telemetry off never switches the plugin on. The file holds the
-    secret, so it is written into a new directory only this user can enter, on
-    the machine's temporary filesystem rather than the repository's drive, whose
-    mount ignores file modes. The caller removes both with `discard_settings`
-    when the role-run ends.
+    Made on first use, in the machine's temporary folder rather than on the repository's drive, whose mount
+    ignores file modes; only this user can enter it; named after this process, so a worker that starts later
+    can tell a folder whose worker died from one still in use (`discard_stale_settings`); and removed, with
+    everything in it, when the turn ends (`discard`).
     """
-    if role.get("brain") != "claude" or span is None or span.traceparent is None:
-        return None
-    public_key = os.environ.get("LANGFUSE_PUBLIC_KEY")
-    secret_key = os.environ.get("LANGFUSE_SECRET_KEY")
-    if not public_key or not secret_key:
-        return None
-    import json
-    import tempfile
-    settings = {
-        "enabledPlugins": {CLAUDE_PLUGIN: True},
-        "pluginConfigs": {CLAUDE_PLUGIN: {"options": {
-            "LANGFUSE_PUBLIC_KEY": public_key,
-            "LANGFUSE_SECRET_KEY": secret_key,
-            "LANGFUSE_BASE_URL": os.environ.get("LANGFUSE_HOST", DEFAULT_HOST)}}},
-    }
-    path = None
-    try:
-        # Named after this process, so a worker that starts later can tell the directory of a stage
-        # whose worker died from one still running (`discard_stale_settings`).
-        directory = tempfile.mkdtemp(prefix="%s%d-" % (SETTINGS_DIR_PREFIX, os.getpid()))
-        path = os.path.join(directory, SETTINGS_FILE)
-        with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600),
-                       "w", encoding="utf-8") as fh:
-            json.dump(settings, fh)
-    except OSError as exc:
-        _warn_once("claude settings", exc)
-        # A file cut short may already hold the secret, and no caller can delete
-        # a file this function never handed out.
-        discard_settings(path)
-        return None
-    return path
 
+    def __init__(self):
+        self.folder = None
 
-def discard_settings(path):
-    """Remove a role-run's settings file and its private directory. Never raises."""
-    if not path:
-        return
-    try:
-        os.remove(path)
-    except FileNotFoundError:
-        pass
-    except OSError as exc:
-        _warn_once("claude settings cleanup", exc)
-    directory = os.path.dirname(path)
-    # Only a directory `harness_settings` made: never one a caller owns.
-    if os.path.basename(directory).startswith(SETTINGS_DIR_PREFIX):
-        try:
-            os.rmdir(directory)
-        except FileNotFoundError:
-            pass
-        except OSError as exc:
-            _warn_once("claude settings cleanup", exc)
+    def path(self, name):
+        if self.folder is None:
+            import tempfile
+            self.folder = tempfile.mkdtemp(prefix="%s%d-" % (TRACE_DIR_PREFIX, os.getpid()))
+        return os.path.join(self.folder, name)
+
+    def discard(self):
+        """Remove the folder and everything in it. Never raises."""
+        if self.folder is None:
+            return
+        import shutil
+        folder, self.folder = self.folder, None
+        shutil.rmtree(folder, ignore_errors=True)
+        if os.path.exists(folder):
+            _warn_once("private folder cleanup", OSError("could not remove %s" % folder))
 
 
 def discard_stale_settings(gone=()):
-    """Remove the settings a role-run left when the process running it died first — a worker killed
-    mid-stage, as a restart may do — so the trace store's key does not outlive it. Returns the
-    directories removed and those still there — a file held open, a folder not writable — or the
-    temporary folder itself when it cannot be listed: whatever may still hold a key. Never raises.
+    """Remove the private folders a turn left when the process running it died first — a worker killed
+    mid-stage, as a restart may do — so the trace store's key does not outlive it. Returns the folders
+    removed and those still there — a file held open, a folder not writable — or the temporary folder itself
+    when it cannot be listed: whatever may still hold a key. Never raises.
 
-    Only a directory whose maker is gone: `harness_settings` names each after its process, and a
-    stage still running in another worker on this host keeps its own. A process in `gone` its caller
-    has proven gone — the stack, having stopped a worker — and is taken at its word: Windows can give
-    its pid to a new process within moments. Any other is asked about; a name that says no process,
-    or a process that cannot be asked about, is left as it is.
+    Only a folder whose maker is gone: each is named after its process, and a stage still running in another
+    worker on this host keeps its own. A process in `gone` its caller has proven gone — the stack, having
+    stopped a worker — is taken at its word: Windows can give its pid to a new process within moments. Any
+    other is asked about; a name that says no process, or a process that cannot be asked about, is left as
+    it is.
     """
     import shutil
     import tempfile
@@ -699,16 +651,17 @@ def discard_stale_settings(gone=()):
     try:
         names = os.listdir(root)
     except OSError as exc:
-        _warn_once("claude settings sweep", exc)
+        _warn_once("private folder sweep", exc)
         return removed, [root]
     for name in names:
-        owner = name[len(SETTINGS_DIR_PREFIX):].split("-", 1)[0] if name.startswith(SETTINGS_DIR_PREFIX) else ""
+        prefix = next((each for each in (TRACE_DIR_PREFIX,) + OLD_DIR_PREFIXES if name.startswith(each)), None)
+        owner = name[len(prefix):].split("-", 1)[0] if prefix else ""
         if not owner.isdigit() or (int(owner) not in gone and _alive(int(owner))):
             continue
         path = os.path.join(root, name)
         shutil.rmtree(path, ignore_errors=True)
         if os.path.exists(path):
-            _warn_once("claude settings sweep", OSError("could not remove %s" % path))
+            _warn_once("private folder sweep", OSError("could not remove %s" % path))
             left.append(path)
         else:
             removed.append(path)
@@ -746,188 +699,41 @@ def _alive(pid):
         return True
 
 
-# The vendor's own uploader, built with the changes this trace needs, kept under the
-# orchestration's own directory on each host: Codex restores its plugin cache whenever it
-# starts, which replaces any build placed there.
-CODEX_PLUGIN = os.path.join(envpath.environment_root(), "codex-observability-plugin", "dist", "index.mjs")
-CODEX_ROLLOUTS = "~/.codex/sessions/*/*/*/rollout-*-%s.jsonl"
-UPLOAD_TIMEOUT_SECONDS = 60
-
-
-# What the trace needs from the installed Codex plugin build: a name each change
-# adds to the bundle, and what goes wrong without it. The first is the documented
-# input. The second is the option the turn-lifecycle change introduces, so a
-# release that renames it warns once instead of quietly bringing empty turns back.
-CODEX_PLUGIN_NEEDS = (
-    ("LANGFUSE_CODEX_TRACEPARENT", "architect turns will not nest under their stage"),
-    ("finalizeTurnId", "empty duplicate turns will appear under later stages"),
-)
-
-
-def _missing_codex_capabilities(bundle):
-    """What the installed plugin build lacks, as the consequence of each gap."""
+def optional(what, answer):
+    """What `answer()` gives, or None: a failure said once and never raised — a trace's extra, never the
+    run's."""
     try:
-        with open(bundle, encoding="utf-8", errors="replace") as fh:
-            text = fh.read()
-    except OSError:
-        return [effect for _, effect in CODEX_PLUGIN_NEEDS]
-    return [effect for marker, effect in CODEX_PLUGIN_NEEDS if marker not in text]
-
-
-def codex_reasoning(role, session_id):
-    """The reasoning summaries of a codex role's most recent run, as readable text.
-
-    Langfuse's formatted view of a model call shows its commands and its answer
-    but not its reasoning field, so the architect's thinking was only reachable
-    by switching an individual call to raw JSON. The engineer's account already
-    sits on its stage; this puts the architect's beside its verdict.
-
-    One codex session spans every stage the architect judges, and each run of it
-    opens with a `task_started` record, so the summaries after the last one are
-    exactly the run that just finished.
-    """
-    if role.get("brain") != "codex" or not session_id:
-        return None
-    import glob
-    import json
-    paths = glob.glob(os.path.expanduser(CODEX_ROLLOUTS % session_id))
-    if not paths:
-        return None
-    current = []
-    try:
-        with open(paths[-1], encoding="utf-8") as fh:
-            for line in fh:
-                try:
-                    record = json.loads(line)
-                except ValueError:
-                    continue
-                payload = record.get("payload") or record
-                if payload.get("type") == "task_started":
-                    current = []
-                elif payload.get("type") == "reasoning":
-                    for item in payload.get("summary") or []:
-                        text = (item.get("text") if isinstance(item, dict) else str(item)) or ""
-                        if text.strip():
-                            current.append(text.strip())
-    except OSError as exc:
-        _warn_once("codex reasoning", exc)
-        return None
-    return "\n\n".join(current) or None
-
-
-def _last_codex_turn(path):
-    """The id of a rollout's most recent turn, as Codex's Stop hook reports it."""
-    import json
-    last = None
-    try:
-        with open(path, encoding="utf-8") as fh:
-            for line in fh:
-                try:
-                    record = json.loads(line)
-                except ValueError:
-                    continue
-                payload = (record.get("payload") if isinstance(record, dict) else None) or {}
-                if payload.get("type") == "task_started" and payload.get("turn_id"):
-                    last = payload["turn_id"]
-    except OSError as exc:
-        _warn_once("codex turn id", exc)
-    return last
-
-
-def upload_codex_session(client, role, session_id, state, stage, role_name, span=None):
-    """Hand a finished codex role-run's transcript to the vendor's own uploader.
-
-    Codex's Stop hook cannot do this for us, measured on 0.153.4 with the hook
-    trusted and running: the plugin needs `TRACE_TO_LANGFUSE` in its own
-    environment, and codex does not pass ours to hook subprocesses. Its config
-    file is no way round that either — the plugin resolves the project file
-    from its own working directory, which is not the worktree. The same
-    environment carries our seed and tags, so the hook path could not produce a
-    *correlated* trace even if it fired. Calling the documented entry point
-    ourselves is the only route, and it keeps tracing scoped to orchestration
-    runs instead of every codex session on the machine.
-
-    Best-effort like everything else here: a failure costs the architect's
-    transcript in the UI and nothing else, and marks the stage `span` WARNING, so
-    the trace itself says it is incomplete.
-    """
-    if client is None or role.get("brain") != "codex" or not session_id:
-        return
-    import glob
-    import json
-    import subprocess
-
-    traceparent = span.traceparent if span is not None else None
-    uploader = sorted(glob.glob(os.path.expanduser(CODEX_PLUGIN)))
-    missing = _missing_codex_capabilities(uploader[-1]) if uploader else []
-    if missing:
-        # A plugin upgrade can replace a build that has these with one that lacks
-        # them. The upload still works, so the run is unaffected, but the trace
-        # quietly degrades in exactly the ways this component removed. Say so.
-        _warn_once("codex plugin build",
-                   "plugin build at %s: %s (see tools/README.md, "
-                   "'The Codex plugin must support a parent trace')"
-                   % (uploader[-1], "; ".join(missing)))
-        warn(span, "telemetry_degraded", "codex plugin build: %s" % "; ".join(missing))
-    rollout = glob.glob(os.path.expanduser(CODEX_ROLLOUTS % session_id))
-    if not uploader or not rollout:
-        _warn_once("codex upload", "no uploader (%d) or rollout (%d) for %s"
-                   % (len(uploader), len(rollout), session_id))
-        warn(span, "telemetry_degraded", "the architect's turns were not uploaded: no uploader "
-             "(%d) or rollout (%d)" % (len(uploader), len(rollout)))
-        return
-
-    episode, attempt = state.get("episode", 1), state.get("round", 0) + 1
-    env = dict(os.environ)
-    env.update({
-        "TRACE_TO_LANGFUSE": "true",
-        # The plugin's own default host is Langfuse Cloud: name ours rather than
-        # rely on a user-level config file to.
-        "LANGFUSE_CODEX_BASE_URL": os.environ.get("LANGFUSE_HOST", DEFAULT_HOST),
-        # Attach this role-run's turns to the stage span that caused them. A
-        # plugin build without parent-context support ignores it and degrades
-        # to a correlated separate session.
-        **({"LANGFUSE_CODEX_TRACEPARENT": traceparent} if traceparent else {}),
-        "PLUGIN_ROOT": os.path.dirname(os.path.dirname(uploader[-1])),
-        "LANGFUSE_CODEX_TRACE_SEED":
-            "%s-%s-e%d-r%d" % (state["run_id"], stage, episode, attempt),
-        # Tags and metadata reach the plugin's rows only when it is not attached
-        # to a stage. The tags are the few every row carries; the run's own
-        # values belong in the metadata below.
-        "LANGFUSE_CODEX_TAGS": ",".join(tags(state)),
-        # We cannot rename the vendor's session, so carry the work item inside
-        # it instead: this is what makes an architect session identifiable
-        # without going back to the orchestration side to look it up.
-        "LANGFUSE_CODEX_METADATA": json.dumps({
-            "work_item": state.get("label") or state["run_id"],
-            "run_id": state["run_id"], "stage": stage, "role": role_name,
-            "episode": episode, "round": attempt,
-            "worktree": state.get("worktree")}),
-    })
-    payload = json.dumps({"session_id": session_id,
-                          "transcript_path": rollout[-1],
-                          "hook_event_name": "Stop",
-                          # Codex's own Stop hook names the turn that just ended, and
-                          # the plugin finalizes only that one. Without it, the empty
-                          # record a resumed session writes before its next turn
-                          # is exported as a turn of its own, under every later stage.
-                          "turn_id": _last_codex_turn(rollout[-1])})
-    try:
-        done = subprocess.run(["node", uploader[-1]], input=payload, env=env,
-                              text=True, capture_output=True,
-                              timeout=UPLOAD_TIMEOUT_SECONDS)
+        return answer()
     except Exception as exc:                       # noqa: BLE001 - by contract
-        _warn_once("codex upload", exc)
-        warn(span, "telemetry_degraded", "the architect's turns were not uploaded: %s" % exc)
+        _warn_once(what, exc)
+        return None
+
+
+def run_upload(described, span=None):
+    """Run the uploader a kind described for a finished turn, within its bounded timeout, and report what it
+    noted. Best effort like everything else here: a failure costs the trace its rows, marks the stage `span`
+    WARNING so the trace itself says it is incomplete, and never costs the run."""
+    if not described:
+        return
+    for note in described.get("notes") or ():
+        _warn_once(note["key"], note["say"])
+        warn(span, "telemetry_degraded", note["degraded"])
+    run = described.get("run")
+    if not run:
+        return
+    import subprocess
+    try:
+        done = subprocess.run(run["argv"], input=run["input"], env=dict(os.environ, **run["env"]), text=True,
+                              capture_output=True, timeout=run["timeout"])
+    except Exception as exc:                       # noqa: BLE001 - by contract
+        _warn_once("upload", exc)
+        warn(span, "telemetry_degraded", "%s: %s" % (run["failed"], exc))
         return
     if done.returncode != 0:
-        # Fail open, but never fail silent: losing the architect's transcript
-        # must cost a warning, or the UI is quietly incomplete and nothing says so.
-        _warn_once("codex upload", "rc=%d %s" % (done.returncode,
-                                                 (done.stderr or "").strip()[:200]))
-        warn(span, "telemetry_degraded", "the architect's turns were not uploaded: "
-             "the uploader exited rc=%d" % done.returncode)
-
+        # Fail open, but never fail silent: a transcript lost must cost a warning, or the view is quietly
+        # incomplete and nothing says so.
+        _warn_once("upload", "rc=%d %s" % (done.returncode, (done.stderr or "").strip()[:200]))
+        warn(span, "telemetry_degraded", "%s: the uploader exited rc=%d" % (run["failed"], done.returncode))
 
 DIFF_MAX_CHARS = 200000
 

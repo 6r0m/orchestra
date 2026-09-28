@@ -50,7 +50,7 @@ sys.path[:0] = [PKG]
 # The suite's own helpers, behind everything else so none of their names can stand in for another.
 sys.path.append(TESTS)
 
-from app.agents import terminal, trust  # noqa: E402
+from app.agents import adapters, terminal, trust  # noqa: E402
 from app.application import client as runs  # noqa: E402
 from app.application import stack  # noqa: E402
 from app.foundation import paths  # noqa: E402
@@ -181,7 +181,7 @@ def closed(view):
 
 class Demo:
     def __init__(self):
-        self.tmp = tempfile.mkdtemp(prefix="orch-demo-")
+        self.tmp = tempfile.mkdtemp(prefix="orchestra-demo-")
         self.repo = os.path.join(self.tmp, "demo-repository")
         self.bin = os.path.join(self.tmp, "bin")
         self.state = os.path.join(self.tmp, "state")
@@ -212,11 +212,9 @@ class Demo:
             with open(path, "w") as fh:
                 fh.write(body)
             os.chmod(path, 0o755)
-        # The deployment's own policy, with a host and a workflow queue of the demo's own: its queues are
+        # The deployment's own settings, with a host and a workflow queue of the demo's own: its queues are
         # polled by no worker but the demo's, and its ports are free now.
-        policy = json.load(open(P.POLICY_FILE, encoding="utf-8"))
-        for role in policy["roles"].values():
-            role["prompt"] = os.path.join(PKG, role["prompt"])
+        policy = json.load(open(P.SETTINGS_FILE, encoding="utf-8"))
         host = "demo%s" % os.urandom(3).hex()
         policy["heartbeat_seconds"], policy["timeout_seconds"] = 10, 900
         policy["workflow_queue"] = "orchestration:%s" % host
@@ -226,7 +224,7 @@ class Demo:
                              "windows": {"host": host, "worktree_root": "C:\\Worktrees",
                                          "terminal_port": port_for_another_process(used)}}
         policy["workbench_port"] = port_for_another_process(used)
-        path = os.path.join(self.tmp, "policy.json")
+        path = os.path.join(self.tmp, "settings.json")
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(policy, fh)
         self.policy_path, self.policy = path, P.load(path)
@@ -239,8 +237,8 @@ class Demo:
 
     def env(self):
         # The Workbench's environment is the one the worker it starts inherits: the fakes first on its PATH.
-        return dict(os.environ, PATH=self.bin + os.pathsep + os.environ["PATH"], ORCH_POLICY=self.policy_path,
-                    ORCH_REPOS=self.descriptors, DEMO_STATE=self.state, LANGFUSE_TRACING_ENVIRONMENT="fixture")
+        return dict(os.environ, PATH=self.bin + os.pathsep + os.environ["PATH"], ORCHESTRA_SETTINGS=self.policy_path,
+                    ORCHESTRA_REPOS=self.descriptors, DEMO_STATE=self.state, LANGFUSE_TRACING_ENVIRONMENT="fixture")
 
     def spawn(self, *argv):
         log = open(os.path.join(self.tmp, "%s.log" % len(self.processes)), "a")
@@ -339,11 +337,11 @@ class Demo:
         return len(subprocess.run(["pgrep", "-f", self.bin + os.sep], capture_output=True, text=True).stdout.split())
 
     def settings_of(self, pid):
-        """A traced Claude stage's settings in worker `pid` — the trace store's key in them — named as
-        `harness_settings` names them in the worker's temporary folder. The demo places one: this
+        """A traced stage's private folder in worker `pid` — the trace store's key in its settings — named
+        as `telemetry.Private` names it in the worker's temporary folder. The demo places one: this
         machine traces a stage only when Langfuse is configured, and the suite proves the real one."""
-        folder = tempfile.mkdtemp(prefix="%s%d-" % (telemetry.SETTINGS_DIR_PREFIX, pid), dir="/tmp")
-        with open(os.path.join(folder, telemetry.SETTINGS_FILE), "w") as fh:
+        folder = tempfile.mkdtemp(prefix="%s%d-" % (telemetry.TRACE_DIR_PREFIX, pid), dir="/tmp")
+        with open(os.path.join(folder, "settings.json"), "w") as fh:
             json.dump({"stands for": "a traced stage's settings, with the trace store's key"}, fh)
         return folder
 
@@ -465,7 +463,7 @@ class Demo:
         check(self.asked("Stopping the WSL worker ends any agent at work on it"),
               "and its question said what the stop interrupts")
         check(not alive(pid), "the worker is gone")
-        check(not os.path.exists(settings) and not glob.glob("/tmp/%s%d-*" % (telemetry.SETTINGS_DIR_PREFIX, pid)),
+        check(not os.path.exists(settings) and not glob.glob("/tmp/%s%d-*" % (telemetry.TRACE_DIR_PREFIX, pid)),
               "and its stages' settings, the trace store's key in them, went with its stop, not at its next start")
         check(wait(lambda: self.agents() == 0, 30, "its agent ending"), "its engineer's agent ended with it")
         self.hold("hold-turn", False)
@@ -575,7 +573,7 @@ class Demo:
                     process.wait()
         for run_id in self.runs:
             shutil.rmtree(os.path.join(paths.RUNTIME_ROOT, run_id), ignore_errors=True)
-        trust.forget(self.repo, ["claude", "codex"])
+        trust.forget(self.repo, [entry["kind"] for entry in adapters.available()])
         shutil.rmtree(self.tmp, ignore_errors=True)
         if left:
             print("\n  LEFT BEHIND: %s" % "; ".join(left), flush=True)

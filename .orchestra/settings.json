@@ -1,16 +1,22 @@
 {
+  "agents": {
+    "claude": {
+      "kind": "claude-code"
+    },
+    "codex": {
+      "kind": "codex",
+      "model": "gpt-5.6-sol",
+      "effort": "high"
+    }
+  },
   "roles": {
     "engineer": {
-      "brain": "claude",
-      "workspace_access": "write",
-      "prompt": "roles/engineer.md"
+      "agent": "claude",
+      "persona_file": "roles/engineer.md"
     },
     "architect": {
-      "brain": "codex",
-      "workspace_access": "read",
-      "prompt": "roles/architect.md",
-      "model": "gpt-5.6-sol",
-      "reasoning_effort": "high"
+      "agent": "codex",
+      "persona_file": "roles/architect.md"
     }
   },
   "max_rounds": {

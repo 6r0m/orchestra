@@ -1,7 +1,7 @@
 """One Temporal time-skipping test server per test process, and workers over the fake seams.
 
 The server and every worker live on one event loop in a background thread, so the
-synchronous tests drive them through `run`. Setting ORCH_WORKFLOW_UNDER_TEST=empty
+synchronous tests drive them through `run`. Setting ORCHESTRA_WORKFLOW_UNDER_TEST=empty
 registers a workflow with no logic instead of the real one: the scenarios' red control.
 """
 import asyncio
@@ -29,14 +29,16 @@ from temporalio.worker import Worker  # noqa: E402
 
 from app.application import activities as A  # noqa: E402
 from app.interfaces import cli  # noqa: E402
+from app.application import settings as S  # noqa: E402
 from app.foundation import policy as policy_mod  # noqa: E402
 from app.orchestration import workflow as WF  # noqa: E402
 
-# As a host that binds its own methodology to each stage does; the shipped policy binds none, and
+# As a host that binds its own methodology to each stage does; the shipped settings bind none, and
 # `test_workflow` proves both — that a bound skill leads the prompt, and that none appears without one.
-POLICY = dict(policy_mod.load(),
-              stage_skills={"plan": "/investigate-change", "assess": "/architect",
-                            "build": "/implement-approved-change", "verify": "/architect"})
+SETTINGS = dict(S.load(), stage_skills={"plan": "investigate-change", "assess": "architect",
+                                        "build": "implement-approved-change", "verify": "architect"})
+# The policy a run started on those settings is handed, as `client.start` makes it.
+POLICY = S.run_policy(SETTINGS)
 WSL_QUEUE = policy_mod.queue(POLICY, "wsl")
 WORKFLOW_QUEUE = policy_mod.workflow_queue(POLICY)
 WINDOWS_QUEUE = policy_mod.queue(POLICY, "windows")
@@ -83,7 +85,7 @@ def client():
 def workflows():
     import control_workflows
     run_class = WF.FeatureRun
-    if os.environ.get("ORCH_WORKFLOW_UNDER_TEST") == "empty":
+    if os.environ.get("ORCHESTRA_WORKFLOW_UNDER_TEST") == "empty":
         import empty_workflow
         run_class = empty_workflow.EmptyRun
     return [run_class, WF.WorktreeView, WF.ReviewDiff, WF.RemoveWorktree] + control_workflows.ALL
@@ -125,9 +127,9 @@ def own_host(test, queue, script, git=None, telemetry=None):
     """A host of the test's own on `queue`, whose worker the test can take away: its activities, over a
     fake agent playing `script`, and the function that stops its worker — which the test's cleanup calls
     too, and which does nothing a second time."""
-    from fakes import FakeAgent, FakeRepos, FakeWorktrees
+    from fakes import FakeAgent, FakeRepos, FakeWorktrees, every_skill, installed
     host = A.Activities(runner=FakeAgent(script), git=git or FakeWorktrees(), repositories=FakeRepos(),
-                        telemetry=telemetry)
+                        telemetry=telemetry, which=installed, holds_skill=every_skill)
     # Outside the loop: the first call starts the test server, and waits on that loop to do it.
     connected = client()
 
@@ -146,13 +148,14 @@ def own_host(test, queue, script, git=None, telemetry=None):
     return host, stop
 
 
-def configure(queue, script, git=None, repositories=None, telemetry=None):
+def configure(queue, script, git=None, repositories=None, telemetry=None, which=None, holds_skill=None):
     """Point one host's seams at fresh fakes; returns the host and its agent."""
-    from fakes import FakeAgent, FakeRepos, FakeWorktrees
+    from fakes import FakeAgent, FakeRepos, FakeWorktrees, every_skill, installed
     activities = hosts()[queue]
     agent = FakeAgent(script)
     activities.runner, activities.git = agent, git or FakeWorktrees()
     activities.repositories = repositories or FakeRepos()
+    activities.which, activities.holds_skill = which or installed, holds_skill or every_skill
     activities._telemetry, activities._client, activities._resolved = telemetry, None, False
     return activities, agent
 
@@ -215,8 +218,9 @@ class Run:
         shutil.rmtree(A.run_dir(self.run_id), ignore_errors=True)
 
 
-def host(script, git=None, repositories=None, telemetry=None, queue=WSL_QUEUE):
+def host(script, git=None, repositories=None, telemetry=None, queue=WSL_QUEUE, which=None, holds_skill=None):
     """The one configured host for a test: every other host refuses to run a role."""
     for other in hosts().values():
         other.runner = _unexpected
-    return configure(queue, script, git=git, repositories=repositories, telemetry=telemetry)
+    return configure(queue, script, git=git, repositories=repositories, telemetry=telemetry, which=which,
+                     holds_skill=holds_skill)

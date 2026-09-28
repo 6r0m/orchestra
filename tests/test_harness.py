@@ -41,7 +41,7 @@ LEFT_RUNNING = textwrap.dedent("""\
 
     started = threading.Event()
 
-    def turn(worktree, argv, rdir, name, prompt, timeout, env, *, brain):
+    def turn(worktree, argv, rdir, name, prompt, timeout, env, *, kind):
         started.set()
         while True:
             terminal._activity_tick(name)
@@ -98,6 +98,18 @@ STANDINS = {
                "        with open(os.path.join(os.path.dirname(__file__), __name__ + '.pid'), 'w') as fh:\n"
                "            fh.write('%d %d' % (os.getpid(), child.pid))\n"
                "        time.sleep(3600)\n",
+    # It, and a sleeper whose parent has already gone: a process of its tree that no walk from it finds.
+    "orphaning": "import os, subprocess, sys, time, unittest\n\n"
+                 "SPAWN = ('import subprocess, sys; print(subprocess.Popen([sys.executable, \"-c\", "
+                 "\"import time; time.sleep(3600)\"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, "
+                 "stderr=subprocess.DEVNULL).pid)')\n\n"
+                 "class Orphaning(unittest.TestCase):\n"
+                 "    def test_it(self):\n"
+                 "        orphan = int(subprocess.run([sys.executable, '-c', SPAWN], capture_output=True, "
+                 "text=True).stdout)\n"
+                 "        with open(os.path.join(os.path.dirname(__file__), __name__ + '.pid'), 'w') as fh:\n"
+                 "            fh.write('%d %d' % (os.getpid(), orphan))\n"
+                 "        time.sleep(3600)\n",
     "twoclasses": "import unittest\n\nclass First(unittest.TestCase):\n    def test_it(self):\n        pass\n\n\n"
                   "class Second(unittest.TestCase):\n    def test_it(self):\n        pass\n",
     # One test fewer in the class's own process — the one its run names — than discovery found.
@@ -125,7 +137,7 @@ class Parallel(unittest.TestCase):
     """Each class in a process of its own; the run fails on anything short of every class passing whole."""
 
     def standins(self, *kinds):
-        folder = tempfile.mkdtemp(prefix="orch-runner-")
+        folder = tempfile.mkdtemp(prefix="orchestra-runner-")
         self.addCleanup(shutil.rmtree, folder, True)
         names = {kind: "test_%s_%s" % (kind, os.urandom(3).hex()) for kind in kinds}
         for kind, name in names.items():
@@ -150,11 +162,11 @@ class Parallel(unittest.TestCase):
                     found += [int(pid) for pid in fh.read().split()]
         return found
 
-    def still_running(self, folder, modules):
-        """The pids the hanging stand-ins wrote that still run, a moment after their run ended them."""
+    def still_running(self, folder, modules, grace=5):
+        """The pids the hanging stand-ins wrote that still run, `grace` seconds after their run ended them."""
         pids = self.pids(folder, modules)
         self.assertEqual(len(pids), 2 * len(modules), "each hanging class got going: %s" % pids)
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + grace
         while any(alive(pid) for pid in pids) and time.monotonic() < deadline:
             time.sleep(0.1)
         return [pid for pid in pids if alive(pid)]
@@ -174,8 +186,8 @@ class Parallel(unittest.TestCase):
                 signal.raise_signal(signals[0])
         ending = runner.end_tree
 
-        def end_tree_and_signal_again(child):
-            ending(child)
+        def end_tree_and_signal_again(*args):
+            ending(*args)
             for number in signals[1:]:
                 signal.raise_signal(number)
         for name, stand_in in (("time", types.SimpleNamespace(monotonic=time.monotonic, sleep=pause)),
@@ -226,7 +238,7 @@ class Parallel(unittest.TestCase):
         self.assertIn("ran 1 of its 2 tests", said)
 
     def test_a_run_that_finds_or_runs_no_tests_fails(self):
-        folder = tempfile.mkdtemp(prefix="orch-runner-")
+        folder = tempfile.mkdtemp(prefix="orchestra-runner-")
         self.addCleanup(shutil.rmtree, folder, True)
         code, said = self.run_parallel(folder, [])
         self.assertEqual(code, 5, said)
@@ -243,6 +255,15 @@ class Parallel(unittest.TestCase):
         self.assertEqual(code, 130, said)
         self.assertIn("interrupted: ended the 2 classes still running", said)
         self.assertEqual(self.still_running(folder, hanging), [], "no class left running, detached")
+
+    def test_a_class_is_ended_with_every_process_of_its_tree_one_whose_parent_is_gone_too(self):
+        """An orphan is its class's all the same, and ends with it. On Windows a job holds the whole tree,
+        and its end is proved before the run goes on, so nothing is left for a grace to wait out."""
+        folder, name = self.standins("orphaning")
+        code, said = self.interrupted_when_hanging(folder, [name["orphaning"]], [signal.SIGINT])
+        self.assertEqual(code, 130, said)
+        self.assertEqual(self.still_running(folder, [name["orphaning"]], grace=0 if os.name == "nt" else 5),
+                         [], "the class and its orphan both ended")
 
     @unittest.skipIf(os.name == "nt", "a termination and a hang-up are POSIX signals")
     def test_a_terminated_run_ends_every_class_as_an_interrupted_one_does(self):
@@ -268,7 +289,7 @@ class Parallel(unittest.TestCase):
 
     def test_a_named_module_that_does_not_load_says_its_own_error(self):
         """unittest names a failed named load after its last part alone: the run keeps the whole name."""
-        folder = tempfile.mkdtemp(prefix="orch-runner-")
+        folder = tempfile.mkdtemp(prefix="orchestra-runner-")
         self.addCleanup(shutil.rmtree, folder, True)
         package = "pkg_%s" % os.urandom(3).hex()
         os.makedirs(os.path.join(folder, package))
@@ -292,7 +313,7 @@ class Parallel(unittest.TestCase):
         them, which must import nothing of ours: only a folder of stand-ins goes on PYTHONPATH."""
         self.assertEqual(runner.child_env(runner.PKG, 10).get("PYTHONPATH"), os.environ.get("PYTHONPATH"),
                          "nothing of the checkout added")
-        folder = tempfile.mkdtemp(prefix="orch-runner-")
+        folder = tempfile.mkdtemp(prefix="orchestra-runner-")
         self.addCleanup(shutil.rmtree, folder, True)
         self.assertEqual(runner.child_env(folder, 10)["PYTHONPATH"].split(os.pathsep)[0], folder)
 

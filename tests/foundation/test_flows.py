@@ -105,7 +105,7 @@ class Rules(unittest.TestCase):
 
 class Files(unittest.TestCase):
     def setUp(self):
-        root = tempfile.mkdtemp(prefix="orch-flows-")
+        root = tempfile.mkdtemp(prefix="orchestra-flows-")
         self.addCleanup(shutil.rmtree, root, True)
         self.addCleanup(setattr, flows, "FLOWS_DIR", flows.FLOWS_DIR)
         flows.FLOWS_DIR = os.path.join(root, "flows")

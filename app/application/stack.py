@@ -1,11 +1,11 @@
 """The Orchestra stack: one reading of it, and one owner that starts, stops and restarts it.
 
-`make up|down|check`, the command line and the Workbench all come here. A stack is what one policy
-runs: Temporal, one service on this machine, and a worker per target host, the WSL one also running
-the policy's workflows. The checkout's own policy's stack manages all three. Another policy's
-(`ORCH_POLICY`: the demo's, the acceptance's) is a stack of its own on the same Temporal and manages
-only its WSL worker: Temporal is the deployment's, and the Windows host runs only its own copy of a
-policy. The reading shows every part, managed or not.
+`make up|down|check`, the command line and the Workbench all come here. A stack is what one settings
+file runs: Temporal, one service on this machine, and a worker per target host, the WSL one also running
+the settings' workflows. The checkout's own settings' stack manages all three. Another file's
+(`ORCHESTRA_SETTINGS`: the demo's, the acceptance's) is a stack of its own on the same Temporal and
+manages only its WSL worker: Temporal is the deployment's, and the Windows host runs only the checkout's
+own settings. The reading shows every part, managed or not.
 
 The process mechanics are `workers.sh` and, for the Windows host, `workers.ps1`, one component at a
 time; this orders them, proves each outcome and says what happened. It runs on WSL, where the
@@ -52,9 +52,9 @@ class Busy(runs.Refusal):
 
 
 def own(policy):
-    """Whether `policy` is the checkout's own, the deployment's: its stack also manages Temporal and the
-    Windows worker."""
-    return policy.get("_policy_path") == P.origin(P.POLICY_FILE)
+    """Whether `policy` is the checkout's own settings, the deployment's: its stack also manages Temporal
+    and the Windows worker. Settings are known by the file they came from."""
+    return policy.get("_policy_path") == P.origin(P.SETTINGS_FILE)
 
 
 def managed(policy):
@@ -91,10 +91,10 @@ def mechanics(policy, component, action, *more):
     argv = (["bash", SCRIPT, component, action] + ([] if component == "temporal" else [worker_name(policy, component)])
             + [str(each) for each in more])
     env = dict(os.environ)
-    env.pop("ORCH_POLICY", None)
+    env.pop(P.VARIABLE, None)
     if not own(policy):
         origin = policy["_policy_path"]
-        env["ORCH_POLICY"] = origin if os.path.isabs(origin) else os.path.join(paths.REPO, *origin.split("/"))
+        env[P.VARIABLE] = origin if os.path.isabs(origin) else os.path.join(paths.REPO, *origin.split("/"))
     try:
         done = subprocess.run(argv, env=env, capture_output=True, text=True, stdin=subprocess.DEVNULL,
                               timeout=SCRIPT_SECONDS[action])

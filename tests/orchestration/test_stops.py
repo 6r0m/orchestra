@@ -144,7 +144,7 @@ class SingleAttempt(Scenario):
         self.addCleanup(self.release.set)
 
     def hanging(self, launches):
-        def runner(worktree, argv, rdir, name, prompt, timeout, env, *, brain):
+        def runner(worktree, argv, rdir, name, prompt, timeout, env, *, kind):
             launches.append(name)
             # A worker that stopped heartbeating: the activity is lost to Temporal.
             self.release.wait(60)
@@ -351,7 +351,7 @@ class Lifecycle(Scenario):
 
     def working(self, started, ended):
         """An agent at work: its turn heartbeats and honours a cancellation, as a real turn does."""
-        def runner(worktree, argv, rdir, name, prompt, timeout, env, *, brain):
+        def runner(worktree, argv, rdir, name, prompt, timeout, env, *, kind):
             started.set()
             try:
                 while not self.release.is_set():

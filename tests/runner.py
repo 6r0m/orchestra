@@ -9,6 +9,10 @@ EXIT_SECONDS to exit, and past that every thread's stack is written to its outpu
 each class besides: one still running at CLASS_SECONDS has had its threads dumped a little before, and
 then its process tree is ended and it fails the run. A run that ran no tests, or fewer than it found,
 fails too; and however it ends, no class of it is left running.
+
+On Windows each class is born into a job of its own, the agents' launcher's (`app.agents.launch`), so
+every process it starts is in it, one whose parent has gone included; ending a class returns only once
+each of those has ended. A POSIX class is its own process group, which one signal ends.
 """
 import faulthandler
 import os
@@ -76,9 +80,6 @@ def parallel(names, start=None, top=PKG, at_once=AT_ONCE, limit=CLASS_SECONDS, d
     shutil.rmtree(out, ignore_errors=True)
     os.makedirs(out, exist_ok=True)
     env = child_env(top, limit - dump_before)
-    # A group of its own, so its whole tree can be ended; and no terminal's interrupt reaches it.
-    group = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
-             else {"start_new_session": True})
     pending, running, results, began = list(found), {}, [], time.monotonic()
     handlers = interrupted_by_signals()
     try:
@@ -86,17 +87,19 @@ def parallel(names, start=None, top=PKG, at_once=AT_ONCE, limit=CLASS_SECONDS, d
             while pending and len(running) < at_once:
                 name, count = pending.pop(0)
                 log = open(os.path.join(out, name + ".log"), "w+b")
-                child = subprocess.Popen([sys.executable, "-m", "tests", name], cwd=PKG, env=env,
-                                         stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, **group)
-                running[name] = (child, log, count, time.monotonic())
+                child, tree = start_class([sys.executable, "-m", "tests", name], env, log)
+                running[name] = (child, tree, log, count, time.monotonic())
             time.sleep(0.1)
-            for name, (child, log, count, started) in list(running.items()):
+            for name, (child, tree, log, count, started) in list(running.items()):
                 seconds = time.monotonic() - started
                 hung = child.poll() is None and seconds >= limit
                 if child.poll() is None and not hung:
                     continue
                 if hung:
-                    end(child)
+                    end(child, tree)
+                elif tree is not None:
+                    # Whatever the class left running goes with its job.
+                    tree.close()
                 del running[name]
                 results.append(finished(name, count, child.returncode, log, seconds, hung))
     except KeyboardInterrupt:
@@ -207,25 +210,49 @@ def summary(results, wall):
     return 1 if failed else 0
 
 
-def end(child):
-    """End a class's process tree, and wait for it — never for good."""
-    end_tree(child)
+def start_class(argv, env, log):
+    """A class's process, writing to `log`, and the job its whole tree is born into — None off Windows.
+
+    It is in a group of its own either way, so no terminal's interrupt reaches it: the run ends what it
+    runs, once."""
+    if os.name == "nt":
+        # Only here, so a class's own process and a POSIX run import nothing of the checkout's.
+        from app.agents import launch
+        tree = launch._WindowsTree()
+        return tree.start(argv, PKG, subprocess.DEVNULL, log, log, env,
+                          flags=subprocess.CREATE_NEW_PROCESS_GROUP), tree
+    return subprocess.Popen(argv, cwd=PKG, env=env, stdin=subprocess.DEVNULL, stdout=log,
+                            stderr=subprocess.STDOUT, start_new_session=True), None
+
+
+def end(child, tree=None):
+    """End a class's process tree, and wait for it — never for good, and saying so when it did not end."""
     try:
+        end_tree(child, tree)
         child.wait(END_SECONDS)
-    except subprocess.TimeoutExpired:
-        print("  %d did not end within %d s" % (child.pid, END_SECONDS), file=sys.stderr, flush=True)
+    except (OSError, TimeoutError, subprocess.TimeoutExpired) as exc:
+        print("  %d did not end within %d s: %s" % (child.pid, END_SECONDS, exc), file=sys.stderr, flush=True)
 
 
 def end_all(running):
-    for child, log, _, _ in running.values():
-        end(child)
+    for child, tree, log, _, _ in running.values():
+        end(child, tree)
         log.close()
     running.clear()
 
 
-def end_tree(child):
-    """End a process and every process it started."""
-    if os.name == "nt":
+def end_tree(child, tree=None):
+    """End a process and every process it started.
+
+    Through the job it was born into, when it has one: this returns once each process of the job has
+    ended, and raises when that is not proved within END_SECONDS. A process with no job is ended by
+    walking its tree on Windows, which misses any whose parent has gone, and by its group elsewhere."""
+    if tree is not None:
+        try:
+            tree.kill(grace=END_SECONDS)
+        finally:
+            tree.close()
+    elif os.name == "nt":
         subprocess.run(["taskkill", "/PID", str(child.pid), "/T", "/F"], capture_output=True)
     else:
         try:

@@ -43,7 +43,7 @@ from temporalio.exceptions import WorkflowAlreadyStartedError  # noqa: E402
 from app.application import client as runs  # noqa: E402
 from app.application import stack  # noqa: E402
 from app.foundation import policy as P  # noqa: E402
-from app.agents import terminal, trust  # noqa: E402
+from app.agents import adapters, terminal, trust  # noqa: E402
 from app.observability import telemetry  # noqa: E402
 from app.orchestration import workflow as WF  # noqa: E402
 import temporal_cleanup  # noqa: E402
@@ -126,7 +126,7 @@ def alive(pid):
 
 class Acceptance:
     def __init__(self):
-        self.tmp = tempfile.mkdtemp(prefix="orch-accept-")
+        self.tmp = tempfile.mkdtemp(prefix="orchestra-accept-")
         self.repo = os.path.join(self.tmp, "Repos_Accept", "sample")
         self.root = os.path.join(self.tmp, "worktrees")
         self.bin = os.path.join(self.tmp, "bin")
@@ -158,9 +158,7 @@ class Acceptance:
             with open(path, "w") as fh:
                 fh.write(FAKE)
             os.chmod(path, 0o755)
-        policy = json.load(open(os.path.join(PKG, "policy.json")))
-        for role in policy["roles"].values():
-            role["prompt"] = os.path.join(PKG, role["prompt"])
+        policy = json.load(open(os.path.join(PKG, ".orchestra", "settings.json")))
         policy["heartbeat_seconds"] = 10
         policy["timeout_seconds"] = 900
         # New each time: a run a killed acceptance left behind never meets the next one's worker.
@@ -172,7 +170,7 @@ class Acceptance:
                                      "terminal_port": port_for_another_process(used)},
                              "windows": {"host": host, "worktree_root": "C:\\Worktrees",
                                          "terminal_port": port_for_another_process(used)}}
-        self.policy = os.path.join(self.tmp, "policy.json")
+        self.policy = os.path.join(self.tmp, "settings.json")
         json.dump(policy, open(self.policy, "w"))
         self.descriptors = os.path.join(self.tmp, "repos.json")
         json.dump({"sample": {"path": self.repo, "target": "wsl",
@@ -181,8 +179,8 @@ class Acceptance:
         self.workflow_queue = P.workflow_queue(P.load(self.policy))
 
     def env(self):
-        return dict(os.environ, PATH=self.bin + os.pathsep + os.environ["PATH"], ORCH_POLICY=self.policy,
-                    ORCH_REPOS=self.descriptors, FAKE_HANG_FILE=self.hang,
+        return dict(os.environ, PATH=self.bin + os.pathsep + os.environ["PATH"], ORCHESTRA_SETTINGS=self.policy,
+                    ORCHESTRA_REPOS=self.descriptors, FAKE_HANG_FILE=self.hang,
                     LANGFUSE_TRACING_ENVIRONMENT="fixture")
 
     def start_worker(self):
@@ -267,9 +265,9 @@ class Acceptance:
         the worker dies first; that worker's stop must take them."""
         left = []
         for name in ("wsl", "windows"):
-            folder = tempfile.mkdtemp(prefix="%s%d-" % (telemetry.SETTINGS_DIR_PREFIX, parts[name]["pid"]),
+            folder = tempfile.mkdtemp(prefix="%s%d-" % (telemetry.TRACE_DIR_PREFIX, parts[name]["pid"]),
                                       dir=self.worker_temp(name))
-            with open(os.path.join(folder, telemetry.SETTINGS_FILE), "w") as fh:
+            with open(os.path.join(folder, "settings.json"), "w") as fh:
                 json.dump({"stands for": "a traced stage's settings, with the trace store's key"}, fh)
             left.append(folder)
         return left
@@ -348,7 +346,7 @@ class Acceptance:
             check(scope in fh.read(), "in a scope of its own, %s, which no restart of the service takes" % scope[1:])
         with open("/proc/%d/environ" % before, "rb") as fh:
             path = dict(entry.split(b"=", 1) for entry in fh.read().split(b"\0") if b"=" in entry)[b"PATH"].decode()
-        found = {brain: shutil.which(brain, path=path) for brain in ("claude", "codex")}
+        found = {module.EXECUTABLE: shutil.which(module.EXECUTABLE, path=path) for module in adapters.usable()}
         check(all(found.values()), "the real CLIs are on its PATH: %s" % found)
 
     async def run(self):
@@ -358,7 +356,7 @@ class Acceptance:
         check(await self.polled(client, self.queue), "the acceptance worker polls %s" % self.queue)
 
         step("a run stops for approval; a rejected answer writes no event on a real server")
-        code, out = self.cli("acceptance change", "--repo", "sample", "--policy", self.policy)
+        code, out = self.cli("acceptance change", "--repo", "sample", "--settings", self.policy)
         check(code == 2 and "reason:   approval" in out, "the run stopped for approval (rc %s)" % code)
         run1 = re.search(r"run-id: ([\w-]+)", out).group(1)
         self.runs.append(run1)
@@ -376,9 +374,9 @@ class Acceptance:
         check(await self.events(handle) == before, "and the history is exactly as long as before (%d events)" % before)
 
         step("the run recorded its repository for the CLIs it uses, so no turn waits at a trust dialog")
-        brains = [role["brain"] for role in P.load(self.policy)["roles"].values()]
-        check(trust.ensure(self.repo, brains) == [],
-              "prepare already recorded this repository for %s" % ", ".join(sorted(set(brains))))
+        kinds = [adapters.kind_name(adapters.for_role(role)) for role in P.load(self.policy)["roles"].values()]
+        check(trust.ensure(self.repo, kinds) == [],
+              "prepare already recorded this repository for %s" % ", ".join(sorted(set(kinds))))
 
         step("a plan changed after its PASS is assessed again before anything is built")
         worktree = os.path.join(self.root, "sample", run1)
@@ -444,7 +442,7 @@ class Acceptance:
         step("a worker killed while its role runs takes the role's whole tree with it")
         open(self.hang, "w").close()
         proc = self.follower = subprocess.Popen(
-            [sys.executable, "-m", "app.interfaces.cli", "second change", "--repo", "sample", "--policy", self.policy,
+            [sys.executable, "-m", "app.interfaces.cli", "second change", "--repo", "sample", "--settings", self.policy,
              "--auto-proceed"], cwd=PKG, env=self.env(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         deadline = time.monotonic() + 300
         while not os.path.exists(self.hang + ".grandchild") and time.monotonic() < deadline:
@@ -521,10 +519,10 @@ class Acceptance:
             os.remove(record)
         left += [name for name in os.listdir(RUNTIME) if name in self.runs or name == os.path.basename(record)]
         try:
-            trust.forget(self.repo, [role["brain"] for role in P.load(self.policy)["roles"].values()])
+            trust.forget(self.repo, [entry["kind"] for entry in adapters.available()])
         except Exception as exc:                   # noqa: BLE001 - reported below, never raised here
             print("  trust.forget failed: %r" % (exc,))
-        left += ["its %s trust record" % brain for brain in self.trust_left()]
+        left += ["its %s trust record" % kind for kind in self.trust_left()]
         shutil.rmtree(self.tmp, ignore_errors=True)
         return left
 
@@ -534,16 +532,17 @@ class Acceptance:
 
     def trust_left(self):
         """Which CLIs still hold a record of this throwaway repository — read, not taken on trust."""
+        from app.agents.adapters import claude_code, codex
         left = []
         try:
-            with open(trust.claude_path(), encoding="utf-8") as fh:
-                if trust.claude_key(self.repo) in (json.load(fh).get("projects") or {}):
-                    left.append("claude")
+            with open(claude_code.config_path(), encoding="utf-8") as fh:
+                if claude_code.trust_key(self.repo) in (json.load(fh).get("projects") or {}):
+                    left.append("claude-code")
         except (OSError, ValueError):
             pass
         try:
-            with open(trust.codex_path(), encoding="utf-8") as fh:
-                if trust.codex_key(self.repo) in fh.read():
+            with open(codex.config_path(), encoding="utf-8") as fh:
+                if codex.trust_key(self.repo) in fh.read():
                     left.append("codex")
         except OSError:
             pass

@@ -36,9 +36,9 @@ class FakeAgent:
         self.script = list(script)
         self.calls = []
 
-    def __call__(self, worktree, argv, run_dir, name, prompt, timeout_seconds, env, *, brain):
+    def __call__(self, worktree, argv, run_dir, name, prompt, timeout_seconds, env, *, kind):
         self.calls.append({"worktree": worktree, "argv": list(argv), "command": " ".join(argv),
-                           "name": name, "prompt": prompt, "env": env, "brain": brain})
+                           "name": name, "prompt": prompt, "env": env, "kind": kind})
         if not self.script:
             raise AssertionError("unexpected extra invocation: %s" % name)
         expect, rc, out = self.script.pop(0)
@@ -84,17 +84,29 @@ class FakeWorktrees:
 
 
 class FakeRepos:
-    """Stands in for `repos.resolve`: a fixed resolution, or a refusal."""
+    """Stands in for `repos.resolve`: a fixed resolution, or a refusal; each call recorded."""
 
     def __init__(self, refusal=None):
         self.refusal = refusal
+        self.calls = []
 
-    def resolve(self, selected, brains, worktree_root):
+    def resolve(self, selected, worktree_root):
+        self.calls.append((selected, worktree_root))
         if self.refusal:
             from app.workspace import repos
             raise repos.Refused(self.refusal)
         return {"repo_path": "/fake/repo", "base_branch": "develop", "worktree_root": "/fake/worktrees",
                 "todo_dir": "todo", "todo_done_dir": "todo/done", "todo_name": "%Y-%m-%d_%H%M-{slug}"}
+
+
+def installed(program):
+    """Stands in for `shutil.which` on a host that has every agent's program."""
+    return "/fake/bin/%s" % program
+
+
+def every_skill(folder):
+    """Stands in for `activities.holds_skill` on a host that holds every skill a run invokes."""
+    return True
 
 
 class Recorder:

@@ -8,8 +8,10 @@ import { reloadFlows } from "./start.js";
 import { refreshRuns, runsListed, runsRead, select } from "./rail.js";
 import { refreshRun, show, unsent } from "./run.js";
 import { openWorktrees } from "./worktrees.js";
+import { openSettings, settingsUnsent } from "./settings.js";
 
-const VIEWS = { empty: "view-empty", new: "view-new", worktrees: "view-worktrees", run: "run" };
+const VIEWS = { empty: "view-empty", new: "view-new", worktrees: "view-worktrees", settings: "view-settings",
+  run: "run" };
 
 // A fragment that is not well encoded names nothing, rather than stopping the page.
 function decoded(text) {
@@ -20,8 +22,8 @@ function decoded(text) {
   }
 }
 
-// `#run=<id>`, `#new`, `#worktrees` or `#worktrees=<repo>`: the fragment is the browser's, so a reload
-// keeps it, a link opens it in a new tab, and it never reaches the server.
+// `#run=<id>`, `#new`, `#worktrees`, `#worktrees=<repo>` or `#settings`: the fragment is the browser's, so a
+// reload keeps it, a link opens it in a new tab, and it never reaches the server.
 function route(event) {
   if ($("confirm").open) $("confirm").close();
   const hash = location.hash;
@@ -36,9 +38,12 @@ function route(event) {
   } else if ((match = hash.match(/^#worktrees(?:=(.+))?$/))) {
     view = "worktrees";
     openWorktrees(match[1] ? decoded(match[1]) : null);
+  } else if (hash === "#settings") {
+    view = "settings";
+    openSettings();
   }
   for (const [name, id] of Object.entries(VIEWS)) $(id).hidden = name !== view;
-  for (const [id, name] of [["nav-new", "new"], ["nav-worktrees", "worktrees"]]) {
+  for (const [id, name] of [["nav-new", "new"], ["nav-worktrees", "worktrees"], ["nav-settings", "settings"]]) {
     if (view === name) $(id).setAttribute("aria-current", "page");
     else $(id).removeAttribute("aria-current");
   }
@@ -72,9 +77,9 @@ $("skip").onclick = (event) => {
 };
 
 window.addEventListener("hashchange", route);
-// Leaving the page asks first while a task or a note is typed and not sent.
+// Leaving the page asks first while a task or a note is typed and not sent, or settings changed and not applied.
 window.addEventListener("beforeunload", (event) => {
-  if ($("start-task").value.trim() || unsent()) event.preventDefault();
+  if ($("start-task").value.trim() || unsent() || settingsUnsent()) event.preventDefault();
 });
 // After a write of the page's own, what it changed is read at once.
 document.addEventListener("workbench:wrote", () => {

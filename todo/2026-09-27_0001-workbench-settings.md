@@ -1,6 +1,6 @@
 # Pluggable agents under every role, set up in the Workbench
 
-**Status:** REVIEW REQUIRED
+**Status:** IN PROGRESS — the external review's PASS and the operator's GO (D13), 2026-09-28
 **Scope:**
 - `app/agents/adapters/`: one generic loader and contract, and a module per kind of agent;
 - the modules that hold agent mechanics today: `nodes.py`, `terminal.py`, `turn_hook.py`, `trust.py`,
@@ -116,6 +116,15 @@ D1–D12 below are this change's operator decisions. The architecture's own deci
     containment's units, its temporary folders and its tools' constants (A1, invariant 11).
   - Reason: stated — the proper name.
   - Date/source: operator, 2026-09-27.
+- **D13** Build this change now, and check it live once, at the end — "why I need check now? we need
+  fully prepare flow first with our settings and rest that will be prove that workbench will good, and
+  then only test live after all syntetic tests pass".
+  - Effect: the implementation starts at once. The live check that
+    [the Workbench UX todo](2026-09-25_2334-workbench-ux.md) and
+    [the flows todo](2026-09-25_1458-configurable-flows.md) still hold happens once, after every
+    synthetic gate of this change has passed, and covers the flows, the page and Settings together.
+  - Reason: stated.
+  - Date/source: operator, 2026-09-28, with the external review's PASS and GO.
 
 ### Operator gates
 
@@ -211,8 +220,9 @@ D1–D12 below are this change's operator decisions. The architecture's own deci
       invariant (invariant 10). 64 KiB crossed it for anything but plain ASCII letters;
     - today's personas are 1,895 and 1,597 bytes, and a persona carries only what its skill cannot
       know (the architecture's D19);
-    - a run's history grows by at most one such input per turn: at least 50 turns to Temporal's 10 MB
-      warning even in that worst case, where today's runs take a few.
+    - each turn adds one such input to the run's history. In that worst case about 52 of them alone
+      would total 10 MB, Temporal's history warning. The whole history also holds outputs and other
+      events, so it may reach the warning sooner. Today's runs take a few turns.
 - **A5 [ACTIVE]:** Skills:
   - settings name a skill and nothing else, by the Agent Skills specification's name rule, never an
     invocation (fact 49);
@@ -596,6 +606,15 @@ Any of these can follow as a change of its own:
     - The validator admits one value per role: the architect `read`, the engineer `write`
       (`app/foundation/policy.py:197-200`).
     - The value's one reader picks the read-only flags (`app/agents/nodes.py:56`).
+51. **Measured through the role's terminal, 2026-09-28, Windows** — one real turn each, through
+    `terminal.run_turn` in a throwaway repository, trust recorded and taken back:
+    - Codex 0.153.4, interactive, read-only, a prompt starting `$architect`: it named the skill and
+      quoted its first sentence verbatim (U1).
+    - Codex, a prompt starting `$no-such-skill-orchestra`: it answered `NO SKILL LOADED`, and the turn
+      completed as any other — the skill dropped without a word (U2).
+    - Claude Code 2.1.283, a prompt starting `/no-such-skill-orchestra`: it printed `Unknown command`,
+      called no model, fired no hook and sat at its prompt, so the turn would end only at its timeout,
+      an hour in the shipped settings (U2).
 
 **Inferences**
 
@@ -607,18 +626,10 @@ Any of these can follow as a change of its own:
 
 **Assumptions / unverified areas**
 
-- **U1:** whether Codex's interactive mode — the one a role's turn uses — loads a skill named at its
-  first prompt as `codex exec` does. Measured only through `codex exec` (fact 21).
-  - It is measured in task 1, before any adapter is built: one real Codex turn through the role's
-    terminal, within the plan's allowance (D6). The operator's live check confirms it.
-  - A negative answer changes only how the `codex` kind renders a skill.
-- **U2:** what each CLI does when a bound skill is not installed on the host running the stage.
-  - Measured in task 1 the same way: one turn per CLI, naming a skill no folder holds.
-  - If a CLI shows the missing skill in a way its adapter can read, that turn fails naming it, as a
-    lost session is read today.
-  - If a CLI goes on silently, a bound skill would be dropped without a word. So that kind's
-    preparation looks for the skill in the folders its vendor documents, and `prepare` refuses the run
-    before any work, naming the skill and where it looked.
+- **U1 [MEASURED — fact 51]:** interactive Codex loads a skill named at its first prompt.
+- **U2 [MEASURED — fact 51]:** neither CLI fails a turn that names a skill no folder holds, so
+  preparation looks for each bound skill in the folders its kind's vendor documents, and `prepare`
+  refuses the run before any work, naming the skill and where it looked (guard 17).
 - **U3:** that replacing a file atomically works on the checkout's filesystem as the Workbench reaches
   it — a Windows drive through WSL.
   - Also, what a replace does while a Windows process holds the file open: Windows refuses to replace
@@ -945,10 +956,44 @@ kind does not declare cannot be passed to it.
 
 ## Implementation tasks
 
+**Progress (2026-09-28).** Order taken: task 2 without the settings file's move, then task 3, then that
+move with task 4 — a settings file of the old shape in `.orchestra/` would resolve its persona files from
+the wrong folder (`tests/foundation/test_policy.py:121-134`). Each guard is written with the task whose
+code it guards, and observed failing first.
+
+- Task 2, all but the settings file: done. Guard 10 red first (`workspace/test_repos.py`, `Source`). The
+  public check, in a throwaway repository: clean passes, and a tracked `.orchestra/repos.json`,
+  `.orchestra/settings.local.json`, nested `repos.json` or acceptance debris each fails it.
+- Task 3: done.
+  - Guard 1 red first: 55 strings in six modules of the committed `app/`. Now only `policy.py`'s
+    `KNOWN_BRAINS` is left, which task 4 removes.
+  - Guard 15 red first against today's trust guard.
+  - Guards 2 (all but its access control, which comes with guard 4), 9, 11, 12, 13 and 14 are written
+    with the suite's own kind, `tests/stand_in.py`.
+  - Focused modules: WSL 93 classes, 430 tests; Windows 58 classes, then the six it failed, rerun after
+    their fixes: 33 classes, 140 tests. All green but guard 1.
+- Found in task 3, and fixed there:
+  - the review parser still probed a `result` field, Claude's old print-mode envelope, which no kind
+    writes now;
+  - Codex's upload notes named the architect, whichever role it runs.
+- Task 2's settings move and task 4: done. `policy.json` is `.orchestra/settings.json`, in the new shape.
+  - Guard 3's control is today's path: a run of the old shape still reads its persona file when its
+    session is born, so an edit made during the plan reaches the architect.
+  - Guards 1 and 3–4, 7, 16–18 and 2's access control are green, 16 with its 64 KiB control over the
+    bound. WSL 111 classes; Windows 85 classes, 381 tests.
+  - An old run's persona resolves by its own origin alone. The host copy that `ORCH_POLICY` named has
+    no successor, since a host's settings file can no longer be a copy of an old run's policy; the
+    deployment's old runs name `policy.json` from the checkout's root, which both hosts read.
+- Task 5: done. U3 measured from WSL on the Windows drive: a replace works, and while a Windows process
+  holds the patch open it is refused with `PermissionError(13)`, the file as it was. Guards 5, 6 and 8
+  are green on WSL (48 classes, 238 tests). They were written right after the code, not before it, and
+  each shows it can fail through its control: a writer that rebuilds the patch, an Apply without the
+  lock, an Apply that ignores where its settings came from.
+
 0. [x] Q1–Q7 answered (D5–D11). Codex's skills measured (fact 21).
-1. [ ] U1 and U2 measured first, one real turn each through the role's terminal (their plan is under
+1. [x] U1 and U2 measured first, one real turn each through the role's terminal (their plan is under
    Assumptions). Then the red guards, each observed failing first (Test-first and verification plan).
-2. [ ] The move and the rename (A1, D12): `.orchestra/`, the `ORCHESTRA_*` variables, `--settings`,
+2. [x] The move and the rename (A1, D12): `.orchestra/`, the `ORCHESTRA_*` variables, `--settings`,
    and every other `orch` name (fact 22). Mechanical, checked by the tests of the modules it touches.
    - This checkout's own `repos.json`, ignored and private, is moved once into `.orchestra/` by hand,
      never printed, because git will not carry it.
@@ -957,7 +1002,7 @@ kind does not declare cannot be passed to it.
    - The public check's private paths and debris glob follow the move, and CI runs the script in place
      of its copy (invariant 11b).
    - The sweep removes both prefixes (A1).
-3. [ ] The adapter package: the contract, the loader, and `claude-code` and `codex` moved behind them,
+3. [x] The adapter package: the contract, the loader, and `claude-code` and `codex` moved behind them,
    behaviour unchanged. That includes:
    - `turn_hook.py` made a vendor-blind sink;
    - tracing split as A7 says: the vendors' files and uploader behind their adapters, and the private
@@ -971,7 +1016,7 @@ kind does not declare cannot be passed to it.
 
    Checked by the touched concerns' tests — the agents', the application's, observability's — and by
    the recorded histories' replay.
-4. [ ] The settings' new shape, and the run's policy made whole at `client.start`:
+4. [x] The settings' new shape, and the run's policy made whole at `client.start`:
    - `application.settings`: the one loader and validator. It composes the generic shape with each kind's
      own values through its adapter; each role's access from its contract, with a kind unable to run
      with it refused; no independent-judge refusal; skill names by their rule; and
@@ -980,7 +1025,7 @@ kind does not declare cannot be passed to it.
    - the old shape read only from a run's own input, by `prepare` and `run_role`, with the replay of
      recorded histories. The loader refuses it, and the suite's, the demo's and the acceptance run's
      settings move to the new shape.
-5. [ ] The merge patch: the loader, the sparse writer with its revision and lock, the refusals' JSON
+5. [x] The merge patch: the loader, the sparse writer with its revision and lock, the refusals' JSON
    Pointers, the `.gitignore` entries, and the suite's isolation. U3 is measured here.
 6. [ ] The settings API — kinds and capabilities from the adapter boundary, through
    `application.settings` — and the Settings view, through `frontend-design`, with each field saying
@@ -1161,10 +1206,13 @@ kind does not declare cannot be passed to it.
       - The number measured replaces fact 39's wherever they differ.
 
       Control: a bound of 64 KiB, which crosses it for 2-byte text (fact 39).
-  17. **A bound skill is never dropped silently** — needed only if U2 finds a CLI that goes on without
-      it. A bound skill that the kind's documented folders do not hold refuses `prepare` before any
-      work, naming the skill and where it looked. Control: a preparation without the check, under
-      which the run starts.
+  17. **A bound skill is never dropped, nor left to hang** (`application/test_activities.py`), since
+      neither CLI fails a turn over it (fact 51).
+      - A bound skill that the kind's documented folders do not hold refuses `prepare` before any
+        work, naming the skill and where it looked.
+      - Only the skills of the stages the run's flow takes are looked for.
+
+      Control: a preparation without the check, under which the run starts.
   18. **Access is the role's, never a setting's** (`application/test_settings.py`):
       - the architect's run policy always says `read`, and the engineer's `write`, whatever profile
         each is bound to;

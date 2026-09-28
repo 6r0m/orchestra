@@ -24,6 +24,7 @@ import sys
 import textwrap
 
 from app.application import client as runs
+from app.application import settings
 from app.application import stack
 from app.foundation import flows
 from app.foundation import policy as policy_mod
@@ -146,7 +147,7 @@ def _trace_url(tele, state):
 
 async def _start(client, args, tele, check):
     handle = await runs.start(client, args.task, repo=args.repo, auto_proceed=args.auto_proceed,
-                              policy_path=args.policy, check=check, flow=args.flow)
+                              settings_path=args.settings, check=check, flow=args.flow)
     run_id = handle.id
     print("run-id: %s" % run_id, flush=True)
     status = await follow(handle)
@@ -274,7 +275,7 @@ async def _show(client, run_id):
 
 
 async def _worktrees(client, args, check):
-    selected, view = await runs.worktrees_of(client, args.repo, args.policy, check)
+    selected, view = await runs.worktrees_of(client, args.repo, args.settings, check)
     print("%s — merged means merged into the local %s" % (selected["id"], view["base_branch"]))
     for row in view["rows"]:
         print("%-9s %-24s %s" % (row["state"], row["branch"] or "-", row["path"]))
@@ -290,11 +291,11 @@ def _said(result):
           flush=True)
 
 
-def stack_command(words, policy_path=None):
+def stack_command(words, settings_path=None):
     """The stack's reading, or a start, stop or restart of it or one part, through its one owner.
     0 when every part it manages is up, or every action did what it was asked."""
     try:
-        policy = policy_mod.load(policy_path)
+        policy = settings.load(settings_path)
         if words == ["status"]:
             reading = asyncio.run(stack.read(policy))
             for part in reading["components"]:
@@ -318,7 +319,7 @@ def parse_args(argv):
                              "the final merge")
     parser.add_argument("--repo", metavar="NAME|PATH", help="repository to run on (default: this one)")
     parser.add_argument("--flow", metavar="NAME",
-                        help="the flow to follow, a file in flows/ (default: the policy's default_flow)")
+                        help="the flow to follow, a file in flows/ (default: the settings' default_flow)")
     parser.add_argument("--resume", metavar="RUN_ID", help="answer the stop this run waits at")
     parser.add_argument("--answer", metavar="TEXT")
     parser.add_argument("--confirm", action="store_true", help="confirm a discard")
@@ -333,7 +334,8 @@ def parse_args(argv):
     parser.add_argument("--stack", nargs="+", metavar="ACTION",
                         help="the stack: `status`, or `start`, `stop` or `restart` — all of it, or one of "
                              "temporal, wsl, windows")
-    parser.add_argument("--policy", metavar="PATH")
+    parser.add_argument("--settings", metavar="PATH",
+                        help="a complete settings file, taken alone, in place of this checkout's")
     args = parser.parse_args(argv)
     if sum(map(bool, (args.task, args.resume, args.continue_, args.stop, args.force_terminate, args.show,
                       args.worktrees, args.stack))) != 1:
@@ -382,7 +384,7 @@ def main(argv=None):
     args = parse_args(argv)
     if args.stack:
         # Not inside an event loop: the owner waits on the stack's components in its own.
-        return stack_command(args.stack, args.policy)
+        return stack_command(args.stack, args.settings)
     return asyncio.run(run(argv))
 
 

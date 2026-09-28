@@ -7,15 +7,15 @@ the live bytes on the worker's WebSocket, `ws://127.0.0.1:<terminal_port>/<run-i
 taking keystrokes back. Whoever holds the page can watch, press Esc and type at any time.
 
 A controller turn replaces the agent process under the terminal: the previous one ends,
-and the vendor CLI starts again in the worktree with the role's session resumed by exact id
+and the agent's CLI starts again in the worktree with the role's session resumed by exact id
 and the prompt as its argument. That process runs under `ptyhost.py`, launched through
 `launch.py`'s tree, so the turn's own failure ends it with everything it started and the
-worker's death ends every terminal's agent. The turn ends on the vendor's own completion of
-that prompt — Claude's `Stop` for the `prompt_id` its `UserPromptSubmit` reported, Codex's
-`agent-turn-complete` for the same input — written by `turn_hook.py` into the turn's own
-events file. Completions of anything the operator typed, of a background task finishing
-later, or of Codex's title turn never end it; neither does an interrupt, which completes
-nothing. A successful turn leaves the agent running, live.
+worker's death ends every terminal's agent. The turn ends on the agent's own completion of
+that prompt, which its hooks write through `turn_hook.py` into the turn's own events file and
+its kind's adapter reads there (`app.agents.adapters`): completions of anything the operator
+typed, of a background task finishing later, or of a turn of the agent's own never end it;
+neither does an interrupt, which completes nothing. A successful turn leaves the agent
+running, live.
 """
 import asyncio
 import json
@@ -29,6 +29,7 @@ import time
 import urllib.parse
 from http import HTTPStatus
 
+from app.agents import adapters
 from app.agents import launch
 from app.foundation import paths
 from app.foundation import policy as P
@@ -47,7 +48,6 @@ TICK_SECONDS = 1.0
 # never appears in a URL the browser prints to its console or a proxy writes to a log.
 PROTOCOL = "workbench.v1"
 TOKEN_PROTOCOL = "token."
-CLAUDE_HOOKS = ("UserPromptSubmit", "Stop", "StopFailure")
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][0-9A-B]|\x1b[=>]")
 
 
@@ -278,31 +278,11 @@ def end_agent(run_id, role):
 
 # ---- a role turn -------------------------------------------------------------------------
 
-def _hook_command(events, event):
-    python = sys.executable.replace("\\", "/")
-    return '"%s" "%s" "%s" %s' % (python, TURN_HOOK.replace("\\", "/"), events.replace("\\", "/"), event)
-
-
-def claude_hooks(argv, events):
-    """`argv` with this turn's completion hooks in its settings — the file it names, or its own."""
-    hooks = {event: [{"hooks": [{"type": "command", "command": _hook_command(events, event)}]}]
-             for event in CLAUDE_HOOKS}
-    argv = list(argv)
-    if "--settings" in argv:
-        path = argv[argv.index("--settings") + 1]
-        with open(path, encoding="utf-8") as fh:
-            settings = json.load(fh)
-        settings["hooks"] = hooks
-        # The file is the role-run's private one; it keeps holding what it held.
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(settings, fh)
-        return argv
-    return argv[:1] + ["--settings", json.dumps({"hooks": hooks})] + argv[1:]
-
-
-def codex_notify(argv, events):
-    command = [sys.executable.replace("\\", "/"), TURN_HOOK.replace("\\", "/"), events.replace("\\", "/"), "notify"]
-    return list(argv) + ["-c", "notify=%s" % json.dumps(command)]
+def sink(events, label, source):
+    """The program an agent calls with each event of its turn: `turn_hook.py`, writing into the turn's own
+    events file. `source` is where the agent puts the payload — `stdin`, or `argument`, its last."""
+    return [sys.executable.replace("\\", "/"), TURN_HOOK.replace("\\", "/"), events.replace("\\", "/"), label,
+            source]
 
 
 def _events(path):
@@ -320,53 +300,6 @@ def _events(path):
     return events
 
 
-def _flag(argv, name):
-    return argv[argv.index(name) + 1] if name in argv else None
-
-
-def completion(brain, events, prompt, session):
-    """This turn's completion as (ok, message, session), or None while it has none.
-
-    The events file and the agent process are this turn's own, so every prompt submitted in the
-    role's session from ours on belongs to this turn: an operator who interrupts and redirects the
-    agent is steering the controller's turn, which ends when that steering completes.
-
-    Claude: from the `UserPromptSubmit` whose prompt is ours, each later one in the session adds its
-    prompt id; the first `Stop` for one of them with no background task still running completes the
-    turn — a `Stop` while one runs only yields until that task ends, and Claude continues then — and
-    a `StopFailure` for one of them fails it. Codex: the first `agent-turn-complete` in the expected
-    thread whose inputs — the thread's prompts so far — include ours; its title turn runs in a
-    thread of its own, whose input only quotes the prompt.
-    """
-    wanted = prompt.strip()
-    if brain == "claude":
-        ids = set()
-        for event in events:
-            if event.get("session_id") != session:
-                continue
-            hook = event.get("_hook")
-            if hook == "UserPromptSubmit":
-                if ids or (event.get("prompt") or "").strip() == wanted:
-                    ids.add(event.get("prompt_id"))
-            elif ids and event.get("prompt_id") in ids:
-                if hook == "Stop" and not any(task.get("status") == "running"
-                                              for task in event.get("background_tasks") or []):
-                    return True, event.get("last_assistant_message") or "", session
-                if hook == "StopFailure":
-                    return False, json.dumps({key: value for key, value in event.items()
-                                              if key not in ("transcript_path", "_hook")}), session
-        return None
-    for event in events:
-        if event.get("_hook") != "notify" or event.get("type") != "agent-turn-complete":
-            continue
-        if wanted not in [text.strip() for text in event.get("input-messages") or []]:
-            continue
-        if session and event.get("thread-id") != session:
-            continue
-        return True, event.get("last-assistant-message") or "", event.get("thread-id")
-    return None
-
-
 def _activity_tick(name):
     from temporalio import activity
     from temporalio.exceptions import CancelledError
@@ -377,18 +310,20 @@ def _activity_tick(name):
         raise CancelledError("role-run %s cancelled" % name)
 
 
-def run_turn(worktree, argv, rdir, name, prompt, timeout, env, on_tick=None, *, brain):
+def run_turn(worktree, argv, rdir, name, prompt, timeout, env, on_tick=None, *, kind):
     """The execution seam: one role turn in the role's live terminal; returns (exit status, output).
 
-    The output is what `nodes` reads from a role-run: Claude's final message, or for Codex
-    its thread and final message as the events `exec --json` printed. Logs under the run's
-    directory keep the prompt, that output, the turn's events, and — as its error text —
-    what the terminal showed during the turn.
+    The turn is `kind`'s: its adapter wires the turn's end into the turn's own events file, reads the turn's
+    completion from it, and says what the finished turn leaves for the role-run to read. Logs under the
+    run's directory keep the prompt, that output, the turn's events, and — as its error text — what the
+    terminal showed during the turn.
     """
-    # The run already decided which agent this turn is; re-deriving it from the command would be a
-    # second authority, and a name this host does not know would silently be driven as the default.
-    if brain not in P.KNOWN_BRAINS:
-        raise launch.ExecutorError("unknown agent %r: cannot wire its completion events" % (brain,))
+    # The run already decided which agent this turn is; re-deriving it from the command would be a second
+    # authority, and a kind this host cannot load is refused before the turn leaves anything behind.
+    try:
+        adapter = adapters.load(kind)
+    except adapters.Refused as exc:
+        raise launch.ExecutorError(str(exc)) from exc
 
     logs = os.path.join(rdir, "logs")
     os.makedirs(logs, exist_ok=True)
@@ -401,12 +336,8 @@ def run_turn(worktree, argv, rdir, name, prompt, timeout, env, on_tick=None, *, 
     if os.path.exists(paths["events"]):
         os.remove(paths["events"])
     argv = [executable] + list(argv[1:])
-    if brain == "claude":
-        argv = claude_hooks(argv, paths["events"])
-        session = _flag(argv, "--session-id") or _flag(argv, "--resume")
-    else:
-        argv = codex_notify(argv, paths["events"])
-        session = argv[argv.index("resume") + 1] if "resume" in argv[1:2] else None
+    session = adapter.session_in(argv)
+    argv = adapter.wire(argv, paths["events"], lambda label, source: sink(paths["events"], label, source))
     # Options such as `--add-dir` take several values; `--` keeps the prompt from becoming one of them.
     argv += ["--", prompt]
 
@@ -429,20 +360,14 @@ def run_turn(worktree, argv, rdir, name, prompt, timeout, env, on_tick=None, *, 
     try:
         deadline = time.monotonic() + timeout
         while True:
-            done = completion(brain, _events(paths["events"]), prompt, session)
+            done = adapter.completion(_events(paths["events"]), prompt, session)
             if done is not None:
                 ok, message, session = done
-                if brain == "codex":
-                    out = "\n".join(json.dumps(event) for event in (
-                        {"type": "thread.started", "thread_id": session},
-                        {"type": "item.completed", "item": {"type": "agent_message", "text": message}})) + "\n"
-                else:
-                    out = message
-                return finish(0 if ok else 1, out)
+                return finish(0 if ok else 1, adapter.output(message, session))
             rc = agent.returncode()
             if rc is not None:
                 agent.pump.join(timeout=launch.GRACE_SECONDS)
-                if completion(brain, _events(paths["events"]), prompt, session) is None:
+                if adapter.completion(_events(paths["events"]), prompt, session) is None:
                     return finish(rc or 1, "")
                 continue
             tick()
