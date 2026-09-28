@@ -1503,3 +1503,23 @@ code it guards, and observed failing first.
   wait, and waits on the operator's disposition there.
 - **Authority:** A2, A4 and A7 rewritten in place; Decisions 2, 3, 4 and 7; invariants 4 and 10;
   guards 4, 16 and 18. No decision changed.
+
+### 2026-09-28 — the external review of the implementation: PATCH, four integration defects
+
+- **Accepted, each checked against the code, and fixed:**
+  1. A finished Windows class's job was only closed, which begins its processes' end without proving it,
+     and `end()` printed an unproved end and went on. Every class now leaves through the one proved end,
+     and an unproved end fails it ([the Workbench UX todo](2026-09-25_2334-workbench-ux.md) holds the
+     runner's record). A POSIX class's group is ended when it finishes, too.
+  2. `/api/flows` reads the settings, so a local patch that does not load failed the read that listed the
+     flows, and the Settings view never showed its refusal. The view reads the settings first, and lists
+     flows only for settings that load.
+  3. New run kept the flow it showed over a newly applied default. It now takes up a new default, unless
+     the operator chose a flow there, and an Apply asks it to read the flows again.
+  4. The acceptance run read a settings role as a run's role. It resolves each role's kind through
+     `application.settings`, as production does.
+- **Evidence:**
+  - runner: its tests on both hosts, and the close-only mutation, as the UX todo records;
+  - page: the headless probe's 23 checks pass; with fixes 2 and 3 taken back, four of them fail.
+- **Declined:** the whole Windows suite now. By the standing order, each host runs it once after the
+  external PASS, and this change runs in that one.

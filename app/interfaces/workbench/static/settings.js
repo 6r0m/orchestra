@@ -87,15 +87,16 @@ function invocation(kind, name) {
   return said;
 }
 
-// A setting the operator's own settings hold says so, with a way back to what lies below it.
-function yours(text, redraw) {
+// A setting the operator's own settings hold says so, with a way back to what lies below it. `what` names the
+// setting in words, for whoever cannot see beside what the Revert sits.
+function yours(text, redraw, what) {
   const marks = el("span", null, "marks");
   if (staged.has(text)) marks.append(el("span", "changed", "yours"));
   else if (overridden(text)) {
     marks.append(el("span", "yours", "yours"));
     const back = el("button", "Revert", "quiet");
     back.type = "button";
-    back.setAttribute("aria-label", "Revert " + text + " to the shared settings");
+    back.setAttribute("aria-label", "Revert " + what + " to the shared settings");
     back.onclick = () => {
       stage(text, { revert: true });
       redraw();
@@ -107,12 +108,12 @@ function yours(text, redraw) {
 
 // ---- drawing ------------------------------------------------------------------------------------
 
-function field(labelText, control, text, extra) {
+function field(labelText, control, text, extra, what) {
   const wrap = el("div", null, "field");
   const label = el("label", labelText);
   label.htmlFor = control.id;
   const head = el("div", null, "field-head");
-  head.append(label, yours(text, draw));
+  head.append(label, yours(text, draw, what || labelText));
   control.dataset.pointer = text;
   if (staged.has(text)) control.dataset.staged = "";
   const alert = el("p", null, "alert");
@@ -146,6 +147,7 @@ function drawRoles(settings) {
     for (const [name, each] of Object.entries(settings.agents)) {
       const option = el("option", name + " (" + kindName(each.kind) + ")");
       option.value = name;
+      option.translate = false;
       agent.append(option);
     }
     agent.value = bound;
@@ -165,9 +167,11 @@ function drawRoles(settings) {
     const persona = el("details", null, "persona");
     const summary = el("summary");
     const size = el("span", null, "bytes");
-    summary.append(el("span", "Persona", "label"), " ", el("span", mine ? "yours"
-      : "persona" in settings.roles[role] ? "from the shared settings" : "from " + settings.roles[role].persona_file,
-    mine ? "yours" : "hint"), " ", size);
+    const source = el("span", null, mine ? "yours" : "hint");
+    if (mine) source.textContent = "yours";
+    else if ("persona" in settings.roles[role]) source.textContent = "from the shared settings";
+    else source.append("from ", code(settings.roles[role].persona_file));
+    summary.append(el("span", "Persona", "label"), " ", source, " ", size);
     const text = el("textarea");
     text.id = "settings-persona-" + role;
     text.rows = 12;
@@ -201,7 +205,8 @@ function drawRoles(settings) {
     personaAlert.setAttribute("role", "alert");
     const actions = el("div", null, "actions");
     if (mine || change) {
-      const back = el("button", "Use " + settings.roles[role].persona_file, "quiet");
+      const back = el("button", "Use ", "quiet");
+      back.append(code(settings.roles[role].persona_file));
       back.type = "button";
       back.onclick = () => {
         stage(personaPointer, overridden(personaPointer) ? { revert: true } : { remove: true });
@@ -226,9 +231,9 @@ function drawRoles(settings) {
         const name = input.value.trim();
         stage(skillPointer, name ? { value: name } : { remove: true }, input);
       };
-      skills.append(field(stage_, input, skillPointer, [said]));
+      skills.append(field(stage_, input, skillPointer, [said], "the " + stage_ + " stage's skill"));
     }
-    block.append(title, field("Agent", agent, agentPointer, [facts]), persona, skills);
+    block.append(title, field("Agent", agent, agentPointer, [facts], "the " + role + "'s agent"), persona, skills);
     return block;
   }));
 }
@@ -239,7 +244,7 @@ function drawProfiles(settings) {
     const kind = kinds()[profile.kind] || { name: profile.kind, refused: "no module answers for this kind" };
     const row = el("tr");
     const who = el("td");
-    who.append(code(name), yours(pointer("agents", name), draw));
+    who.append(code(name), yours(pointer("agents", name), draw, "the profile " + name));
     const what = el("td");
     what.append(kind.name || profile.kind, el("span", kind.refused ? "Unusable: " + kind.refused
       : (kind.access.includes("read") ? "Can review. " : "Cannot review. ")
@@ -308,6 +313,7 @@ function drawProfiles(settings) {
   choose.replaceChildren(...usable.map((kind) => {
     const option = el("option", kind.name + " (" + kind.kind + ")");
     option.value = kind.kind;
+    option.translate = false;
     return option;
   }));
   if (usable.some((kind) => kind.kind === chosen)) choose.value = chosen;
@@ -328,7 +334,7 @@ function drawTogether(settings) {
     input.id = "settings-rounds-" + phase;
     input.value = settings.max_rounds[phase];
     input.onchange = () => stage(text, { value: Number(input.value) }, input);
-    return field("For a " + phase, input, text);
+    return field("For a " + phase, input, text, [], "the review rounds for a " + phase);
   }));
   const select = $("settings-flow");
   const choosing = settings.default_flow || "";
@@ -336,6 +342,7 @@ function drawTogether(settings) {
     const option = el("option", flow.error ? flow.name + " (refused)" : flow.name);
     option.value = flow.name;
     option.disabled = Boolean(flow.error);
+    option.translate = false;
     return option;
   });
   if (choosing && !flows.some((flow) => flow.name === choosing)) {
@@ -365,7 +372,7 @@ function drawTogether(settings) {
 function noteChanges() {
   const count = staged.size;
   $("settings-pending").textContent = !shown.writable ? "These settings take no changes here."
-    : count ? (count === 1 ? "One change" : count + " changes") + " to apply. Runs started from now on take them."
+    : count ? count + (count === 1 ? " change" : " changes") + " to apply. Runs started from now on take them."
       : "No changes.";
   $("settings-apply").disabled = !shown.writable || !count;
   $("settings-discard").hidden = !count;
@@ -378,7 +385,7 @@ function draw() {
     // Nothing is shown to change while the settings do not load: the reason, and where to fix it.
     notice.hidden = false;
     notice.classList.add("bad");
-    $("settings-notice-said").textContent = "The settings do not load: " + shown.refused.reason
+    $("settings-notice-said").textContent = "The settings do not load: " + shown.refused.reason.replace(/\.?\s*$/, ".")
       + " Fix the file it names, or delete your own settings file, then read them again.";
     form.hidden = true;
     return;
@@ -433,14 +440,18 @@ function refuse(text, reason) {
 
 export async function openSettings() {
   const before = shown && shown.revision;
+  let read;
   try {
-    const [read, listed] = await Promise.all([api("/api/settings"), api("/api/flows")]);
-    shown = read;
-    flows = listed.flows;
+    read = await api("/api/settings");
+    // The flows' default is read from the settings, so settings that do not load list none: their
+    // refusal, and where to fix it, is what the view shows.
+    flows = read.refused ? [] : (await api("/api/flows")).flows;
   } catch (error) {
-    report($("settings-result"), "The settings cannot be read: " + error.message, true);
+    report($("settings-result"), "The settings cannot be read: " + error.message + ". Read them again once "
+      + "the Workbench answers.", true);
     return;
   }
+  shown = read;
   if (staged.size && before !== shown.revision) {
     staged.clear();
     report($("settings-result"), "The settings changed since you last saw them, so the changes you had made "
@@ -455,7 +466,12 @@ $("settings-reread").onclick = () => {
   openSettings();
 };
 
-$("settings-discard").onclick = () => {
+$("settings-discard").onclick = async () => {
+  const go = await confirmAction({ title: "Discard your changes?",
+    body: "The " + staged.size + (staged.size === 1 ? " change" : " changes") + " made here and not applied are "
+      + "dropped. What is applied stays as it is.", confirm: "Discard", danger: true,
+    returnTo: $("settings-apply") });
+  if (!go) return;
   staged.clear();
   report($("settings-result"), "Changes discarded.");
   draw();
@@ -468,6 +484,7 @@ $("settings-add").onclick = () => {
   const settings = pending();
   alert.textContent = !NAME.test(name) ? "A profile's name is lowercase letters and digits, words joined by "
     + "single hyphens." : settings.agents[name] ? "There is a profile named " + name + " already." : "";
+  if (alert.textContent) $("settings-add-name").focus();
   if (alert.textContent || !kind) return;
   stage(pointer("agents", name), { value: { kind } });
   $("settings-add-name").value = "";
@@ -485,6 +502,8 @@ $("settings-form").onsubmit = async (event) => {
     shown = await api("/api/settings", { revision: shown.revision, changes: [...staged.values()] });
     staged.clear();
     draw();
+    // What else the page draws from the settings reads them again: the default flow a new run takes.
+    document.dispatchEvent(new Event("workbench:settings"));
     report($("settings-result"), "Applied. Runs started from now on take these settings; a run already started "
       + "keeps its own.");
   } catch (error) {

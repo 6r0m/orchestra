@@ -81,6 +81,8 @@ window.addEventListener("hashchange", route);
 window.addEventListener("beforeunload", (event) => {
   if ($("start-task").value.trim() || unsent() || settingsUnsent()) event.preventDefault();
 });
+// Settings applied: a new run's flow is read again, its default among them.
+document.addEventListener("workbench:settings", reloadFlows);
 // After a write of the page's own, what it changed is read at once.
 document.addEventListener("workbench:wrote", () => {
   refreshRuns();

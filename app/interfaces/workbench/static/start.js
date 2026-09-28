@@ -9,6 +9,9 @@ const chosenRepo = sourceChoice("start");
 // The flows as last shown, so an unchanged answer leaves an open list as it is.
 let shownFlows = "";
 let listedFlows = [];
+// Whether the flow shown is one the operator chose, rather than the settings' default: a default applied in
+// Settings is taken up, and a choice is kept.
+let chosenFlow = false;
 
 function showFlowSteps() {
   const chosen = listedFlows.find((flow) => flow.name === $("start-flow").value);
@@ -24,8 +27,8 @@ async function loadFlows() {
   shownFlows = shown;
   listedFlows = answer.flows;
   const select = $("start-flow");
-  // The flow chosen, else the policy's default; "" when the policy names none.
-  const chosen = select.value || answer.default || "";
+  // The flow the operator chose, else the settings' default; "" when they name none.
+  const chosen = chosenFlow ? select.value : answer.default || "";
   const options = answer.flows.map((flow) => {
     // A flow that breaks a rule is listed, never offered: its reason is what to fix in its file. The one
     // chosen stays chosen, so a start on it is refused with that reason, never made on another flow.
@@ -56,7 +59,10 @@ async function loadFlows() {
 // flows/ is read again each time the list is opened, so a flow added or edited there shows without a reload.
 export const reloadFlows = () => loadFlows().catch((error) => report($("start-result"), error.message, true));
 $("start-flow").onfocus = reloadFlows;
-$("start-flow").onchange = showFlowSteps;
+$("start-flow").onchange = () => {
+  chosenFlow = true;
+  showFlowSteps();
+};
 
 $("start").onsubmit = async (event) => {
   event.preventDefault();

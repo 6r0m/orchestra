@@ -10,9 +10,11 @@ each class besides: one still running at CLASS_SECONDS has had its threads dumpe
 then its process tree is ended and it fails the run. A run that ran no tests, or fewer than it found,
 fails too; and however it ends, no class of it is left running.
 
-On Windows each class is born into a job of its own, the agents' launcher's (`app.agents.launch`), so
-every process it starts is in it, one whose parent has gone included; ending a class returns only once
-each of those has ended. A POSIX class is its own process group, which one signal ends.
+Every class leaves the run through one end, whether it finished, hung or the run was interrupted, so
+nothing it started outlives it. On Windows each class is born into a job of its own, the agents'
+launcher's (`app.agents.launch`), so every process it starts is in it, one whose parent has gone
+included; its end returns only once each of those has ended, and a class whose end is not proved fails.
+A POSIX class is its own process group, which one signal ends.
 """
 import faulthandler
 import os
@@ -95,17 +97,16 @@ def parallel(names, start=None, top=PKG, at_once=AT_ONCE, limit=CLASS_SECONDS, d
                 hung = child.poll() is None and seconds >= limit
                 if child.poll() is None and not hung:
                     continue
-                if hung:
-                    end(child, tree)
-                elif tree is not None:
-                    # Whatever the class left running goes with its job.
-                    tree.close()
+                # What a finished class left running ends with it, as a hung one's does.
+                unended = end(child, tree)
                 del running[name]
-                results.append(finished(name, count, child.returncode, log, seconds, hung))
+                results.append(finished(name, count, child.returncode, log, seconds, hung, unended))
     except KeyboardInterrupt:
         ending = len(running)
-        end_all(running)
-        print("\ninterrupted: ended the %d classes still running" % ending, file=sys.stderr)
+        unended = end_all(running)
+        print("\ninterrupted: ended the %d classes still running" % ending if not unended else
+              "\ninterrupted: %d classes were still running, and the end of %d of them was not proved"
+              % (ending, len(unended)), file=sys.stderr)
         return 130
     finally:
         # However else this run ends, no class of it goes on running, detached from its terminal.
@@ -179,8 +180,9 @@ def flatten(suite):
             yield test
 
 
-def finished(name, count, code, log, seconds, hung):
-    """One line for a class that passed; its whole output, once, for one that did not."""
+def finished(name, count, code, log, seconds, hung, unended=None):
+    """One line for a class that passed; its whole output, once, for one that did not. `unended` is why the
+    end of what it left running was not proved, which fails it."""
     log.seek(0)
     text = log.read().decode("utf-8", "replace")
     log.close()
@@ -194,6 +196,9 @@ def finished(name, count, code, log, seconds, hung):
         verdict = "FAILED — ran %d of its %d tests" % (ran, count)
     else:
         verdict = "ok"
+    if unended:
+        said = "its processes were not proved ended: %s" % unended
+        verdict = "FAILED — " + said if verdict == "ok" else verdict + "; " + said
     print("%7.1f s  %s — %s" % (seconds, name, verdict), flush=True)
     if verdict != "ok":
         print(text.rstrip() + "\n" + "-" * 70, flush=True)
@@ -226,19 +231,27 @@ def start_class(argv, env, log):
 
 
 def end(child, tree=None):
-    """End a class's process tree, and wait for it — never for good, and saying so when it did not end."""
+    """End a class's process tree, and wait for it — never for good. None once its end is proved; else why
+    not, for the class to fail on."""
     try:
         end_tree(child, tree)
         child.wait(END_SECONDS)
     except (OSError, TimeoutError, subprocess.TimeoutExpired) as exc:
-        print("  %d did not end within %d s: %s" % (child.pid, END_SECONDS, exc), file=sys.stderr, flush=True)
+        return "process %d, within %d s: %s" % (child.pid, END_SECONDS, exc)
+    return None
 
 
 def end_all(running):
-    for child, tree, log, _, _ in running.values():
-        end(child, tree)
+    """End every class still running; the names of those whose end was not proved, each said."""
+    unended = []
+    for name, (child, tree, log, _, _) in running.items():
+        why = end(child, tree)
+        if why:
+            print("  %s: its processes were not proved ended: %s" % (name, why), file=sys.stderr, flush=True)
+            unended.append(name)
         log.close()
     running.clear()
+    return unended
 
 
 def end_tree(child, tree=None):

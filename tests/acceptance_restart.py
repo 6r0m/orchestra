@@ -41,6 +41,7 @@ from temporalio.client import Client, WorkflowUpdateFailedError  # noqa: E402
 from temporalio.exceptions import WorkflowAlreadyStartedError  # noqa: E402
 
 from app.application import client as runs  # noqa: E402
+from app.application import settings  # noqa: E402
 from app.application import stack  # noqa: E402
 from app.foundation import policy as P  # noqa: E402
 from app.agents import adapters, terminal, trust  # noqa: E402
@@ -374,7 +375,9 @@ class Acceptance:
         check(await self.events(handle) == before, "and the history is exactly as long as before (%d events)" % before)
 
         step("the run recorded its repository for the CLIs it uses, so no turn waits at a trust dialog")
-        kinds = [adapters.kind_name(adapters.for_role(role)) for role in P.load(self.policy)["roles"].values()]
+        # Through the boundary production uses: settings name a profile, which the settings resolve to its kind.
+        acceptance = settings.load(self.policy)
+        kinds = [adapters.kind_name(settings.kind_of(acceptance, role)) for role in P.ROLES]
         check(trust.ensure(self.repo, kinds) == [],
               "prepare already recorded this repository for %s" % ", ".join(sorted(set(kinds))))
 

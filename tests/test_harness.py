@@ -82,6 +82,18 @@ class Exit(unittest.TestCase):
         self.assertLess(time.monotonic() - done, EXIT_SECONDS)
 
 
+# A class whose test leaves a sleeper whose parent has already gone — a process of its tree that no walk
+# from it finds — and writes both pids where the test can look.
+ORPHAN = ("import os, subprocess, sys, time, unittest\n\n"
+          "SPAWN = ('import subprocess, sys; print(subprocess.Popen([sys.executable, \"-c\", "
+          "\"import time; time.sleep(3600)\"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, "
+          "stderr=subprocess.DEVNULL).pid)')\n\n"
+          "class Orphaning(unittest.TestCase):\n"
+          "    def test_it(self):\n"
+          "        orphan = int(subprocess.run([sys.executable, '-c', SPAWN], capture_output=True, "
+          "text=True).stdout)\n"
+          "        with open(os.path.join(os.path.dirname(__file__), __name__ + '.pid'), 'w') as fh:\n"
+          "            fh.write('%d %d' % (os.getpid(), orphan))\n")
 # Stand-in test modules for the parallel run, written to a folder of each test's own: never the suite's.
 STANDINS = {
     "passing": "import unittest\n\nclass Passing(unittest.TestCase):\n"
@@ -99,17 +111,9 @@ STANDINS = {
                "            fh.write('%d %d' % (os.getpid(), child.pid))\n"
                "        time.sleep(3600)\n",
     # It, and a sleeper whose parent has already gone: a process of its tree that no walk from it finds.
-    "orphaning": "import os, subprocess, sys, time, unittest\n\n"
-                 "SPAWN = ('import subprocess, sys; print(subprocess.Popen([sys.executable, \"-c\", "
-                 "\"import time; time.sleep(3600)\"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, "
-                 "stderr=subprocess.DEVNULL).pid)')\n\n"
-                 "class Orphaning(unittest.TestCase):\n"
-                 "    def test_it(self):\n"
-                 "        orphan = int(subprocess.run([sys.executable, '-c', SPAWN], capture_output=True, "
-                 "text=True).stdout)\n"
-                 "        with open(os.path.join(os.path.dirname(__file__), __name__ + '.pid'), 'w') as fh:\n"
-                 "            fh.write('%d %d' % (os.getpid(), orphan))\n"
-                 "        time.sleep(3600)\n",
+    "orphaning": ORPHAN + "        time.sleep(3600)\n",
+    # The same, and then it passes: what a class that finished left running.
+    "leaving": ORPHAN,
     "twoclasses": "import unittest\n\nclass First(unittest.TestCase):\n    def test_it(self):\n        pass\n\n\n"
                   "class Second(unittest.TestCase):\n    def test_it(self):\n        pass\n",
     # One test fewer in the class's own process — the one its run names — than discovery found.
@@ -119,6 +123,29 @@ STANDINS = {
                  "        def test_two(self):\n            pass\n",
 }
 STANDINS["hanging_too"] = STANDINS["hanging"]
+
+
+def held(pid):
+    """A handle to wait on Windows process `pid` with, or None once it is gone."""
+    import ctypes
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    return kernel32.OpenProcess(0x00100000, False, pid) or None           # SYNCHRONIZE
+
+
+def ended_now(handle):
+    """Whether the process `handle` holds has ended at this moment, with no time given it to end in."""
+    import ctypes
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.WaitForSingleObject.argtypes = (ctypes.c_void_p, ctypes.c_uint32)
+    return kernel32.WaitForSingleObject(handle, 0) == 0                   # WAIT_OBJECT_0
+
+
+def let_go(handle):
+    import ctypes
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
+    kernel32.CloseHandle(handle)
 
 
 def alive(pid):
@@ -264,6 +291,48 @@ class Parallel(unittest.TestCase):
         self.assertEqual(code, 130, said)
         self.assertEqual(self.still_running(folder, [name["orphaning"]], grace=0 if os.name == "nt" else 5),
                          [], "the class and its orphan both ended")
+
+    def test_a_class_that_finished_leaves_nothing_running_its_orphan_included(self):
+        """A class that passed may still have left something running; it ends with the class. On Windows the
+        end is proved before the run goes on: a process held from before it has ended the moment the run
+        returns. The control, a job closed and not waited on, leaves it still ending then (measured once)."""
+        folder, name = self.standins("leaving")
+        module, holding = name["leaving"], {}
+        ending = runner.end_tree
+
+        def hold_then_end(child, tree=None):
+            if os.name == "nt":
+                for pid in self.pids(folder, [module]):
+                    handle = held(pid)
+                    if handle:
+                        holding[pid] = handle
+                        self.addCleanup(let_go, handle)
+            return ending(child, tree)
+        self.addCleanup(setattr, runner, "end_tree", ending)
+        runner.end_tree = hold_then_end
+        code, said = self.run_parallel(folder, [module])
+        self.assertEqual(code, 0, said)
+        if os.name == "nt":
+            self.assertTrue(holding, "the orphan was held before its end")
+            self.assertEqual([pid for pid, handle in holding.items() if not ended_now(handle)], [],
+                             "each process of the class's tree had ended when the run returned")
+        self.assertEqual(self.still_running(folder, [module], grace=0 if os.name == "nt" else 5), [],
+                         "the class and its orphan both ended")
+
+    def test_a_class_whose_end_is_not_proved_fails_the_run_and_says_so(self):
+        folder, name = self.standins("passing")
+        ending = runner.end_tree
+
+        def unproved(child, tree=None):
+            ending(child, tree)
+            raise TimeoutError("the class's process tree did not end within 30s of its kill: process 4242 is "
+                               "still there")
+        self.addCleanup(setattr, runner, "end_tree", ending)
+        runner.end_tree = unproved
+        code, said = self.run_parallel(folder, [name["passing"]])
+        self.assertEqual(code, 1, said)
+        self.assertIn("%s.Passing — FAILED — its processes were not proved ended" % name["passing"], said)
+        self.assertIn("process 4242 is still there", said)
 
     @unittest.skipIf(os.name == "nt", "a termination and a hang-up are POSIX signals")
     def test_a_terminated_run_ends_every_class_as_an_interrupted_one_does(self):

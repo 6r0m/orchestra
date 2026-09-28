@@ -324,6 +324,9 @@ summary:hover { color: var(--ink); }
 .apply-bar { position: sticky; bottom: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px 16px;
   align-items: center; padding: 12px 0; background: var(--ground); border-top: 1px solid var(--rule); }
 .apply-bar #settings-pending { color: var(--quiet); margin-right: auto; }
+/* A field reached by the keyboard stops short of the bar, not beneath it. */
+.settings-form :is(input, select, textarea, button, summary) { scroll-margin-bottom: 96px; }
+#settings-notice-said { overflow-wrap: anywhere; }
 .apply-bar .result, .apply-bar .alert { flex-basis: 100%; }
 
 /* The repository picker: a menu of owners, each list as wide as its names. An owner's list opens beside its
