@@ -13,6 +13,7 @@ let flows = [];
 const staged = new Map();
 const NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const ACCESS = { write: "Writes in the run's worktree.", read: "Reads only: its agent runs read-only." };
+const RESET = ["agents", "roles", "stage_skills", "review_rounds", "max_rounds", "default_flow"];
 
 export const settingsUnsent = () => staged.size > 0;
 
@@ -34,9 +35,10 @@ function same(one, other) {
 }
 
 // The settings as they will be once applied: what was read, with each change made here.
-function pending() {
+function pending(excluding = null) {
   const settings = structuredClone(shown.settings);
   for (const change of staged.values()) {
+    if (excluding && (change.pointer === excluding || change.pointer.startsWith(excluding + "/"))) continue;
     const keys = keysOf(change.pointer);
     let parent = settings;
     for (const key of keys.slice(0, -1)) {
@@ -57,14 +59,22 @@ function pending() {
 // The field it came from, when given, shows at once whether it holds a change.
 function stage(text, change, control) {
   for (const other of [...staged.keys()]) if (other.startsWith(text + "/")) staged.delete(other);
-  const read = at(shown.settings, keysOf(text));
-  if ((change.remove && read === undefined) || ("value" in change && same(read, change.value))) staged.delete(text);
+  const keys = keysOf(text);
+  const read = at(pending(text), keys);
+  const below = at(shown.shared, keys);
+  if ((change.remove && read === undefined) || (change.revert && same(read, below)) ||
+      ("value" in change && same(read, change.value))) staged.delete(text);
   else staged.set(text, Object.assign({ pointer: text }, change));
-  if (control) control.toggleAttribute("data-staged", staged.has(text));
+  if (control) control.toggleAttribute("data-staged", hasStaged(text));
   noteChanges();
 }
 
+function hasStaged(text) {
+  return [...staged.keys()].some((part) => part === text || part.startsWith(text + "/") || text.startsWith(part + "/"));
+}
+
 function overridden(text) {
+  if ([...staged.values()].some((change) => change.revert && text.startsWith(change.pointer + "/"))) return false;
   return at(shown.overrides, keysOf(text)) !== undefined;
 }
 
@@ -91,7 +101,7 @@ function invocation(kind, name) {
 // setting in words, for whoever cannot see beside what the Revert sits.
 function yours(text, redraw, what) {
   const marks = el("span", null, "marks");
-  if (staged.has(text)) marks.append(el("span", "changed", "yours"));
+  if (hasStaged(text)) marks.append(el("span", "changed", "yours"));
   else if (overridden(text)) {
     marks.append(el("span", "yours", "yours"));
     const back = el("button", "Revert", "quiet");
@@ -108,14 +118,15 @@ function yours(text, redraw, what) {
 
 // ---- drawing ------------------------------------------------------------------------------------
 
-function field(labelText, control, text, extra, what) {
+function field(labelText, control, text, extra, what, target = control) {
   const wrap = el("div", null, "field");
   const label = el("label", labelText);
-  label.htmlFor = control.id;
+  label.htmlFor = target.id;
   const head = el("div", null, "field-head");
   head.append(label, yours(text, draw, what || labelText));
-  control.dataset.pointer = text;
-  if (staged.has(text)) control.dataset.staged = "";
+  target.name = keysOf(text).join(".");
+  target.dataset.pointer = text;
+  if (hasStaged(text)) target.dataset.staged = "";
   const alert = el("p", null, "alert");
   alert.setAttribute("role", "alert");
   wrap.append(head, control, ...(extra || []), alert);
@@ -174,6 +185,7 @@ function drawRoles(settings) {
     summary.append(el("span", "Persona", "label"), " ", source, " ", size);
     const text = el("textarea");
     text.id = "settings-persona-" + role;
+    text.name = keysOf(personaPointer).join(".");
     text.rows = 12;
     text.spellcheck = false;
     text.dataset.pointer = personaPointer;
@@ -222,8 +234,16 @@ function drawRoles(settings) {
     for (const stage_ of contract.stages) {
       const skillPointer = pointer("stage_skills", stage_);
       const input = textInput("settings-skill-" + stage_, at(settings, ["stage_skills", stage_]), "none");
+      const row = el("div", null, "skill-input");
+      const choose = el("button", "+ Skill", "quiet");
+      choose.type = "button";
+      choose.setAttribute("aria-label", "Choose an installed skill for " + stage_);
+      choose.disabled = !(kinds()[profile.kind] || {}).skill;
+      choose.onclick = () => openSkillPicker(input, profile.kind, stage_);
+      row.append(input, choose);
       const said = el("p", null, "hint");
-      const show = () => said.replaceChildren(invocation(profile.kind, input.value.trim()));
+      const show = () => said.replaceChildren(input.value.trim()
+        ? invocation(profile.kind, input.value.trim()) : el("span", "No stage skill is explicitly bound."));
       show();
       input.oninput = show;
       input.disabled = !(kinds()[profile.kind] || {}).skill;
@@ -231,11 +251,45 @@ function drawRoles(settings) {
         const name = input.value.trim();
         stage(skillPointer, name ? { value: name } : { remove: true }, input);
       };
-      skills.append(field(stage_, input, skillPointer, [said], "the " + stage_ + " stage's skill"));
+      skills.append(field(stage_, row, skillPointer, [said], "the " + stage_ + " stage's skill", input));
     }
     block.append(title, field("Agent", agent, agentPointer, [facts], "the " + role + "'s agent"), persona, skills);
     return block;
   }));
+}
+
+function openSkillPicker(input, kind, stage_) {
+  const dialog = $("settings-skill-picker");
+  const options = $("settings-skill-options");
+  dialog.querySelector(".hint").textContent = "Choose an available skill for the " + stage_ + " stage.";
+  const names = shown.skills[kind] || [];
+  const controls = [];
+  for (const name of names) {
+    const option = el("button", name, "quiet skill-option");
+    option.type = "button";
+    option.translate = false;
+    option.onclick = () => {
+      input.value = name;
+      input.dispatchEvent(new Event("input"));
+      input.dispatchEvent(new Event("change"));
+      dialog.close();
+      input.focus();
+    };
+    controls.push(option);
+  }
+  const clear = el("button", "No explicit skill", "quiet skill-option");
+  clear.type = "button";
+  clear.onclick = () => {
+    input.value = "";
+    input.dispatchEvent(new Event("input"));
+    input.dispatchEvent(new Event("change"));
+    dialog.close();
+    input.focus();
+  };
+  controls.push(clear);
+  if (!names.length) controls.unshift(el("p", "No installed skills were discovered for this agent."));
+  options.replaceChildren(...controls);
+  dialog.showModal();
 }
 
 function drawProfiles(settings) {
@@ -256,17 +310,18 @@ function drawProfiles(settings) {
         cell.append(el("span", "not taken", "gloss"));
         return cell;
       }
-      const input = textInput("settings-" + option + "-" + name, profile[option], "the provider's default");
+      const input = textInput("settings-" + option + "-" + name, profile[option]);
+      input.name = keysOf(text).join(".");
       input.setAttribute("aria-label", name + "'s " + option);
       input.dataset.pointer = text;
-      if (staged.has(text)) input.dataset.staged = "";
+      if (hasStaged(text)) input.dataset.staged = "";
       input.onchange = () => {
         const value = input.value.trim();
         stage(text, value ? { value } : { remove: true }, input);
       };
       const alert = el("p", null, "alert");
       alert.setAttribute("role", "alert");
-      cell.append(input, alert);
+      cell.append(input, yours(text, draw, "the profile " + name + "'s " + option), alert);
       return cell;
     });
     const act = el("td");
@@ -325,18 +380,29 @@ function drawProfiles(settings) {
 }
 
 function drawTogether(settings) {
-  $("settings-rounds").replaceChildren(...shown.phases.map((phase) => {
-    const text = pointer("max_rounds", phase);
-    const input = el("input");
-    input.type = "number";
-    input.min = "1";
-    input.step = "1";
-    input.id = "settings-rounds-" + phase;
-    input.value = settings.max_rounds[phase];
-    input.onchange = () => stage(text, { value: Number(input.value) }, input);
-    return field("For a " + phase, input, text, [], "the review rounds for a " + phase);
+  const rounds = settings.review_rounds || Object.fromEntries(shown.phases.map((phase) =>
+    [phase, { normal: settings.max_rounds[phase], extended: 0 }]));
+  $("settings-rounds").replaceChildren(...shown.phases.flatMap((phase) => {
+    const group = el("section", null, "review-budget");
+    group.append(el("h3", phase[0].toUpperCase() + phase.slice(1)));
+    const fields = ["normal", "extended"].map((threshold) => {
+      const text = pointer("review_rounds", phase, threshold);
+      const input = el("input");
+      input.type = "number";
+      input.min = threshold === "normal" ? "1" : "0";
+      input.step = "1";
+      input.id = "settings-rounds-" + phase + "-" + threshold;
+      input.name = keysOf(text).join(".");
+      input.value = rounds[phase][threshold];
+      input.onchange = () => stage(text, { value: Number(input.value) }, input);
+      return field(threshold === "normal" ? "Normal" : "Extended", input, text, [],
+                   "the " + phase + " " + threshold + " review budget");
+    });
+    group.append(...fields);
+    return group;
   }));
   const select = $("settings-flow");
+  select.name = "default_flow";
   const choosing = settings.default_flow || "";
   const options = flows.map((flow) => {
     const option = el("option", flow.error ? flow.name + " (refused)" : flow.name);
@@ -401,7 +467,7 @@ function draw() {
   drawProfiles(settings);
   drawTogether(settings);
   form.hidden = false;
-  for (const id of ["settings-add-name", "settings-add-kind", "settings-add", "settings-flow"]) {
+  for (const id of ["settings-add-name", "settings-add-kind", "settings-add", "settings-flow", "settings-reset"]) {
     $(id).disabled = !shown.writable;
   }
   if (!shown.writable) {
@@ -476,6 +542,15 @@ $("settings-discard").onclick = async () => {
   report($("settings-result"), "Changes discarded.");
   draw();
 };
+
+$("settings-reset").onclick = () => {
+  for (const key of RESET) stage(pointer(key), { revert: true });
+  draw();
+  report($("settings-result"), staged.size ? "Reset staged. Apply to restore the shared defaults."
+    : "The visible settings already match the shared defaults.");
+};
+
+$("settings-skill-picker-close").onclick = () => $("settings-skill-picker").close();
 
 $("settings-add").onclick = () => {
   const name = $("settings-add-name").value.trim();

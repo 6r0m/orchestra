@@ -33,10 +33,13 @@ from app.application import settings as S  # noqa: E402
 from app.foundation import policy as policy_mod  # noqa: E402
 from app.orchestration import workflow as WF  # noqa: E402
 
-# As a host that binds its own methodology to each stage does; the shipped settings bind none, and
-# `test_workflow` proves both — that a bound skill leads the prompt, and that none appears without one.
-SETTINGS = dict(S.load(), stage_skills={"plan": "investigate-change", "assess": "architect",
-                                        "build": "implement-approved-change", "verify": "architect"})
+# This harness exercises Codex for both roles and binds test skills to each stage; the shipped defaults
+# bind Claude profiles and the five shared methodologies. Tests that need shipped settings read them directly.
+SETTINGS = dict(S.load())
+SETTINGS["roles"] = dict(SETTINGS["roles"], architect=dict(SETTINGS["roles"]["architect"],
+                                                            agent="codex-architect"))
+SETTINGS["stage_skills"] = {"plan": "investigate-change", "assess": "architect",
+                            "build": "implement-approved-change", "verify": "architect"}
 # The policy a run started on those settings is handed, as `client.start` makes it.
 POLICY = S.run_policy(SETTINGS)
 WSL_QUEUE = policy_mod.queue(POLICY, "wsl")

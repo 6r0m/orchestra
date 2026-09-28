@@ -37,6 +37,7 @@ Importing a kind's module only defines it: anything that touches the host happen
 so the kinds can be listed on a host that has none of their CLIs.
 """
 import importlib
+import os
 import pkgutil
 
 from app.foundation import policy as P
@@ -44,9 +45,9 @@ from app.foundation import policy as P
 ACCESSES = ("read", "write")
 REQUIRED = ("NAME", "EXECUTABLE", "ACCESS", "OPTIONS", "SKILL", "SESSION_MARKERS", "SESSION_MARKER_PREFIXES",
             "LOST_SESSION", "OLD_BRAIN", "validate", "command", "host", "session_in", "wire", "completion",
-            "output", "session", "final_message", "message_of", "skill_folders")
+            "output", "session", "final_message", "message_of", "skill_folders", "skill_roots")
 CALLABLE = ("validate", "command", "host", "session_in", "wire", "completion", "output", "session",
-            "final_message", "message_of", "skill_folders")
+            "final_message", "message_of", "skill_folders", "skill_roots")
 OPTIONAL = ("trust_ensure", "trust_forget", "trace_env", "trace_settings", "reasoning", "upload")
 
 
@@ -110,6 +111,26 @@ def available():
             found.append(dict(capabilities(load(kind)), kind=kind, refused=None))
         except Refused as exc:
             found.append({"kind": kind, "refused": str(exc)})
+    return found
+
+
+def skill_names(repo):
+    """Discovered skill names for each usable kind, using only the roots its adapter owns."""
+    found = {}
+    for entry in available():
+        if entry["refused"]:
+            continue
+        module = load(entry["kind"])
+        names = set()
+        for root in module.skill_roots(repo):
+            try:
+                with os.scandir(root) as children:
+                    names.update(child.name for child in children
+                                 if P.skill_name(child.name) and child.is_dir(follow_symlinks=True))
+            except OSError:
+                # Discovery helps fill a setting; prepare still checks a binding on the worker that will use it.
+                continue
+        found[entry["kind"]] = sorted(names)
     return found
 
 

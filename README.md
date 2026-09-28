@@ -122,7 +122,7 @@ worker that dies between spawn and assignment cannot leave an agent behind.
   never overrides an explicit `untrusted` decision of yours.
 - **The private surface is one file.** `.env` holds credentials and machine-specific values;
   `.env.example` names its keys. Everything about how runs behave is public configuration in
-  `policy.json`. Before publishing anything from a fork: `make public-check`.
+  `.orchestra/settings.json`. Before publishing anything from a fork: `make public-check`.
 
 ## What is proven
 
@@ -147,7 +147,7 @@ file proves; [docs/history/](docs/history/) records how the system got here.
 
 | what | where |
 |---|---|
-| roles, brains, budgets, timeouts, ports, target hosts | [`policy.json`](policy.json), validated strictly by [`policy.py`](app/foundation/policy.py) |
+| shared Settings defaults and local overrides | [`.orchestra/settings.json`](.orchestra/settings.json) and the ignored `.orchestra/settings.local.json`, validated by [`policy.py`](app/foundation/policy.py) and [`application.settings`](app/application/settings.py) |
 | how each role works | [`roles/engineer.md`](roles/engineer.md), [`roles/architect.md`](roles/architect.md) |
 | the order a run's stages take | [`flows/`](flows/README.md), one file per flow; the policy's `default_flow` names the default |
 | the repositories runs may work on | `repos.json` — yours, ignored; copy [`repos.example.json`](repos.example.json) |
@@ -156,12 +156,12 @@ file proves; [docs/history/](docs/history/) records how the system got here.
 Running it day to day — the page, the command line, and where to look when something is wrong — is
 [docs/using.md](docs/using.md). What is being worked on right now is in [todo/](todo/README.md).
 
-If you have your own engineering skills for your CLI, bind them per stage with `stage_skills` in a
-policy of your own, named by `ORCH_POLICY`: the page, the command line and the workers all load the
-policy it names, and the bound skill leads that stage's prompt. Orchestra ships none, and its role
-files say enough to work without one. A policy inside the checkout needs nothing more. One outside it
-is copied to each host, with that host's worker's `ORCH_POLICY` naming its copy; a copy that differs
-from the policy a run started with is refused rather than used.
+The Workbench's Settings view manages role profiles, one explicit methodology skill per stage, review
+budgets and the default flow. Each Apply writes a sparse patch to the ignored
+`.orchestra/settings.local.json`; Revert removes one local override, while Reset stages Revert for every
+setting the page owns and still requires Apply. Other hand-written local members survive. The shared
+file carries the defaults. A separate stack may name its own complete settings file through
+`ORCHESTRA_SETTINGS`; that file is taken alone and the Workbench shows it read-only.
 
 ## License
 

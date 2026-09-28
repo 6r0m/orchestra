@@ -266,7 +266,7 @@ class Activities:
         def compose(session_first):
             return N.compose_prompt(stage, role, is_review, state, session_first=session_first,
                                     stage_first=attempt == 1, logs=os.path.join(rdir, "logs"),
-                                    skills=policy.get("stage_skills"))
+                                    skills=policy.get("stage_skills"), review_rounds=policy.get("review_rounds"))
 
         span = T.begin(client, state, stage, role_name, dict(adapters.view(role), kind=kind, agent=role.get("agent")),
                        log=os.path.relpath(os.path.join(rdir, "logs", name), paths.REPO))
@@ -323,9 +323,15 @@ class Activities:
                 verdict, feedback = N.parse_review(role, rc, out)
                 result.update(verdict=verdict, feedback=feedback)
                 # The routing is the workflow's; the trace only records what it will be.
+                if policy.get("review_rounds"):
+                    thresholds = policy["review_rounds"][state["phase"]]
+                    rounds = state.get("phase_rounds", 0) + 1
+                    limit = thresholds["normal"] + thresholds["extended"]
+                else:
+                    rounds = attempt
+                    limit = policy["max_rounds"][state["phase"]]
                 gate_reason = routing.gate_reason_for(
-                    verdict, args.get("gate"), attempt, policy["max_rounds"][state["phase"]],
-                    state.get("auto_proceed", False))
+                    verdict, args.get("gate"), rounds, limit, state.get("auto_proceed", False))
                 if verdict == "PASS" and judged is not None:
                     if self.git.work_tree(worktree) != judged:
                         raise GitViolation("the worktree changed while the architect judged it, so what it "

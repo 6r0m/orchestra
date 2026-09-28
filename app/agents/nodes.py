@@ -22,6 +22,29 @@ from app.foundation import stages
 
 # What may follow the verdict object and still leave it the reviewer's last word.
 _ENDS_THERE = re.compile(r"\s*(?:```)?\s*")
+CONVERGENCE_REFLECTION = {
+    "engineer": """The normal review budget has elapsed.
+
+Continue the task, but critically examine why convergence is taking this long. Do not mechanically repeat
+the previous approach. Re-evaluate which findings are valid and unresolved, which you dispute and what
+repository evidence refutes them, whether recent changes introduced new consequences, whether you have
+misunderstood a requirement repeatedly, and whether another implementation or investigation strategy is
+needed. If progress genuinely requires a human or external decision, say so clearly. Otherwise continue.""",
+    "architect": """The normal review budget has elapsed.
+
+Continue reviewing the evolving artifact, but critically examine why convergence is taking this long.
+Re-evaluate whether findings are concrete correctness or requirement problems, whether new findings follow
+from new work, whether evidence-backed engineer refutations should be accepted, whether you are repeating
+unsupported findings or overengineering, and whether a genuine human or external decision is unresolved.
+Return BLOCKER if intervention is genuinely required. Otherwise continue with only concrete findings.""",
+}
+FINAL_REVIEW_SUMMARY = """If your verdict is PATCH or UNVERIFIED, make feedback an evidence summary that states:
+- what remains unresolved;
+- what was tried or changed across the loop;
+- which findings are disputed and the evidence on each side;
+- the likely cause: task ambiguity, engineer implementation or reasoning, reviewer disagreement or overreach,
+  or an external blocker;
+- the concrete operator decision or input needed."""
 
 
 class TransportError(RuntimeError):
@@ -156,7 +179,7 @@ def _verdict_object(value):
 
 
 def compose_prompt(stage, stage_cfg, is_review, state, session_first,
-                   stage_first, logs="the run's logs", skills=None):
+                   stage_first, logs="the run's logs", skills=None, review_rounds=None):
     """Everything a stage needs, explicitly from state — no hidden memory.
 
     HOW a role acts lives in its persona, which the run carries from its start, so
@@ -219,6 +242,19 @@ def compose_prompt(stage, stage_cfg, is_review, state, session_first,
                       "(todo: %s)." % todo]
     if state.get("guidance"):
         lines += ["", "# Operator guidance", state["guidance"]]
+    convergence = state.get("convergence") or {}
+    role_name = stages.STAGE_ROLE[stage]
+    seen = state.get("convergence_seen") or []
+    if (convergence.get("phase") == state.get("phase") and
+            (session_first or role_name not in seen)):
+        lines += ["", "# Convergence reflection",
+                  "The normal review budget of %d iterations has elapsed.\n\n%s" %
+                  (convergence["round"], CONVERGENCE_REFLECTION[role_name])]
+    thresholds = (review_rounds or {}).get(state.get("phase"))
+    if is_review and thresholds:
+        review_number = state.get("phase_rounds", 0) + 1
+        if review_number >= thresholds["normal"] + thresholds["extended"]:
+            lines += ["", "# Final review summary", FINAL_REVIEW_SUMMARY]
     return "\n".join(lines) + "\n"
 
 

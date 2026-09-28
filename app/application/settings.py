@@ -57,7 +57,8 @@ def read(root=paths.REPO, environ=os.environ):
                     "stages": [stage for stage in stages.STAGES if stages.STAGE_ROLE[stage] == role]}
              for role in P.ROLES}
     shown = {"revision": P.revision(below, local), "source": P.origin(below, root), "writable": local is not None,
-             "kinds": adapters.available(), "roles": roles, "phases": list(stages.PHASES),
+             "kinds": adapters.available(), "skills": adapters.skill_names(root), "roles": roles,
+             "phases": list(stages.PHASES),
              "max_persona_bytes": P.MAX_PERSONA_BYTES}
     try:
         settings = load(root=root, environ=environ)
@@ -144,4 +145,8 @@ def run_policy(settings, steps=None):
     skills = {stage: skill for stage, skill in (settings.get("stage_skills") or {}).items() if stage in taken}
     policy = {key: value for key, value in settings.items()
               if not key.startswith("_") and key not in ("agents", "roles", "stage_skills")}
+    # A layered old local patch may still hold max_rounds. New runs use the shared review_rounds contract;
+    # histories already carrying max_rounds keep their original policy and routing.
+    if "review_rounds" in policy:
+        policy.pop("max_rounds", None)
     return dict(policy, roles=roles, stage_skills=skills)

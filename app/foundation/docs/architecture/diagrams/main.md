@@ -11,13 +11,13 @@ flowchart LR
         stages["stages.py"]
         flows["flows.py"]
     end
-    repos_ext[("policy.json")]
+    settings_ext[(".orchestra/settings.json + local patch")]
     flows_ext[("flows/")]
     hostfs[("this host's disk")]
     policy -->|"the stage vocabulary"| stages
     policy -->|"the checkout root"| paths
     policy -->|"what can name a flow"| flows
-    repos_ext -->|"policy.json"| policy
+    settings_ext -->|"settings data"| policy
     flows -->|"the stage contract"| stages
     flows -->|"the checkout root"| paths
     flows_ext -->|"a flow's steps"| flows

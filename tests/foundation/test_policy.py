@@ -148,10 +148,30 @@ class Shape(unittest.TestCase):
     def raw(self):
         return json.loads(SETTINGS)
 
-    def test_the_shipped_settings_bind_one_profile_per_role_and_no_skill(self):
+    def test_the_shipped_settings_bind_role_profiles_and_stage_methodologies(self):
         loaded = P.load(P.SETTINGS_FILE)
-        self.assertLessEqual({role["agent"] for role in loaded["roles"].values()}, set(loaded["agents"]))
-        self.assertIsNone(loaded.get("stage_skills"), "the shared settings bind no skill")
+        self.assertEqual({role: settings["agent"] for role, settings in loaded["roles"].items()},
+                         {"engineer": "claude-engineer", "architect": "claude-architect"})
+        self.assertEqual(set(loaded["agents"]),
+                         {"claude-engineer", "claude-architect", "codex-engineer", "codex-architect"})
+        self.assertEqual(loaded["stage_skills"], {
+            "research": "architect", "plan": "investigate-change", "assess": "architect",
+            "build": "implement-approved-change", "verify": "architect"})
+
+    def test_review_rounds_have_normal_and_extended_budgets_and_old_settings_still_load(self):
+        raw = self.raw()
+        raw.pop("max_rounds")
+        raw["review_rounds"] = {phase: {"normal": 10, "extended": 10} for phase in P.stages.PHASES}
+        P.validate(raw)
+        for phase, threshold, value in (("plan", "normal", 0), ("build", "extended", -1),
+                                        ("plan", "extended", True)):
+            broken = json.loads(json.dumps(raw))
+            broken["review_rounds"][phase][threshold] = value
+            with self.subTest(phase=phase, threshold=threshold, value=value), self.assertRaises(P.InvalidPolicy) as raised:
+                P.validate(broken)
+            self.assertEqual(raised.exception.pointer, "/review_rounds/%s/%s" % (phase, threshold))
+        legacy = self.raw()
+        P.validate(legacy)
 
     def test_settings_of_the_old_shape_are_refused_naming_the_new_keys(self):
         old = self.raw()

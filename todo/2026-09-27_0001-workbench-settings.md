@@ -1523,3 +1523,13 @@ code it guards, and observed failing first.
   - page: the headless probe's 23 checks pass; with fixes 2 and 3 taken back, four of them fail.
 - **Declined:** the whole Windows suite now. By the standing order, each host runs it once after the
   external PASS, and this change runs in that one.
+
+
+### 2026-09-28 — settings implementation
+
+- Shipped four role-specific agent profiles, preferred Claude role bindings, the accepted stage skills, and 10 normal + 10 extended review budgets. The settings page discovers skill names through adapter-owned roots, stages Reset for page-owned settings, and continues writing sparse local patches; unrelated local settings survive.
+- Added version-gated routing for new `review_rounds` runs, a code-owned convergence reflection, and evidence summary at exhaustion. Old run policies with `max_rounds` keep the recorded route. Focused Temporal replay passed.
+- Updated the current settings owner and user/architecture/test docs. Replaced stale `policy.json`/`ORCH_POLICY` examples with `.orchestra/settings.json` and `ORCHESTRA_SETTINGS`.
+- Focused Windows verification passed: 26 classes, 158 tests, including settings Apply/Reset/reload, policy shape and layers, adapter skill discovery, Workbench API, workflow thresholds, replay, observability and architecture boundaries. `node --check`, settings JSON parse, and `git diff --check` passed. The focused Settings browser probe from this task passed before the final additions of control names and removal of the legacy budget from Reset; those last edits do not change the interaction path.
+- Claude Code 2.1.283 and current Anthropic model docs support the selected `claude-opus-5` and `claude-fable-5` IDs. The installed Codex CLI 0.153.4 model catalog lists `gpt-5.6-sol` but not `gpt-6-luna`; the shared Codex engineer profile keeps the operator-selected ID, with local execution pending a Codex CLI update. No system-wide CLI update was performed.
+- Per the accepted gate, the full WSL and Windows suites and the final live Workbench walkthrough remain deferred until external implementation PASS.

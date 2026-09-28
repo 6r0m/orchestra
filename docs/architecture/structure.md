@@ -32,12 +32,17 @@ in — its flow, one file in `flows/`.
   history is the run's durable state: a process that exits at a stop loses nothing, and any later
   process answers it. The self-hosted server keeps its own PostgreSQL, and its `orchestration`
   namespace keeps closed runs for 90 days.
-- **D5** **`max_rounds`** = architect attempts per phase — the plan's or the
-  build's, the work a review judges; research, which none judges, has none —
-  counting from 1 including the first; `== max` stops for the human. Operator guidance
-  re-enters the phase with the counter reset. No other budget class. **Nothing
-  runs twice on its own:** a role-run and every git side effect are single-attempt
-  activities, and a failure stops the run for the operator.
+- **D5** **Review budgets count architect attempts per phase** — plan and build,
+  the work a review judges; research has none. New runs use `review_rounds`:
+  `normal` productive attempts, then, if `extended` is greater than zero, one
+  code-owned convergence reflection for each role as it next runs and up to
+  `extended` more attempts. `PASS` advances
+  immediately; `BLOCKER` stops for the human immediately; a non-`PASS` at the
+  combined limit stops as `exhausted`. Operator guidance starts a new episode
+  with its counters reset. A run carrying the old `max_rounds` policy keeps its
+  recorded boundary and routing. **Nothing runs twice on its own:** a role-run
+  and every git side effect are single-attempt activities, and a failure stops
+  the run for the operator.
 - **D8** **State stays compact and raw** (ids, refs, verdict, feedback —
   never transcripts/diffs/accumulated prompts); prompts reach CLIs as an argv
   argument and are kept in files we name; per-role-run logs and terminal
@@ -85,7 +90,7 @@ Do not re-derive a `states/` layer here.
 | [app/workspace/](../../app/workspace/README.md) — [worktrees.py](../../app/workspace/worktrees.py) | the run's worktree through the target's own git: create, guard, merge, discard, the view |
 | [repos.py](../../app/workspace/repos.py) · [repos.json](../../repos.example.json) | which repository, target, base branch and worktree root a run uses |
 | [app/foundation/](../../app/foundation/README.md) — [paths.py](../../app/foundation/paths.py) | the one derivation of this checkout's root, the runtime root a run writes under, and the secrets directory |
-| [policy.json](../../policy.json) · [policy.py](../../app/foundation/policy.py) | roles, brains, budgets, access, target hosts — and strict validation of them |
+| [`.orchestra/settings.json`](../../.orchestra/settings.json) · [policy.py](../../app/foundation/policy.py) · [settings.py](../../app/application/settings.py) | shared settings and local patch, profiles, role bindings, skills, review budgets, timeouts, target hosts — and strict validation across the adapters |
 | [envpath.py](../../app/foundation/envpath.py) | where each checkout's environment lives on each host, and its guarded removal |
 | [app/observability/](../../app/observability/README.md) — [telemetry.py](../../app/observability/telemetry.py) | the optional trace of a run — its work item, phases, role steps, stops, final diff and scores, written to the [trace contract](trace-contract.md) — and the per-run settings that let each agent's tracing plugin nest its turns there |
 | [app/interfaces/](../../app/interfaces/README.md) — [workbench/](../../app/interfaces/workbench/server.py) | the operator's page: the stack, every run, its stop and answers, its live terminals, its rounds and its change — a systemd user service in WSL, outside the stack it controls |
@@ -502,19 +507,18 @@ still lands on a checkout.
   form of the standing boundary that state plus the worktree must be
   sufficient to reconstruct a role. Healthy resumed sessions keep the
   cheap delta.
-- **D19** **The skill owns how a role judges; the persona owns only what is
-  orchestrator-specific**: the global `architect`,
-  `investigate-change` and `implement-approved-change` skills own the stance,
-  the evidence rules and the verdict vocabulary, through the shared contracts
-  they read. A `roles/*.md` file states who the role is in this workflow, defers
-  to its skill, and adds only what the skill cannot know — session persistence
-  across its stages, and that the verdict is what routes (D4). It never
-  restates the stance, so the two cannot drift. Each stage invokes its skill
-  as the prompt's first characters (the `stage_skills` policy key): the skills are
-  model-invocable, but an unattended run must not depend on the model choosing
-  correctly every episode, and a mid-prompt invocation is inert. This does not
-  widen D13 — the persona files stay configuration, and which skill a stage
-  invokes stays code.
+- **D19** **The skill owns its methodology; the persona owns only what is
+  orchestrator-specific**: the global `architect`, `investigate-change` and
+  `implement-approved-change` skills own their stance, evidence rules and
+  verdict vocabulary. A `roles/*.md` file states who the role is in this
+  workflow, defers to its skill, and adds only what the skill cannot know —
+  session persistence across stages and that the verdict is what routes (D4).
+  Settings name at most one skill per stage. The kind's adapter owns how it is
+  invoked and which installed roots it can use; Settings discovers names through
+  those roots, and `prepare` checks a binding on the target host before work.
+  A stage invokes its skill at its first prompt, and a session born again gets
+  it again; retries in the same session do not. The binding is configuration,
+  not role initialization or workflow code.
 - **D25** **The workflow is deterministic.** No clock, randomness, file,
   network or process call happens in workflow code outside Temporal's own APIs;
   every effect is an activity. A change to what the workflow commands goes

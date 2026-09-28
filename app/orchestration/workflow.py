@@ -85,6 +85,7 @@ class FeatureRun:
         self.segments = []
         self.queue = None
         self.policy = None
+        self.review_rounds = None
         self.stop = None
         self.answer_given = None
         self.stops = 0
@@ -106,6 +107,10 @@ class FeatureRun:
 
     async def _run(self, start):
         self.policy, self.queue = start["policy"], start["queue"]
+        # Runs already in Temporal keep the policy and max_rounds behavior recorded at their start.
+        # Only starts carrying the new settings opt into this versioned routing path.
+        if "review_rounds" in self.policy and workflow.patched("review-rounds-with-convergence-extension"):
+            self.review_rounds = self.policy["review_rounds"]
         repository = start["repository"]
         s = self.state = {"run_id": start["run_id"], "task": start["task"], "label": start["label"],
                           "created": start["created"], "auto_proceed": start["auto_proceed"],
@@ -141,6 +146,8 @@ class FeatureRun:
         first = self.segments[0]["work"][1]
         s.update(await self._trace("open_run", {"state": s, "phase": first}) or {})
         s.update(phase=first, round=0, phase_rounds=0, episode=1, agent_sessions={})
+        if self.review_rounds:
+            s.update(convergence=None, convergence_seen=[])
         return await self._loop()
 
     async def _loop(self):
@@ -188,6 +195,8 @@ class FeatureRun:
                 # Guidance, or a revised plan or research: a new bounded episode. The operator's words
                 # survive the worker and are consumed by the architect that judges next.
                 s.update(guidance=answer["text"], round=0, gate_reason="", episode=s["episode"] + 1)
+                if self.review_rounds:
+                    s.update(phase_rounds=0, convergence=None, convergence_seen=[])
                 continue
             if review and s["verdict"] != "PASS":
                 continue
@@ -237,14 +246,31 @@ class FeatureRun:
         if result is None:
             return False
         s["agent_sessions"] = dict(s.get("agent_sessions") or {}, **result["agent_sessions"])
+        if self.review_rounds and s.get("convergence") and s["convergence"].get("phase") == s["phase"]:
+            role = stages.STAGE_ROLE[stage]
+            seen = list(s.get("convergence_seen") or [])
+            if role not in seen:
+                seen.append(role)
+            s["convergence_seen"] = seen
         entry = {"stage": stage, "phase": s["phase"], "episode": s["episode"], "round": s["round"] + 1,
                  "at": workflow.now().isoformat()}
         if "verdict" in result:
             rounds = s["round"] + 1
-            reason = routing.gate_reason_for(result["verdict"], gate, rounds,
-                                             self.policy["max_rounds"][s["phase"]], s["auto_proceed"])
+            phase_rounds = s.get("phase_rounds", 0) + 1
+            if self.review_rounds:
+                thresholds = self.review_rounds[s["phase"]]
+                limit = thresholds["normal"] + thresholds["extended"]
+                routed_round = phase_rounds
+            else:
+                limit = self.policy["max_rounds"][s["phase"]]
+                routed_round = rounds
+            reason = routing.gate_reason_for(result["verdict"], gate, routed_round, limit, s["auto_proceed"])
             s.update(verdict=result["verdict"], feedback=result["feedback"], round=rounds,
-                     phase_rounds=s.get("phase_rounds", 0) + 1, guidance="", gate_reason=reason)
+                     phase_rounds=phase_rounds, guidance="", gate_reason=reason)
+            if self.review_rounds:
+                if (result["verdict"] not in ("PASS", "BLOCKER") and
+                        phase_rounds == thresholds["normal"] and thresholds["extended"] > 0):
+                    s.update(convergence={"phase": s["phase"], "round": phase_rounds}, convergence_seen=[])
             for judged in ("assessed_tree", "verified_tree"):
                 if judged in result:
                     s[judged] = result[judged]
@@ -301,6 +327,8 @@ class FeatureRun:
                  episode=s["episode"] + 1,
                  guidance="The plan in this worktree changed after your last assessment. "
                           "Judge it as it stands now.")
+        if self.review_rounds:
+            s.update(phase_rounds=0, convergence=None, convergence_seen=[])
         return False
 
     async def _next(self, work):
@@ -309,6 +337,8 @@ class FeatureRun:
         # The operator's words were for the stage just approved, never for the next one.
         s.update(phase=work, round=0, phase_rounds=0, feedback="", guidance="", gate_reason="",
                  episode=s["episode"] + 1)
+        if self.review_rounds:
+            s.update(convergence=None, convergence_seen=[])
         opened = await self._trace("open_phase", {"state": s, "phase": work})
         s["trace_phases"] = dict(s.get("trace_phases") or {}, **{work: (opened or {}).get("id")})
 
@@ -332,6 +362,8 @@ class FeatureRun:
                 # A defect found at the gate goes back into the run, to the role the operator names.
                 s.update(status="RUNNING", guidance=answer["text"], round=0, gate_reason="",
                          episode=s["episode"] + 1)
+                if self.review_rounds:
+                    s.update(phase_rounds=0, convergence=None, convergence_seen=[])
                 return "review" if answer["role"] == "architect" else "build"
             self._doing("merge")
             merged = await self._until_done("merge", lambda: self._git("merge", {"state": s}))
@@ -348,6 +380,8 @@ class FeatureRun:
                                   "worktree with conflict markers in: %s. Resolve every conflict in the "
                                   "files; do not stage or commit." % (
                                       s["run_id"], s["base_branch"], ", ".join(merged["files"])))
+                if self.review_rounds:
+                    s.update(phase_rounds=0, convergence=None, convergence_seen=[])
                 self._line("merge conflict: %s" % ", ".join(merged["files"]))
                 return "build"
             s["merge_refusal"] = merged["reason"]

@@ -63,7 +63,7 @@ carries its owners, `work/platform/service`, is found under `work`, then `platfo
 view as you hover it — or on any other one given as its path as WSL sees it (`/mnt/e/...` for a Windows
 drive); only the one chosen is sent. The task's first words name the run and its branch. It follows the
 flow chosen in its Flow list, whose steps show under it: `engineer-code`, the default — `default_flow`
-in `policy.json` — has the engineer plan from the code; `architect-research` has the architect research
+in `.orchestra/settings.json` — has the engineer plan from the code; `architect-research` has the architect research
 first and its brief wait for your approval. With no `default_flow`, a run that names no flow takes the
 order runs took before flows, and the list offers that first. Each flow is a file in
 [flows/](../flows/README.md), read again each time the list is opened, so a flow you add or edit there
@@ -106,6 +106,23 @@ confirmed, deletes them through its host's own git as a discard would. It is ref
 or discard of that run still runs on its host, and when git itself refuses, the page says why.
 *Worktrees*, at the top, lists any repository's worktrees, which of them are still unmerged and which
 run each is, and removes a closed run's from there too.
+
+### Settings
+
+Settings shows the profiles bound to each role, each profile's model and effort, the one optional
+methodology skill named for each stage, the plan and build review budgets, and the default flow. The
+skill picker lists names found through each agent adapter; unbound installed skills remain available to
+the vendor CLI. A run snapshots the effective settings when it starts.
+
+Apply writes only changed values to `.orchestra/settings.local.json`, so a fresh Workbench read keeps
+them and unrelated hand-written local members survive. Revert removes one override to reveal its shared
+value. **Reset visible settings to defaults** stages Revert for every Settings page value; Apply is still
+required. Model identifiers and available efforts are passed to their vendor CLI as configured.
+
+Review budgets have a normal and an extended count for plan and build. After a non-`PASS` at the normal
+boundary, if an extended budget remains, the engineer and architect each receive one convergence
+reflection on their next turn; the normal loop then continues through the extended budget. `BLOCKER`
+stops immediately, and a non-`PASS` at the combined limit waits for operator guidance.
 
 ## The command line
 
@@ -154,7 +171,7 @@ decision depends on it. What the rows promise is in
 
 ## The port
 
-The workbench's port is `workbench_port` in `policy.json`. It has to be free on *both* sides on a
+The workbench's port is `workbench_port` in `.orchestra/settings.json`. It has to be free on *both* sides on a
 Windows + WSL machine: a Windows process listening on the same loopback port takes the connection
 before WSL's forwarding does, and the page then never loads in a Windows browser. `netstat -ano |
 findstr :<port>` on Windows names the holder. The default avoids the ports Unreal Editor uses, which

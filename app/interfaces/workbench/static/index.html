@@ -155,15 +155,16 @@
               <tbody id="settings-profiles"></tbody>
             </table>
           </div>
+          <p class="hint">Leave Model or Effort blank to use that provider's default.</p>
           <div class="add-agent">
             <div class="field">
               <label for="settings-add-name">New profile</label>
-              <input id="settings-add-name" type="text" spellcheck="false" placeholder="codex-fast…"
+              <input id="settings-add-name" name="profile-name" type="text" spellcheck="false" placeholder="codex-fast…"
                 aria-describedby="settings-add-hint" data-pointer="/agents">
             </div>
             <div class="field">
               <label for="settings-add-kind">Kind</label>
-              <select id="settings-add-kind"></select>
+              <select id="settings-add-kind" name="profile-kind"></select>
             </div>
             <button type="button" id="settings-add">Add profile</button>
             <p class="hint" id="settings-add-hint">Lowercase letters and digits, words joined by single hyphens.</p>
@@ -175,7 +176,8 @@
           <h2 id="settings-together-title">How the roles work together</h2>
           <fieldset class="field rounds">
             <legend>Review rounds</legend>
-            <p class="hint">How many times the architect may send a phase's work back before it stops for you.</p>
+            <p class="hint">When an extended budget remains after normal rounds, both agents get one convergence
+              reflection and may continue through it. BLOCKER stops immediately.</p>
             <div class="choices" id="settings-rounds"></div>
           </fieldset>
           <div class="field">
@@ -189,12 +191,21 @@
         <div class="apply-bar">
           <p id="settings-pending">No changes.</p>
           <div class="actions">
+            <button type="button" class="quiet" id="settings-reset">Reset visible settings to defaults</button>
             <button type="button" class="quiet" id="settings-discard">Discard changes</button>
             <button type="submit" class="primary" id="settings-apply">Apply</button>
           </div>
           <p class="result" id="settings-result" role="status"></p>
         </div>
       </form>
+      <dialog id="settings-skill-picker" aria-labelledby="settings-skill-picker-title">
+        <div class="skill-picker-head">
+          <h2 id="settings-skill-picker-title">Choose a skill</h2>
+          <button type="button" class="quiet" id="settings-skill-picker-close">Close</button>
+        </div>
+        <p class="hint">Choose an available skill for this stage.</p>
+        <div class="skill-options" id="settings-skill-options"></div>
+      </dialog>
     </section>
 
     <article class="view run" id="run" hidden aria-labelledby="run-task">

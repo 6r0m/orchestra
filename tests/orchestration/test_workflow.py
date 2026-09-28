@@ -50,12 +50,47 @@ class Routing(Scenario):
         self.assertEqual(self.names(), ["plan-e1-1", "assess-e1-1", "build-e2-1", "verify-e2-1"])
 
     def test_patch_and_unverified_loop_bounded_then_human(self):
-        # max_rounds.plan == 2: round 1 PATCH -> engineer again; round 2 UNVERIFIED == max -> exhausted.
+        # A policy already handed to a run with max_rounds keeps its per-episode boundary.
+        legacy = dict(POLICY)
+        legacy.pop("review_rounds", None)
+        legacy["max_rounds"] = {"plan": 2, "build": 2}
         a1, _ = codex_review_first("PATCH", "fix A")
         run = self.drive([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1),
-                          ("plan-e1-2", 0, "revised\n"), ("assess-e1-2", 0, codex_review_resumed("UNVERIFIED"))])
+                          ("plan-e1-2", 0, "revised\n"), ("assess-e1-2", 0, codex_review_resumed("UNVERIFIED"))],
+                         policy=legacy)
         self.assertEqual(run.stop["reason"], "exhausted")
         self.assertIn("fix A", self.agent.calls[2]["prompt"])
+
+    def test_review_rounds_reflect_once_after_ten_and_exhaust_with_evidence_at_twenty(self):
+        summaries = ("Unresolved: one concrete gap. Tried: two changes. Disputed: finding B, because test C "
+                     "shows otherwise. Likely cause: implementation reasoning. Operator input: choose whether "
+                     "to narrow the scope.")
+        script = []
+        for round_ in range(1, 21):
+            engineer_name = "plan-e1-%d" % round_
+            review_name = "assess-e1-%d" % round_
+            engineer_out = "planned\n" if round_ == 1 else "revised\n"
+            if round_ == 1:
+                review_out = codex_review_first("PATCH", "fix round 1")[0]
+            elif round_ == 20:
+                review_out = codex_review_resumed("UNVERIFIED", summaries)
+            else:
+                review_out = codex_review_resumed("PATCH", "fix round %d" % round_)
+            script.extend(((engineer_name, 0, engineer_out), (review_name, 0, review_out)))
+        policy = dict(POLICY)
+        policy["review_rounds"] = {phase: {"normal": 10, "extended": 10} for phase in ("plan", "build")}
+        policy.pop("max_rounds", None)
+        run = self.drive(script, policy=policy)
+        self.assertEqual(run.stop["reason"], "exhausted")
+        self.assertEqual(len(self.agent.calls), 40)
+        self.assertIn("normal review budget of 10 iterations has elapsed", self.agent.calls[20]["prompt"])
+        self.assertIn("normal review budget of 10 iterations has elapsed", self.agent.calls[21]["prompt"])
+        self.assertNotIn("normal review budget of 10 iterations has elapsed", self.agent.calls[22]["prompt"])
+        final_prompt = self.agent.calls[39]["prompt"]
+        for term in ("what remains unresolved", "what was tried", "which findings are disputed",
+                     "likely cause", "operator decision"):
+            self.assertIn(term, final_prompt)
+        self.assertEqual(run.stop["feedback"], summaries, "the exhausted stop presents the final review evidence")
 
     def test_blocker_reaches_human_only_via_architect(self):
         a1, _ = codex_review_first("BLOCKER", "premise wrong")
@@ -92,10 +127,13 @@ class Routing(Scenario):
 
     def test_guidance_reentry_resets_round(self):
         a1, _ = codex_review_first("PATCH")
+        legacy = dict(POLICY)
+        legacy.pop("review_rounds", None)
+        legacy["max_rounds"] = {"plan": 2, "build": 2}
         run = self.drive([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1),
                           ("plan-e1-2", 0, "v2\n"), ("assess-e1-2", 0, codex_review_resumed("PATCH")),
                           ("plan-e2-1", 0, "v3\n"),        # the reset restarts attempts, in a new episode
-                          ("assess-e2-1", 0, codex_review_resumed("PASS"))])
+                          ("assess-e2-1", 0, codex_review_resumed("PASS"))], policy=legacy)
         self.assertEqual(run.stop["reason"], "exhausted")
         run.answer("narrow the scope to X")
         self.assertEqual(run.stop["reason"], "approval")
@@ -297,9 +335,13 @@ class Sessions(Scenario):
 
     def test_log_names_survive_a_human_reset_episode(self):
         a1, _ = codex_review_first("PATCH")
+        legacy = dict(POLICY)
+        legacy.pop("review_rounds", None)
+        legacy["max_rounds"] = {"plan": 2, "build": 2}
         run = self.drive([("plan-e1-1", 0, "v1\n"), ("assess-e1-1", 0, a1),
                           ("plan-e1-2", 0, "v2\n"), ("assess-e1-2", 0, codex_review_resumed("PATCH")),
-                          ("plan-e2-1", 0, "v3\n"), ("assess-e2-1", 0, codex_review_resumed("PASS"))])
+                          ("plan-e2-1", 0, "v3\n"), ("assess-e2-1", 0, codex_review_resumed("PASS"))],
+                         policy=legacy)
         run.answer("narrow it")
         names = self.names()
         self.assertEqual(len(names), 6)
@@ -311,7 +353,7 @@ class Sessions(Scenario):
         from app.agents import nodes as N
         state = {"task": "t", "todo_path": "/w/todo/x.md", "run_id": "r1", "worktree_path": "/w",
                  "phase": "plan", "round": 0, "episode": 1, "feedback": "", "guidance": ""}
-        roles = S.run_policy(S.load())["roles"]
+        roles = S.run_policy(temporal_env.SETTINGS)["roles"]
         bound = N.compose_prompt("plan", roles["engineer"], False, state, True, True,
                                  skills={"plan": "investigate-change"})
         self.assertTrue(bound.startswith("/investigate-change\n"),
@@ -321,8 +363,9 @@ class Sessions(Scenario):
                         "each kind invokes it its own way: Codex by `$name`")
         self.assertNotIn("/investigate-change",
                          N.compose_prompt("plan", roles["engineer"], False, state, True, True, skills=None),
-                         "and the shipped settings bind none, so no invocation appears")
-        self.assertEqual(S.load().get("stage_skills"), None, "nothing is bound by default")
+                         "a prompt without its run policy does not invent a skill")
+        self.assertEqual(S.load()["stage_skills"]["plan"], "investigate-change",
+                         "the shared settings own the default binding")
         old = {"brain": "claude", "workspace_access": "write", "prompt_path": os.path.join(PKG, "roles", "engineer.md")}
         self.assertTrue(N.compose_prompt("plan", old, False, state, True, True,
                                          skills={"plan": "/investigate-change"}).startswith("/investigate-change\n"),
@@ -511,11 +554,18 @@ class Policy(unittest.TestCase):
         raw["workflow_queue"] = "orchestration:demo1a2b3c"
         policy_mod.validate(raw)
 
-    def test_shipped_architect_pins_model_and_effort(self):
-        settings = temporal_env.SETTINGS
-        architect = settings["agents"][settings["roles"]["architect"]["agent"]]
-        self.assertTrue(architect.get("model"))
-        self.assertTrue(architect.get("effort"))
+    def test_shipped_role_profiles_pin_the_models_and_effort(self):
+        settings = S.load()
+        self.assertEqual((settings["roles"]["engineer"]["agent"], settings["roles"]["architect"]["agent"]),
+                         ("claude-engineer", "claude-architect"))
+        expected = {
+            "claude-engineer": ("claude-code", "claude-opus-5", "max"),
+            "claude-architect": ("claude-code", "claude-fable-5", "high"),
+            "codex-engineer": ("codex", "gpt-6-luna", "xhigh"),
+            "codex-architect": ("codex", "gpt-5.6-sol", "high"),
+        }
+        self.assertEqual({name: (profile["kind"], profile.get("model"), profile.get("effort"))
+                          for name, profile in settings["agents"].items()}, expected)
 
     def test_missing_persona_file_rejected(self):
         raw = self._raw()
@@ -545,7 +595,7 @@ class Policy(unittest.TestCase):
     def test_bad_rounds_rejected(self):
         for bad in (0, -1, "2", True):
             raw = self._raw()
-            raw["max_rounds"]["plan"] = bad
+            raw["review_rounds"]["plan"]["normal"] = bad
             with self.assertRaises(policy_mod.InvalidPolicy):
                 policy_mod.validate(raw)
 

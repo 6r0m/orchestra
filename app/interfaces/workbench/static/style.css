@@ -295,6 +295,9 @@ summary:hover { color: var(--ink); }
 .skills { display: grid; gap: 8px; }
 .skills .field { grid-template-columns: 5.5rem minmax(0, 1fr); column-gap: 12px; align-items: center; row-gap: 4px; }
 .skills .field > :not(.field-head) { grid-column: 2; }
+.skill-input { display: flex; gap: 8px; min-width: 0; }
+.skill-input input { flex: 1; min-width: 0; }
+.skill-input button { flex: none; }
 .skills .hint:empty { display: none; }
 .field-head { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
 .marks { display: inline-flex; gap: 6px; align-items: baseline; }
@@ -318,7 +321,11 @@ summary:hover { color: var(--ink); }
 .unusable { margin: 0; padding-left: 18px; color: var(--quiet); font-size: 13px; }
 .unusable:empty { display: none; }
 .rounds .choices { gap: 12px 24px; }
-.rounds .field { grid-template-columns: auto 5rem; align-items: center; column-gap: 10px; }
+.review-budget { display: grid; grid-template-columns: 1fr; gap: 8px; min-width: 13rem;
+  padding: 10px 14px 12px 0; border-bottom: 1px solid var(--rule); }
+.review-budget h3 { margin: 0; font-size: 14px; text-transform: capitalize; }
+.review-budget .field { grid-template-columns: 5.5rem minmax(4rem, 6rem); align-items: center; column-gap: 10px; }
+.review-budget input { font-variant-numeric: tabular-nums; }
 .rounds .field .alert { grid-column: 1 / -1; }
 /* The one way the view's changes are written, kept in reach at the foot of the window. */
 .apply-bar { position: sticky; bottom: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px 16px;
@@ -328,6 +335,15 @@ summary:hover { color: var(--ink); }
 .settings-form :is(input, select, textarea, button, summary) { scroll-margin-bottom: 96px; }
 #settings-notice-said { overflow-wrap: anywhere; }
 .apply-bar .result, .apply-bar .alert { flex-basis: 100%; }
+
+#settings-skill-picker { max-width: min(520px, calc(100vw - 32px)); max-height: min(72vh, 640px);
+  padding: 20px; color: var(--ink); background: var(--raised); border: 1px solid var(--control);
+  border-radius: 12px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55); overscroll-behavior: contain; }
+#settings-skill-picker::backdrop { background: rgba(4, 6, 9, 0.66); }
+.skill-picker-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.skill-picker-head h2 { margin: 0; font-size: 18px; }
+.skill-options { display: grid; gap: 4px; max-height: 52vh; overflow: auto; overscroll-behavior: contain; }
+.skill-option { width: 100%; justify-content: flex-start; overflow-wrap: anywhere; }
 
 /* The repository picker: a menu of owners, each list as wide as its names. An owner's list opens beside its
    row — to the right, else to the left — and under the row where neither side has room: the browser tries

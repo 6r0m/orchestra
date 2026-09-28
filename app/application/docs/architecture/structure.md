@@ -10,6 +10,7 @@ and stop the stack.
 
 - `activities` — everything a run does on its target host: resolve the repository, make the worktree, record trust, run a role turn, merge, discard, read the change for review, write the trace.
 - `client` — the one client of runs: start, list, status, what a run is doing now, answer, stop and force terminate, the change, the worktrees and the removal of what a closed run kept, shared by the page and the command line.
+- `settings` — the one settings loader and writer, adapter-aware validation, and the run-policy snapshot built from the selected flow.
 - `stack` — the stack's one reading and its one owner: whether Temporal answers and each host's worker runs and polls, and the start, stop and restart of the stack and of each part, in order, each outcome proven — and, once a stopped worker is proven gone, the sweep of what its stages left. The process mechanics it orders are `workers.sh` and `workers.ps1`, at the checkout root.
 
 ## Does not own
@@ -25,6 +26,7 @@ mechanism of its own: every concern this composes is owned by the package it cam
 |---|---|
 | `activities.py` | what a run does on its target host, one activity at a time |
 | `client.py` | the one client of runs, for the page and the command line alike |
+| `settings.py` | adapter-aware settings validation, the sparse local patch and the policy snapshot for a new run |
 | `stack.py` | the stack's one reading and its one owner, for the Makefile, the command line and the page |
 
 ## Relationships
@@ -35,6 +37,10 @@ Through an activity name and its payload: what the workflow commanded. Through T
 client API: a start, an Update carrying an answer, a cancellation or a termination, the `status`
 query, a run's description, and who polls each task queue. Through the lifecycle scripts, one
 part of the stack at a time: a start, a stop, its process's state, and the sweep.
+
+Settings composes the foundation's strict data validation with each selected kind's adapter,
+then hands a checked snapshot to a new run. The Workbench reads and applies settings through this
+owner; individual activities do not reload mutable settings.
 
 Composition belongs here rather than inside a concern. `telemetry.final_diff(client, state,
 worktrees.review_diff)` is written that way on purpose: the trace records a change it is

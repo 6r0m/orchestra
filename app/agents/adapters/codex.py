@@ -161,9 +161,13 @@ def _home():
 
 
 def skill_folders(name, repo):
-    return [os.path.join(_home(), "skills", name),
-            os.path.join(os.path.expanduser("~"), ".agents", "skills", name),
-            os.path.join(repo, ".agents", "skills", name)]
+    return [os.path.join(root, name) for root in skill_roots(repo)]
+
+
+def skill_roots(repo):
+    return [os.path.join(_home(), "skills"),
+            os.path.join(os.path.expanduser("~"), ".agents", "skills"),
+            os.path.join(repo, ".agents", "skills")]
 
 
 # ---- trust ----------------------------------------------------------------------------------

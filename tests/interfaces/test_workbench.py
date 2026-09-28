@@ -131,8 +131,7 @@ class SettingsApi(unittest.TestCase):
         self.root = tempfile.mkdtemp(prefix="orchestra-settings-api-")
         self.addCleanup(shutil.rmtree, self.root, True)
         os.makedirs(os.path.join(self.root, ".orchestra"))
-        self.shared = {key: value for key, value in E.SETTINGS.items()
-                       if not key.startswith("_") and key != "stage_skills"}
+        self.shared = {key: value for key, value in E.SETTINGS.items() if not key.startswith("_")}
         with open(os.path.join(self.root, ".orchestra", "settings.json"), "w", encoding="utf-8") as fh:
             json.dump(self.shared, fh)
         self.local = os.path.join(self.root, ".orchestra", "settings.local.json")
@@ -146,7 +145,7 @@ class SettingsApi(unittest.TestCase):
 
     def test_without_the_token_nothing_is_read_or_written(self):
         self.assertEqual(self.ask("GET", token=False)[0], 403)
-        status, _ = self.ask("POST", {"revision": "x", "changes": [{"pointer": "/max_rounds/plan", "value": 3}]},
+        status, _ = self.ask("POST", {"revision": "x", "changes": [{"pointer": "/review_rounds/plan/normal", "value": 3}]},
                              token=False)
         self.assertEqual(status, 403)
         self.assertFalse(os.path.exists(self.local))
@@ -156,21 +155,23 @@ class SettingsApi(unittest.TestCase):
         status, shown = self.ask("GET")
         self.assertEqual((status, shown["writable"]), (200, True))
         self.assertEqual(shown["kinds"], adapters.available(), "the kinds come from the adapters, not the page")
-        status, after = self.apply(shown["revision"], {"pointer": "/max_rounds/plan", "value": 3})
-        self.assertEqual((status, after["settings"]["max_rounds"]), (200, {"plan": 3, "build": 2}))
+        status, after = self.apply(shown["revision"], {"pointer": "/review_rounds/plan/normal", "value": 3})
+        self.assertEqual((status, after["settings"]["review_rounds"]["plan"]),
+                         (200, {"normal": 3, "extended": 10}))
         with open(self.local, encoding="utf-8") as fh:
-            self.assertEqual(json.load(fh), {"max_rounds": {"plan": 3}})
+            self.assertEqual(json.load(fh), {"review_rounds": {"plan": {"normal": 3}}})
 
     def test_a_stale_apply_is_a_conflict_and_a_refused_one_names_its_setting(self):
         _, shown = self.ask("GET")
-        self.assertEqual(self.apply(shown["revision"], {"pointer": "/max_rounds/plan", "value": 3})[0], 200)
-        status, answer = self.apply(shown["revision"], {"pointer": "/max_rounds/build", "value": 3})
+        self.assertEqual(self.apply(shown["revision"], {"pointer": "/review_rounds/plan/normal", "value": 3})[0], 200)
+        status, answer = self.apply(shown["revision"], {"pointer": "/review_rounds/build/normal", "value": 3})
         self.assertEqual(status, 409, answer)
         _, now = self.ask("GET")
-        status, answer = self.apply(now["revision"], {"pointer": "/agents/codex/model", "value": "a b"})
-        self.assertEqual((status, answer["pointer"]), (400, "/agents/codex/model"))
+        status, answer = self.apply(now["revision"], {"pointer": "/agents/codex-engineer/model", "value": "a b"})
+        self.assertEqual((status, answer["pointer"]), (400, "/agents/codex-engineer/model"))
         with open(self.local, encoding="utf-8") as fh:
-            self.assertEqual(json.load(fh), {"max_rounds": {"plan": 3}}, "neither refusal wrote anything")
+            self.assertEqual(json.load(fh), {"review_rounds": {"plan": {"normal": 3}}},
+                             "neither refusal wrote anything")
 
     def test_a_workbench_named_its_settings_applies_nothing_and_leaves_the_checkouts_alone(self):
         with open(self.local, "w", encoding="utf-8") as fh:
@@ -183,7 +184,7 @@ class SettingsApi(unittest.TestCase):
         at = settings_server(self, self.root, {"ORCHESTRA_SETTINGS": named})
         status, shown = self.ask("GET", at=at)
         self.assertEqual((status, shown["writable"]), (200, False))
-        status, answer = self.apply(shown["revision"], {"pointer": "/max_rounds/plan", "value": 3}, at=at)
+        status, answer = self.apply(shown["revision"], {"pointer": "/review_rounds/plan/normal", "value": 3}, at=at)
         self.assertEqual(status, 403, answer)
         with open(self.local, "rb") as fh:
             self.assertEqual(fh.read(), before, "the operator's own settings, byte for byte")

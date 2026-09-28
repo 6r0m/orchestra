@@ -140,6 +140,14 @@ class ARunsPolicy(unittest.TestCase):
         self.assertEqual(S.run_policy(settings)["stage_skills"], {"build": "implement-approved-change"},
                          "a run started with no flow takes the stages those runs took")
 
+    def test_a_new_run_carries_review_rounds_instead_of_the_legacy_budget(self):
+        settings = shipped()
+        settings.pop("max_rounds", None)
+        settings["review_rounds"] = {phase: {"normal": 10, "extended": 10} for phase in P.stages.PHASES}
+        policy = S.run_policy(settings)
+        self.assertEqual(policy["review_rounds"], settings["review_rounds"])
+        self.assertNotIn("max_rounds", policy)
+
     def test_a_skill_bound_to_a_kind_that_takes_none_is_refused(self):
         stand_in.plant(self, {"skill_less": stand_in.variant(SKILL="SKILL = None")})
         settings = shipped()
@@ -192,30 +200,55 @@ class Applying(unittest.TestCase):
             fh.write(patch if isinstance(patch, str) else json.dumps(patch))
 
     def test_an_apply_writes_the_settings_it_changes_and_nothing_else(self):
-        shown = self.apply({"pointer": "/roles/architect/agent", "value": "claude"})
-        self.assertEqual(self.patch(), {"roles": {"architect": {"agent": "claude"}}},
+        shown = self.apply({"pointer": "/roles/architect/agent", "value": "codex-architect"})
+        self.assertEqual(self.patch(), {"roles": {"architect": {"agent": "codex-architect"}}},
                          "no unchanged shared value copied in")
-        self.assertEqual(shown["settings"]["roles"]["architect"]["agent"], "claude")
+        self.assertEqual(shown["settings"]["roles"]["architect"]["agent"], "codex-architect")
         self.assertEqual(shown["overrides"], self.patch())
 
     def test_control_a_writer_that_rebuilds_the_patch_from_the_effective_settings(self):
         """What the sparse writer is there to prevent: every shared value copied into the patch, where it
         would hide a later shared change."""
-        rebuilt = P.merge(P.read_settings(self.shared), {"roles": {"architect": {"agent": "claude"}}})
+        rebuilt = P.merge(P.read_settings(self.shared), {"roles": {"architect": {"agent": "codex-architect"}}})
         self.assertIn("timeout_seconds", rebuilt)
 
     def test_a_hand_written_override_survives_an_apply(self):
         self.write_patch({"timeout_seconds": 90, "targets": {"wsl": {"terminal_port": 8501}}})
-        self.apply({"pointer": "/roles/architect/agent", "value": "claude"})
+        self.apply({"pointer": "/roles/architect/agent", "value": "codex-architect"})
         self.assertEqual(self.patch(), {"timeout_seconds": 90, "targets": {"wsl": {"terminal_port": 8501}},
-                                        "roles": {"architect": {"agent": "claude"}}})
+                                        "roles": {"architect": {"agent": "codex-architect"}}})
+
+    def test_resetting_every_settings_page_section_keeps_an_unrelated_local_member(self):
+        self.write_patch({
+            "timeout_seconds": 90,
+            "agents": {"claude-engineer": {"effort": "high"}},
+            "roles": {"engineer": {"agent": "codex-engineer"}},
+            "stage_skills": {"plan": "architect"},
+            "review_rounds": {"plan": {"normal": 3}},
+            "max_rounds": {"plan": 4, "build": 5},
+            "default_flow": "engineer-code",
+        })
+        changes = [{"pointer": "/%s" % key, "revert": True}
+                   for key in ("agents", "roles", "stage_skills", "review_rounds", "max_rounds", "default_flow")]
+        shown = S.apply(changes, self.read()["revision"], self.root, self.environ)
+        owned = ("agents", "roles", "stage_skills", "review_rounds", "default_flow")
+        self.assertEqual({key: shown["settings"][key] for key in owned},
+                         {key: shown["shared"][key] for key in owned})
+        self.assertNotIn("max_rounds", shown["settings"], "Reset removes an obsolete local budget override")
+        self.assertEqual(self.patch(), {"timeout_seconds": 90}, "only page-owned settings were reverted")
+
+    def test_an_applied_override_survives_a_fresh_read(self):
+        self.apply({"pointer": "/review_rounds/plan/normal", "value": 7})
+        reloaded = self.read()
+        self.assertEqual(reloaded["settings"]["review_rounds"]["plan"]["normal"], 7)
+        self.assertEqual(reloaded["overrides"], {"review_rounds": {"plan": {"normal": 7}}})
 
     def test_revert_removes_that_setting_alone_and_the_last_one_the_file(self):
-        self.apply({"pointer": "/roles/architect/agent", "value": "claude"},
-                   {"pointer": "/max_rounds/plan", "value": 3})
+        self.apply({"pointer": "/roles/architect/agent", "value": "codex-architect"},
+                   {"pointer": "/review_rounds/plan/normal", "value": 3})
         self.apply({"pointer": "/roles/architect/agent", "revert": True})
-        self.assertEqual(self.patch(), {"max_rounds": {"plan": 3}})
-        self.apply({"pointer": "/max_rounds/plan", "revert": True})
+        self.assertEqual(self.patch(), {"review_rounds": {"plan": {"normal": 3}}})
+        self.apply({"pointer": "/review_rounds/plan/normal", "revert": True})
         self.assertFalse(os.path.exists(self.local), "a patch left empty is no file")
 
     def test_removing_a_shipped_profile_writes_null(self):
@@ -233,8 +266,8 @@ class Applying(unittest.TestCase):
     def test_a_refused_apply_names_its_setting_and_changes_nothing(self):
         before = self.files()
         with self.assertRaises(P.InvalidPolicy) as raised:
-            self.apply({"pointer": "/agents/codex/model", "value": "a b"})
-        self.assertEqual(raised.exception.pointer, "/agents/codex/model")
+            self.apply({"pointer": "/agents/codex-engineer/model", "value": "a b"})
+        self.assertEqual(raised.exception.pointer, "/agents/codex-engineer/model")
         self.assertEqual(self.files(), before)
 
     def test_an_apply_against_a_revision_either_file_has_left_changes_nothing(self):
@@ -245,7 +278,7 @@ class Applying(unittest.TestCase):
                     fh.write("\n" if path == self.shared else '{"timeout_seconds": 70}')
                 before = self.files()
                 with self.assertRaises(S.Stale):
-                    self.apply({"pointer": "/max_rounds/plan", "value": 3}, revision=revision)
+                    self.apply({"pointer": "/review_rounds/plan/normal", "value": 3}, revision=revision)
                 self.assertEqual(self.files(), before)
 
     def racing(self, lock):
@@ -253,21 +286,38 @@ class Applying(unittest.TestCase):
         too, or for two seconds; returns how each ended."""
         revision, met = self.read()["revision"], threading.Barrier(2, timeout=2)
         write = P.write_patch
+        ordering = threading.Lock()
+        first_writer = [None]
+        first_apply_returned = threading.Event()
 
         def held(local, patch):
             try:
                 met.wait()
             except threading.BrokenBarrierError:
                 pass
+            current = threading.current_thread()
+            with ordering:
+                if first_writer[0] is None:
+                    first_writer[0] = current
+                    first = True
+                else:
+                    first = current is first_writer[0]
+            if not first:
+                # Let the first apply finish its readback before replacing on Windows, where an open
+                # reader can make os.replace fail with a sharing violation unrelated to the apply lock.
+                first_apply_returned.wait(5)
             write(local, patch)
         ended = []
 
         def one(value):
             try:
-                self.apply({"pointer": "/max_rounds/plan", "value": value}, revision=revision)
+                self.apply({"pointer": "/review_rounds/plan/normal", "value": value}, revision=revision)
                 ended.append("landed")
             except S.Stale:
                 ended.append("stale")
+            finally:
+                if threading.current_thread() is first_writer[0]:
+                    first_apply_returned.set()
         with mock.patch.object(P, "write_patch", held), mock.patch.object(S, "_APPLYING", lock):
             threads = [threading.Thread(target=one, args=(value,)) for value in (3, 4)]
             for thread in threads:
@@ -289,7 +339,7 @@ class Applying(unittest.TestCase):
         self.assertIn("settings.local.json", shown["refused"]["reason"])
         before = self.files()
         with self.assertRaises(P.InvalidPolicy):
-            self.apply({"pointer": "/max_rounds/plan", "value": 3})
+            self.apply({"pointer": "/review_rounds/plan/normal", "value": 3})
         self.assertEqual(self.files(), before)
 
     def test_settings_a_stack_was_named_take_no_apply_and_the_checkouts_patch_is_left_alone(self):
@@ -302,12 +352,12 @@ class Applying(unittest.TestCase):
             self.assertFalse(self.read()["writable"])
             before = self.files()
             with self.assertRaises(S.ReadOnly):
-                self.apply({"pointer": "/max_rounds/plan", "value": 3})
+                self.apply({"pointer": "/review_rounds/plan/normal", "value": 3})
             self.assertEqual(self.files(), before, "the operator's own patch, byte for byte")
             # The control: an Apply that ignored where its settings came from writes the operator's patch.
             sources = P.sources
             with mock.patch.object(P, "sources", lambda path=None, root=None, environ=None: sources(path, root, {})):
-                self.apply({"pointer": "/max_rounds/plan", "value": 3})
+                self.apply({"pointer": "/review_rounds/plan/normal", "value": 3})
             self.assertNotEqual(self.files(), before)
 
     def test_the_kinds_and_how_each_invokes_a_skill_come_from_the_adapters(self):
@@ -316,6 +366,18 @@ class Applying(unittest.TestCase):
         self.assertEqual(shown["kinds"], adapters.available())
         kinds = {kind["kind"]: kind for kind in shown["kinds"]}
         self.assertEqual((kinds["claude-code"]["skill"], kinds["codex"]["skill"]), ("/{name}", "${name}"))
+
+    def test_skill_discovery_uses_adapter_roots_and_returns_names_only(self):
+        for folder in (os.path.join(self.root, ".claude", "skills", "repo-method"),
+                       os.path.join(self.root, ".agents", "skills", "repo-tool")):
+            os.makedirs(folder)
+        shown = self.read()
+        self.assertIn("repo-method", shown["skills"]["claude-code"])
+        self.assertIn("repo-tool", shown["skills"]["codex"])
+        encoded = json.dumps(shown["skills"])
+        self.assertNotIn(self.root, encoded)
+        self.assertTrue(all(isinstance(name, str) and os.path.basename(name) == name
+                            for names in shown["skills"].values() for name in names))
 
 
 def calls_to_policy_load(root, owner):

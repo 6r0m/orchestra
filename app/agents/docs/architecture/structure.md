@@ -13,6 +13,7 @@ the turn's explicit result back out.
 - `ptyhost` — the pseudo-terminal the agent draws in; launched by path, inside the containment.
 - `turn_hook` — the vendors' own completion wiring, writing a turn's events into that turn's file; launched by path, by the vendor.
 - `nodes` — the prompt a turn is given, the agent argv, session identity, verdict parsing and the failure classes.
+- `adapters` — each vendor CLI's arguments, skill invocation syntax, installed skill roots and other kind-specific mechanics behind one contract.
 - `trust` — telling this host's agent CLIs that a run's repository is one the operator works in, so no turn stops at their trust dialog.
 
 ## Does not own
@@ -32,6 +33,7 @@ runs when, which is [orchestration](../../../orchestration/README.md). Any repos
 | `ptyhost.py` | the pseudo-terminal the agent draws in — launched by path |
 | `turn_hook.py` | the vendor's completion, written into the turn's events file — launched by path |
 | `nodes.py` | prompt rendering, agent argv, session identity, verdict parsing |
+| `adapters/` | the vendor-specific kind contract, including skill invocation and roots |
 | `trust.py` | this host's CLI trust records for a run's repository |
 
 ## Relationships
@@ -41,6 +43,9 @@ This package's relationships are drawn once, in [the main view](diagrams/main.md
 Through the vendor CLI's own argv and its session store: a turn is that CLI started again
 with the role's session resumed by exact id and the prompt as its last argument. No shell
 sits between, so no task text is ever parsed as shell syntax.
+
+Through the adapter contract: Settings discovers skill names from the same roots a kind checks
+when preparing a run; no vendor path crosses the Settings API.
 
 Through the vendor's own completion hook: a turn ends on Claude's `Stop` for its own
 prompt id, or Codex's `agent-turn-complete` in its own thread — never on a first event.

@@ -9,7 +9,7 @@ page over every run — without any of them owning behaviour worth testing on it
 
 - `cli` — the command line over `application.client` and `application.stack`: start, answer, continue, stop, force terminate, show, list, worktrees, and the stack, which the Makefile's `up`, `down` and `check` run.
 - `worker` — one Temporal worker per host, polling that host's queue and no other, and the sweep of what dead workers' stages left on the host.
-- `workbench/server` and `workbench/static` — the operator's page: the stack and its controls, every run, its stop and answers, its live terminals, its rounds, its change and what it kept; and `workbench/orchestra-workbench.service`, the systemd user unit that runs the page in WSL.
+- `workbench/server` and `workbench/static` — the operator's page: the stack and its controls, every run, its stop and answers, its live terminals, its rounds, its change and what it kept; the Settings view reads and applies the application settings owner; and `workbench/orchestra-workbench.service`, the systemd user unit that runs the page in WSL.
 
 ## Does not own
 
@@ -24,7 +24,7 @@ print, serve and exit. The page holds no state of its own.
 | `cli.py` | the command line over the shared client and the stack's owner |
 | `worker.py` | this host's Temporal worker and the queues it polls |
 | `workbench/server.py` | the page's HTTP server and its small JSON API |
-| `workbench/static/` | the page itself: HTML, CSS, its JavaScript as native modules — the stack, the runs, a new run, the run open with its terminals and its change, the worktrees, and `app.js` their entry — and a pinned xterm.js |
+| `workbench/static/` | the page itself: HTML, CSS, its JavaScript as native modules — the stack, runs, new-run form, Settings, terminals, changes, worktrees, and `app.js` their entry — and a pinned xterm.js |
 | `workbench/orchestra-workbench.service` | the systemd user unit the page runs as, rendered for a checkout by `make workbench-install` |
 
 ## Relationships

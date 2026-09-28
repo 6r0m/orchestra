@@ -7,7 +7,8 @@
   is configuration, and so is whether both roles run the same model (D9); whether a kind's values are
   valid, and whether it can run with its role's access, is its adapter's to say, composed in
   `app.application.settings`, since nothing here loads an adapter.
-- max_rounds (D5): architect attempts per phase, counting from 1.
+- review_rounds (D5): normal and extended architect review attempts per phase; max_rounds is retained for
+  old settings and run policies.
 - Git authority: all-false — agents never commit or push (D11).
 
 Identifiers are data: binding an agent, editing a role's persona or naming the default flow is
@@ -59,7 +60,7 @@ MAX_PERSONA_BYTES = 16 * 1024
 # nothing is the worst failure mode for a config-driven system.
 ROLE_KEYS = {"agent", "persona_file", "persona"}
 PLAIN_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]*")
-TOP_KEYS = {"agents", "roles", "max_rounds", "auto_proceed", "timeout_seconds", "heartbeat_seconds",
+TOP_KEYS = {"agents", "roles", "max_rounds", "review_rounds", "auto_proceed", "timeout_seconds", "heartbeat_seconds",
             "stop_cleanup_seconds", "targets", "target_repo", "workbench_port", "stage_skills",
             "workflow_queue", "default_flow", "_policy_path"}
 REPO_KEYS = {"commit_allowed", "push_allowed", "merge_allowed"}
@@ -415,12 +416,27 @@ def validate(raw):
         # Read to prove it is there and within its bound; a run's start reads it again, into the run.
         persona(raw, name)
 
-    rounds = raw.get("max_rounds")
-    if not isinstance(rounds, dict) or set(rounds) != set(stages.PHASES):
-        raise InvalidPolicy("must define exactly %s" % " and ".join(stages.PHASES), pointer("max_rounds"))
-    for phase, n in rounds.items():
-        if not isinstance(n, int) or isinstance(n, bool) or n < 1:
-            raise InvalidPolicy("must be an int >= 1", pointer("max_rounds", phase))
+    legacy = raw.get("max_rounds")
+    if "max_rounds" in raw:
+        if not isinstance(legacy, dict) or set(legacy) != set(stages.PHASES):
+            raise InvalidPolicy("must define exactly %s" % " and ".join(stages.PHASES), pointer("max_rounds"))
+        for phase, n in legacy.items():
+            if not isinstance(n, int) or isinstance(n, bool) or n < 1:
+                raise InvalidPolicy("must be an int >= 1", pointer("max_rounds", phase))
+    rounds = raw.get("review_rounds")
+    if "review_rounds" in raw:
+        if not isinstance(rounds, dict) or set(rounds) != set(stages.PHASES):
+            raise InvalidPolicy("must define exactly %s" % " and ".join(stages.PHASES), pointer("review_rounds"))
+        for phase, thresholds in rounds.items():
+            if not isinstance(thresholds, dict) or set(thresholds) != {"normal", "extended"}:
+                raise InvalidPolicy("must define exactly normal and extended", pointer("review_rounds", phase))
+            for name, n in thresholds.items():
+                minimum = 0 if name == "extended" else 1
+                if not isinstance(n, int) or isinstance(n, bool) or n < minimum:
+                    raise InvalidPolicy("must be an int >= %d" % minimum,
+                                        pointer("review_rounds", phase, name))
+    if "max_rounds" not in raw and "review_rounds" not in raw:
+        raise InvalidPolicy("must define review_rounds", pointer("review_rounds"))
 
     repo = raw.get("target_repo")
     if not isinstance(repo, dict):

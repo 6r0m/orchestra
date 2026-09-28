@@ -92,7 +92,10 @@ def message_of(event):
 
 
 def skill_folders(name, repo):
-    return [os.path.join(repo, ".stand-in", "skills", name)]
+    return [os.path.join(root, name) for root in skill_roots(repo)]
+
+def skill_roots(repo):
+    return [os.path.join(repo, ".stand-in", "skills")]
 '''
 
 

@@ -1,9 +1,21 @@
 {
   "agents": {
-    "claude": {
-      "kind": "claude-code"
+    "claude-engineer": {
+      "kind": "claude-code",
+      "model": "claude-opus-5",
+      "effort": "max"
     },
-    "codex": {
+    "claude-architect": {
+      "kind": "claude-code",
+      "model": "claude-fable-5",
+      "effort": "high"
+    },
+    "codex-engineer": {
+      "kind": "codex",
+      "model": "gpt-6-luna",
+      "effort": "xhigh"
+    },
+    "codex-architect": {
       "kind": "codex",
       "model": "gpt-5.6-sol",
       "effort": "high"
@@ -11,17 +23,30 @@
   },
   "roles": {
     "engineer": {
-      "agent": "claude",
+      "agent": "claude-engineer",
       "persona_file": "roles/engineer.md"
     },
     "architect": {
-      "agent": "codex",
+      "agent": "claude-architect",
       "persona_file": "roles/architect.md"
     }
   },
-  "max_rounds": {
-    "plan": 2,
-    "build": 2
+  "stage_skills": {
+    "research": "architect",
+    "plan": "investigate-change",
+    "assess": "architect",
+    "build": "implement-approved-change",
+    "verify": "architect"
+  },
+  "review_rounds": {
+    "plan": {
+      "normal": 10,
+      "extended": 10
+    },
+    "build": {
+      "normal": 10,
+      "extended": 10
+    }
   },
   "auto_proceed": false,
   "default_flow": "engineer-code",
