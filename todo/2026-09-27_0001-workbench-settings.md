@@ -188,6 +188,9 @@ D1–D12 below are this change's operator decisions. The architecture's own deci
   A profile has no list of extra arguments or environment variables. They are the vendor mechanics the
   adapter owns, and could undo its read-only mode, its session and its turn-end wiring. A kind that
   needs another setting brings its own named, validated option when it does.
+
+  Nothing sets a role's access. It is the role's contract — the engineer writes, the architect reads —
+  never a setting, and the view neither shows nor edits one (Decision 4).
 - **A3 [ACTIVE]:** The operator's example maps onto the three global skills D19 names, one per stage:
   - the engineer's `plan` → `investigate-change`, and its `build` → `implement-approved-change`;
   - the architect's `research`, `assess` and `verify` → `architect`.
@@ -198,12 +201,18 @@ D1–D12 below are this change's operator decisions. The architecture's own deci
   - a role's `persona` text, when present, takes the place of its `persona_file`. Otherwise its
     persona is that file's text. The Settings view writes `persona` into the local patch, marks it, and
     Revert removes it, so the file serves again;
-  - the persona in effect is at most `MAX_PERSONA_BYTES = 64 * 1024` bytes of UTF-8, a constant of the
-    repository's own, sized for the history rather than one payload (fact 39):
-    - every role turn carries the whole policy, both personas in it, so a turn's input is at most about
-      130 KB, half of Temporal's 256 KB warning;
-    - a run's history grows by that much each turn, reaching Temporal's 10 MB warning after about 80
-      turns and its 50 MB limit after about 400, where today's runs take a few.
+  - the persona in effect is at most `MAX_PERSONA_BYTES = 16 * 1024` bytes of UTF-8, a constant of the
+    repository's own. It is sized on Temporal's own wire, measured (fact 39):
+    - every role turn carries the whole policy, both personas in it. The converter escapes each
+      non-ASCII character, so a persona's bytes on the wire run up to three times its UTF-8 bytes, and
+      up to six for control characters;
+    - at 16 KiB each, a turn's input is at most 100,451 bytes for any text, and 198,755 bytes in the
+      worst case of control characters. Both are under Temporal's 256 KiB warning, which is the
+      invariant (invariant 10). 64 KiB crossed it for anything but plain ASCII letters;
+    - today's personas are 1,895 and 1,597 bytes, and a persona carries only what its skill cannot
+      know (the architecture's D19);
+    - a run's history grows by at most one such input per turn: at least 50 turns to Temporal's 10 MB
+      warning even in that worst case, where today's runs take a few.
 - **A5 [ACTIVE]:** Skills:
   - settings name a skill and nothing else, by the Agent Skills specification's name rule, never an
     invocation (fact 49);
@@ -224,8 +233,8 @@ D1–D12 below are this change's operator decisions. The architecture's own deci
   - Each kind is one module, named from the kind by a one-to-one rule: lowercase letters, digits and
     single hyphens, each hyphen an underscore — `claude-code` becomes `claude_code.py`.
   - The loader imports a kind's module, checks it meets the contract, and reads its capabilities: its
-    display name, whether it can run read-only, how it takes a skill, and whether model and effort
-    apply.
+    display name, the access it can run with — read-only, writing, or both — how it takes a skill, and
+    whether model and effort apply.
   - The page gets kinds and capabilities from that boundary through the API, never from a list of its
     own.
   - **The loader's `available()` is how kinds are found.**
@@ -256,8 +265,9 @@ D1–D12 below are this change's operator decisions. The architecture's own deci
       shape, and the roles' references. It cannot load an adapter: `app/foundation` imports nothing of
       ours.
     - `app/application/settings.py` composes the two. It runs that generic validation, then each bound
-      kind's own: whether `model` and `effort` apply to it and which values it takes, and whether it
-      can run read-only where a role needs it. It is the one loader and validator (invariant 5).
+      kind's own: whether `model` and `effort` apply to it and which values it takes, and whether it can
+      run with the access its role's contract requires (Decision 4). It is the one loader and validator
+      (invariant 5).
     - Today's plain-token rule (fact 30) moves into `claude-code` and `codex`, because they put those
       values on a command line. It is not the contract for a kind that does not.
   - **The verdict's grammar stays one parser.** An adapter says only where its agent's messages are in
@@ -326,6 +336,9 @@ Any of these can follow as a change of its own:
 - dropping the sweep's old prefix, once every host has started on the new code (A1);
 - a persona kept out of the run's history and passed by reference — the claim-check pattern — should
   a persona ever need more than `MAX_PERSONA_BYTES` (A4);
+- a bound on the run's own text — its task, feedback, brief and guidance — which rides in every turn's
+  input beside the personas and has none today. The persona bound leaves it at least 63 KB under the
+  256 KiB warning, and 161 KB for personas of any text (fact 39);
 - renaming `policy.py`, or the word "policy".
 
 ## Verified evidence
@@ -519,6 +532,24 @@ Any of these can follow as a change of its own:
       - a history warns at 10 MB and fails at 50 MB.
 
       This server overrides only `limit.maxIDLength` (`temporal/dynamicconfig.yaml`).
+    - **The converter on the wire.** The project sets no converter or codec of its own, so a payload is
+      `DataConverter.default`'s. Its JSON is `json.dumps` with its ASCII escaping left on (temporalio
+      1.33.0, `converter/_payload_converter.py:786-788`), so on the wire:
+      - each non-ASCII character becomes `\uXXXX`, and one outside the Basic Multilingual Plane
+        becomes two of them;
+      - a quote, a backslash and the five control characters JSON names — newline and tab among them —
+        take two bytes, and any other control character six.
+    - **Measured through that converter.** The largest recorded `run_role` input (2,119 bytes on the
+      wire) was taken, both roles were given a persona of one character class at a bound, and the
+      input's `Payloads` message was sized:
+
+      | each persona | ASCII letters | quotes, newlines | 3-byte (CJK, em dash) | 2-byte (Cyrillic), 4-byte (emoji) | control characters |
+      |---|---|---|---|---|---|
+      | 64 KiB | 133,219 | 264,291 | 264,287 | 395,363 | 788,579 |
+      | 32 KiB | 67,683 | 133,219 | 133,211 | 198,755 | 395,363 |
+      | 16 KiB | 34,915 | 67,683 | 67,679 | 100,451 | 198,755 |
+
+      256 KiB is 262,144 bytes. Today's persona files are 1,895 and 1,597 bytes.
 40. **The one persona resolver reads from the policy file's folder.**
     - `prompt_path` resolves a relative persona against its origin's folder
       (`app/foundation/policy.py:101-117`). For the new origin that is `.orchestra/`, where A1 reads
@@ -561,6 +592,10 @@ Any of these can follow as a change of its own:
     - the same as the skill's folder's name.
 
     The three installed skills keep it (fact 14).
+50. **A role's access is not a choice today.**
+    - The validator admits one value per role: the architect `read`, the engineer `write`
+      (`app/foundation/policy.py:197-200`).
+    - The value's one reader picks the read-only flags (`app/agents/nodes.py:56`).
 
 **Inferences**
 
@@ -660,13 +695,17 @@ Any of these can follow as a change of its own:
 2. **The settings' shape.** In `.orchestra/settings.json`, and the local patch over it:
    - `agents`: a profile's name maps to its `kind` and, where the kind takes them, `model` and `effort`.
      Two ship, matching today's bindings.
-   - `roles`: each role's `agent` — a profile's name — its `workspace_access`, its `persona_file`, and,
-     when given, its `persona` text, which takes the file's place (A4).
+   - `roles`: each role's `agent` — a profile's name — its `persona_file`, and, when given, its
+     `persona` text, which takes the file's place (A4). No access: that is the role's contract
+     (Decision 4), and a role holding any key besides these is refused.
    - `stage_skills`: a stage maps to a skill's name, by the Agent Skills name rule (A5, fact 49).
    - Everything else as today: rounds, the default flow, and the stack's keys.
 3. **The run's policy, made whole at its start (A6).**
-   - `client.start` resolves each role to its kind, model, effort, access and persona text, and each
-     stage's skill to its name, through `application.settings`, and hands the run that copy.
+   - `client.start` resolves each role to its kind, model, effort and persona text, and each stage's
+     skill to its name, through `application.settings`, and hands the run that copy.
+   - It writes each role's access into that copy from the role's contract (Decision 4), as the key the
+     role-runs read today (fact 50). The run's policy keeps `workspace_access`, and the settings never
+     hold it.
    - The persona text is `persona` when present, else `persona_file`'s text, checked against
      `MAX_PERSONA_BYTES` there.
    - **One persona resolver still** (fact 40). `prompt_path` gains the new shape's rule: a
@@ -682,9 +721,14 @@ Any of these can follow as a change of its own:
 
    The loader takes only the new shape. A file of the old shape is refused, naming the new keys, and
    the suite's, the demo's and the acceptance run's settings move to the new shape with this change.
-4. **Access and choice.** Access stays per role: the engineer writes, the architect reads (D10). A
-   profile whose kind cannot run read-only cannot take the architect. Which model each role runs is
-   free (D9), and the view shows both roles side by side.
+4. **Access is the role's contract, and the choice is the agent's** (fact 50).
+   - The engineer writes and the architect reads: the architecture's D2 and this change's D10.
+     `policy.py` holds that contract beside `ROLES`, as code, since no other value is valid.
+   - A bound kind that cannot run with its role's access is refused: one without a read-only mode
+     for the architect, one without a writing mode for the engineer.
+   - Which model each role runs is free (D9), and the view shows both roles side by side, with no
+     access field.
+   - A run of the old shape keeps reading the `workspace_access` it stored, as today.
 5. **The layers of A1, and who holds each part.**
    - **`policy.py`, in the foundation, owns the files.**
      - It reads the shared file and applies the local patch, or takes `ORCHESTRA_SETTINGS` alone.
@@ -740,7 +784,8 @@ Any of these can follow as a change of its own:
      - read-only, saying why, where the settings come from `ORCHESTRA_SETTINGS` (A1).
 7. **Documents amended** — the architecture's decisions and the owners the Documentation plan names:
    - D3: the reviewer is read-only; whether it is another model is the operator's choice;
-   - D13: kinds of agent are code, one module each, and which agent a role runs is configuration;
+   - D13: kinds of agent are code, one module each, and which agent a role runs is configuration. A
+     role's access leaves D13's list of configuration: it is the role's contract, code (Decision 4);
    - D17: the seam runs through an adapter, and no agent inherits any vendor's session markers;
    - D18: model and effort stay configuration, and no registry. Their accepted values are their kind's
      adapter's to check;
@@ -846,6 +891,9 @@ kind does not declare cannot be passed to it.
     grammar and its checks stay generic, in `nodes` (A7).
 4. **Every agent's terminal takes typing (D7),** and the reviewing role is read-only, through its kind's
    own mode and the step's failure on a changed tree (D10).
+   - A role's access is its contract, written into every run's policy at the start: the architect's
+     always `read`, the engineer's always `write`.
+   - No setting can change it, since settings hold no access key.
 5. **One loader and one validator — `application.settings` — for the page, the command line, both
    workers and `client.start`.**
    - No other production module calls `policy.load`.
@@ -869,10 +917,13 @@ kind does not declare cannot be passed to it.
    - A patch whose result does not validate stops the loader with the file's name and the reason.
 9. **Settings hold names, never mechanics or secrets.** A skill is a name; a profile has no raw
    arguments or environment; keys stay in `.env`.
-10. **A persona is at most `MAX_PERSONA_BYTES = 64 * 1024` bytes of UTF-8.** The bound is measured on
+10. **A persona is at most `MAX_PERSONA_BYTES = 16 * 1024` bytes of UTF-8.** The bound is measured on
     the persona in effect — `persona` when present, else `persona_file`'s text — and refused, naming
-    the role, one byte past it. A role turn's input with both personas at the bound stays under
-    Temporal's 256 KB payload warning (A4, fact 39).
+    the role, one byte past it.
+    - **The invariant it serves is the wire's:** a `run_role` input with both personas at the bound,
+      of any content, serialized by `DataConverter.default`, stays under Temporal's 256 KiB payload
+      warning (A4, fact 39).
+    - Should a converter or content ever cross it, the bound comes down; the invariant does not move.
 11. **No `orch` name (D12), and no root `policy.json` or `repos.json`, is left** in code, configuration,
     tools, tests or current documents; `todo/` and `docs/history/` keep their wording as history.
     - Only what the change must recognise from before it keeps an old name: the sweep's old prefix
@@ -922,8 +973,9 @@ kind does not declare cannot be passed to it.
    the recorded histories' replay.
 4. [ ] The settings' new shape, and the run's policy made whole at `client.start`:
    - `application.settings`: the one loader and validator. It composes the generic shape with each kind's
-     own values through its adapter, read-only for the architect's kind, with no independent-judge
-     refusal, skill names by their rule, and `MAX_PERSONA_BYTES`;
+     own values through its adapter; each role's access from its contract, with a kind unable to run
+     with it refused; no independent-judge refusal; skill names by their rule; and
+     `MAX_PERSONA_BYTES`, with guard 16 run on the real wire before the bound is settled;
    - persona files through the one resolver, from the checkout's root (Decision 3);
    - the old shape read only from a run's own input, by `prepare` and `run_role`, with the replay of
      recorded histories. The loader refuses it, and the suite's, the demo's and the acceptance run's
@@ -993,7 +1045,8 @@ kind does not declare cannot be passed to it.
        multi-byte characters is refused by its bytes, not its characters.
   4. **Any profile under any role, and the old shape:**
      - both roles on one profile plan, review and build (D9);
-     - the architect on a kind with no read-only mode is refused (D10);
+     - the architect on a kind with no read-only mode is refused (D10), and so is the engineer on a
+       kind with no writing mode;
      - a run whose input has the old shape — a brain, a file path, a `/name` skill — runs as before,
        its `prepare` preflighting through the adapters' old brain names;
      - the loader refuses a settings file of the old shape, naming the new keys.
@@ -1096,13 +1149,31 @@ kind does not declare cannot be passed to it.
   15. **The trust guard follows the calls** (`test_architecture.py`). A unit test's call to an adapter's
       trust answer that names no home is found. Control: today's guard, which knows only
       `trust.ensure` and `trust.forget` and misses it.
-  16. **A role turn's input stays under Temporal's payload warning** (`application/test_settings.py`).
-      A run's policy made whole with both personas at `MAX_PERSONA_BYTES` serializes, inside a
-      `run_role` input, under 256 KB. Control: a bound twice as large, which crosses it.
+  16. **A role turn's input stays under Temporal's payload warning, on the real wire**
+      (`application/test_settings.py`).
+      - A run's policy is made whole with both personas at `MAX_PERSONA_BYTES`, and put in a
+        `run_role` input with the largest state the recorded histories hold.
+      - It is serialized by `DataConverter.default`, the converter the project runs on, and the
+        `Payloads` message's bytes are what is measured — never a persona's own length, nor a
+        `json.dumps` of one's own.
+      - It is under 256 KiB for each character class: ASCII letters, quotes and newlines, 2-, 3- and
+        4-byte UTF-8, and control characters.
+      - The number measured replaces fact 39's wherever they differ.
+
+      Control: a bound of 64 KiB, which crosses it for 2-byte text (fact 39).
   17. **A bound skill is never dropped silently** — needed only if U2 finds a CLI that goes on without
       it. A bound skill that the kind's documented folders do not hold refuses `prepare` before any
       work, naming the skill and where it looked. Control: a preparation without the check, under
       which the run starts.
+  18. **Access is the role's, never a setting's** (`application/test_settings.py`):
+      - the architect's run policy always says `read`, and the engineer's `write`, whatever profile
+        each is bound to;
+      - a bound kind that cannot run with its role's access is refused (guard 4);
+      - a `workspace_access`, or any other key a role does not take, in the settings — shared or
+        local — is refused as unknown.
+
+      Control: a validator that lets `workspace_access` through into the run's policy, under which a
+      settings file makes the architect write.
 - **Reviewer-checked judgements:**
   - the view's words;
   - that nothing in it reads as a model registry;
@@ -1154,8 +1225,8 @@ kind does not declare cannot be passed to it.
     and the persona resolver's invariant, now also at a run's start;
   - [the foundation's structure](../app/foundation/docs/architecture/structure.md) and
     [its main view](../app/foundation/docs/architecture/diagrams/main.md): `.orchestra/`, the merge
-    patch, its sparse writer and revision, `MAX_PERSONA_BYTES` and its budget, and the one persona
-    resolver's two rules;
+    patch, its sparse writer and revision, `MAX_PERSONA_BYTES` and the wire invariant it serves, the
+    role contract's access, and the one persona resolver's two rules;
   - [the workspace's structure](../app/workspace/docs/architecture/structure.md): `.orchestra/repos.json`,
     `ORCHESTRA_REPOS`, and a preflight of `git` alone;
   - [the observability's structure](../app/observability/docs/architecture/structure.md) and
@@ -1363,3 +1434,24 @@ kind does not declare cannot be passed to it.
       Settings named by `ORCHESTRA_SETTINGS` are now read-only there (A1; invariant 6; guard 6).
 - **Authority:** A1, A4, A5, A6 and A7 rewritten in place; Decisions 1, 3, 5, 6 and 7; invariants 3,
   3a–3f, 5, 7, 8, 10, 11, 11b, 13 and 14; a numbering note on the register. No decision changed.
+
+### 2026-09-28 — the external review: PATCH, two settings corrections
+
+- **Accepted, each checked against the code:**
+  1. **`workspace_access` leaves the settings.** It has one valid value per role
+     (`policy.py:197-200`), so it was a knob with nothing to choose. The role's contract holds it,
+     `client.start` writes it into the run's policy, where the role-runs read it today (fact 50), and a
+     kind unable to run with it is refused. Old runs read what they stored (Decision 4; guard 18).
+  2. **The persona bound is proven on Temporal's own wire.** `DataConverter.default` escapes every
+     non-ASCII character (fact 39), so a persona's wire bytes are not its UTF-8 bytes.
+- **Measured now, rather than left to the guard:** at 64 KiB each, a `run_role` input crossed
+  256 KiB for every class but plain ASCII letters — quotes and newlines as well, which double on the
+  wire, and control characters, which grow sixfold. `MAX_PERSONA_BYTES` is 16 KiB: 198,755 bytes in
+  the worst case, 100,451 for any text (A4; invariant 10; guard 16).
+- **Refined:** only the settings drop `workspace_access`; the run's policy keeps it, written at the
+  start. D13's list of configuration loses access (Decision 7).
+- **Noted, not this change's:** the Windows suite gate recorded in
+  [the Workbench UX todo](2026-09-25_2334-workbench-ux.md) is still red on the test runner's tree
+  wait, and waits on the operator's disposition there.
+- **Authority:** A2, A4 and A7 rewritten in place; Decisions 2, 3, 4 and 7; invariants 4 and 10;
+  guards 4, 16 and 18. No decision changed.
