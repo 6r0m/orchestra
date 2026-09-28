@@ -4,18 +4,21 @@
 **Scope:**
 - `app/agents/adapters/`: one generic loader and contract, and a module per kind of agent;
 - the modules that hold agent mechanics today: `nodes.py`, `terminal.py`, `turn_hook.py`, `trust.py`,
-  `activities.py`, `telemetry.py`, `policy.py`, and the preflight in `repos.py`;
-- the settings, moved into `.orchestra/` and layered, with the public check following them;
+  `activities.py`, `telemetry.py`, `policy.py`, and the agents' preflight, moved out of `repos.py`;
+- `app/application/settings.py`: the one place settings are loaded, validated with each kind's own
+  checks, and applied;
+- the settings, moved into `.orchestra/` and layered, with the public check following them, run by CI
+  as it is by hand;
 - every `orch` name, spelled `orchestra` (D12);
 - the run's policy, made whole at its start;
 - the Workbench's settings API and view.
 
-**Stable documentation owner:**
-- [the architecture's D3, D13, D17, D19 and D29](../docs/architecture/structure.md);
-- [the agents' structure](../app/agents/docs/architecture/structure.md), for the adapters;
-- [the foundation's structure](../app/foundation/docs/architecture/structure.md), for the settings'
-  layers;
-- [docs/using.md](../docs/using.md) and [README.md](../README.md), for the operator.
+**Stable documentation owner:** the owners in the Documentation plan — above all
+[the architecture](../docs/architecture/structure.md),
+[the agents'](../app/agents/docs/architecture/structure.md),
+[the application's](../app/application/docs/architecture/structure.md) and
+[the foundation's](../app/foundation/docs/architecture/structure.md) structures, and
+[docs/using.md](../docs/using.md) and [README.md](../README.md) for the operator.
 
 ## Contents
 
@@ -43,6 +46,9 @@ Settings follow a conventional hierarchy of shared and personal files. They are 
 reach only runs started afterwards, and keep personal ones out of the public repository.
 
 ## Authority register
+
+D1–D12 below are this change's operator decisions. The architecture's own decisions are cited as
+*the architecture's* D-number, or with a link, where the two could be confused (D3).
 
 ### Operator decisions
 
@@ -133,7 +139,8 @@ reach only runs started afterwards, and keep personal ones out of the public rep
   | `ORCH_POLICY` | `ORCHESTRA_SETTINGS`: one complete settings file, for a stack of its own — the demo, the acceptance — with no patch applied to it | an application-prefixed variable naming what it points at: `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GIT_CONFIG_GLOBAL` |
   | `repos.json`, `repos.example.json` | `.orchestra/repos.json` (yours, ignored), `.orchestra/repos.example.json` | the same folder, for the similar case D11 names |
   | `ORCH_REPOS`, `ORCH_WORKFLOW_UNDER_TEST` | `ORCHESTRA_REPOS`: one complete descriptor file, taken alone — the demo's, the acceptance's, the suite's; `ORCHESTRA_WORKFLOW_UNDER_TEST` (the suite's own) | the same prefix, whole |
-  | `orch-` and `ORCH` elsewhere: the containment's units, temporary folders' prefixes, a constant in two tools (fact 22) | `orchestra-`: `orchestra-<id>` units, `orchestra-claude-settings-`, `orchestra-index-`, and the tests' and tools' folders; the tools' constant named for what it holds, the checkout | D12; a unit named for its application, as Docker's `docker-<id>.scope` |
+  | `orch-` and `ORCH` elsewhere: the containment's units, temporary folders' prefixes, a constant in two tools (fact 22) | `orchestra-`: `orchestra-<id>` units; `orchestra-trace-`, the private folder a traced turn's keys live in, which names no vendor (A7); `orchestra-index-`; and the tests' and tools' folders. The tools' constant is named for what it holds, the checkout | D12; a unit named for its application, as Docker's `docker-<id>.scope` |
+  | the command line's `--policy PATH` | `--settings PATH`: one complete settings file, taken alone, as `ORCHESTRA_SETTINGS` is | the file it names, as the variable does |
 
   - **The local file is a JSON Merge Patch** (RFC 7396, fact 26): an object merges into the one below
     it member by member; any other value, a list included, replaces; `null` removes the member. A
@@ -148,6 +155,10 @@ reach only runs started afterwards, and keep personal ones out of the public rep
     - With `ORCHESTRA_SETTINGS`, the origin is the file it names.
     - `stack.own()` compares that origin (fact 32), so no Apply ever turns the deployment into
       another stack.
+  - **Settings named by `ORCHESTRA_SETTINGS` or `--settings` are read-only.** Such a stack — the
+    demo's, the acceptance run's, each with a Workbench of its own — has no local patch. Its view shows
+    its settings and refuses every Apply, which would otherwise write the operator's own patch, a file
+    that stack never reads.
   - **Repositories come from one file, chosen as settings are.**
     - With `ORCHESTRA_REPOS` set, exactly the file it names. Neither `.orchestra/repos.json` nor a root
       `repos.json` is looked at, so the demo's, the acceptance's and the suite's descriptors never meet
@@ -166,9 +177,9 @@ reach only runs started afterwards, and keep personal ones out of the public rep
   - **The sweep keeps removing what an older worker left.** A Claude role-run's tracing settings hold
     the trace store's key, and the sweep removes those a dead worker left, by their prefix
     (`app/observability/telemetry.py:683-715`). A worker that died before the upgrade left them under
-    `orch-claude-settings-`, so the sweep removes both prefixes. That old prefix is the one `orch` left
-    in code (invariant 11), and it goes once every host has started on the new code (Not in this
-    change).
+    `orch-claude-settings-`, so the sweep removes that prefix as well as `orchestra-trace-`. That old
+    prefix is the one `orch` left in code, and the one vendor name outside the adapters (invariants 3
+    and 11). It goes once every host has started on the new code (Not in this change).
 - **A2 [ACTIVE]:** What the Settings view edits:
   - agents: named profiles — the kind, and the model and effort where the kind takes them;
   - each role's profile, persona and per-stage skills;
@@ -188,20 +199,26 @@ reach only runs started afterwards, and keep personal ones out of the public rep
     persona is that file's text. The Settings view writes `persona` into the local patch, marks it, and
     Revert removes it, so the file serves again;
   - the persona in effect is at most `MAX_PERSONA_BYTES = 64 * 1024` bytes of UTF-8, a constant of the
-    repository's own. That keeps a run's policy far inside what Temporal takes (fact 27), without tying
-    correctness to that service's limit.
+    repository's own, sized for the history rather than one payload (fact 39):
+    - every role turn carries the whole policy, both personas in it, so a turn's input is at most about
+      130 KB, half of Temporal's 256 KB warning;
+    - a run's history grows by that much each turn, reaching Temporal's 10 MB warning after about 80
+      turns and its 50 MB limit after about 400, where today's runs take a few.
 - **A5 [ACTIVE]:** Skills:
-  - settings name a skill and nothing else, by a strict name grammar, never an invocation;
+  - settings name a skill and nothing else, by the Agent Skills specification's name rule, never an
+    invocation (fact 49);
   - each kind renders the invocation: `/name` for Claude, `$name` for Codex;
   - `/name` is read only from a policy of the old shape, which the suite's own policy is today
     (fact 24);
   - where a vendor installs skills is not a setting. A kind whose launch needs that folder owns it
     inside its adapter, as Claude's `--add-dir` does today (fact 25).
 - **A6 [ACTIVE]:** An Apply reaches only runs started after it.
-  - `client.start` makes the run's policy whole: each role's kind, model, effort, access, persona
-    text and stage skills.
+  - `client.start` makes the run's policy whole, through `application.settings`: each role's kind,
+    model, effort, access, persona text and stage skills.
   - The run carries that copy, and no worker reads settings or a persona file for it.
-  - A policy of the old shape — a brain, a persona file's path — still runs as today.
+  - A run started before the change keeps its policy of the old shape — a brain, a persona file's
+    path — and still runs as today: `prepare` and `run_role` read that shape from the run's own
+    input. The loader takes only the new shape, so no new run starts on the old one.
 - **A7 [ACTIVE]:** Adapters live in `app/agents/adapters/`.
   - `__init__.py` holds the contract and a generic loader, and no list of kinds.
   - Each kind is one module, named from the kind by a one-to-one rule: lowercase letters, digits and
@@ -217,22 +234,61 @@ reach only runs started afterwards, and keep personal ones out of the public rep
     - It turns each module's name back into its kind by the same one-to-one rule, loads it through the
       same contract check, and returns its capabilities: `claude_code.py` is `claude-code`, and
       `codex.py` is `codex`.
+    - It answers per module: a module that fails to import or to meet the contract is returned as
+      refused, with its reason, beside the others. One broken module never hides the rest, and a role
+      bound to a refused kind is refused by validation.
+    - Importing an adapter only defines it. Anything that touches the host happens in its answers, so
+      the page can list kinds on a host that has none of their CLIs.
     - No production module and no page code holds a list of kinds. Tests may name the kinds they test
       — an adapter's own tests must.
   - Every kind runs its agent interactively in the role's live terminal (D7), with its own turn-end
-    signal, read-only mode, and environment hygiene — the variables a parent session of its own
-    leaves, which its agent must not inherit.
-  - **A kind validates its own profile.** The generic owner, `policy.py`, validates what every
-    profile shares: the names, the `kind` and its grammar, the shape, and the roles' references.
-    The loaded adapter validates what it owns: whether `model` and `effort` apply to it, and which
-    values it takes. Today's plain-token rule (fact 30) moves into `claude-code` and `codex`, because
-    they put those values on a command line; it is not the contract for a kind that does not.
+    signal and read-only mode.
+  - **No agent inherits any vendor's session markers** — the architecture's D17, which today strips
+    Claude Code's markers from every agent, Codex's included (fact 37). Each adapter declares the
+    variables a session of its vendor leaves. The application strips the union of every available
+    kind's from every agent's environment, never only the agent's own.
+  - **An old run's `brain` is resolved by the adapters.** Each adapter declares the brain name the old
+    shape used for it — `claude` for `claude-code`, `codex` for `codex` — and the loader resolves an
+    old policy's `brain` through those declarations. No generic module maps one name to another, and
+    the declaration goes with the old-shape readers (Not in this change).
+  - **A kind validates its own profile, composed in the application** (fact 36).
+    - `policy.py` validates what every profile shares: the names, the `kind` and its grammar, the
+      shape, and the roles' references. It cannot load an adapter: `app/foundation` imports nothing of
+      ours.
+    - `app/application/settings.py` composes the two. It runs that generic validation, then each bound
+      kind's own: whether `model` and `effort` apply to it and which values it takes, and whether it
+      can run read-only where a role needs it. It is the one loader and validator (invariant 5).
+    - Today's plain-token rule (fact 30) moves into `claude-code` and `codex`, because they put those
+      values on a command line. It is not the contract for a kind that does not.
+  - **The verdict's grammar stays one parser.** An adapter says only where its agent's messages are in
+    its turn's output: Claude's final message, Codex's `agent_message` items. Finding the
+    `{verdict, feedback}` object that ends a review, and checking it, stay in `nodes`, generic, for
+    every kind (fact 41). A second verdict parser per kind would be a second authority over what
+    routes (the architecture's D4).
   - **The packages keep their direction** (fact 28).
     - `app/agents`, adapters included, never imports `app/observability`, and `telemetry` never
       branches on a kind.
-    - `app/application` loads the adapter, uses it for the agent's mechanics, and hands `telemetry`
-      what the adapter provides for tracing — its environment for a tracing plugin, and the records
-      of a session to upload — as plain data. `telemetry` records a kind only as data.
+    - `app/application` loads the adapter, uses it for the agent's mechanics, and passes tracing
+      between it and `telemetry` as plain data, both ways (fact 38):
+      - **Before a turn**, the adapter is handed the step's trace context — its traceparent, the run's
+        environment and release — and, when the step is traced and Langfuse's keys are set, the keys
+        and a private folder. It returns what its agent needs: arguments and environment. Claude's
+        adapter writes its plugin's settings, keys included, into that folder, with its turn hooks in
+        the same file, since Claude takes one `--settings` (fact 42). Codex's adds nothing, as today.
+      - **After a turn**, the adapter answers from its own session what the trace records:
+        - the reasoning summaries — Codex's, from its rollout;
+        - the vendor uploader to run — its command, environment and payload;
+        - and what the installed build of that uploader lacks.
+
+        `telemetry` runs that command within its bounded timeout and records the outcome and any
+        degradation, knowing no vendor. This is today's Codex upload, moved as it is: it is not
+        rebuilt as records `telemetry` uploads itself.
+      - **The private folder stays `telemetry`'s.** It is made for one traced turn, only this user
+        can enter it, it is named `orchestra-trace-` after the worker's process, it is removed when
+        the turn ends, and it is swept once that process is gone (the architecture's D20). Every kind's
+        keys get today's guarantee, and no adapter names or cleans a folder of its own.
+    - `telemetry` records a step's kind and profile name, model and effort only as data — the trace
+      contract's step metadata, which names the brain today (fact 38).
     - `turn_hook.py` stays outside the adapters as a sink that knows no vendor. Where a payload comes
       from — stdin or its last argument — becomes a mode the adapter passes, and the adapter alone
       decides how its CLI invokes the sink and which events end a turn.
@@ -253,17 +309,23 @@ Any of these can follow as a change of its own:
 
 - a pi adapter (D8);
 - editing a flow's steps in the page — flows stay files, and the view chooses the default among them;
-- the stack's settings in the view: targets, hosts, ports, queues, timeouts. A hand edit of the local
-  patch can still set them; they take effect at the stack's next start;
+- the stack's settings in the view: targets, hosts, ports, queues. A hand edit of the local patch can
+  still set them.
+  - Each takes effect when the process reading it restarts: the stack for hosts, queues and terminal
+    ports; the Workbench for its own port and the terminal ports it connects to.
+  - Until then, a start is refused where no worker polls the queue it names (`client.py:106-115`).
+  - Timeouts are a run's own, taken at its start;
 - a global "skip approvals" — the Start form's per-run choice stays;
 - a list of models to choose from (D18: no model registry);
 - settings per repository or per run — `.orchestra/` in a target repository is where they would live;
 - editing repositories in the Settings view — `.orchestra/repos.json` moves, and stays a file edited by
   hand;
 - finding out which skills each host has installed;
-- removing the persona-path resolver kept for old runs (`prompt_path`, and the copy check behind it),
-  once no run of the old shape is open;
+- removing what reads the old shape, once no run of the old shape is open: `prompt_path`'s old rules
+  and the copy check behind them, and the adapters' old brain names (A7);
 - dropping the sweep's old prefix, once every host has started on the new code (A1);
+- a persona kept out of the run's history and passed by reference — the claim-check pattern — should
+  a persona ever need more than `MAX_PERSONA_BYTES` (A4);
 - renaming `policy.py`, or the word "policy".
 
 ## Verified evidence
@@ -306,7 +368,10 @@ Any of these can follow as a change of its own:
     - D17: a role's turn runs in its live terminal;
     - D18: no model registry;
     - D19: the global skills lead each stage through `stage_skills`;
-    - D29: the page's writes.
+    - D20, D21 and D28: the tracing plugins, the session stores and the accepted limits, each naming
+      a vendor's mechanics;
+    - D26: where a repository's facts come from;
+    - D29: the page's reads and writes.
 13. **Installed CLIs:** Codex `0.155.1` on WSL and `0.153.4` on Windows; Claude Code `2.1.276` on WSL
     and `2.1.282` on Windows.
 14. **Installed skills,** by folder name only:
@@ -368,6 +433,8 @@ Any of these can follow as a change of its own:
       - a constant in `tools/trust_probe.py` and `tools/ui_fixture.py`;
       - the public check's debris glob (`tools/public_check.sh:53`), which follows the acceptance's
         folder prefix (`tests/acceptance_restart.py:129`).
+    - `docs/history/`, a record kept as history, names `repos.json` too
+      (`docs/history/extraction.md:34, 59`).
 23. **How comparable tools layer their settings:**
     - Claude Code, highest first: managed; the command line; `.claude/settings.local.json` — "you, this
       project", kept out of git; `.claude/settings.json` — shared; `~/.claude/settings.json`. It is
@@ -419,6 +486,81 @@ Any of these can follow as a change of its own:
       (`tests/interfaces/test_workbench.py:128`).
     - The example test loads it whenever it exists (`tests/workspace/test_repos.py:190-192`).
     - Neither prints it. A root file left there would fail both once the loader refuses it (A1).
+36. **Where settings can be validated.**
+    - `app/foundation` imports nothing of ours, and `app/agents` only `foundation`
+      (`tests/test_architecture.py:39-55`), so `policy.py` cannot load an adapter.
+    - Settings are loaded only in `app/application` and `app/interfaces`: `client.py:204, 407`,
+      `cli.py:297`, `workbench/server.py:198, 374` and `worker.py:45`.
+    - An interface's behaviour belongs to `app/application` or below
+      (`app/interfaces/docs/architecture/structure.md:16-18`).
+37. **Every agent loses Claude Code's session markers today.** `agent_env` strips them whatever the
+    agent (`app/application/activities.py:48-52, 83-88`), as the architecture's D17 states for every
+    agent (`docs/architecture/structure.md:236-238`).
+38. **Tracing holds each vendor's mechanics** (`app/observability/telemetry.py`):
+    - Claude:
+      - a traceparent variable (`:573-595`);
+      - a settings file holding Langfuse's keys, in a folder only this user can enter, named after the
+        worker's process, removed when the turn ends (`:614-681`) and swept after a dead worker
+        (`:683-715`).
+    - Codex:
+      - its reasoning summaries, read from its rollout (`:777-815`);
+      - after the turn, the plugin's own uploader, run through `node` with the keys in its
+        environment, its build checked for what the trace needs (`:749-929`).
+    - Every step's metadata names its brain, model and reasoning effort (`:446-449`), as the trace
+      contract lists (`docs/architecture/trace-contract.md:38`). No saved view or dashboard selects on
+      them (`trace-contract.md:133-151`).
+39. **Every role turn carries the whole policy.**
+    - `prepare` and each `run_role` are handed it (`app/orchestration/workflow.py:128, 232`); the
+      `status` query is not (`:476-480`).
+    - Measured on the ten recorded histories in `tests/histories/`: 31–115 KB each, 1–7 role turns,
+      and 823–929 bytes of policy in each input.
+    - Temporal's limits ([its defaults](https://docs.temporal.io/self-hosted-guide/defaults)):
+      - a payload warns at 256 KB and fails at 2 MB;
+      - a history warns at 10 MB and fails at 50 MB.
+
+      This server overrides only `limit.maxIDLength` (`temporal/dynamicconfig.yaml`).
+40. **The one persona resolver reads from the policy file's folder.**
+    - `prompt_path` resolves a relative persona against its origin's folder
+      (`app/foundation/policy.py:101-117`). For the new origin that is `.orchestra/`, where A1 reads
+      from the checkout's root.
+    - The foundation's and the application's structures each name it the one resolver
+      (`structure.md:56` and `:49`).
+41. **Verdicts are parsed in two layers** (`app/agents/nodes.py:154-234`):
+    - finding the agent's messages in its output — Claude's final message, Codex's `agent_message`
+      items;
+    - the one `{verdict, feedback}` grammar that routes.
+42. **Claude's turn hooks share a traced turn's settings file.** Claude takes one `--settings`, so its
+    hooks go into the file holding the keys whenever there is one (`app/agents/terminal.py:286-300`).
+43. **Trust, and the guard over it.**
+    - `tests/test_architecture.py:295-317` finds a unit test's `trust.ensure` or `trust.forget` that
+      names no home, which would write the operator's own `~/.claude.json` or `~/.codex/config.toml`.
+      It knows those calls only by that spelling.
+    - Tools and the acceptance run name brains for trust: `tools/demo.py:578`,
+      `tools/trust_probe.py:50, 93`, `tests/acceptance_restart.py:380, 524`.
+44. **CI checks what is tracked with a copy of the public check's list**
+    (`.github/workflows/ci.yml:23-35`).
+    - The copy has the same root-only `repos.json`, and already lacks the acceptance-debris check.
+    - The script itself needs only bash, git and docker (`tools/public_check.sh`), all of which the
+      CI runner has.
+45. **The page answers requests on parallel threads** (`app/interfaces/workbench/server.py:366-369`),
+    and says a refusal as one string (`:159-165`).
+46. **The command line's `--policy PATH`** names a policy file (`app/interfaces/cli.py:336`), and the
+    acceptance run uses it (`tests/acceptance_restart.py:361, 447`).
+47. **The agents' preflight sits in the repositories' owner.**
+    - `repos.py` owns a run's repository, target, base branch and worktree root
+      (`app/workspace/repos.py:1-13`), yet checks each brain's executable (fact 18).
+    - Each kind runs one executable, `claude` or `codex` (`app/agents/nodes.py:60, 83`).
+    - `node` serves only Codex's uploader, after the turn and best effort (`telemetry.py:916`).
+48. **The architecture's D19 says "which skill a stage invokes stays code"**
+    (`docs/architecture/structure.md:516-517`). Yet `stage_skills` is policy (`policy.py:157-167`),
+    and D2 sets skills in the view.
+49. **Skill names follow the Agent Skills specification**
+    ([its name rule](https://agentskills.io/specification)):
+    - 1–64 characters of lowercase letters, digits and hyphens;
+    - no hyphen at either end, and none doubled;
+    - the same as the skill's folder's name.
+
+    The three installed skills keep it (fact 14).
 
 **Inferences**
 
@@ -431,11 +573,23 @@ Any of these can follow as a change of its own:
 **Assumptions / unverified areas**
 
 - **U1:** whether Codex's interactive mode — the one a role's turn uses — loads a skill named at its
-  first prompt as `codex exec` does. Measured only through `codex exec` (fact 21); unverified until the
-  operator's live check of a real Codex role-turn.
+  first prompt as `codex exec` does. Measured only through `codex exec` (fact 21).
+  - It is measured in task 1, before any adapter is built: one real Codex turn through the role's
+    terminal, within the plan's allowance (D6). The operator's live check confirms it.
+  - A negative answer changes only how the `codex` kind renders a skill.
 - **U2:** what each CLI does when a bound skill is not installed on the host running the stage.
+  - Measured in task 1 the same way: one turn per CLI, naming a skill no folder holds.
+  - If a CLI shows the missing skill in a way its adapter can read, that turn fails naming it, as a
+    lost session is read today.
+  - If a CLI goes on silently, a bound skill would be dropped without a word. So that kind's
+    preparation looks for the skill in the folders its vendor documents, and `prepare` refuses the run
+    before any work, naming the skill and where it looked.
 - **U3:** that replacing a file atomically works on the checkout's filesystem as the Workbench reaches
   it — a Windows drive through WSL.
+  - Also, what a replace does while a Windows process holds the file open: Windows refuses to replace
+    a file opened without shared deletion.
+  - The writer takes any error there as a refused Apply that leaves the file as it was. Measured in
+    task 5.
 
 **Refuted**
 
@@ -467,6 +621,8 @@ Any of these can follow as a change of its own:
 4. **A run's personas can change after it starts** (I4).
 5. **Two rules go against the operator's decisions:** the independent-judge refusal (D9), and a skill
    syntax fixed for every agent (D5).
+6. **The check that guards what is published has two copies.** They have already drifted, and the
+   move changes the list both hold (facts 34, 44).
 
 ## Decision
 
@@ -476,57 +632,78 @@ Any of these can follow as a change of its own:
    - `claude-code` and `codex` are today's code moved behind the contract, behaving exactly as now.
 
    An adapter answers, for one turn of its kind of agent:
+   - `executable`: the one program its turn runs, which its launch command starts and the preflight
+     looks for — one name, from one place in the adapter;
    - the command that runs it interactively in the role's live terminal — new or resumed session,
      model, effort, and this host's differences;
    - its read-only mode;
-   - its environment hygiene;
-   - how the end of its turn is signalled, and where its final message and session come from;
+   - the session markers its vendor leaves, which no agent inherits (A7);
+   - how the end of its turn is signalled, and where its agent's messages and its session are in the
+     turn's output — never the verdict's grammar, which stays generic (A7);
    - how a lost session shows;
    - how a skill is invoked, or that it has none;
-   - the commands its turn needs on this host, for the preflight. It names its executable once, and
-     its launch command runs that same name;
-   - optionally, trust setup and tracing;
+   - the brain name the old shape used for it (A7);
+   - optionally, trust setup — recording a repository for its CLI and taking the record back — and
+     tracing, as plain data both ways (A7);
    - its capabilities, for the page.
 
-   **The preflight stays before any work, and knows no kind.**
-   - `prepare` runs on the target host (`app/orchestration/workflow.py:128, 389`). It asks each bound
-     role's adapter for its commands, for that host, as the launch command is built there.
-   - It hands those names to `repos.resolve`, which looks up `git` and the names it is given, as
-     today, and holds no kind and no executable of its own.
-   - A missing command refuses the run before its worktree and any agent, naming the command. A
-     refused preparation already creates nothing (`tests/orchestration/test_stops.py:209-215`).
+   **The agents' preflight belongs to the application, and the repositories' to `repos`** (fact 47).
+   - `prepare` runs on the target host (`app/orchestration/workflow.py:128, 389`). Before anything
+     else, it takes each bound role's adapter and looks up its `executable` on this host.
+   - A missing one refuses the run naming it, before `repos.resolve` reads any git, before the
+     worktree and before any agent. A refused preparation already creates nothing
+     (`tests/orchestration/test_stops.py:209-215`).
+   - `repos.resolve` looks up `git` and resolves the repository, its base branch and its worktree root,
+     and takes no agent's name at all.
+   - One executable per kind is what the evidence needs: `node` serves only Codex's uploader, after the
+     turn and best effort. A list waits for a kind that needs two.
 2. **The settings' shape.** In `.orchestra/settings.json`, and the local patch over it:
    - `agents`: a profile's name maps to its `kind` and, where the kind takes them, `model` and `effort`.
      Two ship, matching today's bindings.
    - `roles`: each role's `agent` — a profile's name — its `workspace_access`, its `persona_file`, and,
      when given, its `persona` text, which takes the file's place (A4).
-   - `stage_skills`: a stage maps to a skill's name (A5).
+   - `stage_skills`: a stage maps to a skill's name, by the Agent Skills name rule (A5, fact 49).
    - Everything else as today: rounds, the default flow, and the stack's keys.
 3. **The run's policy, made whole at its start (A6).**
    - `client.start` resolves each role to its kind, model, effort, access and persona text, and each
-     stage's skill to its name, and hands the run that copy.
+     stage's skill to its name, through `application.settings`, and hands the run that copy.
    - The persona text is `persona` when present, else `persona_file`'s text, checked against
      `MAX_PERSONA_BYTES` there.
+   - **One persona resolver still** (fact 40). `prompt_path` gains the new shape's rule: a
+     `persona_file` resolves from the checkout's root, on the host starting the run. Its old rules stay
+     for old runs, on the host running the role. No second resolver is written.
    - No later Apply, and no later edit to a persona file, changes that run.
 
-   A role-run reads the old shape as well:
-   - a `brain` of `claude` is the `claude-code` kind;
+   The old shape is read only from a run's own input, by `prepare` and `run_role`, for a run started
+   before the change:
+   - its `brain` is resolved to a kind by the adapters' own declarations (A7);
    - a persona file's path resolves as today;
    - a `/name` skill is the skill `name`.
+
+   The loader takes only the new shape. A file of the old shape is refused, naming the new keys, and
+   the suite's, the demo's and the acceptance run's settings move to the new shape with this change.
 4. **Access and choice.** Access stays per role: the engineer writes, the architect reads (D10). A
    profile whose kind cannot run read-only cannot take the architect. Which model each role runs is
    free (D9), and the view shows both roles side by side.
-5. **The layers of A1.**
-   - The loader reads the shared file, applies the local patch, and validates the result; or it takes
-     `ORCHESTRA_SETTINGS` alone.
+5. **The layers of A1, and who holds each part.**
+   - **`policy.py`, in the foundation, owns the files.**
+     - It reads the shared file and applies the local patch, or takes `ORCHESTRA_SETTINGS` alone.
+     - It computes a sparse edit of the patch and replaces the file atomically.
+     - It gives each read a revision: a hash of both files' bytes, an absent file included.
+     - It validates what every profile shares, and loads no adapter (fact 36).
+   - **`application.settings` composes them** — the one entry for the page, the command line, both
+     workers and `client.start`. It validates the result with each bound kind's own checks (A7),
+     makes a run's policy whole, lists the kinds, and applies.
    - The result's origin is its source: `.orchestra/settings.json`, or the file `ORCHESTRA_SETTINGS`
      names, and never the patch (A1).
    - Repositories come from the file `ORCHESTRA_REPOS` names, alone, which must exist; else from
      `.orchestra/repos.json`, where the loader refuses a root `repos.json` left behind, and both being
      present (A1).
-   - The public check follows the move: it fails on a tracked `repos.json` wherever it is, and on a
-     tracked `.orchestra/settings.local.json`, which `.gitignore` gains (fact 34).
-   - A writer beside it:
+   - **The public check follows the move.**
+     - It fails on a tracked `repos.json` wherever it is, and on a tracked
+       `.orchestra/settings.local.json`, which `.gitignore` gains (fact 34).
+     - CI runs `tools/public_check.sh` itself, so the list of private paths has one owner (fact 44).
+   - An Apply:
      - edits the existing local patch only at the paths of the settings submitted, never rebuilding it
        from the effective settings. So:
        - a member the view does not show — a hand-written target or timeout — survives an Apply;
@@ -536,37 +713,63 @@ Any of these can follow as a change of its own:
        - removing a shipped member writes RFC 7396's `null`;
        - Revert removes only that setting's member, pruning objects it leaves empty;
        - a patch left empty removes the file;
-     - validates the whole result;
-     - refuses an Apply made against a revision of either file other than the current one;
-     - replaces the local patch atomically;
+     - validates the whole result, through `application.settings`;
+     - carries the revision its view was read at. It is refused as a conflict — the page's 409, as for
+       a stop already answered — when either file has changed since;
+     - is compared and replaced under one lock in the page's process, so two Applies never interleave
+       (fact 45). A hand edit landing between the compare and the replace is the one window left;
+     - replaces the local patch atomically, and takes an error there as a refusal (U3);
      - changes nothing when it refuses.
+   - **A refusal names its setting.** It carries the JSON Pointer (RFC 6901) of the setting it is about
+     — `/agents/review/model`, say — beside its reason. One about no single setting carries none.
+   - **A local patch that does not load** — a hand edit gone wrong — stops every loader, naming its
+     file and reason (invariant 8). The view then shows that refusal and takes no Apply, and the
+     operator fixes or deletes the file by hand.
 6. **The Settings view** (`#settings`, beside *Worktrees*):
    - **Agents:** profiles — add, edit, and remove, including one shipped below — each with its kind's
-     capabilities: whether it can review, how it takes a skill, whether model and effort apply.
-   - **Roles:** each role's profile, persona and per-stage skills, with each stage's invocation shown.
+     capabilities: whether it can review, how it takes a skill, whether model and effort apply. A kind
+     whose module is refused is listed as unusable, with its reason.
+   - **Roles:** each role's profile, persona — with its size against `MAX_PERSONA_BYTES` — and
+     per-stage skills, with each stage's invocation shown.
    - **Interactions:** rounds per phase, and the default flow with its steps.
-   - **Applying:** one Apply, a Revert per setting, a refusal said beside its field, and "applies to
-     runs started from now on".
-7. **Documents amended:**
+   - **Applying:**
+     - one Apply, carrying the revision the view was read at;
+     - a Revert per setting;
+     - a refusal said beside the field its JSON Pointer names, or above the view when it names none;
+     - "applies to runs started from now on";
+     - read-only, saying why, where the settings come from `ORCHESTRA_SETTINGS` (A1).
+7. **Documents amended** — the architecture's decisions and the owners the Documentation plan names:
    - D3: the reviewer is read-only; whether it is another model is the operator's choice;
    - D13: kinds of agent are code, one module each, and which agent a role runs is configuration;
-   - D17: the seam runs through an adapter;
+   - D17: the seam runs through an adapter, and no agent inherits any vendor's session markers;
    - D18: model and effort stay configuration, and no registry. Their accepted values are their kind's
      adapter's to check;
-   - D19: a skill is named, and rendered by its kind;
-   - D29: a settings change through the policy's owner joins the page's writes;
+   - D19: a skill is named, and rendered by its kind. Which skill leads a stage is configuration, set in
+     the Settings view, so "which skill a stage invokes stays code" goes (fact 48);
+   - D20: a traced turn's keys live in `telemetry`'s private folder for as long as the turn runs, and
+     the adapter decides only what its vendor's file inside it says;
+   - D26: descriptors come from `.orchestra/repos.json`, or the file `ORCHESTRA_REPOS` names;
+   - D29: the page reads and applies settings through `application.settings`, beside its other reads
+     and writes;
+   - vendor mechanics now spelled out at the architecture's level move down to the adapters that own
+     them, and the architecture keeps the generic rule. That covers Claude's permission modes and
+     Codex's Windows sandbox in D17, the flags in D18, the session stores' paths and reasoning
+     summaries in D21, and the tracing plugins and trust dialogs in D28;
    - the README and using.md: `.orchestra/` and the new names.
 
 ### Premise / KISS gate
 
-**The owner** of an agent's mechanics becomes that agent's adapter, and the owner of a run's policy
-stays `client.start`, which now makes it whole.
+**The owner** of an agent's mechanics becomes that agent's adapter. The settings' files stay
+`policy.py`'s, and their composition with the adapters is `application.settings`'s, since the
+foundation can load no adapter. The owner of a run's policy stays `client.start`, which now makes it
+whole. Every other owner keeps its concern: `repos` its repositories, `telemetry` a traced turn's keys.
 
 **It adds:**
 
 - one adapter package, with its contract and loader;
+- one application module, `settings`, composing what exists;
 - agent profiles;
-- the merge patch;
+- the merge patch, with a revision and one lock;
 - two endpoints;
 - one page module;
 - one old prefix the sweep still removes, until every host has started on the new code (A1).
@@ -578,6 +781,7 @@ stays `client.start`, which now makes it whole.
 - one skill syntax for every agent;
 - the independent-judge refusal;
 - a persona read long after a run started;
+- CI's copy of the public check;
 - every `orch` name (D12).
 
 **It knowingly gives up:** a new kind of agent still needs one adapter module, because each CLI signals
@@ -596,6 +800,16 @@ kind does not declare cannot be passed to it.
   session and turn-end guarantees (A2).
 - **A merge that cannot remove.** It cannot take a shipped profile away (fact 26).
 - **Keep `ORCH_POLICY` for personal settings.** It fails D11, and degrades the stack (facts 8–9).
+- **`policy.py` loading adapters to validate.** It turns the package graph into a cycle, which
+  `test_architecture.py` refuses (fact 36).
+- **A JSON Schema per kind, validated by a library.** A new dependency for what the adapter's own check
+  already does, with no present need.
+- **Each adapter making and cleaning its own secret files.** The sweep could not find a new kind's, so
+  its keys would outlive a dead worker (fact 38).
+- **Personas passed by reference, outside the run's history.** More moving parts than the bound needs
+  today (A4). It stays open as a later change.
+- **The agents' preflight given to `repos.resolve` as command names.** It removes the vendor names but
+  leaves the repositories' owner answering for agents (fact 47).
 
 ## Required invariants
 
@@ -606,29 +820,50 @@ kind does not declare cannot be passed to it.
 3. **Agent mechanics live only in the adapters.** No production module outside `app/agents/adapters/`
    contains agent-specific mechanics or branches — `turn_hook.py` and `telemetry.py` included. A kind
    may travel elsewhere only as opaque data — for settings, the page, telemetry — and the page learns
-   kinds and capabilities from the adapter boundary. A guard in `test_architecture.py` enforces it.
+   kinds and capabilities from the adapter boundary.
+   - A guard in `test_architecture.py` enforces it over code, not prose. No string outside the adapters,
+     docstrings apart, contains an available kind's name or its executable.
+   - Its one listed exception is the sweep's old prefix (A1), which goes with it.
+   - It cannot see a vendor's mechanic that carries no vendor name — `CC_LANGFUSE_TRACEPARENT`, say —
+     so the review checks those.
 3a. **The packages keep their direction.** `app/agents` never imports `app/observability`;
-    `app/application` joins them, handing on the adapter's tracing data (A7). The existing boundary
-    check in `test_architecture.py` stays green.
+    `app/application` joins them, handing tracing across as plain data (A7). No foundation module loads
+    an adapter. The existing boundary check in `test_architecture.py` stays green.
 3b. **A kind owns its profile's values.** The generic validator checks shape and references, and the
-    kind's adapter checks whether `model` and `effort` apply and which values they take.
-3c. **The preflight stays early and generic.** A run whose agent's command is missing on its target
-    host is refused before its worktree and any agent, naming that command. The command is the
-    adapter's answer, the one its launch runs; `repos.py` looks up only the names it is handed.
+    kind's adapter checks whether `model` and `effort` apply and which values they take — composed in
+    `application.settings` (A7).
+3c. **The agents' preflight stays early, and in the application.**
+    - A run whose agent's `executable` is missing on its target host is refused by `prepare` before
+      `repos.resolve` reads any git, before its worktree and before any agent, naming the executable.
+    - The executable is the adapter's one answer, the one its launch runs. `repos.py` checks `git` and
+      takes no agent's name.
+3d. **No agent inherits any vendor's session markers** (the architecture's D17): every agent's
+    environment is stripped of the union every available kind declares (A7).
+3e. **A traced turn's keys live only in `telemetry`'s private folder.** It is made for that turn and
+    removed when it ends, swept once its worker is gone, and never named or cleaned by an adapter
+    (A7).
+3f. **The verdict has one parser.** Adapters locate their agent's messages; the `{verdict, feedback}`
+    grammar and its checks stay generic, in `nodes` (A7).
 4. **Every agent's terminal takes typing (D7),** and the reviewing role is read-only, through its kind's
    own mode and the step's failure on a changed tree (D10).
-5. **One loader and one validator** for the page, the command line and both workers. A refusal in the
-   view is the validator's own reason, about the effective settings.
+5. **One loader and one validator — `application.settings` — for the page, the command line, both
+   workers and `client.start`.**
+   - No other production module calls `policy.load`.
+   - A refusal in the view is the validator's own reason, about the effective settings, with the JSON
+     Pointer of its setting (Decision 5).
 6. **An Apply reaches only runs started after it.**
    - A run's policy is whole from its start, persona text included, so no Apply and no edit to a
      persona file changes an open run.
    - The stack stays the checkout's own (D32): with a local patch present, `stack.own()` is true of the
      loaded settings, and `stack.managed()` is still Temporal and both workers.
-   - `ORCHESTRA_SETTINGS` takes no patch.
-7. **The suite never reads the operator's local patch or descriptors** (fact 35): it names descriptors
-   of its own through `ORCHESTRA_REPOS`. The shared settings bind no skill.
-8. **Writes are atomic, checked and sparse.**
+   - `ORCHESTRA_SETTINGS` takes no patch, and a Workbench running under it refuses every Apply,
+     leaving the operator's local patch as it was.
+7. **The suite never reads the operator's local patch or descriptors** (fact 35). Its harness names the
+   shared settings alone through `ORCHESTRA_SETTINGS`, and descriptors of its own through
+   `ORCHESTRA_REPOS`. The shared settings bind no skill.
+8. **Writes are atomic, checked, serialized and sparse.**
    - A refused Apply, or one against a stale revision of either file, leaves both as they were.
+   - Two Applies at once never interleave: one lands, and the other is refused as stale.
    - An Apply changes the local patch only at the settings it carries: every other member survives, and
      no unchanged shared value is copied in.
    - A patch whose result does not validate stops the loader with the file's name and the reason.
@@ -636,9 +871,10 @@ kind does not declare cannot be passed to it.
    arguments or environment; keys stay in `.env`.
 10. **A persona is at most `MAX_PERSONA_BYTES = 64 * 1024` bytes of UTF-8.** The bound is measured on
     the persona in effect — `persona` when present, else `persona_file`'s text — and refused, naming
-    the role, one byte past it.
+    the role, one byte past it. A role turn's input with both personas at the bound stays under
+    Temporal's 256 KB payload warning (A4, fact 39).
 11. **No `orch` name (D12), and no root `policy.json` or `repos.json`, is left** in code, configuration,
-    tools, tests or current documents; `todo/` keeps its wording as history.
+    tools, tests or current documents; `todo/` and `docs/history/` keep their wording as history.
     - Only what the change must recognise from before it keeps an old name: the sweep's old prefix
       (A1), and the loader's refusal of a root `repos.json`.
     - A root `repos.json` in a checkout is refused, naming its new place, and so are both being present.
@@ -646,40 +882,57 @@ kind does not declare cannot be passed to it.
     - The loader never reads the old place and never moves a file.
 11a. **A new kind is its module alone.** `available()` finds kinds from the package's modules, and no
      production module and no page code lists them.
-11b. **The public check covers what moved** (fact 34). A tracked `repos.json` anywhere, a tracked
-     `.orchestra/settings.local.json`, and acceptance debris under the new prefix each fail it.
+11b. **The public check covers what moved, and has one owner** (facts 34, 44). A tracked `repos.json`
+     anywhere, a tracked `.orchestra/settings.local.json`, and acceptance debris under the new prefix
+     each fail it. CI runs the same script.
 12. **D18 still holds:** no model registry; an empty model is the provider's default, shown as such.
-13. **D29:** the page holds no run state, and a settings change goes through the policy's owner, under
-    the page's token and origin checks.
+13. **D29:** the page holds no run state. It reads and applies settings through
+    `application.settings`, under the page's token and origin checks, which cover every `/api/` path
+    (`server.py:149-157`).
+14. **Trust writes in unit tests name a home.** The guard over them follows the calls into the adapters,
+    so no unit test writes the operator's own CLI configuration (fact 43).
 
 ## Implementation tasks
 
 0. [x] Q1–Q7 answered (D5–D11). Codex's skills measured (fact 21).
-1. [ ] Red guards, each observed failing first (Test-first and verification plan).
-2. [ ] The move and the rename (A1, D12): `.orchestra/`, the `ORCHESTRA_*` variables, and every other
-   `orch` name (fact 22). Mechanical, checked by the tests of the modules it touches.
+1. [ ] U1 and U2 measured first, one real turn each through the role's terminal (their plan is under
+   Assumptions). Then the red guards, each observed failing first (Test-first and verification plan).
+2. [ ] The move and the rename (A1, D12): `.orchestra/`, the `ORCHESTRA_*` variables, `--settings`,
+   and every other `orch` name (fact 22). Mechanical, checked by the tests of the modules it touches.
    - This checkout's own `repos.json`, ignored and private, is moved once into `.orchestra/` by hand,
      never printed, because git will not carry it.
    - The loader's refusal of a root one covers every other checkout.
-   - The suite names descriptors of its own (invariant 7).
-   - The public check's private paths and debris glob follow the move (invariant 11b).
+   - The suite's harness names the shared settings alone and descriptors of its own (invariant 7).
+   - The public check's private paths and debris glob follow the move, and CI runs the script in place
+     of its copy (invariant 11b).
    - The sweep removes both prefixes (A1).
 3. [ ] The adapter package: the contract, the loader, and `claude-code` and `codex` moved behind them,
    behaviour unchanged. That includes:
    - `turn_hook.py` made a vendor-blind sink;
-   - `telemetry` given the adapter's tracing data by the application, and branching on no kind;
-   - the preflight given the adapters' commands rather than brains (Decision 1).
+   - tracing split as A7 says: the vendors' files and uploader behind their adapters, and the private
+     folder, its sweep and the uploader's run left generic in `telemetry`;
+   - the agents' preflight moved from `repos.resolve` into `prepare`, which looks up each adapter's
+     `executable` (Decision 1);
+   - the union of every kind's session markers stripped from every agent's environment;
+   - the verdict's grammar left in `nodes`, with each adapter locating its messages;
+   - trust behind the adapters, and its callers — `tools/demo.py`, `tools/trust_probe.py` and the
+     acceptance run — going through every available kind, with the trust guard following the calls.
 
    Checked by the touched concerns' tests — the agents', the application's, observability's — and by
    the recorded histories' replay.
 4. [ ] The settings' new shape, and the run's policy made whole at `client.start`:
-   - validation: the generic shape, and each kind's own values through its adapter; read-only for the
-     architect's kind; no independent-judge refusal; skill names; `MAX_PERSONA_BYTES`;
-   - the old shape still read by role-runs, with the replay of recorded histories.
-5. [ ] The merge patch: the loader, the sparse writer, the `.gitignore` entries, and the suite's
-   isolation.
-6. [ ] The settings API — kinds and capabilities from the adapter boundary — and the Settings view,
-   through `frontend-design`, with each field saying what it changes and when.
+   - `application.settings`: the one loader and validator. It composes the generic shape with each kind's
+     own values through its adapter, read-only for the architect's kind, with no independent-judge
+     refusal, skill names by their rule, and `MAX_PERSONA_BYTES`;
+   - persona files through the one resolver, from the checkout's root (Decision 3);
+   - the old shape read only from a run's own input, by `prepare` and `run_role`, with the replay of
+     recorded histories. The loader refuses it, and the suite's, the demo's and the acceptance run's
+     settings move to the new shape.
+5. [ ] The merge patch: the loader, the sparse writer with its revision and lock, the refusals' JSON
+   Pointers, the `.gitignore` entries, and the suite's isolation. U3 is measured here.
+6. [ ] The settings API — kinds and capabilities from the adapter boundary, through
+   `application.settings` — and the Settings view, through `frontend-design`, with each field saying
+   what it changes and when, and the state of a local patch that does not load.
 7. [ ] Documentation (Documentation plan).
 8. [ ] Verification, in the standing order (fact 31):
    - tasks 2–6 each iterate on the tests of the concerns they touch, named, with the replay of recorded
@@ -708,17 +961,26 @@ kind does not declare cannot be passed to it.
     - an Apply made while a run is open leaves that run as it started.
 - **Permanent regression guards,** each written and run failing before any production code:
   1. **Mechanics only in the adapters** (`test_architecture.py`). Red today in nine places, the turn
-     hook, telemetry and the preflight among them. It reads code, not prose (fact 18). Control: a
-     kind's branch planted outside the package.
+     hook, telemetry and the preflight among them.
+     - It reads code, not prose (fact 18): no string outside the adapters, docstrings apart, contains
+       an available kind's name or executable. Its one listed exception is the sweep's old prefix.
+     - Control: a kind's branch planted outside the package.
   2. **A new kind is one module** (`agents/test_terminal.py`). A test-only kind, handed to the loader:
      - runs a fake agent interactively through the real terminal;
      - takes typed keys;
      - ends its turn on its own signal;
      - resumes its session.
 
+     Its review is parsed by the one generic parser: an answer with text after its verdict object is
+     refused, as it is for Claude and Codex (invariant 3f).
+
      The loader refuses an unknown kind by name, a name outside the grammar, and a module that lacks
-     part of the contract, saying what. Controls: a kind without a turn-end signal, which times out as
-     today; and a module missing its read-only mode, refused for the architect.
+     part of the contract, saying what.
+
+     Controls:
+     - a kind without a turn-end signal, which times out as today;
+     - a module missing its read-only mode, refused for the architect;
+     - a parser of the kind's own, which lets the trailing text through.
   3. **A run keeps its personas** (`orchestration/test_workflow.py`, over the fake seams). The persona
      is changed after a run starts and before its architect's session is born, and the architect still
      receives the text the run started with. Red today (fact 4). Control: the persona read at the
@@ -732,14 +994,18 @@ kind does not declare cannot be passed to it.
   4. **Any profile under any role, and the old shape:**
      - both roles on one profile plan, review and build (D9);
      - the architect on a kind with no read-only mode is refused (D10);
-     - a policy of the old shape — a brain, a file path, a `/name` skill — runs as before.
+     - a run whose input has the old shape — a brain, a file path, a `/name` skill — runs as before,
+       its `prepare` preflighting through the adapters' old brain names;
+     - the loader refuses a settings file of the old shape, naming the new keys.
   5. **The layers** (`foundation/test_policy.py`):
      - the merge patch — objects merge, lists replace, `null` removes a shipped profile — validated as a
        whole;
      - `ORCHESTRA_SETTINGS` taken alone;
-     - the suite never sees the local patch;
-     - a path in settings resolves from the checkout's root.
-  6. **The writer and the API:**
+     - under the suite's harness, no local patch is read;
+     - a persona file resolves from the checkout's root through the one resolver, and an old run's as
+       today.
+  6. **The writer and the API** (`application/test_settings.py` and the Workbench's tests, over a
+     temporary checkout with `ORCHESTRA_SETTINGS` cleared, save the one case that sets it):
      - a refused Apply changes nothing, and so does a stale one after a hand edit of either file;
      - a hand-written `targets` or timeout override survives an Apply that changes a role's agent;
      - an Apply changing one setting copies no unrelated shared value into the patch;
@@ -749,23 +1015,43 @@ kind does not declare cannot be passed to it.
      - no token, no write;
      - kinds and capabilities come from the adapter boundary;
      - a skill's invocation per kind: `/name` for Claude, `$name` for Codex, none for a kind without
-       skills.
+       skills;
+     - two Applies made against one revision, released together: one lands, the other is refused as
+       stale;
+     - a refusal carries the JSON Pointer of its setting;
+     - while the local patch does not load, the view's read returns that refusal and every Apply is
+       refused;
+     - under `ORCHESTRA_SETTINGS`, every Apply is refused, and the checkout's local patch stays as it
+       was, byte for byte.
 
-     Control: a writer that rebuilds the patch from the effective settings.
-  7. **A kind validates its own values** (`foundation/test_policy.py`, with a test-only kind):
+     Controls:
+     - a writer that rebuilds the patch from the effective settings;
+     - one without the lock, under which both concurrent Applies land;
+     - one that ignores where the settings came from, which writes the operator's patch from the
+       demo's page.
+  7. **A kind validates its own values** (`application/test_settings.py`, new, with a test-only kind):
      - a kind that takes no effort refuses one;
      - `claude-code` and `codex` refuse a model that is not a plain token;
-     - the generic validator takes a value it does not know the meaning of, and leaves it to the kind.
+     - the generic validator in `policy.py` takes a value it does not know the meaning of, and leaves it
+       to the kind;
+     - every loader goes through `application.settings`: no other production module calls
+       `policy.load`.
 
-     Control: the plain-token rule kept generic, refusing the test-only kind's own value.
+     Controls: the plain-token rule kept generic, refusing the test-only kind's own value; and a call to
+     `policy.load` planted in another module, which the check finds.
   8. **A local patch leaves the stack the deployment's** (`application/test_stack.py`). With a local
      patch present, the loaded settings are `stack.own()` and `stack.managed()` is Temporal and both
      workers; with `ORCHESTRA_SETTINGS`, they are that file's. Control: an origin taken from
      `settings.local.json`, which makes the stack another's.
-  9. **Kinds found, not listed** (`agents/test_terminal.py` or the adapters' own test module). A valid
-     test-only module, planted on the package's search path (A8), is returned by `available()`;
-     `__init__` and a `_`-prefixed module are not, and a module failing the contract is refused, saying
-     what it lacks. Control: a fixed list of kinds, which misses the planted one.
+  9. **Kinds found, not listed** (`agents/test_terminal.py` or the adapters' own test module):
+     - a valid test-only module, planted on the package's search path (A8), is returned by
+       `available()`;
+     - `__init__` and a `_`-prefixed module are not;
+     - a module failing the contract is returned refused, saying what it lacks, beside the others;
+     - it all holds with an empty `PATH` and an empty home, so no adapter probes its host when it is
+       imported.
+
+     Control: a fixed list of kinds, which misses the planted one.
   10. **The repositories' source is chosen, never guessed** (`workspace/test_repos.py`, over a
       temporary checkout):
       - without `ORCHESTRA_REPOS`:
@@ -782,29 +1068,54 @@ kind does not declare cannot be passed to it.
       Controls: a loader that falls back to the root file, which the first case catches; one that
       looks at the checkout's files before the variable, which the first explicit case catches; and the
       suite without its variable, whose descriptors are then the checkout's.
-  11. **A kind's command, not its name, is looked up** (`application/test_activities.py`, new: the
-      concern's own folder). The test-only kind's name differs from its executable (A8):
-      - its executable found: `prepare` succeeds;
-      - missing: `prepare` is refused, naming the executable, not the kind — and a refused
-        preparation creates no worktree and starts no agent, as `test_stops.py` already shows;
-      - for `claude-code`, `codex` and the test-only kind, the command the launch runs is one the
-        adapter declares.
+  11. **`prepare` looks up an adapter's executable, never its kind** (`application/test_activities.py`,
+      new: the concern's own folder). The test-only kind's name differs from its executable (A8):
+      - its executable found: `prepare` goes on to `repos.resolve`, and succeeds;
+      - missing: `prepare` is refused, naming the executable, not the kind, and `repos.resolve` is
+        never called — no git read, no worktree, no agent. A refused preparation already creates
+        nothing (`test_stops.py`);
+      - for `claude-code`, `codex` and the test-only kind, the launch runs the adapter's `executable`;
+      - `repos.resolve` checks `git` alone and takes no agent's name (`workspace/test_repos.py`, whose
+        missing-tool case now covers `git` only).
 
       Control: today's lookup of the kind's name, which refuses the first case.
   12. **The sweep still removes what an older worker left** (`observability/test_stale_settings.py`).
-      A dead worker's settings folder is removed under the new prefix and under the old. Control: a
-      sweep knowing only the new prefix, which leaves the old folder and its key.
+      A dead worker's folder is removed under `orchestra-trace-` and under `orch-claude-settings-`.
+      Control: a sweep knowing only the new prefix, which leaves the old folder and its key.
+  13. **No agent inherits any vendor's session markers** (`application/test_activities.py`). The
+      environment of the test-only kind's agent, and of each shipped kind's, holds no marker that any
+      available kind declares — Claude Code's included. Control: stripping only the agent's own kind's
+      markers, which leaves Claude's in a Codex agent's environment.
+  14. **A traced turn's keys stay in `telemetry`'s private folder** (`application/test_activities.py`,
+      with a test-only kind that writes a file into the folder it is handed):
+      - the file exists only there, and only during the turn;
+      - the folder is gone after the turn, whether the turn passed or failed;
+      - a folder whose process is gone is swept.
+
+      Control: an adapter making a folder of its own, which the sweep never finds.
+  15. **The trust guard follows the calls** (`test_architecture.py`). A unit test's call to an adapter's
+      trust answer that names no home is found. Control: today's guard, which knows only
+      `trust.ensure` and `trust.forget` and misses it.
+  16. **A role turn's input stays under Temporal's payload warning** (`application/test_settings.py`).
+      A run's policy made whole with both personas at `MAX_PERSONA_BYTES` serializes, inside a
+      `run_role` input, under 256 KB. Control: a bound twice as large, which crosses it.
+  17. **A bound skill is never dropped silently** — needed only if U2 finds a CLI that goes on without
+      it. A bound skill that the kind's documented folders do not hold refuses `prepare` before any
+      work, naming the skill and where it looked. Control: a preparation without the check, under
+      which the run starts.
 - **Reviewer-checked judgements:**
   - the view's words;
   - that nothing in it reads as a model registry;
   - that no kind is named in the page's own code;
   - that no `orch` name and no root `policy.json` / `repos.json` is left where invariant 11 says,
-    checked by one scripted search at the end rather than a permanent test. Outside `todo/` and the
-    vendored scripts, `git grep -P -i '(?<![a-z])orch(?!estra)'` finds nothing but the sweep's old
-    prefix;
+    checked by one scripted search at the end rather than a permanent test. Outside `todo/`,
+    `docs/history/` and the vendored scripts, `git grep -P -i '(?<![a-z])orch(?!estra)'` finds nothing
+    but the sweep's old prefix;
   - that the public check covers what moved (invariant 11b), proven once in a throwaway clone that
     tracks `.orchestra/repos.json`, `.orchestra/settings.local.json` or acceptance debris under the new
-    prefix, each of which fails it.
+    prefix, each of which fails it;
+  - that CI runs that same script, whose first run on CI is the operator's next push;
+  - that no vendor mechanic without a vendor's name is left outside the adapters (invariant 3).
 
 ### Green evidence
 
@@ -812,10 +1123,12 @@ kind does not declare cannot be passed to it.
   histories replaying wherever a run's policy is read.
 - Browser probes of the view.
 - `make demo` passes whole, once, on the finished implementation.
-- `make public-check` and `git diff --check` are clean.
+- `make public-check` and `git diff --check` are clean, and the public check's control in a throwaway
+  clone fails as invariant 11b says.
 - The whole suite once on WSL and once on Windows, after the external PASS.
 - The operator's live check:
-  - skills bound in the view reach a real turn, for Claude and for Codex (U1);
+  - skills bound in the view reach a real turn, for Claude and for Codex (U1, measured already in
+    task 1);
   - either agent is swapped under either role;
   - both terminals take typing;
   - an Apply during an open run leaves it as it was.
@@ -823,30 +1136,59 @@ kind does not declare cannot be passed to it.
 ## Documentation plan
 
 - **Authoritative stable owners:**
-  - [the architecture](../docs/architecture/structure.md): D3, D13, D17, D19 and D29, as in the
-    Decision;
-  - [the agents' structure](../app/agents/docs/architecture/structure.md): the adapter package, its
-    contract, its loader and naming rule, a kind's own validation, the turn hook as a sink that knows
-    no vendor, and how to add a kind;
-  - [the application's structure](../app/application/docs/architecture/structure.md): the adapter's
-    tracing data handed to observability, with the packages' direction unchanged;
-  - [the foundation's structure](../app/foundation/docs/architecture/structure.md): `.orchestra/`, the
-    merge patch and its sparse writer, `MAX_PERSONA_BYTES`, and the run's policy made whole at its
-    start;
+  - [the architecture](../docs/architecture/structure.md): D3, D13, D17, D18, D19, D20, D21, D26, D28
+    and D29, as in Decision 7, and the Composition table's rows for `policy.json`, `repos.json`,
+    `nodes.py`, `trust.py` and the settings;
+  - [the main view](../docs/architecture/diagrams/main.md) and
+    [the processes view](../docs/architecture/diagrams/processes.md): the agents' CLIs as kinds behind
+    adapters, where they name `claude · codex` today;
+  - [the agents' structure](../app/agents/docs/architecture/structure.md) and
+    [its main view](../app/agents/docs/architecture/diagrams/main.md): the adapter package as a part —
+    its contract, its loader and naming rule, a kind's own validation, the turn hook as a sink that
+    knows no vendor, and how to add a kind.
+    - `app/agents/adapters/` routes by pattern — one module per kind — never by a list, so adding a
+      kind edits no document.
+    - Each adapter's docstring owns its vendor's facts, moved down from the architecture's decisions.
+  - [the application's structure](../app/application/docs/architecture/structure.md): `settings`, the
+    one loader and validator; the agents' preflight in `prepare`; tracing passed across as plain data;
+    and the persona resolver's invariant, now also at a run's start;
+  - [the foundation's structure](../app/foundation/docs/architecture/structure.md) and
+    [its main view](../app/foundation/docs/architecture/diagrams/main.md): `.orchestra/`, the merge
+    patch, its sparse writer and revision, `MAX_PERSONA_BYTES` and its budget, and the one persona
+    resolver's two rules;
+  - [the workspace's structure](../app/workspace/docs/architecture/structure.md): `.orchestra/repos.json`,
+    `ORCHESTRA_REPOS`, and a preflight of `git` alone;
+  - [the observability's structure](../app/observability/docs/architecture/structure.md) and
+    [its main view](../app/observability/docs/architecture/diagrams/main.md): the private folder, its
+    sweep and the uploader's run, with no vendor's settings of its own;
+  - [the interfaces' structure](../app/interfaces/docs/architecture/structure.md): the settings API and
+    the Settings view's module;
+  - [the trace contract](../docs/architecture/trace-contract.md): a step's metadata names its kind and
+    profile, model and effort, where it names the brain today;
   - [docs/using.md](../docs/using.md): the Settings view, and the new names;
   - [README.md](../README.md): the configuration table — `.orchestra/settings.json`, the local patch,
-    `.orchestra/repos.json`, `ORCHESTRA_SETTINGS`, `ORCHESTRA_REPOS` — and the skills route, now the
-    Settings view;
-  - [tests/README.md](../tests/README.md): the rows of the modules whose guards change, and one for
-    `application/test_activities.py`.
+    `.orchestra/repos.json`, `ORCHESTRA_SETTINGS`, `ORCHESTRA_REPOS`, `--settings` — and the skills
+    route, now the Settings view;
+  - [tools/README.md](../tools/README.md): the new names;
+  - [tests/README.md](../tests/README.md): the rows of the modules whose guards change, and one each for
+    `application/test_activities.py` and `application/test_settings.py`.
 - **Duplication avoided:** the schemas are the validator's, and documents name them rather than list
-  them. RFC 7396 is cited, never restated.
+  them. RFC 7396, RFC 6901 and the Agent Skills name rule are cited, never restated. A vendor's
+  mechanics live in its adapter alone.
 - Stable docs, code, comments, tests and configuration will not reference this todo.
 
 ## Rollout and rollback
 
 - **The move and the rename:** the stack's scripts, the Makefile, the systemd unit and the demo change
   with the code, so a stack restarted on the new checkout finds its settings.
+- **The upgrade, in order:**
+  1. with no role turn at work — a turn cut short by its worker's restart stops the run, to be
+     continued (the architecture's D16);
+  2. `make down`, on the old code;
+  3. the new code, and this checkout's `repos.json` moved by hand;
+  4. `make up`;
+  5. `make workbench-restart`, since the page is outside the stack (the architecture's D32) and would
+     otherwise keep the old code, which reads a `policy.json` no longer there.
 - **The operator's own `repos.json`:** moved once into `.orchestra/`, by hand, in this checkout (task 2).
   In any other checkout, the loader refuses the one left at the root and names where it goes. It
   neither reads it nor moves it.
@@ -857,8 +1199,12 @@ kind does not declare cannot be passed to it.
 - **The settings folders a worker left before the upgrade** are removed by each host's first start on
   the new code (A1).
 - **Open runs** keep working through the change (invariant 2).
-- **Rollback of personal settings:** delete `.orchestra/settings.local.json`. A rollback of the code is
-  a revert; open runs survive it because the old shape stays readable.
+- **Rollback of personal settings:** delete `.orchestra/settings.local.json`.
+- **Rollback of the code:** a revert, in the upgrade's order.
+  - A run started on the new shape cannot go on under the old code, which reads no profile or kind.
+    Such runs are finished or stopped first.
+  - `.orchestra/repos.json` goes back to the checkout's root by hand. The old code never reads the local
+    patch, which can stay.
 
 ## Completion criteria
 
@@ -866,6 +1212,7 @@ kind does not declare cannot be passed to it.
 - `make demo`, `make public-check` and `git diff --check` pass on the finished implementation. The whole
   suite passes once on each host after the external PASS, and a failure there is reported as one,
   never counted as a pass.
+- U1 and U2 measured before the adapters were built, and the design adjusted to what they found.
 - The operator's live check passes, U1 included.
 - The documentation plan is done, with nothing unrelated in the diff.
 
@@ -972,3 +1319,47 @@ kind does not declare cannot be passed to it.
     key (A1, guard 12).
 - **Authority:** D12 added. A1 and A8 rewritten in place; Decision 1 and 5; invariants 3c, 7, 11 and
   11b.
+
+### 2026-09-27 — the external review: PATCH, the preflight's owner; the architect's audit: PATCH
+
+- **Accepted from the review, checked against the code:** the agents' preflight moves out of
+  `repos.resolve`, the repositories' owner, into `prepare`, and each adapter names one `executable`
+  that its launch and the preflight share (fact 47; Decision 1; invariant 3c; guard 11). The todo's
+  earlier "commands its turn needs" becomes that one name: `node` serves only Codex's uploader, after
+  the turn.
+- **Found by the audit, each with its evidence, and fixed here:**
+  1. `policy.py` cannot load adapters: the foundation imports nothing of ours. So kind validation is
+     composed in `application.settings`, the one loader (fact 36; A7; Decision 5; invariant 5).
+  2. Per-kind environment hygiene would give Codex agents Claude's markers, against the architecture's
+     D17. So every agent now loses every kind's markers (fact 37; invariant 3d; guard 13).
+  3. Tracing is more than an environment and records: a key-bearing file, a vendor uploader run after
+     the turn, and rollout reading. It is now split as plain data, with the keys' folder staying
+     generic (fact 38; A7; invariant 3e; guard 14).
+  4. A4's bound was reasoned on one payload, while every turn carries both personas. The bound is
+     kept, with the history budget measured (fact 39; invariant 10; guard 16).
+  5. `prompt_path` would resolve new persona files from `.orchestra/`. The one resolver gains the new
+     rule, with no second resolver (fact 40; Decision 3).
+  6. The verdict's grammar stays one generic parser, and adapters only locate messages (fact 41;
+     invariant 3f; guard 2).
+  7. The trust guard knows only today's calls, and would stop protecting the operator's CLI
+     configuration (fact 43; invariant 14; guard 15). Tools and the acceptance run name brains for
+     trust (task 3).
+  8. CI checks a copy of the public check, already drifted. CI now runs the script (fact 44;
+     invariant 11b).
+  9. Concurrent Applies could lose an update. So an Apply carries a revision under one lock; a refusal
+     names its setting by JSON Pointer; a patch that does not load is shown, not fatal (fact 45;
+     Decision 5; guard 6).
+  10. `--policy PATH` is renamed `--settings PATH`, taken alone (fact 46; A1).
+  11. The old shape is read only from a run's input — by `prepare` too — through the adapters' old
+      brain names, and the loader refuses it (A6; A7; Decision 3; guard 4).
+  12. The architecture's D19 still called a stage's skill code (fact 48). Vendor mechanics at the
+      architecture's level move down to the adapters, and the trace contract's metadata follows
+      (Decision 7; Documentation plan).
+  13. Rollout and rollback gain their order, the Workbench's restart, and what a revert costs a run on
+      the new shape. The stack's hand-set keys say when they take effect.
+  14. U1 and U2 are measured before any adapter is built, and U2's answer decides guard 17. U3 now
+      covers a replace over a file Windows holds open.
+  15. The demo's and the acceptance run's own Workbench would have written the operator's local patch.
+      Settings named by `ORCHESTRA_SETTINGS` are now read-only there (A1; invariant 6; guard 6).
+- **Authority:** A1, A4, A5, A6 and A7 rewritten in place; Decisions 1, 3, 5, 6 and 7; invariants 3,
+  3a–3f, 5, 7, 8, 10, 11, 11b, 13 and 14; a numbering note on the register. No decision changed.
