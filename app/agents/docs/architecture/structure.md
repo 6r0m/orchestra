@@ -47,8 +47,11 @@ sits between, so no task text is ever parsed as shell syntax.
 Through the run's settings snapshot: `nodes` appends an optional operator prompt addition for
 each role after the normal budget when extended rounds remain, and at the final budgeted
 iteration. The code-owned reflection and handoff instructions remain in force when an addition
-is empty, and every role keeps its own instructions. The addition does not replace the stage ask
-or the role's verdict contract.
+is empty, and every role keeps its own instructions. After the normal budget, each role diagnoses
+non-convergence, checks its own contribution, and continues ordinary work when no human decision is
+needed. The final architect handoff names a cause with evidence and separates the engineer's
+contribution, the architect's assessment, unresolved and disputed findings, and any operator
+decision. The addition does not replace the stage ask or the role's verdict contract.
 
 Through the adapter contract: Settings discovers skill names from the same roots a kind checks
 when preparing a run; no vendor path crosses the Settings API.

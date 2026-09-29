@@ -22,17 +22,31 @@ from app.foundation import stages
 
 # What may follow the verdict object and still leave it the reviewer's last word.
 _ENDS_THERE = re.compile(r"\s*(?:```)?\s*")
+CONVERGENCE_CAUSES = (
+    "task / requirements: ambiguous, contradictory, wrong scope, or wrong problem",
+    "engineer: misunderstanding, reasoning or implementation error, or repeated ineffective approach",
+    "reviewer: misunderstanding, stale, duplicate or unsupported finding, goalpost movement, or overengineering",
+    "legitimate complexity / new consequences: progress exposes another valid consequence",
+    "external / tooling / evidence: environment, dependency or service, missing information or proof",
+    "mixed / unknown: multiple causes, or insufficient evidence to attribute one",
+)
+_CONVERGENCE_CAUSE_GUIDANCE = (
+    "Choose one or more causes, cite evidence, and use mixed / unknown when attribution is unclear:\n- "
+    + "\n- ".join(CONVERGENCE_CAUSES)
+)
 CONVERGENCE_REFLECTION = {
-    "engineer": """The normal review budget has elapsed. Continue the current phase, but first critically reassess why convergence is taking this long.
+    "engineer": """Before continuing, diagnose why this phase has not converged.
 
-Re-check every unresolved architect finding against the current repository and evidence. Fix findings that are supported. For findings you dispute, state the specific evidence that refutes them; do not reject feedback merely because you prefer another design. Check whether recent fixes introduced new consequences, whether you repeatedly misunderstood a requirement, and whether a different investigation or implementation approach is now warranted.
+%s
 
-Do not broaden the agreed scope. If safe progress genuinely requires a human or external decision, state the exact blocking decision and evidence in your final report so the architect can escalate it. Otherwise continue solving the work normally.""",
-    "architect": """The normal review budget has elapsed. Continue reviewing the evolving artifact, but first critically reassess your own review.
+Re-check each remaining architect finding against the current repository and evidence. Fix supported findings and refute unsupported ones with specific evidence. Critically assess your own contribution and change your approach when the evidence says it is not working. Do not broaden scope. If safe progress requires a human or external decision, state the exact decision and evidence; otherwise continue the phase normally.""" % _CONVERGENCE_CAUSE_GUIDANCE,
+    "architect": """Before continuing, diagnose why this phase has not converged.
 
-Re-check every remaining finding against the current repository and evidence. Remove findings that are stale, duplicated, already resolved, unsupported, or outside the agreed goal. Re-evaluate evidence-backed engineer refutations and accept them when they hold. New findings are valid when new work introduced a concrete correctness, reliability, requirement, or architectural problem; do not move the goalposts or require a preferred design without such evidence.
+%s
 
-Keep the normal verdict meanings. Return BLOCKER when the premise or architecture is unsafe, conflicts with an accepted invariant, or cannot be repaired locally. Under D15, a harmful, mismatched, or wrong-problem task also needs a BLOCKER and a better direction for the human. Return BLOCKER as well when safe progress requires a specific human or external decision this loop cannot resolve. State the reason, evidence, and exact decision when one is needed. Otherwise return only concrete remaining findings under the normal PASS, PATCH, and UNVERIFIED meanings.""",
+Critically check your own review and the engineer's work against the current artifact and evidence. Withdraw findings that are stale, duplicated, resolved, unsupported, or outside the agreed goal. Accept engineer refutations when their evidence holds. New findings remain valid when new work exposes a concrete problem; do not move the goalposts or require a preferred design without evidence.
+
+Keep the normal verdict meanings. Return BLOCKER when the premise or architecture is unsafe, conflicts with an accepted invariant, or cannot be repaired locally. Under D15, a harmful, mismatched, or wrong-problem task also needs a BLOCKER and a better direction for the human. Return BLOCKER as well when safe progress requires a specific human or external decision this loop cannot resolve. State the reason, evidence, and exact decision when one is needed. Otherwise return only concrete remaining findings under the normal PASS, PATCH, and UNVERIFIED meanings.""" % _CONVERGENCE_CAUSE_GUIDANCE,
 }
 FINAL_REVIEW_SUMMARY = {
     "engineer": """This is the final budgeted engineer turn for this phase. Finish the smallest safe changes supported by the current review. Do not assume another engineer turn will follow.
@@ -48,11 +62,13 @@ If the result remains PATCH or UNVERIFIED, make the feedback the operator handof
 Engineer contribution: what the engineer changed or tried and the evidence provided.
 Architect assessment: what you verified and which findings remain valid.
 Unresolved: the concrete remaining problems or missing evidence.
+Why not converged: choose one or more causes below and support the diagnosis with evidence.
 Disputed findings: each unresolved disagreement and the evidence on both sides.
-Likely cause: task ambiguity, engineer implementation or reasoning, reviewer disagreement or overreach, or an external blocker.
 Operator decision needed: the exact decision or input required to continue.
 
-Keep the normal verdict JSON contract.""",
+%s
+
+Keep the normal verdict JSON contract.""" % _CONVERGENCE_CAUSE_GUIDANCE,
 }
 
 

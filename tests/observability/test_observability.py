@@ -1097,8 +1097,9 @@ class TraceShape(Scenario):
                                   ("engineer-build", 1), ("architect-verify", 1)])
 
     def test_review_budget_restarts_after_guidance_while_phase_round_stays_cumulative(self):
-        summaries = ("Unresolved: one gap. Tried: two changes. Disputed: finding B, because test C shows otherwise. "
-                     "Likely cause: missing coverage. Operator input: choose whether to narrow the scope.")
+        summaries = ("Unresolved: one gap. Disputed: finding B, because test C shows otherwise. "
+                     "Why not converged: external / tooling / evidence: missing coverage. "
+                     "Operator decision needed: choose whether to narrow the scope.")
         policy = dict(E.POLICY)
         policy["review_rounds"] = {phase: {"normal": 2, "extended": 1} for phase in ("plan", "build")}
         policy.pop("max_rounds", None)

@@ -43,7 +43,8 @@ in — its flow, one file in `flows/`.
   evidence prompt directs it to inspect the engineer's plan/build reports in the
   per-run logs, leaving the todo under review unchanged. On exhaustion, the
   architect's feedback separates the engineer's contribution from its own
-  assessment for the operator. `PASS` advances
+  assessment, explains why the phase did not converge with evidence, and gives
+  the operator unresolved findings and any required decision. `PASS` advances
   immediately; `BLOCKER` stops for the human immediately; a non-`PASS` at the
   combined limit stops as `exhausted`.
   Operator guidance starts a new episode

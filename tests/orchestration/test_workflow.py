@@ -63,9 +63,9 @@ class Routing(Scenario):
         self.assertIn("fix A", self.agent.calls[2]["prompt"])
 
     def test_review_rounds_reflect_once_after_ten_and_exhaust_with_evidence_at_twenty(self):
-        summaries = ("Unresolved: one concrete gap. Tried: two changes. Disputed: finding B, because test C "
-                     "shows otherwise. Likely cause: implementation reasoning. Operator input: choose whether "
-                     "to narrow the scope.")
+        summaries = ("Unresolved: one concrete gap. Disputed: finding B, because test C shows otherwise. "
+                     "Why not converged: engineer: implementation reasoning. "
+                     "Operator decision needed: choose whether to narrow the scope.")
         script = []
         for round_ in range(1, 21):
             engineer_name = "plan-e1-%d" % round_
@@ -92,10 +92,19 @@ class Routing(Scenario):
         self.assertIn("normal review budget of 10 iterations has elapsed", self.agent.calls[21]["prompt"])
         self.assertIn("ENGINEER NORMAL EXTRA", self.agent.calls[20]["prompt"])
         self.assertIn("ARCHITECT NORMAL EXTRA", self.agent.calls[21]["prompt"])
-        engineer_reflection = "critically reassess why convergence is taking this long"
-        architect_reflection = "critically reassess your own review"
+        engineer_reflection = "diagnose why this phase has not converged"
+        architect_reflection = "diagnose why this phase has not converged"
         self.assertEqual(self.agent.calls[20]["prompt"].count(engineer_reflection), 1)
         self.assertEqual(self.agent.calls[21]["prompt"].count(architect_reflection), 1)
+        causes = ("task / requirements:", "engineer:", "reviewer:",
+                  "legitimate complexity / new consequences:", "external / tooling / evidence:",
+                  "mixed / unknown:")
+        for prompt in (self.agent.calls[20]["prompt"], self.agent.calls[21]["prompt"]):
+            for cause in causes:
+                self.assertIn(cause, prompt)
+        self.assertIn("Critically assess your own contribution", self.agent.calls[20]["prompt"])
+        self.assertIn("Critically check your own review", self.agent.calls[21]["prompt"])
+        self.assertIn("continue the phase normally", self.agent.calls[20]["prompt"])
         for phrase in ("premise or architecture is unsafe", "conflicts with an accepted invariant",
                        "cannot be repaired locally", "harmful", "mismatched",
                        "specific human or external decision"):
@@ -122,8 +131,11 @@ class Routing(Scenario):
                        "specific human or external decision"):
             self.assertIn(phrase, final_prompt)
         for term in ("Engineer contribution", "Architect assessment", "Unresolved",
-                     "Disputed findings", "Likely cause", "Operator decision needed"):
+                     "Why not converged", "Disputed findings", "Operator decision needed"):
             self.assertIn(term, final_prompt)
+        for cause in causes:
+            self.assertIn(cause, final_prompt.lower())
+        self.assertIn("cite evidence", final_prompt)
         self.assertIn("ARCHITECT FINAL EXTRA", final_prompt)
         self.assertLess(final_prompt.index("This is the final budgeted review for this phase"),
                         final_prompt.index("ARCHITECT FINAL EXTRA"))
@@ -137,7 +149,7 @@ class Routing(Scenario):
                  "convergence": {"phase": "plan", "round": 2}}
         prompt = nodes.compose_prompt("plan", role, False, state, True, True,
                                       review_rounds={"plan": {"normal": 2, "extended": 1}})
-        self.assertIn("critically reassess why convergence is taking this long", prompt)
+        self.assertIn("diagnose why this phase has not converged", prompt)
         self.assertNotIn("Operator's additional reflection guidance", prompt)
         no_additions = nodes.compose_prompt(
             "plan", role, False, state, True, True,

@@ -129,9 +129,10 @@ immediately, and a non-`PASS` at the combined limit waits for operator guidance.
 Advanced review guidance shows the code-owned instructions used at each boundary. It can add separate
 instructions for each role after the normal budget and on the last budgeted iteration; these optional
 additions follow the built-in guidance, which always applies. Additions are shared by Plan and Build and
-limited to 4,096 combined UTF-8 bytes. At exhaustion, the engineer is asked to give the architect a
-factual handoff in its final message, and the architect's feedback separates the engineer's contribution
-from its own assessment for the operator.
+limited to 4,096 combined UTF-8 bytes. At exhaustion, the engineer gives the architect a factual
+handoff in its final message. The architect's final feedback separates both roles' contributions,
+explains why the phase did not converge with evidence, lists unresolved or disputed findings, and
+states any operator decision needed.
 
 ## The command line
 
