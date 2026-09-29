@@ -152,9 +152,14 @@ class SettingsApi(unittest.TestCase):
 
     def test_a_read_lists_the_kinds_and_an_apply_writes_only_what_it_changes(self):
         from app.agents import adapters
+        from app.agents import nodes
         status, shown = self.ask("GET")
         self.assertEqual((status, shown["writable"]), (200, True))
         self.assertEqual(shown["kinds"], adapters.available(), "the kinds come from the adapters, not the page")
+        self.assertEqual(shown["code_owned_review_guidance"], {
+            "after_normal": nodes.CONVERGENCE_REFLECTION,
+            "at_limit": nodes.FINAL_REVIEW_SUMMARY,
+        }, "Settings displays the same guidance the role runner composes")
         status, after = self.apply(shown["revision"], {"pointer": "/review_rounds/plan/normal", "value": 3})
         self.assertEqual((status, after["settings"]["review_rounds"]["plan"]),
                          (200, {"normal": 3, "extended": 10}))

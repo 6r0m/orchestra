@@ -48,16 +48,6 @@
       "extended": 10
     }
   },
-  "review_prompts": {
-    "after_normal": {
-      "engineer": "",
-      "architect": ""
-    },
-    "at_limit": {
-      "engineer": "",
-      "architect": ""
-    }
-  },
   "auto_proceed": false,
   "default_flow": "engineer-code",
   "timeout_seconds": 3600,

@@ -145,55 +145,55 @@
           <h2 id="settings-roles-title">Roles</h2>
           <div class="cast" id="settings-roles"></div>
         </section>
-        <section class="settings-part" aria-labelledby="settings-agents-title">
-          <h2 id="settings-agents-title">Agent profiles</h2>
-          <details class="settings-disclosure" id="settings-profile-disclosure">
-            <summary id="settings-profile-summary">Edit agent profiles</summary>
-            <p class="hint">Each role above uses one profile. Leave Model or Effort blank to use that provider's default.</p>
-            <div class="table-wrap">
-              <table class="profiles">
-                <thead><tr><th scope="col">Profile</th><th scope="col">Kind</th><th scope="col">Model</th>
-                  <th scope="col">Effort</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
-                <tbody id="settings-profiles"></tbody>
-              </table>
-            </div>
-            <div class="add-agent">
-              <div class="field">
-                <label for="settings-add-name">New profile</label>
-                <input id="settings-add-name" name="profile-name" type="text" spellcheck="false" placeholder="codex-fast…"
-                  aria-describedby="settings-add-hint" data-pointer="/agents">
-              </div>
-              <div class="field">
-                <label for="settings-add-kind">Kind</label>
-                <select id="settings-add-kind" name="profile-kind"></select>
-              </div>
-              <button type="button" id="settings-add">Add profile</button>
-              <p class="hint" id="settings-add-hint">Lowercase letters and digits, words joined by single hyphens.</p>
-              <p class="alert" id="settings-add-alert" role="alert"></p>
-            </div>
-            <ul class="unusable" id="settings-unusable"></ul>
-          </details>
-        </section>
         <section class="settings-part" aria-labelledby="settings-together-title">
-          <h2 id="settings-together-title">How the roles work together</h2>
+          <h2 id="settings-together-title">Review loop</h2>
           <fieldset class="field rounds">
             <legend>Review rounds</legend>
-            <p class="hint">If extended rounds remain after normal rounds, both roles reflect once before continuing. BLOCKER stops immediately.</p>
+            <p class="hint">If still not PASS at the normal budget and after-reflection rounds remain, both roles reflect once. BLOCKER stops immediately.</p>
             <div class="choices" id="settings-rounds"></div>
           </fieldset>
-          <details class="settings-disclosure" id="settings-review-prompt-disclosure">
-            <summary id="settings-review-prompt-summary">Advanced: extra review guidance (none)</summary>
-            <p class="hint" id="settings-review-prompt-limit"></p>
-            <div class="prompt-groups" id="settings-review-prompts"></div>
-          </details>
+        </section>
+        <section class="settings-part" aria-labelledby="settings-flow-title">
+          <h2 id="settings-flow-title">Default flow</h2>
           <div class="field">
-            <label for="settings-flow">Default flow</label>
+            <label class="visually-hidden" for="settings-flow">Default flow</label>
             <select id="settings-flow" data-pointer="/default_flow" aria-describedby="settings-flow-hint"></select>
             <ol class="score compact" id="settings-flow-steps" aria-label="The flow's steps"></ol>
             <p class="hint" id="settings-flow-hint">What a run follows when it names no flow of its own.</p>
             <p class="alert" role="alert"></p>
           </div>
         </section>
+        <details class="settings-disclosure" id="settings-profile-disclosure">
+          <summary id="settings-profile-summary">Agent profiles</summary>
+          <p class="hint">Each role above uses one profile. Leave Model or Effort blank to use that provider's default.</p>
+          <div class="table-wrap">
+            <table class="profiles">
+              <thead><tr><th scope="col">Profile</th><th scope="col">Kind</th><th scope="col">Model</th>
+                <th scope="col">Effort</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+              <tbody id="settings-profiles"></tbody>
+            </table>
+          </div>
+          <div class="add-agent">
+            <div class="field">
+              <label for="settings-add-name">New profile</label>
+              <input id="settings-add-name" name="profile-name" type="text" spellcheck="false" placeholder="codex-fast…"
+                aria-describedby="settings-add-hint" data-pointer="/agents">
+            </div>
+            <div class="field">
+              <label for="settings-add-kind">Kind</label>
+              <select id="settings-add-kind" name="profile-kind"></select>
+            </div>
+            <button type="button" id="settings-add">Add profile</button>
+            <p class="hint" id="settings-add-hint">Lowercase letters and digits, words joined by single hyphens.</p>
+            <p class="alert" id="settings-add-alert" role="alert"></p>
+          </div>
+          <ul class="unusable" id="settings-unusable"></ul>
+        </details>
+        <details class="settings-disclosure" id="settings-review-prompt-disclosure">
+          <summary id="settings-review-prompt-summary">Advanced: extra review guidance (none)</summary>
+          <p class="hint" id="settings-review-prompt-limit"></p>
+          <div class="prompt-groups" id="settings-review-prompts"></div>
+        </details>
         <div class="apply-bar">
           <p id="settings-pending">No changes.</p>
           <div class="actions">

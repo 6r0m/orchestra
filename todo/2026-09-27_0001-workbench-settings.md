@@ -1569,6 +1569,36 @@ code it guards, and observed failing first.
 - Updated the user guide and package owners for the new behavior. Windows focused verification passed: 4 classes, 44 tests; JavaScript syntax, shared settings JSON and git diff check passed. The live Settings API returned 200; the profile and prompt disclosures rendered, all four prompt fields staged without Apply, and a 390 px layout had no horizontal overflow. A page reload cleared the temporary UI-only draft; no settings Apply was sent.
 - Full WSL and Windows suites and the final live Workbench walkthrough remain at the accepted external review gate.
 
+### 2026-09-29 — PATCH: built-in guidance and compact Settings hierarchy
+
+- **Accepted and fixed:** architect convergence and exhaustion prompts retain Orchestra's BLOCKER
+  meaning for unsafe premises or architecture, accepted-invariant conflicts, locally unrepairable
+  blockers, D15's harmful or mismatched tasks, and a specific human or external decision. The prompt
+  contract is tested at both boundaries.
+- **Accepted and fixed:** code-owned review prompts are exposed read-only from `nodes.py`; Settings
+  presents them before optional per-role additions. The empty shared `review_prompts` scaffold is
+  removed. Policy validation now accepts sparse event/role additions while continuing to reject
+  unknown keys and oversized content; a single-leaf Apply/revert test proves the shared policy needs
+  no empty scaffold.
+- **Accepted and refined:** Settings shows roles, compact `normal + after reflection = max` budgets,
+  then Default flow. Agent profiles and advanced guidance are collapsed by default. Disabled Apply is
+  neutral and Reset is hidden without a visible override. Desktop max width is 1160 px; mobile skill
+  input sizing keeps the longest built-in skill name visible at 390 px.
+- **Reviewer corrections:** Agent profiles were already collapsed in the prior UI. The screenshot's
+  claim of abundant unused width does not hold at 1080 px, where the sidebar and page padding leave a
+  761 px settings column; widening still improves larger desktop windows. Removing the blank prompt
+  scaffold alone would have made sparse additions fail the old strict event/role validator, so that
+  validation contract was updated with the sparse setting.
+- **Verification:** 6 focused Windows test classes, 87 tests passed; JavaScript syntax, shared settings
+  JSON parsing and `git diff --check` passed. The Workbench API returned built-ins matching runtime
+  constants, the Settings browser probe verified additive editors and live budget totals without
+  applying settings; the 390 px viewport has no horizontal overflow and the longest skill label
+  measures 168.6 px against 178 px of input content width. Desktop collapsed and Advanced-open
+  screenshots were captured; the browser screenshot helper timed out on the final mobile capture, so
+  that layout was verified from viewport and input geometry instead. No settings Apply was sent.
+- Full WSL and Windows suites and the final live Workbench walkthrough remain at the accepted external
+  review gate.
+
 ### 2026-09-29 — PATCH: convergence prompts and Settings wording
 
 - **Accepted and fixed:** the final engineer prompt now asks for a concise handoff in its final message, not the reviewed todo. The architect's evidence prompt directs it to inspect engineer plan/build reports in their per-run logs, so the existing evidence path can carry the handoff without adding workflow state or changing the approved artifact.

@@ -9,7 +9,7 @@
   `app.application.settings`, since nothing here loads an adapter.
 - review_rounds (D5): normal and extended architect review attempts per phase; max_rounds is retained for
   old settings and run policies.
-- review_prompts: bounded, optional role-specific additions at the normal reflection and final budget boundary.
+- review_prompts: bounded, optional sparse role-specific additions at the normal reflection and final budget boundary.
 - Git authority: all-false — agents never commit or push (D11).
 
 Identifiers are data: binding an agent, editing a role's persona or naming the default flow is
@@ -445,12 +445,12 @@ def validate(raw):
     prompts = raw.get("review_prompts")
     if "review_prompts" in raw:
         prompt_events = {"after_normal", "at_limit"}
-        if not isinstance(prompts, dict) or set(prompts) != prompt_events:
-            raise InvalidPolicy("must define exactly after_normal and at_limit", pointer("review_prompts"))
+        if not isinstance(prompts, dict) or set(prompts) - prompt_events:
+            raise InvalidPolicy("may contain only after_normal and at_limit", pointer("review_prompts"))
         total_bytes = 0
         for event, role_prompts in prompts.items():
-            if not isinstance(role_prompts, dict) or set(role_prompts) != set(ROLES):
-                raise InvalidPolicy("must define exactly %s and %s" % ROLES,
+            if not isinstance(role_prompts, dict) or set(role_prompts) - set(ROLES):
+                raise InvalidPolicy("may contain only %s and %s" % ROLES,
                                     pointer("review_prompts", event))
             for role, text in role_prompts.items():
                 where = pointer("review_prompts", event, role)

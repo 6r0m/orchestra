@@ -32,7 +32,7 @@ Do not broaden the agreed scope. If safe progress genuinely requires a human or 
 
 Re-check every remaining finding against the current repository and evidence. Remove findings that are stale, duplicated, already resolved, unsupported, or outside the agreed goal. Re-evaluate evidence-backed engineer refutations and accept them when they hold. New findings are valid when new work introduced a concrete correctness, reliability, requirement, or architectural problem; do not move the goalposts or require a preferred design without such evidence.
 
-If safe progress genuinely requires an operator or external decision that this loop cannot resolve, return BLOCKER and state that exact decision and evidence. Otherwise return only concrete remaining findings.""",
+Keep the normal verdict meanings. Return BLOCKER when the premise or architecture is unsafe, conflicts with an accepted invariant, or cannot be repaired locally. Under D15, a harmful, mismatched, or wrong-problem task also needs a BLOCKER and a better direction for the human. Return BLOCKER as well when safe progress requires a specific human or external decision this loop cannot resolve. State the reason, evidence, and exact decision when one is needed. Otherwise return only concrete remaining findings under the normal PASS, PATCH, and UNVERIFIED meanings.""",
 }
 FINAL_REVIEW_SUMMARY = {
     "engineer": """This is the final budgeted engineer turn for this phase. Finish the smallest safe changes supported by the current review. Do not assume another engineer turn will follow.
@@ -42,7 +42,7 @@ In your final message, give the architect a concise, factual handoff: what you c
 Do not modify the todo merely to record this handoff.""",
     "architect": """This is the final budgeted review for this phase. Re-evaluate the current artifact and evidence as they stand now; do not add optional improvements merely because this is the last turn.
 
-PASS if the reviewed requirements are satisfied. Return BLOCKER only if safe progress requires a specific human or external decision; state that decision and the evidence.
+Keep the normal verdict meanings. PASS if the reviewed requirements are satisfied. Return BLOCKER when the premise or architecture is unsafe, conflicts with an accepted invariant, cannot be repaired locally, or the task is harmful, mismatched, or the wrong problem (D15); also use it when safe progress requires a specific human or external decision. State the reason and evidence, and the exact decision when one is needed. PATCH and UNVERIFIED keep their normal meanings for other unresolved findings.
 
 If the result remains PATCH or UNVERIFIED, make the feedback the operator handoff with these sections:
 Engineer contribution: what the engineer changed or tried and the evidence provided.

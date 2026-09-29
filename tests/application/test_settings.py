@@ -146,7 +146,7 @@ class ARunsPolicy(unittest.TestCase):
         settings["review_rounds"] = {phase: {"normal": 10, "extended": 10} for phase in P.stages.PHASES}
         policy = S.run_policy(settings)
         self.assertEqual(policy["review_rounds"], settings["review_rounds"])
-        self.assertEqual(policy["review_prompts"], settings["review_prompts"])
+        self.assertEqual(policy.get("review_prompts"), settings.get("review_prompts"))
         self.assertNotIn("max_rounds", policy)
 
     def test_a_skill_bound_to_a_kind_that_takes_none_is_refused(self):
@@ -238,8 +238,8 @@ class Applying(unittest.TestCase):
                                "default_flow")]
         shown = S.apply(changes, self.read()["revision"], self.root, self.environ)
         owned = ("agents", "roles", "stage_skills", "review_rounds", "review_prompts", "default_flow")
-        self.assertEqual({key: shown["settings"][key] for key in owned},
-                         {key: shown["shared"][key] for key in owned})
+        self.assertEqual({key: shown["settings"].get(key) for key in owned},
+                         {key: shown["shared"].get(key) for key in owned})
         self.assertEqual(shown["settings"]["max_rounds"], {"plan": 4, "build": 5})
         self.assertEqual(self.patch(), {"timeout_seconds": 90, "max_rounds": {"plan": 4, "build": 5}},
                          "Reset only reverts visible page-owned settings")

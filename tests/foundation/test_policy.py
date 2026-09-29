@@ -176,17 +176,31 @@ class Shape(unittest.TestCase):
 
     def test_review_prompt_additions_are_role_specific_and_bounded_together(self):
         raw = self.raw()
+        raw.pop("review_prompts", None)
+        raw["review_prompts"] = {"after_normal": {"engineer": "Check the work and findings."}}
+        P.validate(raw)
+
+        unknown_event = json.loads(json.dumps(raw))
+        unknown_event["review_prompts"]["after_build"] = {"engineer": "Check the build."}
+        with self.assertRaises(P.InvalidPolicy) as raised:
+            P.validate(unknown_event)
+        self.assertEqual(raised.exception.pointer, "/review_prompts")
+
+        unknown_role = json.loads(json.dumps(raw))
+        unknown_role["review_prompts"]["after_normal"]["operator"] = "Check the task."
+        with self.assertRaises(P.InvalidPolicy) as raised:
+            P.validate(unknown_role)
+        self.assertEqual(raised.exception.pointer, "/review_prompts/after_normal")
+
         raw["review_prompts"] = {
             event: {role: "" for role in P.ROLES} for event in ("after_normal", "at_limit")
         }
         raw["review_prompts"]["after_normal"]["engineer"] = "Check the work and findings."
         P.validate(raw)
 
-        missing_role = json.loads(json.dumps(raw))
-        del missing_role["review_prompts"]["at_limit"]["architect"]
-        with self.assertRaises(P.InvalidPolicy) as raised:
-            P.validate(missing_role)
-        self.assertEqual(raised.exception.pointer, "/review_prompts/at_limit")
+        sparse_role = json.loads(json.dumps(raw))
+        del sparse_role["review_prompts"]["at_limit"]["architect"]
+        P.validate(sparse_role)
 
         within_limit = json.loads(json.dumps(raw))
         within_limit["review_prompts"]["after_normal"]["engineer"] = "é" * (P.MAX_REVIEW_PROMPT_BYTES // 2)

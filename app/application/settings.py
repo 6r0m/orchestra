@@ -17,7 +17,7 @@ refused.
 import os
 import threading
 
-from app.agents import adapters
+from app.agents import adapters, nodes
 from app.foundation import flows
 from app.foundation import paths
 from app.foundation import policy as P
@@ -59,6 +59,8 @@ def read(root=paths.REPO, environ=os.environ):
     shown = {"revision": P.revision(below, local), "source": P.origin(below, root), "writable": local is not None,
              "kinds": adapters.available(), "skills": adapters.skill_names(root), "roles": roles,
              "phases": list(stages.PHASES),
+             "code_owned_review_guidance": {"after_normal": nodes.CONVERGENCE_REFLECTION,
+                                             "at_limit": nodes.FINAL_REVIEW_SUMMARY},
              "max_persona_bytes": P.MAX_PERSONA_BYTES,
              "max_review_prompt_bytes": P.MAX_REVIEW_PROMPT_BYTES}
     try:

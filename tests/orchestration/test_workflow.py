@@ -95,6 +95,10 @@ class Routing(Scenario):
         architect_reflection = "critically reassess your own review"
         self.assertEqual(self.agent.calls[20]["prompt"].count(engineer_reflection), 1)
         self.assertEqual(self.agent.calls[21]["prompt"].count(architect_reflection), 1)
+        for phrase in ("premise or architecture is unsafe", "conflicts with an accepted invariant",
+                       "cannot be repaired locally", "harmful", "mismatched",
+                       "specific human or external decision"):
+            self.assertIn(phrase, self.agent.calls[21]["prompt"])
         self.assertNotIn(engineer_reflection, self.agent.calls[22]["prompt"])
         self.assertNotIn(architect_reflection, self.agent.calls[23]["prompt"])
         self.assertNotIn("ENGINEER NORMAL EXTRA", self.agent.calls[22]["prompt"])
@@ -112,6 +116,10 @@ class Routing(Scenario):
         self.assertLess(final_engineer_prompt.index("This is the final budgeted engineer turn"),
                         final_engineer_prompt.index("ENGINEER FINAL EXTRA"))
         final_prompt = " ".join(self.agent.calls[39]["prompt"].split())
+        for phrase in ("premise or architecture is unsafe", "conflicts with an accepted invariant",
+                       "cannot be repaired locally", "harmful", "mismatched",
+                       "specific human or external decision"):
+            self.assertIn(phrase, final_prompt)
         for term in ("Engineer contribution", "Architect assessment", "Unresolved",
                      "Disputed findings", "Likely cause", "Operator decision needed"):
             self.assertIn(term, final_prompt)

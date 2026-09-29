@@ -55,6 +55,8 @@ button:hover, .button:hover { background: #26303b; border-color: var(--quiet); }
 button:disabled { opacity: 0.55; cursor: default; }
 button.primary, .button.primary { background: var(--you); border-color: var(--you); color: #1a1405; font-weight: 600; }
 button.primary:hover, .button.primary:hover { background: #f6c56a; border-color: #f6c56a; }
+button.primary:disabled, button.primary:disabled:hover { background: var(--raised); border-color: var(--rule);
+  color: var(--quiet); opacity: 1; }
 button.danger { color: var(--bad); border-color: var(--bad); background: transparent; }
 button.danger:hover { background: rgba(236, 106, 106, 0.12); }
 button.quiet { border-color: transparent; background: transparent; color: var(--quiet); padding-inline: 6px; }
@@ -282,7 +284,7 @@ summary:hover { color: var(--ink); }
 
 /* Settings: each role in its colour, as its terminal and its cues are; what is yours, and what you are
    changing, in yours. Nothing is raised: the sections sit apart by space and rules. */
-.settings { max-width: 960px; }
+.settings { max-width: 1160px; }
 .settings-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; }
 .settings-part { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 .settings-disclosure { display: grid; gap: 12px; border-top: 1px solid var(--rule); padding-top: 10px; }
@@ -326,18 +328,29 @@ summary:hover { color: var(--ink); }
 .rounds .choices { gap: 12px 24px; }
 .review-budget { display: grid; grid-template-columns: 1fr; gap: 8px; min-width: 13rem;
   padding: 10px 14px 12px 0; border-bottom: 1px solid var(--rule); }
-.review-budget h3 { margin: 0; font-size: 14px; text-transform: capitalize; }
-.review-budget .field { grid-template-columns: 5.5rem minmax(4rem, 6rem); align-items: center; column-gap: 10px; }
+.review-budget h3 { margin: 0; font-size: 14px; }
+.review-equation { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: end; }
+.review-count { gap: 4px; }
+.review-count input { width: 5.5rem; }
+.review-count .field-head { min-height: 1.5rem; }
+.review-operator, .review-maximum { color: var(--quiet); padding-bottom: 7px; white-space: nowrap; }
 .review-budget input { font-variant-numeric: tabular-nums; }
 .rounds .field .alert { grid-column: 1 / -1; }
-.prompt-groups { display: grid; gap: 16px; }
-.prompt-group { display: grid; gap: 8px; min-width: 0; border: 0; border-top: 1px solid var(--rule);
+.prompt-groups { display: grid; gap: 12px; }
+.prompt-group { display: grid; gap: 10px; min-width: 0; border: 0; border-top: 1px solid var(--rule);
   margin: 0; padding: 12px 0 0; }
-.prompt-group > legend { font-size: 14px; }
+.prompt-group > summary { cursor: pointer; font-size: 14px; font-weight: 600; }
+.prompt-group[open] > summary { margin-bottom: 2px; }
 .prompt-roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 14px 24px; }
 .prompt-role { min-width: 0; padding-left: 12px; border-left: 3px solid var(--rule); }
 .prompt-role[data-role="engineer"] { border-left-color: var(--engineer); }
 .prompt-role[data-role="architect"] { border-left-color: var(--architect); }
+.prompt-role h3 { font-size: 14px; text-transform: capitalize; }
+.prompt-built-in > summary { cursor: pointer; color: var(--quiet); font-size: 13px; }
+.prompt-built-in > pre { max-height: 26rem; overflow: auto; margin: 8px 0 0; padding: 10px;
+  border-left: 2px solid var(--rule); background: var(--surface); font-size: 12px; line-height: 1.55;
+  white-space: pre-wrap; overflow-wrap: anywhere; }
+.prompt-add { justify-self: start; }
 .prompt-role textarea { min-height: 96px; line-height: 1.5; overflow-wrap: anywhere; }
 /* The one way the view's changes are written, kept in reach at the foot of the window. */
 .apply-bar { position: sticky; bottom: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px 16px;
@@ -405,6 +418,8 @@ summary:hover { color: var(--ink); }
   .form.inline { grid-template-columns: minmax(0, 1fr); }
   .part { grid-template-columns: 1fr; }
   .add-agent { grid-template-columns: minmax(0, 1fr); }
+  .skills .field { grid-template-columns: 3.75rem minmax(0, 1fr); column-gap: 6px; }
+  .skill-input input { font-size: 13px; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }

@@ -120,17 +120,18 @@ them and unrelated hand-written local members survive. Revert removes one overri
 value. **Reset visible settings to defaults** stages Revert for every Settings page value; Apply is still
 required. Model identifiers and available efforts are passed to their vendor CLI as configured.
 
-Review budgets have a normal count and an **After reflection** count for plan and build (the settings
-file calls the second value `extended`). After a non-`PASS` at the normal boundary, if the second count
-is greater than zero, the engineer and architect each receive one code-owned convergence reflection
-on their next turn; the loop then continues through the remaining budget. `BLOCKER` stops immediately,
-and a non-`PASS` at the combined limit waits for operator guidance.
+Review budgets show the normal count plus the **After reflection** count as each phase's maximum (the
+settings file calls the second value `extended`). After a non-`PASS` at the normal boundary, if the
+second count is greater than zero, the engineer and architect each receive one code-owned convergence
+reflection on their next turn; the loop then continues through the remaining budget. `BLOCKER` stops
+immediately, and a non-`PASS` at the combined limit waits for operator guidance.
 
-Advanced review guidance can add separate instructions for each role after the normal budget and on
-the last budgeted iteration. These optional additions follow code-owned guidance, which always applies.
-The four additions are shared by Plan and Build and limited to 4,096 combined UTF-8 bytes. At exhaustion,
-the engineer is asked to give the architect a factual handoff in its final message, and the architect's
-feedback separates the engineer's contribution from its own assessment for the operator.
+Advanced review guidance shows the code-owned instructions used at each boundary. It can add separate
+instructions for each role after the normal budget and on the last budgeted iteration; these optional
+additions follow the built-in guidance, which always applies. Additions are shared by Plan and Build and
+limited to 4,096 combined UTF-8 bytes. At exhaustion, the engineer is asked to give the architect a
+factual handoff in its final message, and the architect's feedback separates the engineer's contribution
+from its own assessment for the operator.
 
 ## The command line
 

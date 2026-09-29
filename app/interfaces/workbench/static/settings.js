@@ -11,13 +11,14 @@ import { $, code, confirmAction, el, report, score } from "./ui.js";
 let shown = null;
 let flows = [];
 const staged = new Map();
+const promptEditors = new Set();
 const NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const ACCESS = { write: "Writes in the run's worktree.", read: "Reads only: its agent runs read-only." };
 const RESET = ["agents", "roles", "stage_skills", "review_rounds", "review_prompts", "default_flow"];
 const PROMPT_EVENTS = [
-  { key: "after_normal", title: "After normal rounds",
-    hint: "Added once to each role's next turn when extended rounds remain." },
-  { key: "at_limit", title: "At the final allowed iteration",
+  { key: "after_normal", title: "After normal budget",
+    hint: "Added once to each role's next turn when after-reflection rounds remain." },
+  { key: "at_limit", title: "Final budget",
     hint: "Added to both roles' final turns. If the run exhausts, the architect's feedback is the operator handoff." },
 ];
 
@@ -57,6 +58,17 @@ function pending(excluding = null) {
     else parent[last] = structuredClone(change.revert ? below : change.value);
   }
   return settings;
+}
+
+function hasVisibleOverride() {
+  const settings = pending();
+  return RESET.some((key) => {
+    const root = pointer(key);
+    const touched = [...staged.values()].some((change) => change.pointer === root
+      || change.pointer.startsWith(root + "/"));
+    if (!touched) return at(shown.overrides, [key]) !== undefined;
+    return !same(settings[key], shown.shared[key]);
+  });
 }
 
 // ---- changes made here ------------------------------------------------------------------------
@@ -300,8 +312,8 @@ function openSkillPicker(input, kind, stage_) {
 
 function drawProfiles(settings) {
   const bound = Object.fromEntries(Object.entries(settings.roles).map(([role, each]) => [each.agent, role]));
-  $("settings-profile-summary").textContent = "Edit agent profiles (" + Object.keys(settings.agents).length
-    + " profiles, " + Object.keys(bound).length + " in use)";
+  $("settings-profile-summary").textContent = "Agent profiles: " + Object.keys(settings.agents).length
+    + " profiles, " + Object.keys(bound).length + " in use";
   $("settings-profiles").replaceChildren(...Object.entries(settings.agents).map(([name, profile]) => {
     const kind = kinds()[profile.kind] || { name: profile.kind, refused: "no module answers for this kind" };
     const row = el("tr");
@@ -393,6 +405,7 @@ function drawTogether(settings) {
   $("settings-rounds").replaceChildren(...shown.phases.flatMap((phase) => {
     const group = el("section", null, "review-budget");
     group.append(el("h3", phase[0].toUpperCase() + phase.slice(1)));
+    const equation = el("div", null, "review-equation");
     const fields = ["normal", "extended"].map((threshold) => {
       const text = pointer("review_rounds", phase, threshold);
       const input = el("input");
@@ -403,14 +416,23 @@ function drawTogether(settings) {
       input.name = keysOf(text).join(".");
       input.value = rounds[phase][threshold];
       input.onchange = () => stage(text, { value: Number(input.value) }, input);
-      return field(threshold === "normal" ? "Normal" : "After reflection", input, text, [],
-                   "the " + phase + " review budget "
-                   + (threshold === "normal" ? "before reflection" : "after reflection"));
+      input.oninput = () => updateReviewMaximum(phase);
+      const wrap = field(threshold === "normal" ? "Normal" : "After reflection", input, text, [],
+        "the " + phase + " review budget "
+        + (threshold === "normal" ? "before reflection" : "after reflection"));
+      wrap.classList.add("review-count");
+      return wrap;
     });
-    group.append(...fields);
+    const maximum = el("output", null, "review-maximum");
+    maximum.id = "settings-rounds-" + phase + "-maximum";
+    maximum.htmlFor = "settings-rounds-" + phase + "-normal settings-rounds-" + phase + "-extended";
+    equation.append(fields[0], el("span", "+", "review-operator"), fields[1], el("span", "=", "review-operator"),
+      maximum);
+    group.append(equation);
+    updateReviewMaximum(phase);
     return group;
   }));
-  drawReviewPrompts(settings);
+  shown.phases.forEach(updateReviewMaximum);
   const select = $("settings-flow");
   select.name = "default_flow";
   const choosing = settings.default_flow || "";
@@ -445,8 +467,26 @@ function drawTogether(settings) {
   };
 }
 
+function updateReviewMaximum(phase) {
+  const normal = $("settings-rounds-" + phase + "-normal");
+  const extended = $("settings-rounds-" + phase + "-extended");
+  const maximum = $("settings-rounds-" + phase + "-maximum");
+  if (!normal || !extended || !maximum) return;
+  const counts = [normal, extended];
+  const valid = counts.every((input) => input.value !== "" && Number.isInteger(Number(input.value))
+    && Number(input.value) >= Number(input.min));
+  const total = valid ? counts.reduce((sum, input) => sum + Number(input.value), 0) : null;
+  maximum.textContent = total === null ? "max pending" : "max " + total;
+  maximum.setAttribute("aria-label", total === null ? "Maximum " + phase + " iterations pending valid values"
+    : "Maximum " + phase + " iterations: " + total);
+}
+
 function drawReviewPrompts(settings) {
   const prompts = settings.review_prompts || {};
+  const builtIns = shown.code_owned_review_guidance || {};
+  const container = $("settings-review-prompts");
+  const openDetails = new Set([...container.querySelectorAll("details[data-prompt-detail][open]")]
+    .map((detail) => detail.dataset.promptDetail));
   const additions = Object.values(prompts).flatMap((roles) => Object.values(roles || {}))
     .filter((value) => typeof value === "string" && value.trim()).length;
   $("settings-review-prompt-summary").textContent = "Advanced: extra review guidance ("
@@ -455,28 +495,57 @@ function drawReviewPrompts(settings) {
     + "These optional additions follow them; add project-specific guidance only when needed. "
     + "Plan and Build share these additions. Combined limit: "
     + shown.max_review_prompt_bytes.toLocaleString() + " UTF-8 bytes.";
-  $("settings-review-prompts").replaceChildren(...PROMPT_EVENTS.map((event) => {
-    const group = el("fieldset", null, "prompt-group");
-    const legend = el("legend", event.title);
+  container.replaceChildren(...PROMPT_EVENTS.map((event) => {
+    const group = el("details", null, "prompt-group");
+    group.dataset.promptDetail = "event:" + event.key;
+    group.open = openDetails.has(group.dataset.promptDetail);
+    const legend = el("summary", event.title);
     const hint = el("p", event.hint, "hint");
     hint.id = "settings-review-" + event.key + "-hint";
     group.append(legend, hint);
     const roles = el("div", null, "prompt-roles");
     for (const role of Object.keys(shown.roles)) {
       const text = pointer("review_prompts", event.key, role);
-      const input = el("textarea");
-      input.id = "settings-prompt-" + event.key + "-" + role;
-      input.rows = 4;
-      input.spellcheck = false;
-      input.setAttribute("aria-describedby", hint.id + " settings-review-prompt-limit");
-      input.placeholder = "Optional extra guidance\u2026";
-      input.value = (prompts[event.key] || {})[role] || "";
-      input.onchange = () => stage(text, { value: input.value }, input);
-      const editor = field(role[0].toUpperCase() + role.slice(1) + " prompt addition", input, text, [],
-                           "the " + role + " " + event.title.toLowerCase() + " prompt addition");
-      editor.classList.add("prompt-role");
-      editor.dataset.role = role;
-      roles.append(editor);
+      const value = at(settings, keysOf(text));
+      const roleView = el("section", null, "prompt-role");
+      roleView.dataset.role = role;
+      roleView.append(el("h3", role[0].toUpperCase() + role.slice(1)));
+
+      const builtIn = el("details", null, "prompt-built-in");
+      builtIn.dataset.promptDetail = "builtin:" + event.key + ":" + role;
+      builtIn.open = openDetails.has(builtIn.dataset.promptDetail);
+      builtIn.append(el("summary", "Built-in instructions"));
+      const body = el("pre");
+      const codeOwned = builtIns[event.key] && builtIns[event.key][role];
+      body.textContent = typeof codeOwned === "string" ? codeOwned : "Built-in guidance is unavailable. Read Settings again.";
+      builtIn.append(body);
+      roleView.append(builtIn);
+
+      if ((typeof value === "string" && value.trim()) || overridden(text) || promptEditors.has(text)) {
+        const input = el("textarea");
+        input.id = "settings-prompt-" + event.key + "-" + role;
+        input.rows = 4;
+        input.spellcheck = false;
+        input.setAttribute("aria-describedby", hint.id + " settings-review-prompt-limit");
+        input.placeholder = "Optional extra guidance\u2026";
+        input.value = typeof value === "string" ? value : "";
+        input.oninput = () => stage(text, input.value.trim() ? { value: input.value } : { remove: true }, input);
+        const editor = field("Extra guidance", input, text, [],
+          "the " + role + " " + event.title.toLowerCase() + " extra guidance");
+        editor.classList.add("prompt-addition");
+        roleView.append(editor);
+      } else {
+        const add = el("button", "+ Add extra guidance", "quiet prompt-add");
+        add.type = "button";
+        add.setAttribute("aria-label", "Add extra guidance for " + role + " " + event.title.toLowerCase());
+        add.onclick = () => {
+          promptEditors.add(text);
+          drawReviewPrompts(pending());
+          focusSetting(text);
+        };
+        roleView.append(add);
+      }
+      roles.append(roleView);
     }
     group.append(roles);
     return group;
@@ -490,6 +559,8 @@ function noteChanges() {
       : "No changes.";
   $("settings-apply").disabled = !shown.writable || !count;
   $("settings-discard").hidden = !count;
+  $("settings-reset").hidden = !hasVisibleOverride();
+  $("settings-reset").disabled = !shown.writable;
 }
 
 function draw() {
@@ -514,6 +585,7 @@ function draw() {
   drawRoles(settings);
   drawProfiles(settings);
   drawTogether(settings);
+  drawReviewPrompts(settings);
   form.hidden = false;
   for (const id of ["settings-add-name", "settings-add-kind", "settings-add", "settings-flow", "settings-reset"]) {
     $(id).disabled = !shown.writable;
@@ -576,6 +648,7 @@ export async function openSettings() {
 
 $("settings-reread").onclick = () => {
   staged.clear();
+  promptEditors.clear();
   report($("settings-result"), "");
   openSettings();
 };
@@ -587,6 +660,7 @@ $("settings-discard").onclick = async () => {
     returnTo: $("settings-apply") });
   if (!go) return;
   staged.clear();
+  promptEditors.clear();
   report($("settings-result"), "Changes discarded.");
   draw();
 };
