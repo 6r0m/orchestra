@@ -162,6 +162,7 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--you); width: 1
 /* The main area and its views. */
 main { min-width: 0; padding: 24px 32px 48px; }
 main:focus { outline: none; }
+main:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 /* One column that may shrink below its widest content: a long patch line or a terminal scrolls in its own box. */
 .view { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; max-width: 1240px; }
 .view > h1 + .lead { margin-top: -10px; }

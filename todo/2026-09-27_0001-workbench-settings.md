@@ -1606,3 +1606,11 @@ code it guards, and observed failing first.
 - **Accepted and fixed:** the review-guidance disclosure now names optional additions, says built-in instructions always apply, and labels the second budget **After reflection** while preserving the `extended` settings key. The user guide uses the same visible term.
 - **Verification:** the Windows focused run passed 2 classes / 25 tests (`Routing`, `TraceShape`). The regression checks one reflection per role at the boundary, its absence on the following round, final-turn handoffs, empty additions, and additive custom guidance; a control restoring the old todo-handoff prompt failed at the expected assertion. `node --check` and `git diff --check` passed. The fresh Settings read returned HTTP 200, displayed the revised copy and four empty role fields at 390 px with no horizontal overflow, and no setting was applied.
 - Full WSL and Windows suites and the final live Workbench walkthrough remain at the accepted external review gate.
+
+### 2026-09-29 - final Settings evidence
+
+- Captured fresh final-tree screenshots at desktop default, desktop Advanced with the after-normal event and one built-in instruction open, and 390 by 844 mobile default. At 390 px, the profile and Advanced disclosures are closed and the document has no horizontal overflow.
+- The final UI checklist found that `main:focus` suppressed the skip link target's focus ring. Added a `main:focus-visible` outline and confirmed its computed style in the live page. Settings HTML, CSS and JavaScript otherwise pass the checklist.
+- The live page read `/api/settings` and `/api/flows` successfully; its background `/api/repos` request returned 400. This did not prevent Settings from rendering and remains a separate, undiagnosed Workbench issue.
+- `make public-check` and `git diff --check` passed after the CSS fix. No Settings changes were applied in the browser.
+- `make demo` remains pending: `tools/README.md` documents writes to the configured real Langfuse project when credentials exist, and the required operator authorization for that external write has not arrived. Full WSL and Windows suites remain deferred until the external review gate.
