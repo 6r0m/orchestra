@@ -91,17 +91,33 @@ class Routing(Scenario):
         self.assertIn("normal review budget of 10 iterations has elapsed", self.agent.calls[21]["prompt"])
         self.assertIn("ENGINEER NORMAL EXTRA", self.agent.calls[20]["prompt"])
         self.assertIn("ARCHITECT NORMAL EXTRA", self.agent.calls[21]["prompt"])
-        self.assertNotIn("normal review budget of 10 iterations has elapsed", self.agent.calls[22]["prompt"])
+        engineer_reflection = "critically reassess why convergence is taking this long"
+        architect_reflection = "critically reassess your own review"
+        self.assertEqual(self.agent.calls[20]["prompt"].count(engineer_reflection), 1)
+        self.assertEqual(self.agent.calls[21]["prompt"].count(architect_reflection), 1)
+        self.assertNotIn(engineer_reflection, self.agent.calls[22]["prompt"])
+        self.assertNotIn(architect_reflection, self.agent.calls[23]["prompt"])
         self.assertNotIn("ENGINEER NORMAL EXTRA", self.agent.calls[22]["prompt"])
+        self.assertNotIn("ARCHITECT NORMAL EXTRA", self.agent.calls[23]["prompt"])
+        self.assertLess(self.agent.calls[20]["prompt"].index(engineer_reflection),
+                        self.agent.calls[20]["prompt"].index("ENGINEER NORMAL EXTRA"))
+        self.assertLess(self.agent.calls[21]["prompt"].index(architect_reflection),
+                        self.agent.calls[21]["prompt"].index("ARCHITECT NORMAL EXTRA"))
         final_engineer_prompt = " ".join(self.agent.calls[38]["prompt"].split())
         self.assertIn("ENGINEER FINAL EXTRA", final_engineer_prompt)
-        self.assertIn("leave the architect a concise, factual handoff in the run's todo", final_engineer_prompt)
+        self.assertIn("your final message", final_engineer_prompt)
+        self.assertIn("Do not modify the todo merely to record this handoff", final_engineer_prompt)
+        self.assertNotIn("handoff in the run's todo", final_engineer_prompt)
         self.assertIn("what remains unresolved", final_engineer_prompt)
+        self.assertLess(final_engineer_prompt.index("This is the final budgeted engineer turn"),
+                        final_engineer_prompt.index("ENGINEER FINAL EXTRA"))
         final_prompt = " ".join(self.agent.calls[39]["prompt"].split())
-        for term in ("Engineer contribution", "Architect assessment", "what remains unresolved",
-                     "what the engineer tried or changed", "likely cause", "operator decision"):
+        for term in ("Engineer contribution", "Architect assessment", "Unresolved",
+                     "Disputed findings", "Likely cause", "Operator decision needed"):
             self.assertIn(term, final_prompt)
         self.assertIn("ARCHITECT FINAL EXTRA", final_prompt)
+        self.assertLess(final_prompt.index("This is the final budgeted review for this phase"),
+                        final_prompt.index("ARCHITECT FINAL EXTRA"))
         self.assertEqual(run.stop["feedback"], summaries, "the exhausted stop presents the final review evidence")
 
     def test_a_run_without_prompt_additions_keeps_the_code_owned_reflection(self):
@@ -112,8 +128,13 @@ class Routing(Scenario):
                  "convergence": {"phase": "plan", "round": 2}}
         prompt = nodes.compose_prompt("plan", role, False, state, True, True,
                                       review_rounds={"plan": {"normal": 2, "extended": 1}})
-        self.assertIn("Reflect on your own work and the architect's review", prompt)
+        self.assertIn("critically reassess why convergence is taking this long", prompt)
         self.assertNotIn("Operator's additional reflection guidance", prompt)
+        no_additions = nodes.compose_prompt(
+            "plan", role, False, state, True, True,
+            review_rounds={"plan": {"normal": 2, "extended": 1}},
+            review_prompts={event: {"engineer": ""} for event in ("after_normal", "at_limit")})
+        self.assertEqual(prompt, no_additions)
 
     def test_blocker_reaches_human_only_via_architect(self):
         a1, _ = codex_review_first("BLOCKER", "premise wrong")

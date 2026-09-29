@@ -38,10 +38,14 @@ in — its flow, one file in `flows/`.
   code-owned convergence reflection for each role as it next runs and up to
   `extended` more attempts. Settings may append separate role guidance at that
   reflection and at the last budgeted iteration; the code-owned instructions and
-  verdict routes remain authoritative. On exhaustion, the architect's feedback
-  separates the engineer's contribution from the architect's assessment for the
-  operator. `PASS` advances immediately; `BLOCKER` stops for the human
-  immediately; a non-`PASS` at the combined limit stops as `exhausted`.
+  verdict routes remain authoritative. On the final budgeted engineer turn, its
+  prompt requests a concise factual handoff in its final message; the architect's
+  evidence prompt directs it to inspect the engineer's plan/build reports in the
+  per-run logs, leaving the todo under review unchanged. On exhaustion, the
+  architect's feedback separates the engineer's contribution from its own
+  assessment for the operator. `PASS` advances
+  immediately; `BLOCKER` stops for the human immediately; a non-`PASS` at the
+  combined limit stops as `exhausted`.
   Operator guidance starts a new episode
   and resets its `round` budget; `phase_rounds` keeps counting architect judgements
   until `_next()` enters another phase. A run carrying the old `max_rounds` policy keeps its

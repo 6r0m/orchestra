@@ -403,8 +403,9 @@ function drawTogether(settings) {
       input.name = keysOf(text).join(".");
       input.value = rounds[phase][threshold];
       input.onchange = () => stage(text, { value: Number(input.value) }, input);
-      return field(threshold === "normal" ? "Normal" : "Extended", input, text, [],
-                   "the " + phase + " " + threshold + " review budget");
+      return field(threshold === "normal" ? "Normal" : "After reflection", input, text, [],
+                   "the " + phase + " review budget "
+                   + (threshold === "normal" ? "before reflection" : "after reflection"));
     });
     group.append(...fields);
     return group;
@@ -448,10 +449,11 @@ function drawReviewPrompts(settings) {
   const prompts = settings.review_prompts || {};
   const additions = Object.values(prompts).flatMap((roles) => Object.values(roles || {}))
     .filter((value) => typeof value === "string" && value.trim()).length;
-  $("settings-review-prompt-summary").textContent = "Edit reflection and handoff prompts ("
-    + (additions ? additions + " custom additions" : "built-in only") + ")";
-  $("settings-review-prompt-limit").textContent = "Built-in guidance always runs; these additions follow it. "
-    + "Plan and Build share these prompts. Combined limit: "
+  $("settings-review-prompt-summary").textContent = "Advanced: extra review guidance ("
+    + (additions ? additions + (additions === 1 ? " addition" : " additions") : "none") + ")";
+  $("settings-review-prompt-limit").textContent = "Built-in reflection and final handoff instructions always apply. "
+    + "These optional additions follow them; add project-specific guidance only when needed. "
+    + "Plan and Build share these additions. Combined limit: "
     + shown.max_review_prompt_bytes.toLocaleString() + " UTF-8 bytes.";
   $("settings-review-prompts").replaceChildren(...PROMPT_EVENTS.map((event) => {
     const group = el("fieldset", null, "prompt-group");

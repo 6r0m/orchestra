@@ -23,31 +23,36 @@ from app.foundation import stages
 # What may follow the verdict object and still leave it the reviewer's last word.
 _ENDS_THERE = re.compile(r"\s*(?:```)?\s*")
 CONVERGENCE_REFLECTION = {
-    "engineer": """The normal review budget has elapsed. Reflect on your own work and the architect's review before continuing.
+    "engineer": """The normal review budget has elapsed. Continue the current phase, but first critically reassess why convergence is taking this long.
 
-Check whether you misunderstood a requirement, repeated a failed approach, or left a regression. Re-check every open
-architect finding against the current code and tests. Fix supported findings. If you disagree, answer the finding with
-specific repository evidence and propose a correction to the review only when that evidence supports it. Do not dismiss
-feedback because a different design is your preference. Use a different implementation or investigation strategy when
-the evidence shows the current one is not converging. Ask the operator only when a concrete decision blocks safe progress.""",
-    "architect": """The normal review budget has elapsed. Reflect on your own review and the engineer's work before continuing.
+Re-check every unresolved architect finding against the current repository and evidence. Fix findings that are supported. For findings you dispute, state the specific evidence that refutes them; do not reject feedback merely because you prefer another design. Check whether recent fixes introduced new consequences, whether you repeatedly misunderstood a requirement, and whether a different investigation or implementation approach is now warranted.
 
-Check each finding for current evidence, duplicate or stale claims, and assumptions that changed. Re-evaluate the
-engineer's fixes and refutations against the code and tests. Accept supported corrections and withdraw findings that
-are unsupported, already resolved, or outside the agreed goal. For anything that remains, state the evidence and the
-smallest safe correction. Do not require a preferred design without a concrete reason. Return BLOCKER only when a
-specific human decision is required; otherwise continue with concrete findings.""",
+Do not broaden the agreed scope. If safe progress genuinely requires a human or external decision, state the exact blocking decision and evidence in your final report so the architect can escalate it. Otherwise continue solving the work normally.""",
+    "architect": """The normal review budget has elapsed. Continue reviewing the evolving artifact, but first critically reassess your own review.
+
+Re-check every remaining finding against the current repository and evidence. Remove findings that are stale, duplicated, already resolved, unsupported, or outside the agreed goal. Re-evaluate evidence-backed engineer refutations and accept them when they hold. New findings are valid when new work introduced a concrete correctness, reliability, requirement, or architectural problem; do not move the goalposts or require a preferred design without such evidence.
+
+If safe progress genuinely requires an operator or external decision that this loop cannot resolve, return BLOCKER and state that exact decision and evidence. Otherwise return only concrete remaining findings.""",
 }
 FINAL_REVIEW_SUMMARY = {
-    "engineer": """This is the last budgeted iteration for this phase. Finish changes supported by the review and leave the architect
-a concise, factual handoff in the run's todo: what you changed, what evidence you checked, which architect findings you
-addressed or refuted, and what remains unresolved. Do not assume another engineer turn will follow.""",
-    "architect": """This is the last budgeted iteration for this phase. If your verdict is PATCH or UNVERIFIED, make feedback an
-evidence summary with separate sections named Engineer contribution and Architect assessment. State what remains
-unresolved; what the engineer tried or changed; which architect findings the engineer addressed or disputed and the
-evidence on each side; your remaining findings; the likely cause (task ambiguity, implementation or reasoning,
-reviewer disagreement or overreach, or an external blocker); and the exact operator decision or input needed. Keep the
-verdict JSON contract. For PASS or BLOCKER, follow the usual verdict and stop rules.""",
+    "engineer": """This is the final budgeted engineer turn for this phase. Finish the smallest safe changes supported by the current review. Do not assume another engineer turn will follow.
+
+In your final message, give the architect a concise, factual handoff: what you changed, what evidence you checked, which findings you addressed, which findings you refuted and with what evidence, what remains unresolved, and any concrete human or external decision that may still be required.
+
+Do not modify the todo merely to record this handoff.""",
+    "architect": """This is the final budgeted review for this phase. Re-evaluate the current artifact and evidence as they stand now; do not add optional improvements merely because this is the last turn.
+
+PASS if the reviewed requirements are satisfied. Return BLOCKER only if safe progress requires a specific human or external decision; state that decision and the evidence.
+
+If the result remains PATCH or UNVERIFIED, make the feedback the operator handoff with these sections:
+Engineer contribution: what the engineer changed or tried and the evidence provided.
+Architect assessment: what you verified and which findings remain valid.
+Unresolved: the concrete remaining problems or missing evidence.
+Disputed findings: each unresolved disagreement and the evidence on both sides.
+Likely cause: task ambiguity, engineer implementation or reasoning, reviewer disagreement or overreach, or an external blocker.
+Operator decision needed: the exact decision or input required to continue.
+
+Keep the normal verdict JSON contract.""",
 }
 
 
