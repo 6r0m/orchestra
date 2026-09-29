@@ -285,6 +285,9 @@ summary:hover { color: var(--ink); }
 .settings { max-width: 960px; }
 .settings-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; }
 .settings-part { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.settings-disclosure { display: grid; gap: 12px; border-top: 1px solid var(--rule); padding-top: 10px; }
+.settings-disclosure > summary { cursor: pointer; font-weight: 600; }
+.settings-disclosure[open] > summary { margin-bottom: 2px; }
 .cast { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 20px 32px; }
 .cast-role { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-content: start;
   padding: 2px 0 4px 16px; border-left: 3px solid var(--rule); }
@@ -327,6 +330,15 @@ summary:hover { color: var(--ink); }
 .review-budget .field { grid-template-columns: 5.5rem minmax(4rem, 6rem); align-items: center; column-gap: 10px; }
 .review-budget input { font-variant-numeric: tabular-nums; }
 .rounds .field .alert { grid-column: 1 / -1; }
+.prompt-groups { display: grid; gap: 16px; }
+.prompt-group { display: grid; gap: 8px; min-width: 0; border: 0; border-top: 1px solid var(--rule);
+  margin: 0; padding: 12px 0 0; }
+.prompt-group > legend { font-size: 14px; }
+.prompt-roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 14px 24px; }
+.prompt-role { min-width: 0; padding-left: 12px; border-left: 3px solid var(--rule); }
+.prompt-role[data-role="engineer"] { border-left-color: var(--engineer); }
+.prompt-role[data-role="architect"] { border-left-color: var(--architect); }
+.prompt-role textarea { min-height: 96px; line-height: 1.5; overflow-wrap: anywhere; }
 /* The one way the view's changes are written, kept in reach at the foot of the window. */
 .apply-bar { position: sticky; bottom: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px 16px;
   align-items: center; padding: 12px 0; background: var(--ground); border-top: 1px solid var(--rule); }

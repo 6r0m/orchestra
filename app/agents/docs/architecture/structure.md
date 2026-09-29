@@ -44,6 +44,12 @@ Through the vendor CLI's own argv and its session store: a turn is that CLI star
 with the role's session resumed by exact id and the prompt as its last argument. No shell
 sits between, so no task text is ever parsed as shell syntax.
 
+Through the run's settings snapshot: `nodes` appends an optional operator prompt addition for
+each role after the normal budget when extended rounds remain, and at the final budgeted
+iteration. The code-owned reflection and handoff instructions remain in force when an addition
+is empty, and every role keeps its own instructions. The addition does not replace the stage ask
+or the role's verdict contract.
+
 Through the adapter contract: Settings discovers skill names from the same roots a kind checks
 when preparing a run; no vendor path crosses the Settings API.
 

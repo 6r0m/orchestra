@@ -26,9 +26,10 @@ final diff's copy button puts on the clipboard against an independent oracle.
 
 Role turns run the agents' interactive CLIs, and both stop at a trust dialog before working in a
 repository they have no record of — a turn would wait there, in its terminal, until someone answered
-it in the workbench. That dialog asks what the operator answered by starting a run on that repository — a
-[`repos.json`](../repos.example.json) entry, or a path typed into the workbench, which starts runs on any
-repository — so a run records the answer itself before any agent starts ([`trust.py`](../app/agents/trust.py), from the `prepare`
+it in the workbench. That dialog asks what the operator answered by starting a run on that repository — an
+entry in [`.orchestra/repos.json`](../.orchestra/repos.example.json), or a path typed into the workbench,
+which starts runs on any repository — so a run records the answer itself before any agent starts
+([`trust.py`](../app/agents/trust.py), from the `prepare`
 activity, on the run's own target host): Claude's `~/.claude.json` and Codex's `~/.codex/config.toml`
 gain one entry for that repository. Both CLIs resolve a run's worktree to the repository it belongs
 to, so the one entry covers every later run of it on that host (measured for both CLIs on both hosts:

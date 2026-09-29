@@ -13,7 +13,13 @@ let flows = [];
 const staged = new Map();
 const NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const ACCESS = { write: "Writes in the run's worktree.", read: "Reads only: its agent runs read-only." };
-const RESET = ["agents", "roles", "stage_skills", "review_rounds", "max_rounds", "default_flow"];
+const RESET = ["agents", "roles", "stage_skills", "review_rounds", "review_prompts", "default_flow"];
+const PROMPT_EVENTS = [
+  { key: "after_normal", title: "After normal rounds",
+    hint: "Added once to each role's next turn when extended rounds remain." },
+  { key: "at_limit", title: "At the final allowed iteration",
+    hint: "Added to both roles' final turns. If the run exhausts, the architect's feedback is the operator handoff." },
+];
 
 export const settingsUnsent = () => staged.size > 0;
 
@@ -294,6 +300,8 @@ function openSkillPicker(input, kind, stage_) {
 
 function drawProfiles(settings) {
   const bound = Object.fromEntries(Object.entries(settings.roles).map(([role, each]) => [each.agent, role]));
+  $("settings-profile-summary").textContent = "Edit agent profiles (" + Object.keys(settings.agents).length
+    + " profiles, " + Object.keys(bound).length + " in use)";
   $("settings-profiles").replaceChildren(...Object.entries(settings.agents).map(([name, profile]) => {
     const kind = kinds()[profile.kind] || { name: profile.kind, refused: "no module answers for this kind" };
     const row = el("tr");
@@ -401,6 +409,7 @@ function drawTogether(settings) {
     group.append(...fields);
     return group;
   }));
+  drawReviewPrompts(settings);
   const select = $("settings-flow");
   select.name = "default_flow";
   const choosing = settings.default_flow || "";
@@ -433,6 +442,43 @@ function drawTogether(settings) {
     stage("/default_flow", select.value ? { value: select.value } : { remove: true }, select);
     steps();
   };
+}
+
+function drawReviewPrompts(settings) {
+  const prompts = settings.review_prompts || {};
+  const additions = Object.values(prompts).flatMap((roles) => Object.values(roles || {}))
+    .filter((value) => typeof value === "string" && value.trim()).length;
+  $("settings-review-prompt-summary").textContent = "Edit reflection and handoff prompts ("
+    + (additions ? additions + " custom additions" : "built-in only") + ")";
+  $("settings-review-prompt-limit").textContent = "Built-in guidance always runs; these additions follow it. "
+    + "Plan and Build share these prompts. Combined limit: "
+    + shown.max_review_prompt_bytes.toLocaleString() + " UTF-8 bytes.";
+  $("settings-review-prompts").replaceChildren(...PROMPT_EVENTS.map((event) => {
+    const group = el("fieldset", null, "prompt-group");
+    const legend = el("legend", event.title);
+    const hint = el("p", event.hint, "hint");
+    hint.id = "settings-review-" + event.key + "-hint";
+    group.append(legend, hint);
+    const roles = el("div", null, "prompt-roles");
+    for (const role of Object.keys(shown.roles)) {
+      const text = pointer("review_prompts", event.key, role);
+      const input = el("textarea");
+      input.id = "settings-prompt-" + event.key + "-" + role;
+      input.rows = 4;
+      input.spellcheck = false;
+      input.setAttribute("aria-describedby", hint.id + " settings-review-prompt-limit");
+      input.placeholder = "Optional extra guidance\u2026";
+      input.value = (prompts[event.key] || {})[role] || "";
+      input.onchange = () => stage(text, { value: input.value }, input);
+      const editor = field(role[0].toUpperCase() + role.slice(1) + " prompt addition", input, text, [],
+                           "the " + role + " " + event.title.toLowerCase() + " prompt addition");
+      editor.classList.add("prompt-role");
+      editor.dataset.role = role;
+      roles.append(editor);
+    }
+    group.append(roles);
+    return group;
+  }));
 }
 
 function noteChanges() {

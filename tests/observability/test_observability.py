@@ -1077,18 +1077,72 @@ class TraceShape(Scenario):
 
         telemetry.begin = begin
         try:
-            b1, _ = codex_review_first("BLOCKER")
-            run = self.drive([("plan-e1-1", 0, "p\n"), ("assess-e1-1", 0, b1),
+            p1, _ = codex_review_first("PATCH")
+            policy = dict(E.POLICY)
+            policy["review_rounds"] = {phase: {"normal": 3, "extended": 1} for phase in ("plan", "build")}
+            policy.pop("max_rounds", None)
+            run = self.drive([("plan-e1-1", 0, "p\n"), ("assess-e1-1", 0, p1),
+                              ("plan-e1-2", 0, "p\n"),
+                              ("assess-e1-2", 0, codex_review_resumed("BLOCKER")),
                               ("plan-e2-1", 0, "p\n"), ("assess-e2-1", 0, codex_review_resumed("PASS")),
                               ("build-e3-1", 0, "b\n"), ("verify-e3-1", 0, codex_review_resumed("PASS"))],
-                             telemetry=Recorder())
+                             telemetry=Recorder(), policy=policy)
             run.answer("use approach B")
             run.answer("yes")
         finally:
             telemetry.begin = original
         self.assertEqual(run.state["status"], "READY_FOR_HUMAN")
         self.assertEqual(rounds, [("engineer-plan", 1), ("architect-assess", 1), ("engineer-plan", 2),
-                                  ("architect-assess", 2), ("engineer-build", 1), ("architect-verify", 1)])
+                                  ("architect-assess", 2), ("engineer-plan", 3), ("architect-assess", 3),
+                                  ("engineer-build", 1), ("architect-verify", 1)])
+
+    def test_review_budget_restarts_after_guidance_while_phase_round_stays_cumulative(self):
+        summaries = ("Unresolved: one gap. Tried: two changes. Disputed: finding B, because test C shows otherwise. "
+                     "Likely cause: missing coverage. Operator input: choose whether to narrow the scope.")
+        policy = dict(E.POLICY)
+        policy["review_rounds"] = {phase: {"normal": 2, "extended": 1} for phase in ("plan", "build")}
+        policy.pop("max_rounds", None)
+        script = []
+        for episode in (1, 2):
+            for round_ in range(1, 4):
+                name = "e%d-%d" % (episode, round_)
+                engineer = "p\n" if round_ == 1 else "revised\n"
+                verdict = "UNVERIFIED" if round_ == 3 else "PATCH"
+                evidence = summaries if round_ == 3 else "gap %d" % round_
+                review = (codex_review_first(verdict, evidence)[0] if episode == 1 and round_ == 1 else
+                          codex_review_resumed(verdict, evidence))
+                script.extend((("plan-" + name, 0, engineer), ("assess-" + name, 0, review)))
+
+        from app.observability import telemetry
+        rounds = []
+        original = telemetry.begin
+
+        def begin(client, state, stage, role_name, role, **kwargs):
+            rounds.append((telemetry.stage_name(stage, role_name), telemetry.phase_round(state)))
+            return telemetry._Span()
+
+        telemetry.begin = begin
+        try:
+            run = self.drive(script, telemetry=Recorder(), policy=policy)
+            self.assertEqual(run.stop["reason"], "exhausted")
+            self.assertEqual(len(self.agent.calls), 6)
+            self.assertIn("normal review budget of 2 iterations has elapsed", self.agent.calls[4]["prompt"])
+            self.assertIn("normal review budget of 2 iterations has elapsed", self.agent.calls[5]["prompt"])
+            self.assertNotIn("normal review budget of 2 iterations has elapsed", self.agent.calls[2]["prompt"])
+            run.answer("narrow the scope")
+            self.assertEqual(run.stop["reason"], "exhausted")
+            self.assertEqual(len(self.agent.calls), 12)
+            self.assertIn("normal review budget of 2 iterations has elapsed", self.agent.calls[10]["prompt"])
+            self.assertIn("normal review budget of 2 iterations has elapsed", self.agent.calls[11]["prompt"])
+            self.assertEqual((run.state["round"], run.state["phase_rounds"]), (3, 6))
+        finally:
+            telemetry.begin = original
+        self.assertEqual(rounds, [("engineer-plan", 1), ("architect-assess", 1),
+                                  ("engineer-plan", 2), ("architect-assess", 2),
+                                  ("engineer-plan", 3), ("architect-assess", 3),
+                                  ("engineer-plan", 4), ("architect-assess", 4),
+                                  ("engineer-plan", 5), ("architect-assess", 5),
+                                  ("engineer-plan", 6), ("architect-assess", 6)])
 
 
 class ApprovalSummary(Scenario):

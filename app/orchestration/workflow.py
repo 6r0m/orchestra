@@ -196,7 +196,7 @@ class FeatureRun:
                 # survive the worker and are consumed by the architect that judges next.
                 s.update(guidance=answer["text"], round=0, gate_reason="", episode=s["episode"] + 1)
                 if self.review_rounds:
-                    s.update(phase_rounds=0, convergence=None, convergence_seen=[])
+                    s.update(convergence=None, convergence_seen=[])
                 continue
             if review and s["verdict"] != "PASS":
                 continue
@@ -260,17 +260,15 @@ class FeatureRun:
             if self.review_rounds:
                 thresholds = self.review_rounds[s["phase"]]
                 limit = thresholds["normal"] + thresholds["extended"]
-                routed_round = phase_rounds
             else:
                 limit = self.policy["max_rounds"][s["phase"]]
-                routed_round = rounds
-            reason = routing.gate_reason_for(result["verdict"], gate, routed_round, limit, s["auto_proceed"])
+            reason = routing.gate_reason_for(result["verdict"], gate, rounds, limit, s["auto_proceed"])
             s.update(verdict=result["verdict"], feedback=result["feedback"], round=rounds,
                      phase_rounds=phase_rounds, guidance="", gate_reason=reason)
             if self.review_rounds:
                 if (result["verdict"] not in ("PASS", "BLOCKER") and
-                        phase_rounds == thresholds["normal"] and thresholds["extended"] > 0):
-                    s.update(convergence={"phase": s["phase"], "round": phase_rounds}, convergence_seen=[])
+                        rounds == thresholds["normal"] and thresholds["extended"] > 0):
+                    s.update(convergence={"phase": s["phase"], "round": rounds}, convergence_seen=[])
             for judged in ("assessed_tree", "verified_tree"):
                 if judged in result:
                     s[judged] = result[judged]
@@ -328,7 +326,7 @@ class FeatureRun:
                  guidance="The plan in this worktree changed after your last assessment. "
                           "Judge it as it stands now.")
         if self.review_rounds:
-            s.update(phase_rounds=0, convergence=None, convergence_seen=[])
+            s.update(convergence=None, convergence_seen=[])
         return False
 
     async def _next(self, work):
@@ -363,7 +361,7 @@ class FeatureRun:
                 s.update(status="RUNNING", guidance=answer["text"], round=0, gate_reason="",
                          episode=s["episode"] + 1)
                 if self.review_rounds:
-                    s.update(phase_rounds=0, convergence=None, convergence_seen=[])
+                    s.update(convergence=None, convergence_seen=[])
                 return "review" if answer["role"] == "architect" else "build"
             self._doing("merge")
             merged = await self._until_done("merge", lambda: self._git("merge", {"state": s}))
@@ -381,7 +379,7 @@ class FeatureRun:
                                   "files; do not stage or commit." % (
                                       s["run_id"], s["base_branch"], ", ".join(merged["files"])))
                 if self.review_rounds:
-                    s.update(phase_rounds=0, convergence=None, convergence_seen=[])
+                    s.update(convergence=None, convergence_seen=[])
                 self._line("merge conflict: %s" % ", ".join(merged["files"]))
                 return "build"
             s["merge_refusal"] = merged["reason"]

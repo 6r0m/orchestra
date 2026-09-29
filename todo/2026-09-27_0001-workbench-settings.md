@@ -1533,3 +1533,38 @@ code it guards, and observed failing first.
 - Focused Windows verification passed: 26 classes, 158 tests, including settings Apply/Reset/reload, policy shape and layers, adapter skill discovery, Workbench API, workflow thresholds, replay, observability and architecture boundaries. `node --check`, settings JSON parse, and `git diff --check` passed. The focused Settings browser probe from this task passed before the final additions of control names and removal of the legacy budget from Reset; those last edits do not change the interaction path.
 - Claude Code 2.1.283 and current Anthropic model docs support the selected `claude-opus-5` and `claude-fable-5` IDs. The installed Codex CLI 0.153.4 model catalog lists `gpt-5.6-sol` but not `gpt-6-luna`; the shared Codex engineer profile keeps the operator-selected ID, with local execution pending a Codex CLI update. No system-wide CLI update was performed.
 - Per the accepted gate, the full WSL and Windows suites and the final live Workbench walkthrough remain deferred until external implementation PASS.
+
+### 2026-09-28 — PATCH checked against the code; four fixes and synthetic gates
+
+- **Accepted and fixed:** `round` owns the bounded `review_rounds` episode, while `phase_rounds` stays
+  cumulative until `_next()` enters another phase. Routing, reflection, exhaustion, role trace data and
+  the final-summary prompt now read the budget counter. Guidance, plan reassessment, final revise and
+  merge-conflict re-entry clear convergence state without resetting the trace count.
+- **Accepted and fixed:** discovery lists a directory only when it contains `SKILL.md`, matching the
+  worker preflight. Its test includes both real skill markers and an empty-directory control.
+- **Accepted and fixed:** Settings Reset no longer sends a revert for hidden legacy `max_rounds`; the
+  Apply test and browser probe prove that it and an unrelated local timeout survive.
+- **Accepted and fixed:** current `.env.example`, README, `app/README.md`, workspace docs, user guide and
+  tools guide use `.orchestra/repos.json` / `.orchestra/repos.example.json` and `ORCHESTRA_REPOS`. The
+  old root `repos.json` remains named only where code refuses the old layout or historical material
+  explains the migration.
+- **Found while running the required demo:** its fake CLIs expect the Claude engineer and Codex architect
+  contracts, but it inherited shared role bindings. The demo now pins those roles in its temporary policy;
+  shared defaults are unchanged. The first demo run failed at the architect output, cleaned its run,
+  worker, Workbench, repository and trust records, and the rerun passed all six runs and removed its
+  Temporal records.
+- **Verification:** 14 focused Windows test classes, 58 tests passed (workflow routing, both round-count
+  regressions, Settings/application and activities); the isolated Settings browser probe completed Reset
+  and Apply with API 200s, its POST omitted `/max_rounds`, and the response retained `max_rounds` and the
+  unrelated local timeout; `node --check`, `git diff --check`, `make public-check` and `make demo` passed.
+  The wider initial Windows selection also hit unrelated host-bound tests: a cross-drive relative path in
+  the telemetry file-error test and entry-point tests that invoke GNU make directly from Windows.
+- The full WSL and Windows suites and final live Workbench walkthrough remain deferred until external
+  implementation PASS.
+
+### 2026-09-29 — Settings UX and round guidance
+
+- Collapsed the profile table and creation controls behind a count-bearing disclosure while keeping role bindings, round budgets and the default flow visible. Added a disclosure with four labeled, role-specific prompt additions: after normal rounds and at the final allowed iteration.
+- The built-in normal reflection asks each role to examine its own work and the opposite role's evidence. At the budget limit, the engineer leaves its contribution in the run todo and the architect's exhausted feedback separates Engineer contribution from Architect assessment. Custom additions follow the code-owned instructions, are shared across Plan and Build, and have a combined 4,096 UTF-8 byte limit.
+- Updated the user guide and package owners for the new behavior. Windows focused verification passed: 4 classes, 44 tests; JavaScript syntax, shared settings JSON and git diff check passed. The live Settings API returned 200; the profile and prompt disclosures rendered, all four prompt fields staged without Apply, and a 390 px layout had no horizontal overflow. A page reload cleared the temporary UI-only draft; no settings Apply was sent.
+- Full WSL and Windows suites and the final live Workbench walkthrough remain at the accepted external review gate.

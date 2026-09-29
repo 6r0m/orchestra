@@ -9,6 +9,7 @@
   `app.application.settings`, since nothing here loads an adapter.
 - review_rounds (D5): normal and extended architect review attempts per phase; max_rounds is retained for
   old settings and run policies.
+- review_prompts: bounded, optional role-specific additions at the normal reflection and final budget boundary.
 - Git authority: all-false — agents never commit or push (D11).
 
 Identifiers are data: binding an agent, editing a role's persona or naming the default flow is
@@ -56,12 +57,15 @@ SKILL_NAME_MAX = 64
 # character it does not keep as ASCII: at this bound, a turn's input stays under Temporal's 256 KiB payload
 # warning for any text (measured on the real wire, `tests/application/test_settings.py`).
 MAX_PERSONA_BYTES = 16 * 1024
+# All optional review prompt additions travel in the run policy together.
+MAX_REVIEW_PROMPT_BYTES = 4 * 1024
 # Strict schemas: an unknown key is a typo, and a typo that silently does
 # nothing is the worst failure mode for a config-driven system.
 ROLE_KEYS = {"agent", "persona_file", "persona"}
 PLAIN_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]*")
-TOP_KEYS = {"agents", "roles", "max_rounds", "review_rounds", "auto_proceed", "timeout_seconds", "heartbeat_seconds",
-            "stop_cleanup_seconds", "targets", "target_repo", "workbench_port", "stage_skills",
+TOP_KEYS = {"agents", "roles", "max_rounds", "review_rounds", "review_prompts", "auto_proceed",
+            "timeout_seconds", "heartbeat_seconds", "stop_cleanup_seconds", "targets", "target_repo",
+            "workbench_port", "stage_skills",
             "workflow_queue", "default_flow", "_policy_path"}
 REPO_KEYS = {"commit_allowed", "push_allowed", "merge_allowed"}
 # A Stop's cleanup waits this long at most, so a host whose worker is gone never holds a Stop; a policy's
@@ -437,6 +441,25 @@ def validate(raw):
                                         pointer("review_rounds", phase, name))
     if "max_rounds" not in raw and "review_rounds" not in raw:
         raise InvalidPolicy("must define review_rounds", pointer("review_rounds"))
+
+    prompts = raw.get("review_prompts")
+    if "review_prompts" in raw:
+        prompt_events = {"after_normal", "at_limit"}
+        if not isinstance(prompts, dict) or set(prompts) != prompt_events:
+            raise InvalidPolicy("must define exactly after_normal and at_limit", pointer("review_prompts"))
+        total_bytes = 0
+        for event, role_prompts in prompts.items():
+            if not isinstance(role_prompts, dict) or set(role_prompts) != set(ROLES):
+                raise InvalidPolicy("must define exactly %s and %s" % ROLES,
+                                    pointer("review_prompts", event))
+            for role, text in role_prompts.items():
+                where = pointer("review_prompts", event, role)
+                if not isinstance(text, str):
+                    raise InvalidPolicy("must be text", where)
+                total_bytes += len(text.encode("utf-8"))
+                if total_bytes > MAX_REVIEW_PROMPT_BYTES:
+                    raise InvalidPolicy("combined review prompt additions must be at most %d UTF-8 bytes"
+                                        % MAX_REVIEW_PROMPT_BYTES, where)
 
     repo = raw.get("target_repo")
     if not isinstance(repo, dict):

@@ -146,40 +146,46 @@
           <div class="cast" id="settings-roles"></div>
         </section>
         <section class="settings-part" aria-labelledby="settings-agents-title">
-          <h2 id="settings-agents-title">Agents</h2>
-          <p class="hint">A profile names a kind of agent and what it runs with. Each role above runs one.</p>
-          <div class="table-wrap">
-            <table class="profiles">
-              <thead><tr><th scope="col">Profile</th><th scope="col">Kind</th><th scope="col">Model</th>
-                <th scope="col">Effort</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
-              <tbody id="settings-profiles"></tbody>
-            </table>
-          </div>
-          <p class="hint">Leave Model or Effort blank to use that provider's default.</p>
-          <div class="add-agent">
-            <div class="field">
-              <label for="settings-add-name">New profile</label>
-              <input id="settings-add-name" name="profile-name" type="text" spellcheck="false" placeholder="codex-fast…"
-                aria-describedby="settings-add-hint" data-pointer="/agents">
+          <h2 id="settings-agents-title">Agent profiles</h2>
+          <details class="settings-disclosure" id="settings-profile-disclosure">
+            <summary id="settings-profile-summary">Edit agent profiles</summary>
+            <p class="hint">Each role above uses one profile. Leave Model or Effort blank to use that provider's default.</p>
+            <div class="table-wrap">
+              <table class="profiles">
+                <thead><tr><th scope="col">Profile</th><th scope="col">Kind</th><th scope="col">Model</th>
+                  <th scope="col">Effort</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+                <tbody id="settings-profiles"></tbody>
+              </table>
             </div>
-            <div class="field">
-              <label for="settings-add-kind">Kind</label>
-              <select id="settings-add-kind" name="profile-kind"></select>
+            <div class="add-agent">
+              <div class="field">
+                <label for="settings-add-name">New profile</label>
+                <input id="settings-add-name" name="profile-name" type="text" spellcheck="false" placeholder="codex-fast…"
+                  aria-describedby="settings-add-hint" data-pointer="/agents">
+              </div>
+              <div class="field">
+                <label for="settings-add-kind">Kind</label>
+                <select id="settings-add-kind" name="profile-kind"></select>
+              </div>
+              <button type="button" id="settings-add">Add profile</button>
+              <p class="hint" id="settings-add-hint">Lowercase letters and digits, words joined by single hyphens.</p>
+              <p class="alert" id="settings-add-alert" role="alert"></p>
             </div>
-            <button type="button" id="settings-add">Add profile</button>
-            <p class="hint" id="settings-add-hint">Lowercase letters and digits, words joined by single hyphens.</p>
-            <p class="alert" id="settings-add-alert" role="alert"></p>
-          </div>
-          <ul class="unusable" id="settings-unusable"></ul>
+            <ul class="unusable" id="settings-unusable"></ul>
+          </details>
         </section>
         <section class="settings-part" aria-labelledby="settings-together-title">
           <h2 id="settings-together-title">How the roles work together</h2>
           <fieldset class="field rounds">
             <legend>Review rounds</legend>
-            <p class="hint">When an extended budget remains after normal rounds, both agents get one convergence
-              reflection and may continue through it. BLOCKER stops immediately.</p>
+            <p class="hint">If extended rounds remain after normal rounds, both roles reflect once before continuing. BLOCKER stops immediately.</p>
             <div class="choices" id="settings-rounds"></div>
           </fieldset>
+          <details class="settings-disclosure" id="settings-review-prompt-disclosure">
+            <summary id="settings-review-prompt-summary">Edit reflection and handoff prompts</summary>
+            <p class="hint" id="settings-review-prompt-limit"></p>
+            <div class="prompt-groups" id="settings-review-prompts"></div>
+          </details>
           <div class="field">
             <label for="settings-flow">Default flow</label>
             <select id="settings-flow" data-pointer="/default_flow" aria-describedby="settings-flow-hint"></select>

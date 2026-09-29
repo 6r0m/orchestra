@@ -7,14 +7,16 @@ through that repository's own git — create the worktree, guard it, merge it or
 
 ## Owns
 
-- `repos` — which repository, target host, base branch, worktree root and todo convention a run uses: configured in `repos.json`, detected otherwise, and refused when neither.
+- `repos` — which repository, target host, base branch, worktree root and todo convention a run uses:
+  configured in `.orchestra/repos.json` (or the file named by `ORCHESTRA_REPOS`), detected otherwise,
+  and refused when neither.
 - `worktrees` — the run's worktree through the target's own git: create, guard, merge, discard, and the view the page lists.
 
 ## Does not own
 
 Where Orchestra itself is installed or where its runs write — that is
 [foundation](../../../foundation/README.md)'s `paths`. A descriptor file happens to sit
-beside this checkout; that is a default, not ownership. The decision to merge: the operator
+in this checkout's `.orchestra/`; that is a default, not ownership. The decision to merge: the operator
 makes it at the final gate, and [application](../../../application/README.md) carries it
 here. What an agent does inside the worktree, which is
 [agents](../../../agents/README.md).
@@ -33,8 +35,8 @@ This package's relationships are drawn once, in [the main view](diagrams/main.md
 Through `git` on the target host: every worktree, commit and merge. This package never
 reads another host's git — a Windows worktree is read by a Windows process only.
 
-Through the descriptor file: `repos.json` names the operator's own repositories, and a
-missing file means no descriptors rather than an error.
+Through the descriptor file: `.orchestra/repos.json` (or the file named by `ORCHESTRA_REPOS`) names
+the operator's own repositories, and a missing file means no descriptors rather than an error.
 
 ## Invariants
 

@@ -36,10 +36,15 @@ in — its flow, one file in `flows/`.
   the work a review judges; research has none. New runs use `review_rounds`:
   `normal` productive attempts, then, if `extended` is greater than zero, one
   code-owned convergence reflection for each role as it next runs and up to
-  `extended` more attempts. `PASS` advances
-  immediately; `BLOCKER` stops for the human immediately; a non-`PASS` at the
-  combined limit stops as `exhausted`. Operator guidance starts a new episode
-  with its counters reset. A run carrying the old `max_rounds` policy keeps its
+  `extended` more attempts. Settings may append separate role guidance at that
+  reflection and at the last budgeted iteration; the code-owned instructions and
+  verdict routes remain authoritative. On exhaustion, the architect's feedback
+  separates the engineer's contribution from the architect's assessment for the
+  operator. `PASS` advances immediately; `BLOCKER` stops for the human
+  immediately; a non-`PASS` at the combined limit stops as `exhausted`.
+  Operator guidance starts a new episode
+  and resets its `round` budget; `phase_rounds` keeps counting architect judgements
+  until `_next()` enters another phase. A run carrying the old `max_rounds` policy keeps its
   recorded boundary and routing. **Nothing runs twice on its own:** a role-run
   and every git side effect are single-attempt activities, and a failure stops
   the run for the operator.
@@ -88,7 +93,7 @@ Do not re-derive a `states/` layer here.
 | [launch.py](../../app/agents/launch.py) | one agent process from an argv list, with its whole descendant tree contained |
 | [trust.py](../../app/agents/trust.py) | telling this host's agent CLIs that a run's repository is one the operator works in, so no turn stops at their trust dialog |
 | [app/workspace/](../../app/workspace/README.md) — [worktrees.py](../../app/workspace/worktrees.py) | the run's worktree through the target's own git: create, guard, merge, discard, the view |
-| [repos.py](../../app/workspace/repos.py) · [repos.json](../../repos.example.json) | which repository, target, base branch and worktree root a run uses |
+| [repos.py](../../app/workspace/repos.py) · [.orchestra/repos.example.json](../../.orchestra/repos.example.json) | which repository, target, base branch and worktree root a run uses |
 | [app/foundation/](../../app/foundation/README.md) — [paths.py](../../app/foundation/paths.py) | the one derivation of this checkout's root, the runtime root a run writes under, and the secrets directory |
 | [`.orchestra/settings.json`](../../.orchestra/settings.json) · [policy.py](../../app/foundation/policy.py) · [settings.py](../../app/application/settings.py) | shared settings and local patch, profiles, role bindings, skills, review budgets, timeouts, target hosts — and strict validation across the adapters |
 | [envpath.py](../../app/foundation/envpath.py) | where each checkout's environment lives on each host, and its guarded removal |

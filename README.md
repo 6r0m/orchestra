@@ -83,8 +83,8 @@ make check                    # each part of the stack, and the Workbench's serv
 ```
 
 Open the page — `http://127.0.0.1:8390` by default — and start a run on this repository. To work on
-your own repositories, copy `repos.example.json` to `repos.json` (ignored) and describe them there;
-the page can also start a run on any path you type.
+your own repositories, copy `.orchestra/repos.example.json` to `.orchestra/repos.json` (ignored) and
+describe them there; the page can also start a run on any path you type.
 
 ```bash
 make feature TASK="fix the retry in the uploader"   # the same run, from the command line
@@ -150,7 +150,7 @@ file proves; [docs/history/](docs/history/) records how the system got here.
 | shared Settings defaults and local overrides | [`.orchestra/settings.json`](.orchestra/settings.json) and the ignored `.orchestra/settings.local.json`, validated by [`policy.py`](app/foundation/policy.py) and [`application.settings`](app/application/settings.py) |
 | how each role works | [`roles/engineer.md`](roles/engineer.md), [`roles/architect.md`](roles/architect.md) |
 | the order a run's stages take | [`flows/`](flows/README.md), one file per flow; the policy's `default_flow` names the default |
-| the repositories runs may work on | `repos.json` — yours, ignored; copy [`repos.example.json`](repos.example.json) |
+| the repositories runs may work on | `.orchestra/repos.json` — yours; copy [`.orchestra/repos.example.json`](.orchestra/repos.example.json) |
 | credentials and machine-specific values | `.env` — see [`.env.example`](.env.example) |
 
 Running it day to day — the page, the command line, and where to look when something is wrong — is

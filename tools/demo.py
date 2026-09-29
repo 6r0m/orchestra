@@ -215,6 +215,9 @@ class Demo:
         # The deployment's own settings, with a host and a workflow queue of the demo's own: its queues are
         # polled by no worker but the demo's, and its ports are free now.
         policy = json.load(open(P.SETTINGS_FILE, encoding="utf-8"))
+        # These fakes speak Claude's engineer contract and Codex's review contract, independent of defaults.
+        policy["roles"]["engineer"]["agent"] = "claude-engineer"
+        policy["roles"]["architect"]["agent"] = "codex-architect"
         host = "demo%s" % os.urandom(3).hex()
         policy["heartbeat_seconds"], policy["timeout_seconds"] = 10, 900
         policy["workflow_queue"] = "orchestration:%s" % host

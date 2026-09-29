@@ -79,18 +79,41 @@ class Routing(Scenario):
             script.extend(((engineer_name, 0, engineer_out), (review_name, 0, review_out)))
         policy = dict(POLICY)
         policy["review_rounds"] = {phase: {"normal": 10, "extended": 10} for phase in ("plan", "build")}
+        policy["review_prompts"] = {
+            "after_normal": {"engineer": "ENGINEER NORMAL EXTRA", "architect": "ARCHITECT NORMAL EXTRA"},
+            "at_limit": {"engineer": "ENGINEER FINAL EXTRA", "architect": "ARCHITECT FINAL EXTRA"},
+        }
         policy.pop("max_rounds", None)
         run = self.drive(script, policy=policy)
         self.assertEqual(run.stop["reason"], "exhausted")
         self.assertEqual(len(self.agent.calls), 40)
         self.assertIn("normal review budget of 10 iterations has elapsed", self.agent.calls[20]["prompt"])
         self.assertIn("normal review budget of 10 iterations has elapsed", self.agent.calls[21]["prompt"])
+        self.assertIn("ENGINEER NORMAL EXTRA", self.agent.calls[20]["prompt"])
+        self.assertIn("ARCHITECT NORMAL EXTRA", self.agent.calls[21]["prompt"])
         self.assertNotIn("normal review budget of 10 iterations has elapsed", self.agent.calls[22]["prompt"])
-        final_prompt = self.agent.calls[39]["prompt"]
-        for term in ("what remains unresolved", "what was tried", "which findings are disputed",
-                     "likely cause", "operator decision"):
+        self.assertNotIn("ENGINEER NORMAL EXTRA", self.agent.calls[22]["prompt"])
+        final_engineer_prompt = " ".join(self.agent.calls[38]["prompt"].split())
+        self.assertIn("ENGINEER FINAL EXTRA", final_engineer_prompt)
+        self.assertIn("leave the architect a concise, factual handoff in the run's todo", final_engineer_prompt)
+        self.assertIn("what remains unresolved", final_engineer_prompt)
+        final_prompt = " ".join(self.agent.calls[39]["prompt"].split())
+        for term in ("Engineer contribution", "Architect assessment", "what remains unresolved",
+                     "what the engineer tried or changed", "likely cause", "operator decision"):
             self.assertIn(term, final_prompt)
+        self.assertIn("ARCHITECT FINAL EXTRA", final_prompt)
         self.assertEqual(run.stop["feedback"], summaries, "the exhausted stop presents the final review evidence")
+
+    def test_a_run_without_prompt_additions_keeps_the_code_owned_reflection(self):
+        from app.agents import nodes
+        role = POLICY["roles"]["engineer"]
+        state = {"task": "t", "todo_path": "todo/task.md", "run_id": "r", "worktree_path": "/w",
+                 "phase": "plan", "round": 2, "episode": 1, "feedback": "", "guidance": "",
+                 "convergence": {"phase": "plan", "round": 2}}
+        prompt = nodes.compose_prompt("plan", role, False, state, True, True,
+                                      review_rounds={"plan": {"normal": 2, "extended": 1}})
+        self.assertIn("Reflect on your own work and the architect's review", prompt)
+        self.assertNotIn("Operator's additional reflection guidance", prompt)
 
     def test_blocker_reaches_human_only_via_architect(self):
         a1, _ = codex_review_first("BLOCKER", "premise wrong")
@@ -758,9 +781,12 @@ class Flows(Scenario):
                                         "build-e4-1", "verify-e4-1"])
 
     def test_skipping_approvals_never_skips_a_spent_round_budget(self):
+        policy = dict(POLICY)
+        policy["review_rounds"] = {phase: {"normal": 1, "extended": 1} for phase in ("plan", "build")}
+        policy.pop("max_rounds", None)
         run = self.drive([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, codex_review_first("PATCH", "fix A")[0]),
                           ("plan-e1-2", 0, "revised\n"), ("assess-e1-2", 0, codex_review_resumed("PATCH", "fix B"))],
-                         auto=True)
+                         auto=True, policy=policy)
         self.assertEqual((run.stop["reason"], run.stop["feedback"]), ("exhausted", "fix B"))
 
     def test_a_run_handed_a_flow_it_cannot_follow_is_refused_before_any_step(self):

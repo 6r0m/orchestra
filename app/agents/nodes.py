@@ -23,28 +23,32 @@ from app.foundation import stages
 # What may follow the verdict object and still leave it the reviewer's last word.
 _ENDS_THERE = re.compile(r"\s*(?:```)?\s*")
 CONVERGENCE_REFLECTION = {
-    "engineer": """The normal review budget has elapsed.
+    "engineer": """The normal review budget has elapsed. Reflect on your own work and the architect's review before continuing.
 
-Continue the task, but critically examine why convergence is taking this long. Do not mechanically repeat
-the previous approach. Re-evaluate which findings are valid and unresolved, which you dispute and what
-repository evidence refutes them, whether recent changes introduced new consequences, whether you have
-misunderstood a requirement repeatedly, and whether another implementation or investigation strategy is
-needed. If progress genuinely requires a human or external decision, say so clearly. Otherwise continue.""",
-    "architect": """The normal review budget has elapsed.
+Check whether you misunderstood a requirement, repeated a failed approach, or left a regression. Re-check every open
+architect finding against the current code and tests. Fix supported findings. If you disagree, answer the finding with
+specific repository evidence and propose a correction to the review only when that evidence supports it. Do not dismiss
+feedback because a different design is your preference. Use a different implementation or investigation strategy when
+the evidence shows the current one is not converging. Ask the operator only when a concrete decision blocks safe progress.""",
+    "architect": """The normal review budget has elapsed. Reflect on your own review and the engineer's work before continuing.
 
-Continue reviewing the evolving artifact, but critically examine why convergence is taking this long.
-Re-evaluate whether findings are concrete correctness or requirement problems, whether new findings follow
-from new work, whether evidence-backed engineer refutations should be accepted, whether you are repeating
-unsupported findings or overengineering, and whether a genuine human or external decision is unresolved.
-Return BLOCKER if intervention is genuinely required. Otherwise continue with only concrete findings.""",
+Check each finding for current evidence, duplicate or stale claims, and assumptions that changed. Re-evaluate the
+engineer's fixes and refutations against the code and tests. Accept supported corrections and withdraw findings that
+are unsupported, already resolved, or outside the agreed goal. For anything that remains, state the evidence and the
+smallest safe correction. Do not require a preferred design without a concrete reason. Return BLOCKER only when a
+specific human decision is required; otherwise continue with concrete findings.""",
 }
-FINAL_REVIEW_SUMMARY = """If your verdict is PATCH or UNVERIFIED, make feedback an evidence summary that states:
-- what remains unresolved;
-- what was tried or changed across the loop;
-- which findings are disputed and the evidence on each side;
-- the likely cause: task ambiguity, engineer implementation or reasoning, reviewer disagreement or overreach,
-  or an external blocker;
-- the concrete operator decision or input needed."""
+FINAL_REVIEW_SUMMARY = {
+    "engineer": """This is the last budgeted iteration for this phase. Finish changes supported by the review and leave the architect
+a concise, factual handoff in the run's todo: what you changed, what evidence you checked, which architect findings you
+addressed or refuted, and what remains unresolved. Do not assume another engineer turn will follow.""",
+    "architect": """This is the last budgeted iteration for this phase. If your verdict is PATCH or UNVERIFIED, make feedback an
+evidence summary with separate sections named Engineer contribution and Architect assessment. State what remains
+unresolved; what the engineer tried or changed; which architect findings the engineer addressed or disputed and the
+evidence on each side; your remaining findings; the likely cause (task ambiguity, implementation or reasoning,
+reviewer disagreement or overreach, or an external blocker); and the exact operator decision or input needed. Keep the
+verdict JSON contract. For PASS or BLOCKER, follow the usual verdict and stop rules.""",
+}
 
 
 class TransportError(RuntimeError):
@@ -179,7 +183,7 @@ def _verdict_object(value):
 
 
 def compose_prompt(stage, stage_cfg, is_review, state, session_first,
-                   stage_first, logs="the run's logs", skills=None, review_rounds=None):
+                   stage_first, logs="the run's logs", skills=None, review_rounds=None, review_prompts=None):
     """Everything a stage needs, explicitly from state — no hidden memory.
 
     HOW a role acts lives in its persona, which the run carries from its start, so
@@ -247,14 +251,20 @@ def compose_prompt(stage, stage_cfg, is_review, state, session_first,
     seen = state.get("convergence_seen") or []
     if (convergence.get("phase") == state.get("phase") and
             (session_first or role_name not in seen)):
+        extra = ((review_prompts or {}).get("after_normal") or {}).get(role_name, "").strip()
         lines += ["", "# Convergence reflection",
                   "The normal review budget of %d iterations has elapsed.\n\n%s" %
                   (convergence["round"], CONVERGENCE_REFLECTION[role_name])]
+        if extra:
+            lines += ["", "# Operator's additional reflection guidance", extra]
     thresholds = (review_rounds or {}).get(state.get("phase"))
-    if is_review and thresholds:
-        review_number = state.get("phase_rounds", 0) + 1
+    if thresholds:
+        review_number = state.get("round", 0) + 1
         if review_number >= thresholds["normal"] + thresholds["extended"]:
-            lines += ["", "# Final review summary", FINAL_REVIEW_SUMMARY]
+            extra = ((review_prompts or {}).get("at_limit") or {}).get(role_name, "").strip()
+            lines += ["", "# Final budget handoff", FINAL_REVIEW_SUMMARY[role_name]]
+            if extra:
+                lines += ["", "# Operator's additional final-turn guidance", extra]
     return "\n".join(lines) + "\n"
 
 

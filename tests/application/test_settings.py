@@ -146,6 +146,7 @@ class ARunsPolicy(unittest.TestCase):
         settings["review_rounds"] = {phase: {"normal": 10, "extended": 10} for phase in P.stages.PHASES}
         policy = S.run_policy(settings)
         self.assertEqual(policy["review_rounds"], settings["review_rounds"])
+        self.assertEqual(policy["review_prompts"], settings["review_prompts"])
         self.assertNotIn("max_rounds", policy)
 
     def test_a_skill_bound_to_a_kind_that_takes_none_is_refused(self):
@@ -177,6 +178,9 @@ class Applying(unittest.TestCase):
 
     def read(self):
         return S.read(self.root, self.environ)
+
+    def test_read_exposes_the_combined_review_prompt_limit(self):
+        self.assertEqual(self.read()["max_review_prompt_bytes"], P.MAX_REVIEW_PROMPT_BYTES)
 
     def apply(self, *changes, revision=None):
         return S.apply(list(changes), revision or self.read()["revision"], self.root, self.environ)
@@ -218,30 +222,42 @@ class Applying(unittest.TestCase):
         self.assertEqual(self.patch(), {"timeout_seconds": 90, "targets": {"wsl": {"terminal_port": 8501}},
                                         "roles": {"architect": {"agent": "codex-architect"}}})
 
-    def test_resetting_every_settings_page_section_keeps_an_unrelated_local_member(self):
+    def test_resetting_visible_settings_keeps_hidden_legacy_and_unrelated_local_members(self):
         self.write_patch({
             "timeout_seconds": 90,
             "agents": {"claude-engineer": {"effort": "high"}},
             "roles": {"engineer": {"agent": "codex-engineer"}},
             "stage_skills": {"plan": "architect"},
             "review_rounds": {"plan": {"normal": 3}},
+            "review_prompts": {"after_normal": {"engineer": "Re-check the task evidence."}},
             "max_rounds": {"plan": 4, "build": 5},
             "default_flow": "engineer-code",
         })
         changes = [{"pointer": "/%s" % key, "revert": True}
-                   for key in ("agents", "roles", "stage_skills", "review_rounds", "max_rounds", "default_flow")]
+                   for key in ("agents", "roles", "stage_skills", "review_rounds", "review_prompts",
+                               "default_flow")]
         shown = S.apply(changes, self.read()["revision"], self.root, self.environ)
-        owned = ("agents", "roles", "stage_skills", "review_rounds", "default_flow")
+        owned = ("agents", "roles", "stage_skills", "review_rounds", "review_prompts", "default_flow")
         self.assertEqual({key: shown["settings"][key] for key in owned},
                          {key: shown["shared"][key] for key in owned})
-        self.assertNotIn("max_rounds", shown["settings"], "Reset removes an obsolete local budget override")
-        self.assertEqual(self.patch(), {"timeout_seconds": 90}, "only page-owned settings were reverted")
+        self.assertEqual(shown["settings"]["max_rounds"], {"plan": 4, "build": 5})
+        self.assertEqual(self.patch(), {"timeout_seconds": 90, "max_rounds": {"plan": 4, "build": 5}},
+                         "Reset only reverts visible page-owned settings")
 
     def test_an_applied_override_survives_a_fresh_read(self):
         self.apply({"pointer": "/review_rounds/plan/normal", "value": 7})
         reloaded = self.read()
         self.assertEqual(reloaded["settings"]["review_rounds"]["plan"]["normal"], 7)
         self.assertEqual(reloaded["overrides"], {"review_rounds": {"plan": {"normal": 7}}})
+
+    def test_a_role_prompt_addition_applies_sparsely_and_reverts(self):
+        self.apply({"pointer": "/review_prompts/after_normal/engineer", "value": "Check my assumptions."})
+        reloaded = self.read()
+        self.assertEqual(reloaded["settings"]["review_prompts"]["after_normal"]["engineer"],
+                         "Check my assumptions.")
+        self.assertEqual(self.patch(), {"review_prompts": {"after_normal": {"engineer": "Check my assumptions."}}})
+        self.apply({"pointer": "/review_prompts/after_normal/engineer", "revert": True})
+        self.assertFalse(os.path.exists(self.local), "a prompt patch left empty is no file")
 
     def test_revert_removes_that_setting_alone_and_the_last_one_the_file(self):
         self.apply({"pointer": "/roles/architect/agent", "value": "codex-architect"},
@@ -368,12 +384,17 @@ class Applying(unittest.TestCase):
         self.assertEqual((kinds["claude-code"]["skill"], kinds["codex"]["skill"]), ("/{name}", "${name}"))
 
     def test_skill_discovery_uses_adapter_roots_and_returns_names_only(self):
-        for folder in (os.path.join(self.root, ".claude", "skills", "repo-method"),
-                       os.path.join(self.root, ".agents", "skills", "repo-tool")):
+        folders = (os.path.join(self.root, ".claude", "skills", "repo-method"),
+                   os.path.join(self.root, ".agents", "skills", "repo-tool"))
+        for folder in folders:
             os.makedirs(folder)
+            with open(os.path.join(folder, "SKILL.md"), "w", encoding="utf-8") as fh:
+                fh.write("---\nname: %s\n---\n" % os.path.basename(folder))
+        os.makedirs(os.path.join(self.root, ".claude", "skills", "empty-method"))
         shown = self.read()
         self.assertIn("repo-method", shown["skills"]["claude-code"])
         self.assertIn("repo-tool", shown["skills"]["codex"])
+        self.assertNotIn("empty-method", shown["skills"]["claude-code"])
         encoded = json.dumps(shown["skills"])
         self.assertNotIn(self.root, encoded)
         self.assertTrue(all(isinstance(name, str) and os.path.basename(name) == name

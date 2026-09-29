@@ -59,7 +59,8 @@ def read(root=paths.REPO, environ=os.environ):
     shown = {"revision": P.revision(below, local), "source": P.origin(below, root), "writable": local is not None,
              "kinds": adapters.available(), "skills": adapters.skill_names(root), "roles": roles,
              "phases": list(stages.PHASES),
-             "max_persona_bytes": P.MAX_PERSONA_BYTES}
+             "max_persona_bytes": P.MAX_PERSONA_BYTES,
+             "max_review_prompt_bytes": P.MAX_REVIEW_PROMPT_BYTES}
     try:
         settings = load(root=root, environ=environ)
         patch = P.read_patch(local) or {}

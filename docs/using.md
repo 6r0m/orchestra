@@ -58,7 +58,8 @@ still retains is out of reach, and the tab's title counts the runs that need you
 the page's address names the run open, so a reload keeps it and a new tab opens it.
 
 *New run* opens the form that starts one — and with no runs at all, the page opens on it: on a
-repository named in `repos.json` — its menu reads the file again each time it is opened, and a name that
+repository named in `.orchestra/repos.json` or in the file named by `ORCHESTRA_REPOS` — its menu
+reads the file again each time it is opened, and a name that
 carries its owners, `work/platform/service`, is found under `work`, then `platform`, each opening in
 view as you hover it — or on any other one given as its path as WSL sees it (`/mnt/e/...` for a Windows
 drive); only the one chosen is sent. The task's first words name the run and its branch. It follows the
@@ -124,6 +125,12 @@ boundary, if an extended budget remains, the engineer and architect each receive
 reflection on their next turn; the normal loop then continues through the extended budget. `BLOCKER`
 stops immediately, and a non-`PASS` at the combined limit waits for operator guidance.
 
+Settings can add separate instructions for each role after the normal budget and on the last budgeted
+iteration. The four additions are shared by Plan and Build and limited to 4,096 combined UTF-8 bytes.
+They follow the built-in reflection and handoff instructions, and the same role instructions apply to
+both phases. At exhaustion, the architect's feedback separates the engineer's contribution from the
+architect's assessment for the operator.
+
 ## The command line
 
 ```bash
@@ -132,7 +139,7 @@ export UV_PROJECT_ENVIRONMENT="$(uv run --no-project --managed-python --python 3
 O="uv run --locked python -m app.interfaces.cli"
 
 $O "<task>"                        # a run on this repository
-$O "<task>" --repo work/webapp     # a run on a repository named in repos.json
+$O "<task>" --repo work/webapp     # a repository listed in .orchestra/repos.json or ORCHESTRA_REPOS
 $O "<task>" --flow architect-research   # a run that follows another flow than the default
 $O --resume <run-id> --answer yes  # answer the stop the run waits at
 $O --continue <run-id>             # run a failed stage again, after you fixed its cause

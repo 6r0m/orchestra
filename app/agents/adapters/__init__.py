@@ -126,7 +126,8 @@ def skill_names(repo):
             try:
                 with os.scandir(root) as children:
                     names.update(child.name for child in children
-                                 if P.skill_name(child.name) and child.is_dir(follow_symlinks=True))
+                                 if P.skill_name(child.name) and child.is_dir(follow_symlinks=True) and
+                                 os.path.isfile(os.path.join(child.path, "SKILL.md")))
             except OSError:
                 # Discovery helps fill a setting; prepare still checks a binding on the worker that will use it.
                 continue

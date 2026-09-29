@@ -171,7 +171,38 @@ class Shape(unittest.TestCase):
                 P.validate(broken)
             self.assertEqual(raised.exception.pointer, "/review_rounds/%s/%s" % (phase, threshold))
         legacy = self.raw()
+        legacy.pop("review_prompts", None)
         P.validate(legacy)
+
+    def test_review_prompt_additions_are_role_specific_and_bounded_together(self):
+        raw = self.raw()
+        raw["review_prompts"] = {
+            event: {role: "" for role in P.ROLES} for event in ("after_normal", "at_limit")
+        }
+        raw["review_prompts"]["after_normal"]["engineer"] = "Check the work and findings."
+        P.validate(raw)
+
+        missing_role = json.loads(json.dumps(raw))
+        del missing_role["review_prompts"]["at_limit"]["architect"]
+        with self.assertRaises(P.InvalidPolicy) as raised:
+            P.validate(missing_role)
+        self.assertEqual(raised.exception.pointer, "/review_prompts/at_limit")
+
+        within_limit = json.loads(json.dumps(raw))
+        within_limit["review_prompts"]["after_normal"]["engineer"] = "é" * (P.MAX_REVIEW_PROMPT_BYTES // 2)
+        P.validate(within_limit)
+
+        too_long = json.loads(json.dumps(within_limit))
+        too_long["review_prompts"]["at_limit"]["architect"] = "x"
+        with self.assertRaises(P.InvalidPolicy) as raised:
+            P.validate(too_long)
+        self.assertEqual(raised.exception.pointer, "/review_prompts/at_limit/architect")
+
+        not_text = json.loads(json.dumps(raw))
+        not_text["review_prompts"]["at_limit"]["engineer"] = False
+        with self.assertRaises(P.InvalidPolicy) as raised:
+            P.validate(not_text)
+        self.assertEqual(raised.exception.pointer, "/review_prompts/at_limit/engineer")
 
     def test_settings_of_the_old_shape_are_refused_naming_the_new_keys(self):
         old = self.raw()
