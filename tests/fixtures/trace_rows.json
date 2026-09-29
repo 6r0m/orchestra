@@ -40,8 +40,10 @@
   {
    "as_type": "agent",
    "filtered": {
-    "agent": "claude",
+    "agent": "claude-engineer",
+    "effort": "max",
     "kind": "claude-code",
+    "model": "claude-opus-5",
     "phase": "plan",
     "role": "engineer",
     "round": 1,
@@ -56,8 +58,10 @@
    "level": "DEFAULT",
    "metadata": [
     "agent",
+    "effort",
     "kind",
     "logs",
+    "model",
     "phase",
     "provider_session_id",
     "role",
@@ -76,7 +80,7 @@
   {
    "as_type": "agent",
    "filtered": {
-    "agent": "codex",
+    "agent": "codex-architect",
     "effort": "high",
     "error_type": "telemetry_degraded",
     "kind": "codex",
@@ -122,8 +126,10 @@
   {
    "as_type": "agent",
    "filtered": {
-    "agent": "claude",
+    "agent": "claude-engineer",
+    "effort": "max",
     "kind": "claude-code",
+    "model": "claude-opus-5",
     "phase": "plan",
     "role": "engineer",
     "round": 2,
@@ -139,8 +145,10 @@
    "level": "DEFAULT",
    "metadata": [
     "agent",
+    "effort",
     "kind",
     "logs",
+    "model",
     "phase",
     "provider_session_id",
     "role",
@@ -159,7 +167,7 @@
   {
    "as_type": "agent",
    "filtered": {
-    "agent": "codex",
+    "agent": "codex-architect",
     "effort": "high",
     "error_type": "telemetry_degraded",
     "gate_reason": "approval",
@@ -273,9 +281,11 @@
   {
    "as_type": "agent",
    "filtered": {
-    "agent": "claude",
+   "agent": "claude-engineer",
+    "effort": "max",
     "error_type": "session_lost",
     "kind": "claude-code",
+    "model": "claude-opus-5",
     "phase": "build",
     "role": "engineer",
     "round": 1,
@@ -290,9 +300,11 @@
    "level": "WARNING",
    "metadata": [
     "agent",
+    "effort",
     "error_type",
     "kind",
     "logs",
+    "model",
     "phase",
     "provider_session_id",
     "role",
@@ -312,7 +324,7 @@
   {
    "as_type": "agent",
    "filtered": {
-    "agent": "codex",
+    "agent": "codex-architect",
     "effort": "high",
     "error_type": "telemetry_degraded",
     "kind": "codex",

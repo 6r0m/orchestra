@@ -26,6 +26,29 @@ def codex_review_resumed(verdict, feedback="fb"):
     return "thinking...\n" + json.dumps({"verdict": verdict, "feedback": feedback}) + "\n"
 
 
+def first_message_for(settings, role, message):
+    kind = settings["agents"][settings["roles"][role]["agent"]]["kind"]
+    if kind == "codex":
+        return codex_first_out(message)
+    if kind == "claude-code":
+        return message, None
+    raise AssertionError("no fake first message for agent kind %r" % kind)
+
+
+def review_first_for(settings, role, verdict, feedback="fb"):
+    message = json.dumps({"verdict": verdict, "feedback": feedback})
+    return first_message_for(settings, role, message)
+
+
+def review_resumed_for(settings, role, verdict, feedback="fb"):
+    kind = settings["agents"][settings["roles"][role]["agent"]]["kind"]
+    if kind == "codex":
+        return codex_review_resumed(verdict, feedback)
+    if kind == "claude-code":
+        return json.dumps({"verdict": verdict, "feedback": feedback}) + "\n"
+    raise AssertionError("no fake resumed review for agent kind %r" % kind)
+
+
 class FakeAgent:
     """The Temporal path's execution seam: scripted (rc, stdout) per role-run, each call recorded.
 

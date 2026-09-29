@@ -199,22 +199,25 @@ class Wiring(unittest.TestCase):
         saved = trust.ensure
         trust.ensure = lambda repo, kinds, home=None: recorded.append((repo, sorted(set(kinds))))
         self.addCleanup(setattr, trust, "ensure", saved)
+        settings = S.load()
+        policy = S.run_policy(settings)
         host = activities.Activities(runner=None, git=None, repositories=FakeRepos(), telemetry=None,
                                      which=installed, holds_skill=every_skill)
         resolved = host.prepare({"repository": {"id": "example", "target": "wsl", "path": "/x"},
-                                 "policy": S.run_policy(S.load())})
-        self.assertEqual(recorded, [(resolved["repo_path"], ["claude-code", "codex"])])
+                                 "policy": policy})
+        kinds = sorted({role["kind"] for role in policy["roles"].values()})
+        self.assertEqual(recorded, [(resolved["repo_path"], kinds)])
 
         # And again before each turn, because a record written while a CLI runs can be taken back.
         recorded.clear()
-        policy = S.run_policy(S.load())
+        policy = S.run_policy(settings)
         state = {"run_id": "r1", "task": "t", "phase": "plan", "round": 0, "episode": 1,
                  "repo_path": resolved["repo_path"], "worktree_path": "/fake/worktree",
                  "todo_path": "/fake/worktree/todo/x.md", "agent_sessions": {}}
         host = activities.Activities(runner=lambda *args, **kwargs: (1, ""), git=FakeWorktrees(), telemetry=None)
         with self.assertRaises(Exception):
             host.run_role({"stage": "plan", "state": state, "policy": policy})
-        self.assertEqual(recorded, [(resolved["repo_path"], ["claude-code"])],
+        self.assertEqual(recorded, [(resolved["repo_path"], [policy["roles"]["engineer"]["kind"]])],
                          "for the kind whose turn it is, before that turn starts")
 
 if __name__ == "__main__":

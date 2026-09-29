@@ -19,7 +19,8 @@ sys.path[:0] = [PKG, HERE]
 
 from temporal_env import POLICY, Run, client, host  # noqa: E402
 import temporal_env  # noqa: E402
-from fakes import codex_first_out, codex_review_first, codex_review_resumed  # noqa: E402
+from fakes import (codex_first_out, codex_review_first, codex_review_resumed, review_first_for,
+                   review_resumed_for)  # noqa: E402
 
 from app.application import client as runs  # noqa: E402
 from app.application import settings as S  # noqa: E402
@@ -854,8 +855,11 @@ class Flows(Scenario):
             json.dump(self.CODE, fh)
         repo = tempfile.mkdtemp(prefix="orchestra-flow-repo-")
         self.addCleanup(shutil.rmtree, repo, True)
-        self.host, self.agent = host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, codex_review_first("PASS")[0]),
-                                      ("build-e2-1", 0, "built\n"), ("verify-e2-1", 0, codex_review_resumed("PASS"))])
+        settings = S.load()
+        self.host, self.agent = host([("plan-e1-1", 0, "planned\n"),
+                                      ("assess-e1-1", 0, review_first_for(settings, "architect", "PASS")[0]),
+                                      ("build-e2-1", 0, "built\n"),
+                                      ("verify-e2-1", 0, review_resumed_for(settings, "architect", "PASS"))])
         run = Run(handle=temporal_env.run(runs.start(client(), "a flow of my own", repo=repo, flow="mine",
                                                      check=False)))
         self.addCleanup(run.cleanup)

@@ -28,14 +28,27 @@ sys.path[:0] = [PKG, HERE]
 from temporalio.service import RPCError, RPCStatusCode  # noqa: E402
 
 from app.application import client as runs  # noqa: E402
+from app.application import settings as S  # noqa: E402
 from app.application import stack  # noqa: E402
 from app.orchestration import workflow as WF  # noqa: E402
 import temporal_env as E  # noqa: E402
 from app.agents import terminal  # noqa: E402
 from app.interfaces.workbench import server as workbench  # noqa: E402
-from fakes import FakeWorktrees, codex_first_out, codex_review_first, codex_review_resumed  # noqa: E402
+from fakes import FakeWorktrees, first_message_for, review_first_for, review_resumed_for  # noqa: E402
 from tests.application.test_stack import lock_of_its_own  # noqa: E402
 from tests.orchestration.test_workflow import Scenario  # noqa: E402
+
+
+def configured_review_first(verdict, feedback="fb"):
+    return review_first_for(S.load(), "architect", verdict, feedback)
+
+
+def configured_review_resumed(verdict, feedback="fb"):
+    return review_resumed_for(S.load(), "architect", verdict, feedback)
+
+
+def configured_first_message(message):
+    return first_message_for(S.load(), "architect", message)
 
 # Every request reads the stack afresh, so what a test says of it is what the page sees.
 workbench.READING_SECONDS = 0
@@ -557,7 +570,7 @@ class Runs(Scenario):
         return run_id
 
     def test_a_waiting_run_says_what_it_waits_at_since_when_and_what_it_takes(self):
-        a1, _ = codex_review_first("PASS", "Direction: A.")
+        a1, _ = configured_review_first("PASS", "Direction: A.")
         self.host, self.agent = E.host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)], git=FakeWorktrees())
         run_id = self.start("a run that waits")
         view = self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "approval")["view"]
@@ -588,7 +601,7 @@ class Runs(Scenario):
         self.assertEqual(view["actions"], [], "nothing to answer while it works")
 
     def test_a_run_whose_hosts_worker_is_down_says_which(self):
-        a1, _ = codex_review_first("PASS", "Direction: A.")
+        a1, _ = configured_review_first("PASS", "Direction: A.")
         self.host, self.agent = E.host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)], git=FakeWorktrees())
         run_id = self.start("a run on a host with no worker")
         self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "approval")
@@ -599,7 +612,7 @@ class Runs(Scenario):
     def test_a_run_whose_workflow_worker_is_down_is_still_shown_blocked_by_it(self):
         """Its status is a query only its workflow worker answers, and with none it waits: the page asks for a
         moment at most, then shows the run from its listing."""
-        a1, _ = codex_review_first("PASS", "Direction: A.")
+        a1, _ = configured_review_first("PASS", "Direction: A.")
         self.host, self.agent = E.host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)], git=FakeWorktrees())
         run_id = self.start("a run whose worker goes down")
         self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "approval")
@@ -641,7 +654,7 @@ class Runs(Scenario):
         status, refused = request("POST", "/api/runs", {"task": "a task", "repo": self.repo, "flow": "no-such-flow"})
         self.assertEqual(status, 400, refused)
         self.assertIn("no flow 'no-such-flow'", refused["error"])
-        brief, _ = codex_first_out("Brief: the scheduler.")
+        brief, _ = configured_first_message("Brief: the scheduler.")
         self.host, self.agent = E.host([("research-e1-1", 0, brief)], git=FakeWorktrees())
         status, started = request("POST", "/api/runs", {"task": "research first", "repo": self.repo,
                                                         "flow": "architect-research"})
@@ -653,10 +666,10 @@ class Runs(Scenario):
         self.assertEqual(view["stop"]["feedback"], "Brief: the scheduler.", "the approval shows the brief")
 
     def test_start_list_review_and_answer_a_run(self):
-        a1, _ = codex_review_first("PASS", "Direction: A.")
+        a1, _ = configured_review_first("PASS", "Direction: A.")
         git = FakeWorktrees()
         self.host, self.agent = E.host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1),
-                                        ("build-e2-1", 0, "built\n"), ("verify-e2-1", 0, codex_review_resumed("PASS"))],
+                                        ("build-e2-1", 0, "built\n"), ("verify-e2-1", 0, configured_review_resumed("PASS"))],
                                        git=git)
         self.assertEqual(request("POST", "/api/runs", {"task": ""})[0], 400)
         status, started = request("POST", "/api/runs", {"task": "a workbench run", "repo": self.repo})
@@ -725,8 +738,8 @@ class Runs(Scenario):
     def test_the_operators_words_reach_the_role_they_are_for(self):
         """A revise sent as the page sends it — the action, with the note typed beside it — reaches the
         engineer's next plan, word for word."""
-        a1, _ = codex_review_first("PASS", "Direction: A.")
-        a2, _ = codex_review_first("PASS", "Direction: B.")
+        a1, _ = configured_review_first("PASS", "Direction: A.")
+        a2, _ = configured_review_first("PASS", "Direction: B.")
         self.host, self.agent = E.host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1),
                                         ("plan-e2-1", 0, "planned again\n"), ("assess-e2-1", 0, a2)],
                                        git=FakeWorktrees())
@@ -741,7 +754,7 @@ class Runs(Scenario):
         self.assertIn("split the change in two", replanned[0]["prompt"])
 
     def test_stop_ends_a_run_and_a_closed_run_refuses_it(self):
-        a1, _ = codex_review_first("PASS", "Direction: A.")
+        a1, _ = configured_review_first("PASS", "Direction: A.")
         git = FakeWorktrees()
         self.host, self.agent = E.host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)], git=git)
         run_id = self.start("a run to stop")
@@ -777,7 +790,7 @@ class Runs(Scenario):
         self.assertEqual(status, 409, body)
 
     def test_what_a_stopped_run_kept_is_listed_and_removed_through_its_hosts_git_once_confirmed(self):
-        a1, _ = codex_review_first("PASS", "Direction: A.")
+        a1, _ = configured_review_first("PASS", "Direction: A.")
 
         class Kept(FakeWorktrees):
             rows = []
@@ -828,7 +841,7 @@ class Runs(Scenario):
                          "removed once, by its host's git, as a discard removes it")
 
     def test_a_removal_its_hosts_git_refuses_says_why_and_runs_again_only_when_asked_again(self):
-        a1, _ = codex_review_first("PASS", "Direction: A.")
+        a1, _ = configured_review_first("PASS", "Direction: A.")
 
         class Locked(FakeWorktrees):
             refusals = ["fatal: '/fake/worktree' is locked, use 'git worktree unlock' first"]
@@ -859,7 +872,7 @@ class Runs(Scenario):
         self.assertEqual(len(discards()), 2)
 
     def test_a_second_removal_while_one_runs_is_refused(self):
-        a1, _ = codex_review_first("PASS", "Direction: A.")
+        a1, _ = configured_review_first("PASS", "Direction: A.")
         discarding, let_go = threading.Event(), threading.Event()
         self.addCleanup(let_go.set)
 
@@ -890,7 +903,7 @@ class Runs(Scenario):
     def test_an_answer_or_a_change_read_while_no_worker_can_read_the_run_is_refused_at_once(self):
         """The page keeps a stop's buttons while its run cannot be read; pressing one is refused at once,
         naming the worker, rather than waiting for a query no worker answers."""
-        a1, _ = codex_review_first("PASS", "Direction: A.")
+        a1, _ = configured_review_first("PASS", "Direction: A.")
         self.host, self.agent = E.host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)], git=FakeWorktrees())
         run_id = self.start("a run whose worker goes down at its stop")
         stop = self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "approval")["stop"]
@@ -915,7 +928,7 @@ class Runs(Scenario):
     def test_stop_and_force_terminate_are_taken_while_no_worker_can_read_the_run(self):
         """Temporal records a Stop and a termination with no worker polling: neither waits on one, nor is
         refused for want of one."""
-        a1, _ = codex_review_first("PASS", "Direction: A.")
+        a1, _ = configured_review_first("PASS", "Direction: A.")
         self.host, self.agent = E.host([("plan-e1-1", 0, "p\n"), ("assess-e1-1", 0, a1),
                                         ("plan-e1-1", 0, "p\n"), ("assess-e1-1", 0, a1)], git=FakeWorktrees())
         stopped = self.start("a run stopped while its workers are down")
@@ -944,7 +957,7 @@ class Runs(Scenario):
     def test_an_answer_whose_run_does_not_answer_in_time_is_refused_naming_its_worker(self):
         """The preflight counts a worker dead for under a minute and a half as polling: a status that does not
         come in time is refused all the same, naming that worker, never waited on for the page's minutes."""
-        a1, _ = codex_review_first("PASS", "Direction: A.")
+        a1, _ = configured_review_first("PASS", "Direction: A.")
         self.host, self.agent = E.host([("plan-e1-1", 0, "p\n"), ("assess-e1-1", 0, a1)], git=FakeWorktrees())
         run_id = self.start("a run whose worker has just died")
         stop = self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "approval")["stop"]
@@ -1000,7 +1013,7 @@ class Runs(Scenario):
     def test_a_removal_while_no_worker_can_read_the_run_is_refused_at_once_naming_that_worker(self):
         """A closed run's status is a query only a worker of its workflow queue answers; with none polling
         it the query would wait, so the removal is refused before asking it."""
-        a1, _ = codex_review_first("PASS", "Direction: A.")
+        a1, _ = configured_review_first("PASS", "Direction: A.")
         git = FakeWorktrees()
         self.host, self.agent = E.host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)], git=git)
         run_id = self.start("a run whose worker is down")
@@ -1045,7 +1058,7 @@ class Runs(Scenario):
     def test_a_removal_whose_run_does_not_answer_in_time_is_refused_naming_its_worker(self):
         """A worker dead for under a minute and a half still counts as polling: a closed run's status that does
         not come in time refuses its removal all the same, naming that worker, never waited on for minutes."""
-        a1, _ = codex_review_first("PASS", "Direction: A.")
+        a1, _ = configured_review_first("PASS", "Direction: A.")
         git = FakeWorktrees()
         self.host, self.agent = E.host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)], git=git)
         run_id = self.start("a run whose worker has just died")
@@ -1066,10 +1079,10 @@ class Runs(Scenario):
         self.assertNotIn("discard", [call[0] for call in git.calls])
 
     def test_a_run_that_merged_kept_nothing_to_remove(self):
-        a1, _ = codex_review_first("PASS", "Direction: A.")
+        a1, _ = configured_review_first("PASS", "Direction: A.")
         git = FakeWorktrees()
         self.host, self.agent = E.host([("plan-e1-1", 0, "p\n"), ("assess-e1-1", 0, a1), ("build-e2-1", 0, "b\n"),
-                                        ("verify-e2-1", 0, codex_review_resumed("PASS"))], git=git)
+                                        ("verify-e2-1", 0, configured_review_resumed("PASS"))], git=git)
         run_id = self.start("a run that merges")
         stop = self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "approval")["stop"]
         request("POST", "/api/runs/%s/answer" % run_id, {"stop": stop["id"], "action": "approve"})
@@ -1084,7 +1097,7 @@ class Runs(Scenario):
         """A closed run still answers its status query with the stop it closed at, from its
         history, so the page offers the answer; the Update then finds no open run. That is a
         refusal, not a failure of the page."""
-        a1, _ = codex_review_first("PASS", "Direction: A.")
+        a1, _ = configured_review_first("PASS", "Direction: A.")
         self.host, self.agent = E.host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)],
                                        git=FakeWorktrees())
         status, started = request("POST", "/api/runs", {"task": "a run closed at its gate", "repo": self.repo})
