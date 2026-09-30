@@ -4,7 +4,8 @@
 
 It serves `static/` beside it and a small JSON API over `app.application` on `http://127.0.0.1:<workbench_port>`:
 the stack's reading and its start, stop and restart; the runs and what each is doing now, a run's
-status and timeline, its change; starting a run, answering its stop, stopping or force-terminating
+status and timeline, its recorded turn inputs and outputs, its change; starting a run, answering its
+stop, stopping or force-terminating
 it, and removing what a closed run kept; and the settings, read and applied through
 `app.application.settings`, which reach only the runs started after them. The page opens each run's agent terminals directly on the
 worker of the run's host (`app.agents.terminal`). It holds no state of its own: stopping it changes
@@ -35,8 +36,10 @@ from app.application import stack
 from app.foundation import flows
 from app.foundation import paths
 from app.foundation import policy as P
+from app.foundation import stages
 from app.workspace import repos
 from app.agents import terminal
+from app.agents.adapters import codex
 
 # The page is this server's own, served from beside it.
 PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -61,6 +64,7 @@ STATIC = {"/": ("index.html", "text/html; charset=utf-8"),
           "/vendor/xterm.css": ("vendor/xterm/xterm.css", "text/css; charset=utf-8")}
 RUN_ID = re.compile(r"^[\w-]{1,64}$")
 MAX_BODY = 1 << 20
+MAX_TURN_FILE = 8 << 20
 ANSWER_KEYS = {"stop", "action", "text", "confirm"}
 # The page reads the stack three ways every few seconds, and a Windows worker's process takes about
 # half a second to read: every request shares one reading at most this old, and a stack action drops it.
@@ -68,6 +72,42 @@ READING_SECONDS = 3
 # A run's status is a query its own workflow worker answers; while that worker is down the page still
 # shows the run, from its listing, after waiting this long for the answer.
 STATUS_SECONDS = datetime.timedelta(seconds=5)
+
+
+def agent_prompt(view, logs=None):
+    """Whether the active Claude turn has reported a vendor dialog still waiting in its terminal."""
+    if view.get("state") != "running" or view.get("stage") not in stages.STAGE_ROLE:
+        return False
+    episode, round_number = view.get("episode"), view.get("round")
+    if not isinstance(episode, int) or episode < 1 or not isinstance(round_number, int) or round_number < 0:
+        return False
+    if logs is None:
+        logs = os.path.join(terminal.run_dir(view["run_id"]), "logs")
+    if os.path.islink(logs) or os.path.islink(os.path.dirname(logs)):
+        return False
+    base = "%s-e%d-%d" % (view["stage"], episode, round_number + 1)
+    files = [os.path.join(logs, base + suffix + ".events") for suffix in ("", "-rehydrated")]
+    try:
+        path = max((path for path in files if not os.path.islink(path) and os.path.isfile(path)),
+                   key=os.path.getmtime)
+        with open(path, "rb") as stream:
+            stream.seek(max(0, os.fstat(stream.fileno()).st_size - 65536))
+            lines = stream.read().splitlines()
+    except (FileNotFoundError, OSError, ValueError):
+        return False
+    for line in reversed(lines):
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        if event.get("_hook") == "Notification" and event.get("notification_type") in (
+                "permission_prompt", "elicitation_dialog", "elicitation_url_dialog"):
+            return True
+        if event.get("_hook") in ("PostToolUse", "PostToolUseFailure", "UserPromptSubmit", "Stop", "StopFailure"):
+            return False
+    return False
 
 
 class Loop:
@@ -103,6 +143,17 @@ def trace_links():
     if langfuse is None:
         return None
     return lambda trace_id: telemetry.trace_url(langfuse, trace_id)
+
+
+def turn_message(raw):
+    """The final message from a saved turn, using the adapter that wrote a structured record."""
+    try:
+        structured = codex.session(raw, None)
+    except (AttributeError, TypeError):
+        structured = None
+    if structured:
+        return codex.final_message(raw) or raw
+    return raw
 
 
 def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.environ):
@@ -210,6 +261,8 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
                     run_id = parts[1]
                     if len(parts) == 2:
                         return self._send(*self._run(run_id))
+                    if parts[2:] == ["turn"]:
+                        return self._send(*self._turn(run_id))
                     if parts[2:] == ["diff"]:
                         query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
                         asked = (query.get("offset") or ["0"])[0]
@@ -321,6 +374,7 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
                         shown = runs.view(run, await runs.status(client, run["run_id"], STATUS_SECONDS), health)
                     except Exception:               # noqa: BLE001 - a run whose status fails still lists
                         return runs.view(run, None, health)
+                    shown["agent_prompt"] = agent_prompt(shown)
                     if run["execution"] != "RUNNING":
                         finished[run["run_id"]] = shown
                     return shown
@@ -372,6 +426,7 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
             status["view"] = runs.view(execution or {"run_id": run_id, "execution": None, "started": None,
                                                      "closed": None, "task_queue": None},
                                        None if unreadable else status, health)
+            status["view"]["agent_prompt"] = agent_prompt(status["view"])
             status["view"]["kept"] = not unreadable and runs.not_kept(execution, status, removal) is None
             if status["view"]["kept"]:
                 # What its Worktrees view is opened on: the repository as the worktree view takes it again.
@@ -382,6 +437,46 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
             status["links"] = {"temporal": "%s/namespaces/%s/workflows/%s" % (TEMPORAL_UI, runs.NAMESPACE, run_id),
                                "trace": links(trace_id) if links and trace_id else None}
             return HTTPStatus.OK, status
+
+        def _turn(self, run_id):
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            stage = (query.get("stage") or [""])[0]
+            episode = (query.get("episode") or [""])[0]
+            round_number = (query.get("round") or [""])[0]
+            if (stage not in stages.STAGE_ROLE
+                    or not episode.isdecimal() or not round_number.isdecimal()
+                    or len(episode) > 9 or len(round_number) > 9
+                    or int(episode) < 1 or int(round_number) < 1):
+                return HTTPStatus.BAD_REQUEST, {"error": "name a completed turn by stage, episode and round"}
+            if call(lambda client: runs.execution(client, run_id)) is None:
+                return HTTPStatus.NOT_FOUND, {"error": "no run %r" % run_id}
+
+            logs = os.path.join(terminal.run_dir(run_id), "logs")
+            if any(os.path.islink(path) for path in (os.path.dirname(logs), logs)):
+                raise runs.Refusal("the turn's log directory cannot be followed through a link")
+            name = "%s-e%d-%d" % (stage, int(episode), int(round_number))
+            attempts = []
+            for suffix in ("", "-rehydrated"):
+                record = {"attempt": "retried with a new session" if suffix else "original"}
+                for key, ext in (("input", "prompt"), ("output", "out")):
+                    path = os.path.join(logs, name + suffix + "." + ext)
+                    if os.path.islink(path):
+                        raise runs.Refusal("a turn log cannot be followed through a link")
+                    try:
+                        with open(path, "rb") as fh:
+                            saved = fh.read(MAX_TURN_FILE + 1)
+                        if len(saved) > MAX_TURN_FILE:
+                            raise runs.Refusal("this turn's %s is too large for the page; read its local log" % key)
+                        record[key] = saved.decode("utf-8")
+                    except FileNotFoundError:
+                        record[key] = None
+                if record["output"] is not None:
+                    message = turn_message(record["output"])
+                    if message != record["output"]:
+                        record["message"] = message
+                if record["input"] is not None or record["output"] is not None:
+                    attempts.append(record)
+            return HTTPStatus.OK, {"attempts": attempts}
 
     return Handler
 

@@ -137,7 +137,7 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--you); width: 1
 .runs { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .runs .none { padding: 4px 8px; color: var(--quiet); font-size: 13px; }
 .row { display: grid; gap: 2px; padding: 8px 10px 8px 12px; border-radius: 6px; text-decoration: none;
-  border-left: 3px solid var(--rule); content-visibility: auto; contain-intrinsic-size: auto 72px; }
+  border-left: 3px solid var(--rule); content-visibility: auto; contain-intrinsic-size: auto 110px; }
 .row:hover { background: var(--raised); }
 .row[aria-current="page"] { background: var(--raised); outline: 1px solid var(--control); outline-offset: -1px; }
 .row[data-tone="you"] { border-left-color: var(--you); }
@@ -154,6 +154,9 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--you); width: 1
   overflow-wrap: anywhere; }
 .row-meta { display: flex; justify-content: space-between; gap: 8px; color: var(--quiet); font-size: 12px; min-width: 0; }
 .row-meta > :first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.row-meta .row-repo { color: var(--ink); font-weight: 600; }
+.row-branch { color: var(--quiet); font: 11px/1.4 var(--mono); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
 /* How long, whole on one line: the repository's name gives way to it. */
 .row-meta > :last-child { flex-shrink: 0; white-space: nowrap; }
 .row-blocked { color: var(--bad); font-size: 12px; }
@@ -177,6 +180,9 @@ main:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .facts dt { color: var(--quiet); font-size: 12px; }
 .facts dd { margin: 0; display: flex; gap: 8px; align-items: center; min-width: 0; overflow-wrap: anywhere; }
 .facts dd code { font-size: 12.5px; }
+.facts .repo-fact { flex-basis: 100%; padding: 0 0 8px; border-bottom: 1px solid var(--rule); }
+.facts .repo-fact dd code { color: var(--ink); font-size: 16px; font-weight: 700; overflow-wrap: anywhere; }
+.facts .flow-fact dd { color: var(--ink); font-weight: 600; }
 .now { font-size: 15px; }
 .now .who { font-weight: 600; }
 .notice { display: grid; gap: 8px; padding: 12px 14px; border-radius: 8px; border: 1px solid var(--rule);
@@ -264,6 +270,17 @@ summary:hover { color: var(--ink); }
   text-overflow: ellipsis; white-space: nowrap; }
 .entry details[open] > summary { white-space: normal; }
 .entry details .prose { margin: 6px 0 4px; }
+.turn-content { display: grid; gap: 12px; margin: 8px 0 6px; }
+.turn-content > button { justify-self: start; }
+.turn-attempt, .turn-field { display: grid; gap: 6px; min-width: 0; }
+.turn-attempt + .turn-attempt { border-top: 1px solid var(--rule); padding-top: 12px; }
+.turn-attempt h4 { margin: 0; font-size: 13px; font-weight: 600; }
+.turn-prose { max-width: 80ch; max-height: 30rem; overflow: auto; overscroll-behavior: contain;
+  padding: 10px 12px; border-left: 2px solid var(--control); background: var(--surface);
+  font: 14px/1.65 var(--ui); white-space: pre-wrap; overflow-wrap: anywhere; }
+.turn-prompt .turn-field, .turn-raw .turn-field { margin-top: 8px; }
+.turn-field > button { justify-self: start; }
+.turn-field .code { max-height: 30rem; overflow: auto; overscroll-behavior: contain; }
 .verdict { font-weight: 700; font-size: 12px; letter-spacing: 0.02em; }
 .verdict.PASS { color: var(--pass); }
 .verdict.PATCH, .verdict.UNVERIFIED { color: var(--you); }

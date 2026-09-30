@@ -50,6 +50,32 @@ def configured_review_resumed(verdict, feedback="fb"):
 def configured_first_message(message):
     return first_message_for(S.load(), "architect", message)
 
+
+class AgentPrompt(unittest.TestCase):
+    def test_a_waiting_vendor_prompt_is_operator_attention_only_until_the_agent_resumes(self):
+        with tempfile.TemporaryDirectory() as root:
+            logs = os.path.join(root, "logs")
+            os.mkdir(logs)
+            path = os.path.join(logs, "assess-e2-1.events")
+            view = {"state": "running", "stage": "assess", "episode": 2, "round": 0}
+
+            def record(event):
+                with open(path, "a", encoding="utf-8") as stream:
+                    stream.write(json.dumps(event) + "\n")
+
+            self.assertFalse(workbench.agent_prompt(view, logs))
+            record(["noise"])
+            record({"_hook": "Notification", "notification_type": "permission_prompt"})
+            self.assertTrue(workbench.agent_prompt(view, logs))
+            record({"_hook": "PostToolUse", "tool_name": "Read"})
+            self.assertFalse(workbench.agent_prompt(view, logs))
+            record({"_hook": "Notification", "notification_type": "permission_prompt"})
+            self.assertTrue(workbench.agent_prompt(view, logs))
+            self.assertFalse(workbench.agent_prompt(dict(view, state="waiting"), logs))
+            self.assertFalse(workbench.agent_prompt(dict(view, stage="verify"), logs))
+            record({"_hook": "Stop"})
+            self.assertFalse(workbench.agent_prompt(view, logs))
+
 # Every request reads the stack afresh, so what a test says of it is what the page sees.
 workbench.READING_SECONDS = 0
 
@@ -534,6 +560,26 @@ class Kept(unittest.TestCase):
         self.assertIn("removed already", runs.not_kept(self.listed(), self.status(status="STOPPED"), "COMPLETED"))
 
 
+def recorded(agent):
+    """`agent`, leaving each turn's prompt and output in its run's logs under the name its activity gave the
+    turn, as the host's terminal runner records them."""
+    def run(worktree, argv, run_dir, name, prompt, timeout_seconds, env, *, kind):
+        rc, out = agent(worktree, argv, run_dir, name, prompt, timeout_seconds, env, kind=kind)
+        logs = os.path.join(run_dir, "logs")
+        os.makedirs(logs, exist_ok=True)
+        for ext, text in (("prompt", prompt), ("out", out)):
+            with open(os.path.join(logs, "%s.%s" % (name, ext)), "w", encoding="utf-8", newline="") as fh:
+                fh.write(text)
+        return rc, out
+    return run
+
+
+def turn_path(run_id, entry):
+    """The turn a history entry names, as the page asks for it."""
+    return "/api/runs/%s/turn?%s" % (run_id, urllib.parse.urlencode(
+        {"stage": entry["stage"], "episode": entry["episode"], "round": entry["round"]}))
+
+
 class Runs(Scenario):
     """A run seen, reviewed and answered through the workbench, exactly as the workflow allows."""
 
@@ -599,6 +645,25 @@ class Runs(Scenario):
         self.assertEqual((view["state"], view["stage"], view["role"]), ("running", "plan", "engineer"))
         self.assertTrue(datetime.datetime.fromisoformat(view["since"]), "since when it works")
         self.assertEqual(view["actions"], [], "nothing to answer while it works")
+        logs = os.path.join(terminal.run_dir(run_id), "logs")
+        os.makedirs(logs, exist_ok=True)
+        events = os.path.join(logs, "plan-e%d-%d.events" % (view["episode"], view["round"] + 1))
+        with open(events, "a", encoding="utf-8") as stream:
+            stream.write(json.dumps({"_hook": "Notification", "notification_type": "permission_prompt"}) + "\n")
+        self.assertTrue(request("GET", "/api/runs/%s" % run_id)[1]["view"]["agent_prompt"])
+        saved_runs = runs.runs
+
+        async def listed_run(client, cursor=None):
+            return ([{"run_id": run_id, "execution": "RUNNING", "started": None, "closed": None,
+                      "task_queue": "orchestration"}], None)
+
+        runs.runs = listed_run
+        self.addCleanup(setattr, runs, "runs", saved_runs)
+        listed = request("GET", "/api/runs")[1]["runs"]
+        self.assertTrue(next(row for row in listed if row["run_id"] == run_id)["agent_prompt"])
+        with open(events, "a", encoding="utf-8") as stream:
+            stream.write(json.dumps({"_hook": "PostToolUse"}) + "\n")
+        self.assertFalse(request("GET", "/api/runs/%s" % run_id)[1]["view"]["agent_prompt"])
 
     def test_a_run_whose_hosts_worker_is_down_says_which(self):
         a1, _ = configured_review_first("PASS", "Direction: A.")
@@ -664,6 +729,73 @@ class Runs(Scenario):
         view = self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "approval")["view"]
         self.assertEqual((view["flow"]["name"], view["step"]), ("architect-research", 1))
         self.assertEqual(view["stop"]["feedback"], "Brief: the scheduler.", "the approval shows the brief")
+
+    def test_each_completed_turn_opens_the_prompt_it_was_sent_and_what_it_answered(self):
+        """A history entry names its turn by stage, episode and round; the route reads what the host recorded
+        under the name the activity gave that turn — the research, the engineer's and the architect's — and
+        says when a record is gone rather than inventing one."""
+        brief, _ = configured_first_message("Brief: the scheduler.")
+        self.host, self.agent = E.host([("research-e1-1", 0, brief), ("plan-e2-1", 0, "planned\n"),
+                                        ("assess-e2-1", 0, configured_review_resumed("PASS", "Direction: A."))],
+                                       git=FakeWorktrees())
+        self.host.runner = recorded(self.agent)
+        status, started = request("POST", "/api/runs", {"task": "turn records", "repo": self.repo,
+                                                        "flow": "architect-research"})
+        self.assertEqual(status, 200, started)
+        run_id = started["run_id"]
+        self.addCleanup(lambda: E.Run.cleanup(type("R", (), {"run_id": run_id})()))
+        research = self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "approval")
+        status, answered = request("POST", "/api/runs/%s/answer" % run_id,
+                                   {"stop": research["stop"]["id"], "action": "approve"})
+        self.assertEqual(status, 200, answered)
+        body = self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "approval"
+                             and body["stop"]["id"] != research["stop"]["id"])
+
+        entries = {entry["stage"]: entry for entry in body["timeline"] if entry["stage"] in ("research", "plan", "assess")}
+        self.assertEqual(sorted(entries), ["assess", "plan", "research"])
+        said = {"research": "Brief: the scheduler.", "plan": "planned\n"}
+        for call in self.agent.calls:
+            stage = call["name"].split("-")[0]
+            status, record = request("GET", turn_path(run_id, entries[stage]))
+            self.assertEqual(status, 200, record)
+            [attempt] = record["attempts"]
+            self.assertEqual((attempt["attempt"], attempt["input"]), ("original", call["prompt"]), stage)
+            final = attempt.get("message", attempt["output"])
+            if stage in said:
+                self.assertEqual(final, said[stage], stage)
+            else:
+                self.assertIn("Direction: A.", final, "the architect's review")
+
+        logs = os.path.join(terminal.run_dir(run_id), "logs")
+        plan = turn_path(run_id, entries["plan"])
+        for ext, text in (("prompt", "the whole task again"), ("out", "planned again\n")):
+            with open(os.path.join(logs, "plan-e2-1-rehydrated." + ext), "w", encoding="utf-8") as fh:
+                fh.write(text)
+        attempts = request("GET", plan)[1]["attempts"]
+        self.assertEqual([(each["attempt"], each["input"], each["output"]) for each in attempts],
+                         [("original", self.agent.calls[1]["prompt"], "planned\n"),
+                          ("retried with a new session", "the whole task again", "planned again\n")],
+                         "a lost session's retry is a second record, beside the first")
+        for name in ("plan-e2-1.out", "plan-e2-1-rehydrated.prompt", "plan-e2-1-rehydrated.out"):
+            os.remove(os.path.join(logs, name))
+        [attempt] = request("GET", plan)[1]["attempts"]
+        self.assertEqual((attempt["input"], attempt["output"]), (self.agent.calls[1]["prompt"], None),
+                         "a missing output is said missing")
+        os.remove(os.path.join(logs, "plan-e2-1.prompt"))
+        self.assertEqual(request("GET", plan), (200, {"attempts": []}), "a turn with no record left has none")
+
+        saved = workbench.MAX_TURN_FILE
+        workbench.MAX_TURN_FILE = len("Brief") - 1
+        self.addCleanup(setattr, workbench, "MAX_TURN_FILE", saved)
+        status, refused = request("GET", turn_path(run_id, entries["research"]))
+        self.assertEqual(status, 400, refused)
+        self.assertIn("too large for the page", refused["error"])
+        workbench.MAX_TURN_FILE = saved
+
+        for query in ("stage=nope&episode=1&round=1", "stage=plan&episode=1&round=0",
+                      "stage=plan&episode=x&round=1", "stage=plan&episode=1"):
+            self.assertEqual(request("GET", "/api/runs/%s/turn?%s" % (run_id, query))[0], 400, query)
+        self.assertEqual(request("GET", "/api/runs/no-such-run/turn?stage=plan&episode=1&round=1")[0], 404)
 
     def test_start_list_review_and_answer_a_run(self):
         a1, _ = configured_review_first("PASS", "Direction: A.")

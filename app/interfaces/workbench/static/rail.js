@@ -1,5 +1,5 @@
-// The runs: every one Temporal holds, grouped by whether it waits for you, works or has finished, each a
-// link that opens it; older finished runs a page at a time.
+// The runs: every one Temporal holds, grouped by whether it waits for the operator, works or has closed, each a
+// link that opens it; older closed runs a page at a time.
 
 import { api } from "./api.js";
 import { $, blockedBy, clock, el, headline, unchanged } from "./ui.js";
@@ -12,8 +12,8 @@ let read = false;
 let selected = null;
 
 const GROUPS = { waiting: "runs-waiting", failed: "runs-waiting", running: "runs-running", stopping: "runs-running" };
-const NONE = { "runs-waiting": "Nothing waits for you.", "runs-running": "Nothing is working.",
-  "runs-finished": "No finished runs yet." };
+const NONE = { "runs-waiting": "No operator action waits.", "runs-running": "Nothing is working.",
+  "runs-finished": "No closed runs yet." };
 
 // The runs as last read, and whether they have been read at all.
 export const runsListed = () => listed;
@@ -54,7 +54,7 @@ export function select(runId) {
 
 function render() {
   const groups = { "runs-waiting": [], "runs-running": [], "runs-finished": [] };
-  for (const run of listed) groups[GROUPS[run.state] || "runs-finished"].push(run);
+  for (const run of listed) groups[run.agent_prompt ? "runs-waiting" : GROUPS[run.state] || "runs-finished"].push(run);
   for (const [id, runs] of Object.entries(groups)) {
     const count = $(id + "-count");
     if (count) count.textContent = runs.length ? String(runs.length) : "";
@@ -79,11 +79,16 @@ function row(run) {
   link.dataset.run = run.run_id;
   link.append(el("span", said.text, "row-what"), el("span", run.goal || run.run_id, "row-task"));
   const meta = el("span", null, "row-meta");
-  const repo = el("span", run.repo || "");
+  const repo = el("span", run.repo || "Repository unavailable", "row-repo");
   repo.translate = false;
+  repo.title = run.repo || "Repository unavailable";
   meta.append(repo, run.state === "closed" ? (run.closed ? clock(run.closed, "ago") : el("span"))
     : run.since ? clock(run.since) : el("span"));
   link.appendChild(meta);
+  const branch = el("span", run.run_id, "row-branch");
+  branch.translate = false;
+  branch.title = "Worktree branch: " + run.run_id;
+  link.appendChild(branch);
   const blocked = blockedBy(run);
   if (blocked.length) link.appendChild(el("span", "Blocked: " + blocked.join(", "), "row-blocked"));
   const item = el("li");

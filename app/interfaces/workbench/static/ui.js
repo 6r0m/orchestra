@@ -177,6 +177,7 @@ export function outcome(view) {
 
 // A run's state in a few words, and the voice it is said in: who is working, you, or trouble.
 export function headline(view) {
+  if (view.agent_prompt) return { text: "Agent needs input in terminal", tone: "you" };
   if (view.state === "waiting") return { text: decisionTitle(view.stop.reason, view.phase), tone: "you" };
   if (view.state === "failed") return { text: "A step failed", tone: "bad" };
   if (view.state === "stopping") return { text: "Stopping", tone: "quiet" };

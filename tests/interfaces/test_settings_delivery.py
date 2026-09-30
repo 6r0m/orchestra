@@ -111,6 +111,7 @@ class SettingsDelivery(unittest.TestCase):
         self.assertEqual(status, 200)
         changes = [
             {"pointer": "/roles/engineer/agent", "value": "codex-engineer"},
+            {"pointer": "/roles/architect/agent", "value": "claude-architect"},
             {"pointer": "/agents/codex-engineer/model", "value": "smoke-engineer"},
             {"pointer": "/agents/claude-architect/model", "value": "smoke-architect"},
             {"pointer": "/roles/engineer/persona", "value": "Smoke engineer persona."},
@@ -144,6 +145,7 @@ class SettingsDelivery(unittest.TestCase):
         status, changed = ask("POST", "/api/settings", {
             "revision": applied["revision"],
             "changes": [{"pointer": "/roles/engineer/agent", "revert": True},
+                        {"pointer": "/roles/architect/agent", "revert": True},
                         {"pointer": "/agents/codex-engineer/model", "revert": True},
                         {"pointer": "/agents/claude-architect/model", "revert": True},
                         {"pointer": "/roles/engineer/persona", "revert": True},
@@ -154,6 +156,7 @@ class SettingsDelivery(unittest.TestCase):
         })
         self.assertEqual(status, 200, changed)
         self.assertEqual(changed["settings"]["roles"]["engineer"]["agent"], "claude-engineer")
+        self.assertEqual(changed["settings"]["roles"]["architect"]["agent"], "codex-architect")
         self.assertEqual(changed["settings"]["review_rounds"]["plan"], {"normal": 1, "extended": 0})
         status, answer = ask("POST", "/api/runs/%s/answer" % run_id,
                              {"stop": research["stop"]["id"], "action": "approve"})
@@ -249,7 +252,7 @@ class SettingsDelivery(unittest.TestCase):
                         self.assertEqual(call["argv"][call["argv"].index("--sandbox") + 1], "read-only")
                     else:
                         self.assertEqual(call["argv"][call["argv"].index("--effort") + 1], "medium")
-                        self.assertEqual(call["argv"][call["argv"].index("--permission-mode") + 1], "dontAsk")
+                        self.assertEqual(call["argv"][call["argv"].index("--permission-mode") + 1], "bypassPermissions")
                 self.answer(run_id, final["stop"], "discard", confirm=True)
                 self.wait_until_discarded(run_id)
                 self.assertIn(("discard", run_id), git.calls)
@@ -268,12 +271,15 @@ class SettingsDelivery(unittest.TestCase):
         approval = self.wait_for(run_id, "approval")
         self.answer(run_id, approval["stop"], "approve")
         final = self.wait_for(run_id, "final")
-        self.assertEqual([call["kind"] for call in agent.calls], ["claude-code"] * 4)
         for call in agent.calls:
             role = "architect" if call["name"].startswith(("assess", "verify")) else "engineer"
             profile = restored["agents"][restored["roles"][role]["agent"]]
+            self.assertEqual(call["kind"], profile["kind"])
             self.assertIn(profile["model"], call["argv"])
-            self.assertEqual(call["argv"][call["argv"].index("--effort") + 1], profile["effort"])
+            if profile["kind"] == "codex":
+                self.assertIn('model_reasoning_effort="%s"' % profile["effort"], call["argv"])
+            else:
+                self.assertEqual(call["argv"][call["argv"].index("--effort") + 1], profile["effort"])
         self.answer(run_id, final["stop"], "discard", confirm=True)
         self.wait_until_discarded(run_id)
         self.assertIn(("discard", run_id), git.calls)

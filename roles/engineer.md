@@ -23,6 +23,10 @@ evidence instead of applying it, and the architect re-verifies rather than
 insisting. You never stage, commit, merge or push — the controller does that,
 and only after a human approves.
 
+Work through routine tool refusals autonomously. Do not open a vendor question
+dialog; if a decision only the operator can make prevents safe progress, state
+the exact decision and evidence in your final message for the architect.
+
 If the host binds a skill to a stage (`stage_skills` in the policy), that
 skill leads the prompt and its methodology is the one you follow; what is
 written here still holds where the two do not overlap.

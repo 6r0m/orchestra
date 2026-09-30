@@ -40,6 +40,8 @@ const LIFECYCLE = {
       "until its host's worker restarts.", sent: { confirm: true } },
 };
 const GATES = { approval: "your approval", blocker: "your guidance", exhausted: "your guidance" };
+const STAGE_ROLES = { research: "architect", plan: "engineer", assess: "architect", build: "engineer",
+  verify: "architect" };
 
 let selected = null;
 let shownStop = null;
@@ -119,8 +121,8 @@ function renderFacts(runId, view, state, links, timeline) {
   const planned = Boolean(state.plan) && timeline.some((entry) => entry.stage === "plan");
   const facts = [
     ["Repository", view.repo && code(view.repo)],
-    ["Host", view.host && code(view.host)],
     ["Flow", view.flow && (view.flow.name ? code(view.flow.name) : "the order from before flows")],
+    ["Host", view.host && code(view.host)],
     ["Run and branch", [code(runId), copyButton(runId, "the run's id")]],
     ["Worktree", view.worktree && [code(view.worktree), copyButton(view.worktree, "the worktree's path")]],
     ["Plan", planned && [code(state.plan), copyButton(state.todo_path || state.plan, "the plan's path")]],
@@ -134,6 +136,8 @@ function renderFacts(runId, view, state, links, timeline) {
     const pair = el("div");
     const shown = el("dd");
     shown.append(...[].concat(value));
+    if (term === "Repository") pair.className = "repo-fact";
+    if (term === "Flow") pair.className = "flow-fact";
     pair.append(el("dt", term), shown);
     return pair;
   }));
@@ -166,7 +170,7 @@ function renderScore(view) {
 // What the run is doing now, in one sentence, with how long it has been so.
 function renderNow(view, status) {
   const line = $("run-now");
-  if (unchanged(line, [status.unreadable, view.state, view.stage, view.role, view.since, view.closed, view.status,
+  if (unchanged(line, [status.unreadable, view.state, view.agent_prompt, view.stage, view.role, view.since, view.closed, view.status,
     view.execution, status.state && status.state.refusal])) return;
   line.replaceChildren(...nowSaid(view, status));
 }
@@ -177,6 +181,7 @@ function since(iso) {
 
 function nowSaid(view, status) {
   if (status.unreadable) return ["Its status cannot be read now: " + status.unreadable.replace(/^its status cannot be read now: /, "")];
+  if (view.agent_prompt) return ["The " + view.role + " is waiting for input in its live terminal. Open the terminal below to answer or interrupt."];
   if (view.state === "waiting" || view.state === "failed") return ["Waiting for your answer", ...since(view.since)];
   if (view.state === "stopping") {
     return ["Stopping", ...since(view.since), view.stage ? "; its " + view.stage + " runs to its end first." : ""];
@@ -368,8 +373,14 @@ function renderChange(view, stop, timeline) {
 function renderHistory(view, timeline) {
   const root = $("timeline");
   if (unchanged(root, [timeline, [...shownAbove]])) return;
+  const openDetails = new Set([...root.querySelectorAll("details[open][data-history-detail]")]
+    .map((detail) => detail.dataset.historyDetail));
+  // A completed turn's record does not change: one already read keeps its node, and what was opened in it.
+  const readTurns = new Map([...root.querySelectorAll("details.turn-evidence[data-loaded='yes']")]
+    .map((detail) => [detail.dataset.historyDetail, detail]));
   const steps = view.flow ? view.flow.steps : [];
-  const roleOf = (stage) => (steps.find((step) => step.endsWith(":" + stage)) || "").split(":")[0];
+  const roleOf = (stage) => (steps.find((step) => step.endsWith(":" + stage)) || "").split(":")[0]
+    || STAGE_ROLES[stage];
   root.replaceChildren();
   // A run's phases are its flow's work stages, in the order it took them.
   for (const phase of [...new Set(timeline.map((entry) => entry.phase))]) {
@@ -378,7 +389,8 @@ function renderHistory(view, timeline) {
     let episode = null;
     for (const entry of timeline.filter((each) => each.phase === phase)) {
       // A new episode of a phase starts with the operator's answer — a revise, or guidance.
-      box.appendChild(historyEntry(entry, roleOf(entry.stage), episode !== null && entry.episode !== episode));
+      box.appendChild(historyEntry(entry, roleOf(entry.stage), episode !== null && entry.episode !== episode,
+        openDetails, readTurns));
       episode = entry.episode;
     }
     root.appendChild(box);
@@ -388,7 +400,7 @@ function renderHistory(view, timeline) {
 
 // One round: who did what, its verdict, where it stopped for you, and its words — kept whole, and closed
 // when the decision above already shows them.
-function historyEntry(entry, role, answered) {
+function historyEntry(entry, role, answered, openDetails, readTurns) {
   const row = el("div", null, "entry");
   const head = el("div", null, "entry-head");
   const what = el("span");
@@ -404,10 +416,105 @@ function historyEntry(entry, role, answered) {
   const text = entry.brief || entry.feedback;
   if (text) {
     const more = el("details");
-    more.open = !shownAbove.has(text);
+    more.dataset.historyDetail = "result:" + entry.stage + ":" + entry.episode + ":" + entry.round;
     more.append(el("summary", shownAbove.has(text) ? "Shown above, in the decision"
-      : entry.brief ? "The brief" : "The review"), el("div", text, "prose"));
+      : entry.brief ? "The research brief" : "The review findings"), el("div", text, "prose"));
+    more.open = openDetails.has(more.dataset.historyDetail);
     row.appendChild(more);
   }
+  const key = "turn:" + entry.stage + ":" + entry.episode + ":" + entry.round;
+  if (readTurns.has(key)) {
+    row.appendChild(readTurns.get(key));
+    return row;
+  }
+  const turn = el("details", null, "turn-evidence");
+  turn.dataset.historyDetail = key;
+  const content = el("div", null, "turn-content");
+  turn.append(el("summary", "Recorded input and output"), content);
+  turn.addEventListener("toggle", () => {
+    if (turn.open && !turn.dataset.loaded) loadTurn(turn, content, entry, selected);
+  });
+  turn.open = openDetails.has(turn.dataset.historyDetail);
+  row.appendChild(turn);
   return row;
+}
+
+async function loadTurn(turn, content, entry, runId) {
+  turn.dataset.loaded = "loading";
+  content.replaceChildren(el("p", "Reading the turn…", "hint"));
+  const query = new URLSearchParams({ stage: entry.stage, episode: entry.episode, round: entry.round });
+  let record;
+  try {
+    record = await api("/api/runs/" + encodeURIComponent(runId) + "/turn?" + query);
+  } catch (error) {
+    if (turn.isConnected && runId === selected) {
+      delete turn.dataset.loaded;
+      turnReadAgain(content, "The turn cannot be read: " + error.message, turn, entry, runId, true);
+    }
+    return;
+  }
+  if (!turn.isConnected || runId !== selected) return;
+  if (!record.attempts.length) {
+    delete turn.dataset.loaded;
+    turnReadAgain(content, "This turn's local record is unavailable.", turn, entry, runId, false);
+  } else {
+    content.replaceChildren(...record.attempts.map((attempt) => {
+      const box = el("section", null, "turn-attempt");
+      if (record.attempts.length > 1) box.appendChild(el("h4", attempt.attempt));
+      const message = attempt.message ?? attempt.output;
+      const review = reviewOutput(message);
+      const output = el("div", null, "turn-field");
+      const outputLabel = el("div", null, "evidence-label");
+      outputLabel.appendChild(el("span", "Final message"));
+      if (message !== null) outputLabel.appendChild(copyButton(review
+        ? review.verdict + "\n\n" + review.feedback : message, "the final message"));
+      output.appendChild(outputLabel);
+      if (review) {
+        output.append(el("span", review.verdict, "verdict " + review.verdict),
+          el("div", review.feedback, "turn-prose"));
+      } else {
+        output.appendChild(el("div", message === null ? "No local record." : message, "turn-prose"));
+      }
+      box.appendChild(output);
+
+      const prompt = el("details", null, "turn-prompt");
+      const promptBody = el("div", null, "turn-field");
+      if (attempt.input !== null) promptBody.appendChild(copyButton(attempt.input, "the prompt sent to the agent"));
+      promptBody.appendChild(el("div", attempt.input === null ? "No local record." : attempt.input, "turn-prose"));
+      prompt.append(el("summary", "Prompt sent to the agent"), promptBody);
+      box.appendChild(prompt);
+
+      if (attempt.output !== null && (attempt.output !== message || review)) {
+        const raw = el("details", null, "turn-raw");
+        const rawBody = el("div", null, "turn-field");
+        const record = el("pre", attempt.output, "code");
+        record.translate = false;
+        rawBody.append(copyButton(attempt.output, "the raw output record"), record);
+        raw.append(el("summary", "Raw output record"), rawBody);
+        box.appendChild(raw);
+      }
+      return box;
+    }));
+  }
+  if (record.attempts.length) turn.dataset.loaded = "yes";
+}
+
+function reviewOutput(message) {
+  if (!message) return null;
+  try {
+    const parsed = JSON.parse(message);
+    return parsed && ["PASS", "PATCH", "BLOCKER", "UNVERIFIED"].includes(parsed.verdict)
+      && typeof parsed.feedback === "string" ? parsed : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function turnReadAgain(content, message, turn, entry, runId, refused) {
+  const line = el("p", message, refused ? "alert" : "hint");
+  line.setAttribute("role", refused ? "alert" : "status");
+  const retry = el("button", "Read again");
+  retry.type = "button";
+  retry.onclick = () => loadTurn(turn, content, entry, runId);
+  content.replaceChildren(line, retry);
 }

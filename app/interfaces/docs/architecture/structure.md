@@ -24,7 +24,7 @@ print, serve and exit. The page holds no state of its own.
 | `cli.py` | the command line over the shared client and the stack's owner |
 | `worker.py` | this host's Temporal worker and the queues it polls |
 | `workbench/server.py` | the page's HTTP server and its small JSON API |
-| `workbench/static/` | the page itself: HTML, CSS, its JavaScript as native modules — the stack, runs, new-run form, Settings, terminals, changes, worktrees, and `app.js` their entry — and a pinned xterm.js |
+| `workbench/static/` | the page itself: HTML, CSS, its JavaScript as native modules — the stack, runs, new-run form, Settings, terminals, per-turn history, changes, worktrees, and `app.js` their entry — and a pinned xterm.js |
 | `workbench/orchestra-workbench.service` | the systemd user unit the page runs as, rendered for a checkout by `make workbench-install` |
 
 ## Relationships
@@ -38,9 +38,13 @@ and restart of it, so neither keeps a second copy of how the stack runs.
 
 Through the worker's WebSocket: the page attaches to a run's live terminals on whichever
 host is running them.
+Its Operator action list also projects a waiting vendor dialog from the active turn's local
+hook events; the workflow still owns actual stops and their answers.
 
 There is no facade here: the CLI reads a repository descriptor and the page reads a
-terminal record directly, and an indirection to hide that would buy nothing.
+terminal record directly. A completed turn's prompt and final output are read on demand from
+the worker's local logs; the workflow's timeline stays compact. An indirection to hide those
+records would buy nothing.
 
 ## Invariants
 

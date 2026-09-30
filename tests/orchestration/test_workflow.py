@@ -292,9 +292,10 @@ class Sessions(Scenario):
                 self.assertEqual(argv[argv.index("--ask-for-approval") + 1], "never")
                 self.assertIn('web_search="live"', argv)
             else:
-                # Never waits on a prompt, and may edit only inside its worktree.
-                self.assertEqual(argv[argv.index("--permission-mode") + 1], "dontAsk")
-                self.assertEqual(argv[argv.index("--allowedTools") + 1], "Edit(./**)")
+                # The engineer can carry out routine work without a permission dialog.
+                self.assertEqual(argv[argv.index("--permission-mode") + 1], "bypassPermissions")
+                self.assertIn("AskUserQuestion", argv)
+                self.assertIn("EnterPlanMode", argv)
 
     def test_a_windows_host_runs_codex_in_the_unelevated_sandbox(self):
         from app.agents.adapters import claude_code, codex
@@ -308,6 +309,21 @@ class Sessions(Scenario):
         skills = os.path.dirname(os.path.abspath(__file__))
         self.assertEqual(claude_code.host(claude, skills=skills), claude + ["--add-dir", skills],
                          "a Claude role reads its skills' references without a prompt")
+
+    def test_claude_architect_keeps_read_only_mode_without_vendor_questions(self):
+        from app.agents.adapters import claude_code
+        argv, _ = claude_code.command({"workspace_access": "read"}, None)
+        self.assertEqual(argv[argv.index("--permission-mode") + 1], "plan")
+        self.assertIn("AskUserQuestion", argv)
+        self.assertIn("ExitPlanMode", argv)
+        wired = claude_code.wire(argv, "turn.events", lambda label, source: ["python", "hook", label, source])
+        hooks = json.loads(wired[wired.index("--settings") + 1])["hooks"]
+        self.assertIn("Notification", hooks)
+        self.assertIn("PostToolUse", hooks)
+        self.assertIn("PostToolUseFailure", hooks)
+        self.assertEqual([group["matcher"] for group in hooks["Notification"]],
+                         ["permission_prompt", "elicitation_dialog", "elicitation_url_dialog"],
+                         "a pipe in inline settings is a command separator in the Windows .cmd CLI shim")
 
     def test_stage_template_reanchors_on_stage_switch(self):
         self._run_to_ready()
@@ -581,7 +597,7 @@ class AnyProfileUnderAnyRole(Scenario):
         self.assertEqual(run.state["status"], "READY_FOR_HUMAN")
         self.assertEqual({call["kind"] for call in self.agent.calls}, {"claude-code"})
         modes = {call["name"]: call["argv"][call["argv"].index("--permission-mode") + 1] for call in self.agent.calls}
-        self.assertEqual(modes, {"plan-e1-1": "dontAsk", "assess-e1-1": "plan", "build-e2-1": "dontAsk",
+        self.assertEqual(modes, {"plan-e1-1": "bypassPermissions", "assess-e1-1": "plan", "build-e2-1": "bypassPermissions",
                                  "verify-e2-1": "plan"}, "the reviewer reads only, whatever it runs")
         sessions = run.state["agent_sessions"]
         self.assertNotEqual(sessions["engineer"], sessions["architect"], "one profile, two sessions")
@@ -636,11 +652,11 @@ class Policy(unittest.TestCase):
     def test_shipped_role_profiles_pin_the_models_and_effort(self):
         settings = S.load()
         self.assertEqual((settings["roles"]["engineer"]["agent"], settings["roles"]["architect"]["agent"]),
-                         ("claude-engineer", "claude-architect"))
+                         ("claude-engineer", "codex-architect"))
         expected = {
             "claude-engineer": ("claude-code", "claude-opus-5", "max"),
             "claude-architect": ("claude-code", "claude-fable-5", "high"),
-            "codex-engineer": ("codex", "gpt-6-luna", "xhigh"),
+            "codex-engineer": ("codex", "gpt-5.6-sol", "xhigh"),
             "codex-architect": ("codex", "gpt-5.6-sol", "high"),
         }
         self.assertEqual({name: (profile["kind"], profile.get("model"), profile.get("effort"))

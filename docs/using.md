@@ -52,10 +52,16 @@ the Workbench comes back with WSL. Nothing is exposed beyond loopback.
 
 ## The page
 
-The runs are listed down its side by whether they need you, work, or have finished, each with what
-it waits for or is doing and for how long; older finished runs are a page away, so nothing Temporal
+The runs are listed down its side under Operator action, Working and Closed. Each row names its
+repository, task and worktree branch, with what waits or is working and for how long. A run ready to
+merge stays under Operator action until you answer its final gate; Closed also includes stopped and
+discarded runs. Older closed runs are a page away, so nothing Temporal
 still retains is out of reach, and the tab's title counts the runs that need you. Each run is a link:
 the page's address names the run open, so a reload keeps it and a new tab opens it.
+
+If a vendor dialog waits in a live terminal, that running run also appears under Operator action.
+Open its terminal to answer or interrupt it. This is a terminal prompt, not a workflow stop; routine
+agent questions are denied and real blockers reach the normal workflow stop.
 
 *New run* opens the form that starts one — and with no runs at all, the page opens on it: on a
 repository named in `.orchestra/repos.json` or in the file named by `ORCHESTRA_REPOS` — its menu
@@ -90,8 +96,13 @@ beside what it concerns, and a merge or a discard asks first.
 Both roles' terminals follow, the one at work open and an idle one closed until you open it. Each is the
 vendor's own CLI: press Esc to interrupt a working agent, type to steer it. What you read in one is
 never drawn again under you: after its worker restarts it keeps its record until its role's next turn,
-which it then adds to. The history keeps every round with its verdict and its words — closed there when
-the decision already shows them — and a large change is read in parts, a press each.
+which it then adds to. The history lists each completed turn by stage, role, round, verdict and time.
+Open a turn to read its final message first, with review verdict and feedback separated into readable
+text. Its exact new prompt and raw adapter output remain openable and copyable from the same local log.
+The vendor keeps the prior conversation in its own session. Review findings and research briefs remain separately openable; the current
+decision shows its own evidence first. A terminal is the continuous vendor session, including interaction
+during a turn; the turn record is its saved prompt and final output. A local record that has been removed
+is reported as unavailable. A large change is read in parts, a press each.
 
 *Stop run* and *Force terminate* come after the decision, and while a run is stopping only *Force
 terminate* is offered. *Stop run* ends a run from whatever it is doing — an agent at work, a stop

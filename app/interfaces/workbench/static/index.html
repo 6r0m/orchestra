@@ -37,7 +37,7 @@
 <div class="layout">
   <nav class="rail" aria-label="Runs">
     <section class="group" aria-labelledby="runs-waiting-title">
-      <h2 id="runs-waiting-title">Needs you <span class="count" id="runs-waiting-count"></span></h2>
+      <h2 id="runs-waiting-title">Operator action <span class="count" id="runs-waiting-count"></span></h2>
       <ul class="runs" id="runs-waiting"></ul>
     </section>
     <section class="group" aria-labelledby="runs-running-title">
@@ -45,7 +45,7 @@
       <ul class="runs" id="runs-running"></ul>
     </section>
     <section class="group" aria-labelledby="runs-finished-title">
-      <h2 id="runs-finished-title">Finished</h2>
+      <h2 id="runs-finished-title">Closed</h2>
       <ul class="runs" id="runs-finished"></ul>
       <button type="button" class="quiet" id="runs-older" hidden>Load older runs</button>
     </section>
@@ -283,6 +283,7 @@
 
       <section class="history" id="history" aria-labelledby="history-title">
         <h2 id="history-title">History</h2>
+        <p class="hint">Open a turn for its final message. Its prompt and raw output record are there when you need them; the vendor keeps prior session context.</p>
         <div id="timeline"></div>
         <details class="legend">
           <summary>What the verdicts mean</summary>

@@ -624,6 +624,20 @@ class Lifecycle(unittest.TestCase):
 
 
 class Hook(unittest.TestCase):
+    def test_attention_events_keep_only_status_not_tool_input_or_notification_text(self):
+        events = os.path.join(tempfile.mkdtemp(prefix="orchestra-hook-"), "turn.events")
+        self.addCleanup(shutil.rmtree, os.path.dirname(events), True)
+        for label, payload in (("Notification", {"notification_type": "permission_prompt", "message": "private"}),
+                               ("PostToolUse", {"tool_name": "Read", "tool_input": {"file_path": "private"},
+                                                "tool_response": "private"})):
+            done = subprocess.run([sys.executable, terminal.TURN_HOOK, events, label, "stdin"],
+                                  input=json.dumps(payload).encode("utf-8"), capture_output=True)
+            self.assertEqual(done.returncode, 0)
+        with open(events, encoding="utf-8") as stream:
+            self.assertEqual([json.loads(line) for line in stream],
+                             [{"_hook": "Notification", "notification_type": "permission_prompt"},
+                              {"_hook": "PostToolUse", "tool_name": "Read"}])
+
     def test_a_payload_on_stdin_is_read_as_utf8_whatever_the_locale(self):
         # Claude pipes its hook payload as UTF-8; a Windows locale such as cp1251 would decode it wrongly.
         events = os.path.join(tempfile.mkdtemp(prefix="orchestra-hook-"), "turn.events")

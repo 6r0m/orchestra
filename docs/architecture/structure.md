@@ -242,9 +242,7 @@ still lands on a checkout.
   once — so the end closes the job to newcomers, holds each process it lists, and after the
   termination waits until each has ended: a worktree is free to remove the moment its agents are
   ended, and an end it cannot prove — a process it lists but cannot open, or one not ended within
-  the grace — fails the step, so no merge or discard goes on as though it were. A Claude engineer runs in `dontAsk` mode with edits allowed inside its worktree and
-  the host's skills directory added for reading, so a turn never waits on a permission prompt:
-  what is not allowed is denied and the agent works on. A Codex role never asks either. The
+  the grace — fails the step, so no merge or discard goes on as though it were. A Claude engineer runs in `bypassPermissions` mode for autonomous tool use; the host's Claude guards remain tripwires, not a filesystem boundary. A Claude architect stays in plan mode, and both Claude roles deny vendor question tools: a decision only the operator can make reaches the workflow through the stage result. The host's skills directory is added for reading. A Codex role never asks for tool approval either. The
   prompt follows `--`, so no option that takes several values can swallow it. On Windows a Codex role-run uses Codex's unelevated sandbox: the elevated one
   starts its helper through an administrator prompt, which a worker outside the interactive
   desktop can never show; the ConPTY asks its terminal for win32-input-mode, in which Codex
@@ -387,17 +385,21 @@ still lands on a checkout.
 
 - **D29** **The workbench is the operator's surface.** One page on `http://127.0.0.1:<workbench_port>`
   lists every run Temporal holds, grouped by whether it waits for the operator, runs or has
-  finished — every open run, however old, and the finished ones newest first a page at a time, so a
+  closed — every open run, however old, and the closed ones newest first a page at a time, so a
   run waiting for an answer is never off the list and everything Temporal still retains is reachable. A
   run that waits shows its stop first, with that stop's answers as buttons and what to judge them by;
   then both roles' terminals from their host's worker, the one at work open and an idle one opened when
   the operator opens it; its flow with the step it is at, the rounds of each phase with each verdict and
-  its feedback and a research step's brief, its change as its target host's git reads it, and links to
+  its feedback and a research step's brief, plus each completed turn's recorded prompt and final output
+  read on demand from its local logs, its change as its target host's git reads it, and links to
   its Temporal and Langfuse pages. The page's address names the run open, so a reload keeps it.
   A terminal connected again adds only what its record gained — the record only grows, and every
   connection streams it from its start — so what the operator reads is never drawn again under them; a
   worker holds a role's terminal only from that role's first turn on it, so after a restart the page
   connects again once the run reads the role at work, or moves on, never on a timer.
+  A vendor permission or elicitation dialog that waits in a live terminal is projected into the
+  Operator action list from the turn's local hook events. This is a page hint, not a Temporal stop or
+  a workflow answer; it clears when the agent resumes or the turn ends.
   Each run also says what it is doing now — the stage and role at work, or
   the stop it waits at or the failure it stopped on — since when, and which host's worker it is
   blocked by when one is down, with that worker's start beside it; a run whose workflow worker is
