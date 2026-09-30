@@ -334,6 +334,8 @@ class Sessions(Scenario):
         self.assertEqual([group["matcher"] for group in hooks["Notification"]],
                          ["permission_prompt", "elicitation_dialog", "elicitation_url_dialog"],
                          "a pipe in inline settings is a command separator in the Windows .cmd CLI shim")
+        self.assertEqual([group["hooks"][0]["command"] for group in hooks["Notification"]],
+                         ['"python" "hook" "Notification" stdin'] * 3, "each written as a Notification")
 
     def test_stage_template_reanchors_on_stage_switch(self):
         self._run_to_ready()

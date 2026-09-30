@@ -259,7 +259,7 @@ class Activities:
         rdir = run_dir(state["run_id"])
         attempt, episode = state.get("round", 0) + 1, state.get("episode", 1)
         # Episode-scoped so a guidance reset cannot overwrite an earlier episode's logs.
-        name = "%s-e%d-%d" % (stage, episode, attempt)
+        name = terminal.turn_name(stage, episode, attempt)
         worktree = state["worktree_path"]
         client = self.client()
 
@@ -299,7 +299,7 @@ class Activities:
                                   policy["timeout_seconds"], env, kind=kind)
             effective_resume = resume_id
             if rc != 0 and N.classify_failure(role, resume_id, rc, out,
-                                              _read(os.path.join(rdir, "logs", name + ".err"))) == "session_lost":
+                                              _read(terminal.turn_files(rdir, name)["err"])) == "session_lost":
                 # Definitive not-found before any work began: a fresh session gets the
                 # whole task again, since the lost one took the task and persona with it.
                 T.warn(span, "session_lost",
@@ -307,7 +307,7 @@ class Activities:
                        "given the whole task again" % role_name)
                 effective_resume = None
                 argv, minted = N.build_argv(role, None, traced)
-                rc, out = self.runner(worktree, adapter.host(argv), rdir, name + "-rehydrated", compose(True),
+                rc, out = self.runner(worktree, adapter.host(argv), rdir, name + terminal.RETRIED, compose(True),
                                       policy["timeout_seconds"], env, kind=kind)
             if rc != 0:
                 raise N.TransportError("%s failed rc=%d — inspect %s/logs/%s.*" % (stage, rc, rdir, name))

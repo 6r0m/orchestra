@@ -1,6 +1,6 @@
 """Press one of the Workbench's own buttons in a headless browser, as the operator would.
 
-    python tools/demo_press.py <workbench url> <run id | stack | start> <button label | task | terminal:role | hold:role:label | absent:label,...> <what the page should say> [note]
+    python tools/demo_press.py <workbench url> <run id | stack | start> <button label | task | terminal:role | turn:stage | hold:role:label | absent:label,...> <what the page should say> [note]
 
 The Windows side of `make demo` (WSL cannot reach Windows' loopback, and Windows reaches the
 Workbench's): headless Edge, driven over the DevTools protocol, opens the page, opens the run by its
@@ -10,7 +10,9 @@ opened from its chips; the page's own confirmation answered yes, and each questi
 given a note, it types it into the stop's own note first, as an answer's words are. Given `start`, it
 opens New run and types the task into the page's own form, with the first repository it offers, and
 presses Start run. Given `terminal:<role>`, it presses nothing: it opens that role's terminal, if it is
-closed, and reads its screen as the page shows it, live from its host. It waits for the page to report
+closed, and reads its screen as the page shows it, live from its host. Given `turn:<stage>`, it presses
+nothing either: it opens the run's latest turn of that stage in its history and reads the final message the
+page shows from that turn's record. It waits for the page to report
 what came of the press — the status line, or the alert, beside the control — and its exit code says
 whether the page's words begin as expected; for a terminal, whether it shows them. Given
 `hold:<role>:<label>`, it first opens that role's terminal — its record, while the run's worker holds no
@@ -91,6 +93,17 @@ OPEN_TERMINAL = ("(role => { const box = document.getElementById('terminal-' + r
 SCREEN = ("(role => { const rows = document.querySelector('#term-' + role + ' .xterm-rows');"
           " return rows ? rows.innerText : ''; })(%s)")
 
+# A stage's latest turn in the run's history, opened as a click on its summary opens it, and the final message
+# the page then shows from its record.
+OPEN_TURN = ("(stage => { const turns = document.querySelectorAll("
+             "'#timeline details.turn-evidence[data-history-detail^=\"turn:' + stage + ':\"]');"
+             " const turn = turns[turns.length - 1]; if (!turn) return false;"
+             " if (!turn.open) turn.querySelector('summary').click(); turn.scrollIntoView(); return true; })(%s)")
+TURN_SAID = ("(stage => { const turns = document.querySelectorAll("
+             "'#timeline details.turn-evidence[data-history-detail^=\"turn:' + stage + ':\"]');"
+             " const field = turns.length && turns[turns.length - 1].querySelector('.turn-field');"
+             " return field ? field.innerText.replace(/\\s+/g, ' ') : ''; })(%s)")
+
 # A role's terminal watched: the connections the page opens for it, and the xterm it makes — whose buffer,
 # selection and scroll are read from it, not from what it drew. Then opened, as a click on its summary opens it:
 # its xterm is the first the page makes from here, and the other role's, made once that role works, is not it.
@@ -164,6 +177,15 @@ def main(url, run_id, label, said, note=None):
                     page.value(SCREEN % json.dumps(role))), 90, "the %s terminal to show %r" % (role, said))
                 shown = [line for line in screen.splitlines() if said in line][-1].strip()
                 print("read the %s terminal in the Workbench: it shows %r" % (role, shown))
+                return 0
+            if label.startswith("turn:"):
+                stage = label.split(":", 1)[1]
+                page.value(OPEN % json.dumps(run_id))
+                wait(lambda: page.value(OPENED), 60, "the run")
+                wait(lambda: page.value(OPEN_TURN % json.dumps(stage)), 60, "the %s turn in the history" % stage)
+                message = wait(lambda: (lambda text: text if said in text else "")(
+                    page.value(TURN_SAID % json.dumps(stage))), 60, "the %s turn's record to show %r" % (stage, said))
+                print("opened the %s turn's record in the Workbench: %r" % (stage, " ".join(message.split())))
                 return 0
             if label.startswith("absent:"):
                 labels = label.split(":", 1)[1].split(",")

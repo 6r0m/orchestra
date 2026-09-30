@@ -38,8 +38,8 @@ from app.foundation import paths
 from app.foundation import policy as P
 from app.foundation import stages
 from app.workspace import repos
+from app.agents import adapters
 from app.agents import terminal
-from app.agents.adapters import codex
 
 # The page is this server's own, served from beside it.
 PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -74,19 +74,19 @@ READING_SECONDS = 3
 STATUS_SECONDS = datetime.timedelta(seconds=5)
 
 
-def agent_prompt(view, logs=None):
-    """Whether the active Claude turn has reported a vendor dialog still waiting in its terminal."""
+def agent_prompt(view, rdir=None):
+    """Whether the active turn has reported a vendor dialog still waiting in its terminal, as its kind reads
+    the turn's events — those of its retry in a fresh session when that is the newer."""
     if view.get("state") != "running" or view.get("stage") not in stages.STAGE_ROLE:
         return False
     episode, round_number = view.get("episode"), view.get("round")
     if not isinstance(episode, int) or episode < 1 or not isinstance(round_number, int) or round_number < 0:
         return False
-    if logs is None:
-        logs = os.path.join(terminal.run_dir(view["run_id"]), "logs")
-    if os.path.islink(logs) or os.path.islink(os.path.dirname(logs)):
+    rdir = rdir or terminal.run_dir(view["run_id"])
+    name = terminal.turn_name(view["stage"], episode, round_number + 1)
+    files = [terminal.turn_files(rdir, name + suffix)["events"] for suffix in ("", terminal.RETRIED)]
+    if os.path.islink(rdir) or os.path.islink(os.path.dirname(files[0])):
         return False
-    base = "%s-e%d-%d" % (view["stage"], episode, round_number + 1)
-    files = [os.path.join(logs, base + suffix + ".events") for suffix in ("", "-rehydrated")]
     try:
         path = max((path for path in files if not os.path.islink(path) and os.path.isfile(path)),
                    key=os.path.getmtime)
@@ -95,19 +95,16 @@ def agent_prompt(view, logs=None):
             lines = stream.read().splitlines()
     except (FileNotFoundError, OSError, ValueError):
         return False
-    for line in reversed(lines):
+    events = []
+    for line in lines:
         try:
             event = json.loads(line)
         except ValueError:
             continue
-        if not isinstance(event, dict):
-            continue
-        if event.get("_hook") == "Notification" and event.get("notification_type") in (
-                "permission_prompt", "elicitation_dialog", "elicitation_url_dialog"):
-            return True
-        if event.get("_hook") in ("PostToolUse", "PostToolUseFailure", "UserPromptSubmit", "Stop", "StopFailure"):
-            return False
-    return False
+        # Only a hook's object is an event; a line cut by the tail, or anything else, is not.
+        if isinstance(event, dict):
+            events.append(event)
+    return adapters.waiting(events)
 
 
 class Loop:
@@ -143,17 +140,6 @@ def trace_links():
     if langfuse is None:
         return None
     return lambda trace_id: telemetry.trace_url(langfuse, trace_id)
-
-
-def turn_message(raw):
-    """The final message from a saved turn, using the adapter that wrote a structured record."""
-    try:
-        structured = codex.session(raw, None)
-    except (AttributeError, TypeError):
-        structured = None
-    if structured:
-        return codex.final_message(raw) or raw
-    return raw
 
 
 def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.environ):
@@ -451,15 +437,17 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
             if call(lambda client: runs.execution(client, run_id)) is None:
                 return HTTPStatus.NOT_FOUND, {"error": "no run %r" % run_id}
 
-            logs = os.path.join(terminal.run_dir(run_id), "logs")
-            if any(os.path.islink(path) for path in (os.path.dirname(logs), logs)):
+            rdir = terminal.run_dir(run_id)
+            name = terminal.turn_name(stage, int(episode), int(round_number))
+            logs = os.path.dirname(terminal.turn_files(rdir, name)["prompt"])
+            if os.path.islink(rdir) or os.path.islink(logs):
                 raise runs.Refusal("the turn's log directory cannot be followed through a link")
-            name = "%s-e%d-%d" % (stage, int(episode), int(round_number))
             attempts = []
-            for suffix in ("", "-rehydrated"):
+            for suffix in ("", terminal.RETRIED):
+                files = terminal.turn_files(rdir, name + suffix)
                 record = {"attempt": "retried with a new session" if suffix else "original"}
                 for key, ext in (("input", "prompt"), ("output", "out")):
-                    path = os.path.join(logs, name + suffix + "." + ext)
+                    path = files[ext]
                     if os.path.islink(path):
                         raise runs.Refusal("a turn log cannot be followed through a link")
                     try:
@@ -471,8 +459,9 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
                     except FileNotFoundError:
                         record[key] = None
                 if record["output"] is not None:
-                    message = turn_message(record["output"])
-                    if message != record["output"]:
+                    # Read back by the kind whose record it is; a record that is its answer already has none.
+                    message = adapters.recorded_message(record["output"])
+                    if message is not None and message != record["output"]:
                         record["message"] = message
                 if record["input"] is not None or record["output"] is not None:
                     attempts.append(record)

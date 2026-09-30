@@ -388,6 +388,9 @@ class Demo:
               "the base branch holds the change")
         check(self.press(merged, "absent:Stop run,Force terminate", "absent"),
               "the page offers the closed run neither Stop run nor Force terminate")
+        check(self.press(merged, "turn:verify", "PASS The change is the approved plan."),
+              "the page opens the verify turn and shows its verdict and feedback, read from the record its host "
+              "wrote")
 
         step("a run stopped while its engineer works")
         self.hold("hold-turn")

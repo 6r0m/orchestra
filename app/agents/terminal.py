@@ -48,6 +48,8 @@ TICK_SECONDS = 1.0
 # never appears in a URL the browser prints to its console or a proxy writes to a log.
 PROTOCOL = "workbench.v1"
 TOKEN_PROTOCOL = "token."
+# A turn tried again in a fresh session, its first one lost, keeps its files under its name and this.
+RETRIED = "-rehydrated"
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][0-9A-B]|\x1b[=>]")
 
 
@@ -57,6 +59,19 @@ def run_dir(run_id):
 
 def record_path(run_id, role):
     return os.path.join(run_dir(run_id), "terminals", "%s.out" % role)
+
+
+def turn_name(stage, episode, attempt):
+    """The name a turn's files take in its run's logs: its stage, its episode, and its attempt — the round
+    it is, from 1."""
+    return "%s-e%d-%d" % (stage, episode, attempt)
+
+
+def turn_files(rdir, name):
+    """The files a turn named `name` leaves in the logs of the run at `rdir`, by what each holds: the prompt
+    it was given, what it answered, its errors and its events."""
+    logs = os.path.join(rdir, "logs")
+    return {ext: os.path.join(logs, "%s.%s" % (name, ext)) for ext in ("prompt", "out", "err", "events")}
 
 
 def token():
@@ -325,9 +340,8 @@ def run_turn(worktree, argv, rdir, name, prompt, timeout, env, on_tick=None, *, 
     except adapters.Refused as exc:
         raise launch.ExecutorError(str(exc)) from exc
 
-    logs = os.path.join(rdir, "logs")
-    os.makedirs(logs, exist_ok=True)
-    paths = {ext: os.path.join(logs, "%s.%s" % (name, ext)) for ext in ("prompt", "out", "err", "events")}
+    paths = turn_files(rdir, name)
+    os.makedirs(os.path.dirname(paths["prompt"]), exist_ok=True)
     with open(paths["prompt"], "w", encoding="utf-8", newline="") as fh:
         fh.write(prompt)
     executable = shutil.which(argv[0])

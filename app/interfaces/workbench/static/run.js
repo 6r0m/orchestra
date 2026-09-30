@@ -466,14 +466,15 @@ async function loadTurn(turn, content, entry, runId) {
       const output = el("div", null, "turn-field");
       const outputLabel = el("div", null, "evidence-label");
       outputLabel.appendChild(el("span", "Final message"));
-      if (message !== null) outputLabel.appendChild(copyButton(review
+      if (message) outputLabel.appendChild(copyButton(review
         ? review.verdict + "\n\n" + review.feedback : message, "the final message"));
       output.appendChild(outputLabel);
       if (review) {
         output.append(el("span", review.verdict, "verdict " + review.verdict),
           el("div", review.feedback, "turn-prose"));
       } else {
-        output.appendChild(el("div", message === null ? "No local record." : message, "turn-prose"));
+        output.appendChild(el("div", message === null ? "No local record."
+          : message || "The record holds no final message.", "turn-prose"));
       }
       box.appendChild(output);
 

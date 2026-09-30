@@ -58,8 +58,9 @@ when preparing a run; no vendor path crosses the Settings API.
 
 Through the vendor's own completion hook: a turn ends on Claude's `Stop` for its own
 prompt id, or Codex's `agent-turn-complete` in its own thread — never on a first event.
-Claude's notification and tool-finish hooks also record only the event type needed to show a
-waiting vendor dialog in Workbench; they never decide a turn's result.
+Claude's notification and tool-finish hooks also record their events, keeping only the session and a
+notification's kind — never what a dialog says or what a tool read or wrote. The adapter reads a waiting
+dialog from them for the Workbench (`waiting`); they never decide a turn's result.
 
 Through a host containment primitive: a transient systemd user scope on POSIX, a job object
 on Windows. A launch no scope can hold is refused before the agent runs.

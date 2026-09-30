@@ -398,8 +398,10 @@ still lands on a checkout.
   worker holds a role's terminal only from that role's first turn on it, so after a restart the page
   connects again once the run reads the role at work, or moves on, never on a timer.
   A vendor permission or elicitation dialog that waits in a live terminal is projected into the
-  Operator action list from the turn's local hook events. This is a page hint, not a Temporal stop or
-  a workflow answer; it clears when the agent resumes or the turn ends.
+  Operator action list from the turn's local hook events, as its kind reads them — only Claude reports
+  one. This is a page hint, not a Temporal stop or a workflow answer: a dialog's notification sets it,
+  and the next tool's end, prompt or end of the turn clears it. Made from events that can come late or
+  not at all, it can lag or miss; the terminal is what shows the dialog.
   Each run also says what it is doing now — the stage and role at work, or
   the stop it waits at or the failure it stopped on — since when, and which host's worker it is
   blocked by when one is down, with that worker's start beside it; a run whose workflow worker is
@@ -427,19 +429,16 @@ still lands on a checkout.
 
 ## Invariants
 
-- **D3** **The judge is never the builder:** the architect must not be the
-  same model as the engineer. Independence is a property of the model that
-  thinks, not of the CLI that launches it, so a role's judging identity is
-  `(brain, model)` — one `claude` running Opus and another running Fable are
-  two judges; two roles that both take the provider default are one. Rejected
-  at policy load, enforced further by each CLI's own read-only mode, set by
-  its flag. Different vendors remain
-  the strongest form, because they share neither training nor blind spots; two
-  models from one vendor share tooling and much of their training, so they are
-  the weaker form and are chosen deliberately. The guard compares the names it
-  is given and cannot resolve them: two different names that alias to the same
-  weights pass it, so naming two genuinely different models is the operator's
-  part of this invariant.
+- **D3** **The judge reads only; how independent it is, the operator chooses.** The
+  architect runs read-only, enforced by each CLI's own read-only mode, set by
+  its flag. Independence is a property of the model that thinks, not of the CLI
+  that launches it, so a role's judging identity is `(brain, model)` — one
+  `claude` running Opus and another running Fable are two judges; two roles that
+  both take the provider default are one. Different vendors are the strongest
+  form, because they share neither training nor blind spots; two models from one
+  vendor share tooling and much of their training, so they are the weaker form;
+  one model under both roles, with different prompts, is the operator's to
+  choose. Nothing refuses it: which profile each role runs is configuration.
 - **D6** **A stop waits in the workflow and nowhere else.** Each stop publishes
   the actions it takes — approve or revise at an approval the run's flow
   schedules, after a review or after research, whose brief it shows;

@@ -51,30 +51,71 @@ def configured_first_message(message):
     return first_message_for(S.load(), "architect", message)
 
 
+DIALOG = {"_hook": "Notification", "notification_type": "permission_prompt"}
+
+
 class AgentPrompt(unittest.TestCase):
+    """A vendor dialog waiting in the active turn's terminal, as the page is told of it."""
+    view = {"state": "running", "stage": "assess", "episode": 2, "round": 0}
+
+    def setUp(self):
+        self.rdir = tempfile.mkdtemp(prefix="orchestra-prompt-")
+        self.addCleanup(shutil.rmtree, self.rdir, True)
+        os.mkdir(os.path.join(self.rdir, "logs"))
+        # The view's round counts from 0; the turn it is at is named by its attempt, from 1.
+        self.name = terminal.turn_name("assess", 2, 1)
+
+    def record(self, *events, retried=False):
+        path = terminal.turn_files(self.rdir, self.name + (terminal.RETRIED if retried else ""))["events"]
+        with open(path, "a", encoding="utf-8") as stream:
+            for event in events:
+                stream.write((event if isinstance(event, str) else json.dumps(event)) + "\n")
+        return path
+
+    def waiting(self, **view):
+        return workbench.agent_prompt(dict(self.view, **view), self.rdir)
+
     def test_a_waiting_vendor_prompt_is_operator_attention_only_until_the_agent_resumes(self):
-        with tempfile.TemporaryDirectory() as root:
-            logs = os.path.join(root, "logs")
-            os.mkdir(logs)
-            path = os.path.join(logs, "assess-e2-1.events")
-            view = {"state": "running", "stage": "assess", "episode": 2, "round": 0}
+        self.assertFalse(self.waiting())
+        self.record(DIALOG)
+        self.assertTrue(self.waiting())
+        self.record({"_hook": "PostToolUse"})
+        self.assertFalse(self.waiting())
+        self.record(DIALOG)
+        self.assertTrue(self.waiting())
+        self.assertFalse(self.waiting(state="waiting"))
+        self.assertFalse(self.waiting(stage="verify"))
+        self.record({"_hook": "Stop"})
+        self.assertFalse(self.waiting())
 
-            def record(event):
-                with open(path, "a", encoding="utf-8") as stream:
-                    stream.write(json.dumps(event) + "\n")
+    def test_a_line_that_is_no_hook_object_is_passed_over(self):
+        self.record(["noise"], "not json", "7")
+        self.assertFalse(self.waiting(), "nothing in it is an event")
+        self.record(DIALOG, ["noise"], "not json", '"words"', "7")
+        self.assertTrue(self.waiting(), "the dialog is the last event, whatever follows it")
 
-            self.assertFalse(workbench.agent_prompt(view, logs))
-            record(["noise"])
-            record({"_hook": "Notification", "notification_type": "permission_prompt"})
-            self.assertTrue(workbench.agent_prompt(view, logs))
-            record({"_hook": "PostToolUse", "tool_name": "Read"})
-            self.assertFalse(workbench.agent_prompt(view, logs))
-            record({"_hook": "Notification", "notification_type": "permission_prompt"})
-            self.assertTrue(workbench.agent_prompt(view, logs))
-            self.assertFalse(workbench.agent_prompt(dict(view, state="waiting"), logs))
-            self.assertFalse(workbench.agent_prompt(dict(view, stage="verify"), logs))
-            record({"_hook": "Stop"})
-            self.assertFalse(workbench.agent_prompt(view, logs))
+    def test_the_newer_of_a_turn_and_its_retry_decides(self):
+        first = self.record(DIALOG)
+        retry = self.record({"_hook": "UserPromptSubmit"}, retried=True)
+        os.utime(first, (1000, 1000))
+        os.utime(retry, (2000, 2000))
+        self.assertFalse(self.waiting(), "the retry in a fresh session is the turn now")
+        os.utime(retry, (500, 500))
+        self.assertTrue(self.waiting(), "the first is the newer")
+
+    @unittest.skipIf(os.name == "nt", "a symbolic link needs a privilege there")
+    def test_a_linked_log_folder_or_events_file_is_never_followed(self):
+        elsewhere = tempfile.mkdtemp(prefix="orchestra-prompt-elsewhere-")
+        self.addCleanup(shutil.rmtree, elsewhere, True)
+        with open(os.path.join(elsewhere, "events"), "w", encoding="utf-8") as stream:
+            stream.write(json.dumps(DIALOG) + "\n")
+        os.symlink(os.path.join(elsewhere, "events"), terminal.turn_files(self.rdir, self.name)["events"])
+        self.assertFalse(self.waiting(), "an events file that is a link")
+        shutil.rmtree(os.path.join(self.rdir, "logs"))
+        os.symlink(elsewhere, os.path.join(self.rdir, "logs"))
+        self.record(DIALOG)
+        self.assertFalse(self.waiting(), "a log folder that is a link")
+
 
 # Every request reads the stack afresh, so what a test says of it is what the page sees.
 workbench.READING_SECONDS = 0
@@ -645,11 +686,11 @@ class Runs(Scenario):
         self.assertEqual((view["state"], view["stage"], view["role"]), ("running", "plan", "engineer"))
         self.assertTrue(datetime.datetime.fromisoformat(view["since"]), "since when it works")
         self.assertEqual(view["actions"], [], "nothing to answer while it works")
-        logs = os.path.join(terminal.run_dir(run_id), "logs")
-        os.makedirs(logs, exist_ok=True)
-        events = os.path.join(logs, "plan-e%d-%d.events" % (view["episode"], view["round"] + 1))
+        events = terminal.turn_files(terminal.run_dir(run_id),
+                                     terminal.turn_name("plan", view["episode"], view["round"] + 1))["events"]
+        os.makedirs(os.path.dirname(events), exist_ok=True)
         with open(events, "a", encoding="utf-8") as stream:
-            stream.write(json.dumps({"_hook": "Notification", "notification_type": "permission_prompt"}) + "\n")
+            stream.write(json.dumps(DIALOG) + "\n")
         self.assertTrue(request("GET", "/api/runs/%s" % run_id)[1]["view"]["agent_prompt"])
         saved_runs = runs.runs
 
@@ -766,31 +807,60 @@ class Runs(Scenario):
             else:
                 self.assertIn("Direction: A.", final, "the architect's review")
 
-        logs = os.path.join(terminal.run_dir(run_id), "logs")
+        rdir = terminal.run_dir(run_id)
+        name = terminal.turn_name("plan", entries["plan"]["episode"], entries["plan"]["round"])
+        first, retry = terminal.turn_files(rdir, name), terminal.turn_files(rdir, name + terminal.RETRIED)
         plan = turn_path(run_id, entries["plan"])
         for ext, text in (("prompt", "the whole task again"), ("out", "planned again\n")):
-            with open(os.path.join(logs, "plan-e2-1-rehydrated." + ext), "w", encoding="utf-8") as fh:
+            with open(retry[ext], "w", encoding="utf-8") as fh:
                 fh.write(text)
         attempts = request("GET", plan)[1]["attempts"]
         self.assertEqual([(each["attempt"], each["input"], each["output"]) for each in attempts],
                          [("original", self.agent.calls[1]["prompt"], "planned\n"),
                           ("retried with a new session", "the whole task again", "planned again\n")],
                          "a lost session's retry is a second record, beside the first")
-        for name in ("plan-e2-1.out", "plan-e2-1-rehydrated.prompt", "plan-e2-1-rehydrated.out"):
-            os.remove(os.path.join(logs, name))
+        for path in (first["out"], retry["prompt"], retry["out"]):
+            os.remove(path)
         [attempt] = request("GET", plan)[1]["attempts"]
         self.assertEqual((attempt["input"], attempt["output"]), (self.agent.calls[1]["prompt"], None),
                          "a missing output is said missing")
-        os.remove(os.path.join(logs, "plan-e2-1.prompt"))
+        os.remove(first["prompt"])
         self.assertEqual(request("GET", plan), (200, {"attempts": []}), "a turn with no record left has none")
 
         saved = workbench.MAX_TURN_FILE
-        workbench.MAX_TURN_FILE = len("Brief") - 1
+        workbench.MAX_TURN_FILE = 64
         self.addCleanup(setattr, workbench, "MAX_TURN_FILE", saved)
-        status, refused = request("GET", turn_path(run_id, entries["research"]))
-        self.assertEqual(status, 400, refused)
-        self.assertIn("too large for the page", refused["error"])
+        for key, sizes in (("output", (64, 65)), ("input", (65, 64))):
+            for ext, size in zip(("prompt", "out"), sizes):
+                with open(first[ext], "w", encoding="utf-8") as fh:
+                    fh.write("x" * size)
+            status, refused = request("GET", plan)
+            self.assertEqual(status, 400, refused)
+            self.assertIn("this turn's %s is too large for the page" % key, refused["error"])
+        with open(first["prompt"], "w", encoding="utf-8") as fh:
+            fh.write("x" * 64)
+        self.assertEqual(request("GET", plan)[1]["attempts"][0]["output"], "x" * 64, "a record at the limit is read")
         workbench.MAX_TURN_FILE = saved
+
+        if os.name != "nt":
+            # A link is never followed: not a record's own file, nor the folder the records are in.
+            elsewhere = tempfile.mkdtemp(prefix="orchestra-turn-elsewhere-")
+            self.addCleanup(shutil.rmtree, elsewhere, True)
+            with open(os.path.join(elsewhere, "secret"), "w", encoding="utf-8") as fh:
+                fh.write("outside the run")
+            os.remove(first["prompt"])
+            os.symlink(os.path.join(elsewhere, "secret"), first["prompt"])
+            status, refused = request("GET", plan)
+            self.assertEqual(status, 400, refused)
+            self.assertNotIn("outside the run", json.dumps(refused))
+            logs = os.path.dirname(first["prompt"])
+            os.rename(logs, logs + ".real")
+            self.addCleanup(shutil.rmtree, logs + ".real", True)
+            os.symlink(logs + ".real", logs)
+            self.addCleanup(os.remove, logs)
+            status, refused = request("GET", turn_path(run_id, entries["research"]))
+            self.assertEqual(status, 400, refused)
+            self.assertIn("cannot be followed through a link", refused["error"])
 
         for query in ("stage=nope&episode=1&round=1", "stage=plan&episode=1&round=0",
                       "stage=plan&episode=x&round=1", "stage=plan&episode=1"):

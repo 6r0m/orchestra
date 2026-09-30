@@ -31,7 +31,9 @@ What a kind's module holds, each named below by what it answers:
 - `message_of(event)`: an agent message inside one JSON line of its output, or None.
 - `skill_folders(name, repo)`: where a skill of that name would be found for it.
 - optional — `trust_ensure(repo, home)`, `trust_forget(repo, home)`; `trace_env(context)`,
-  `trace_settings(context, private)`, `reasoning(session)`, `upload(session, context)`.
+  `trace_settings(context, private)`, `reasoning(session)`, `upload(session, context)`;
+  `waiting(events)`: whether its turn's events end on a dialog waiting in its terminal, for a kind that
+  reports one.
 
 Importing a kind's module only defines it: anything that touches the host happens in its answers,
 so the kinds can be listed on a host that has none of their CLIs.
@@ -48,7 +50,7 @@ REQUIRED = ("NAME", "EXECUTABLE", "ACCESS", "OPTIONS", "SKILL", "SESSION_MARKERS
             "output", "session", "final_message", "message_of", "skill_folders", "skill_roots")
 CALLABLE = ("validate", "command", "host", "session_in", "wire", "completion", "output", "session",
             "final_message", "message_of", "skill_folders", "skill_roots")
-OPTIONAL = ("trust_ensure", "trust_forget", "trace_env", "trace_settings", "reasoning", "upload")
+OPTIONAL = ("trust_ensure", "trust_forget", "trace_env", "trace_settings", "reasoning", "upload", "waiting")
 
 
 class Refused(ValueError):
@@ -175,6 +177,21 @@ def session_markers():
         names.update(module.SESSION_MARKERS)
         prefixes.update(module.SESSION_MARKER_PREFIXES)
     return names, tuple(sorted(prefixes))
+
+
+def waiting(events):
+    """Whether a turn's events end on a dialog waiting in its terminal, by the kinds that report one; each
+    reads only its own events, and a kind that reports none never waits here."""
+    return any(module.waiting(events) for module in usable() if hasattr(module, "waiting"))
+
+
+def recorded_message(out):
+    """A finished turn's answer read back from what it left alone, by the kind whose record names its own
+    session there; None when no kind's does — a record that is its answer already."""
+    for module in usable():
+        if module.session(out, None):
+            return module.final_message(out)
+    return None
 
 
 def skill(module, name):

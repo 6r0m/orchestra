@@ -44,6 +44,9 @@ SESSION_MARKER_PREFIXES = ("CLAUDE_CODE_",)
 LOST_SESSION = ("no conversation found with session id",)
 OLD_BRAIN = "claude"
 HOOKS = ("UserPromptSubmit", "Stop", "StopFailure", "PostToolUse", "PostToolUseFailure")
+# The notifications that mean a dialog waits in its terminal for someone to answer it: each its own hook
+# matcher, since a `|` between them is a command separator to the Windows `.cmd` shim.
+DIALOGS = ("permission_prompt", "elicitation_dialog", "elicitation_url_dialog")
 WINDOWS = sys.platform.startswith("win")
 # Model and effort reach the command line, so each is a plain token.
 PLAIN_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]*")
@@ -116,7 +119,7 @@ def wire(argv, events, sink):
     hooks = {event: [{"hooks": [{"type": "command", "command": _hook(sink(event, "stdin"))}]}] for event in HOOKS}
     hooks["Notification"] = [
         {"matcher": kind, "hooks": [{"type": "command", "command": _hook(sink("Notification", "stdin"))}]}
-        for kind in ("permission_prompt", "elicitation_dialog", "elicitation_url_dialog")]
+        for kind in DIALOGS]
     argv = list(argv)
     if "--settings" in argv:
         path = argv[argv.index("--settings") + 1]
@@ -128,6 +131,18 @@ def wire(argv, events, sink):
             json.dump(settings, fh)
         return argv
     return argv[:1] + ["--settings", json.dumps({"hooks": hooks})] + argv[1:]
+
+
+def waiting(events):
+    """Whether its turn's events end on a dialog still waiting in its terminal: a dialog's notification that
+    no tool's end, prompt or end of the turn has followed yet."""
+    for event in reversed(events):
+        hook = event.get("_hook")
+        if hook == "Notification" and event.get("notification_type") in DIALOGS:
+            return True
+        if hook in HOOKS:
+            return False
+    return False
 
 
 def completion(events, prompt, session):
