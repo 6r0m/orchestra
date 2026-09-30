@@ -1,6 +1,7 @@
 # Pluggable agents under every role, set up in the Workbench
 
-**Status:** IN PROGRESS — the external review's PASS and the operator's GO (D13), 2026-09-28
+**Status:** DONE — deterministic Settings gate passed on WSL and Windows; D14 supersedes the
+Settings-specific D13 live gate
 **Scope:**
 - `app/agents/adapters/`: one generic loader and contract, and a module per kind of agent;
 - the modules that hold agent mechanics today: `nodes.py`, `terminal.py`, `turn_hook.py`, `trust.py`,
@@ -14,11 +15,11 @@
 - the Workbench's settings API and view.
 
 **Stable documentation owner:** the owners in the Documentation plan — above all
-[the architecture](../docs/architecture/structure.md),
-[the agents'](../app/agents/docs/architecture/structure.md),
-[the application's](../app/application/docs/architecture/structure.md) and
-[the foundation's](../app/foundation/docs/architecture/structure.md) structures, and
-[docs/using.md](../docs/using.md) and [README.md](../README.md) for the operator.
+[the architecture](../../docs/architecture/structure.md),
+[the agents'](../../app/agents/docs/architecture/structure.md),
+[the application's](../../app/application/docs/architecture/structure.md) and
+[the foundation's](../../app/foundation/docs/architecture/structure.md) structures, and
+[docs/using.md](../../docs/using.md) and [README.md](../../README.md) for the operator.
 
 ## Contents
 
@@ -120,11 +121,19 @@ D1–D12 below are this change's operator decisions. The architecture's own deci
   fully prepare flow first with our settings and rest that will be prove that workbench will good, and
   then only test live after all syntetic tests pass".
   - Effect: the implementation starts at once. The live check that
-    [the Workbench UX todo](2026-09-25_2334-workbench-ux.md) and
-    [the flows todo](2026-09-25_1458-configurable-flows.md) still hold happens once, after every
+    [the Workbench UX todo](../2026-09-25_2334-workbench-ux.md) and
+    [the flows todo](../2026-09-25_1458-configurable-flows.md) still hold happens once, after every
     synthetic gate of this change has passed, and covers the flows, the page and Settings together.
   - Reason: stated.
   - Date/source: operator, 2026-09-28, with the external review's PASS and GO.
+- **D14** The Settings-to-run contract is accepted through deterministic mocked-agent tests; a live
+  agent walkthrough is no longer a completion gate for this Settings change.
+  - Effect: D13's live gate is superseded for this todo. The Workbench UX and configurable-flows todos
+    retain any live acceptance they independently require. Their results do not decide whether applied
+    Settings reach the role-turn seam.
+  - Reason: the real Settings API, client, Temporal workflow, activities, role-turn inputs and stops are
+    exercised by the deterministic suite on both hosts.
+  - Date/source: operator, 2026-09-30.
 
 ### Operator gates
 
@@ -385,7 +394,7 @@ Any of these can follow as a change of its own:
 10. **The live stack's workers run without `ORCH_POLICY`** (`stack.py:93-97`).
 11. **The Workbench reads the policy afresh.** It reads the default flow at each request
     (`app/interfaces/workbench/server.py:198`), and starts runs through `client.start`.
-12. **The decisions this touches** ([the architecture](../docs/architecture/structure.md)):
+12. **The decisions this touches** ([the architecture](../../docs/architecture/structure.md)):
     - D3: the judge is never the builder, and the architect is read-only;
     - D13: the set of brains that can be bound is code;
     - D17: a role's turn runs in its live terminal;
@@ -486,7 +495,7 @@ Any of these can follow as a change of its own:
 30. **Model and effort share one rule today:** a plain token, because both reach a command line
     (`policy.py:32-33, 181-184`).
 31. **The standing test rule.** An iteration runs only the modules it touches, named; the whole suite runs
-    once, after the reviewer's final pass, before the operator's live check ([tests/README.md](../tests/README.md)).
+    once, after the reviewer's final pass, before the operator's live check ([tests/README.md](../../tests/README.md)).
 32. **Which stack a policy's is.** `stack.own()` compares a policy's recorded origin (`_policy_path`) with
     the deployment file's (`stack.py:54-57`). Only the deployment's stack manages Temporal and the
     Windows worker (`stack.py:60-62`).
@@ -1027,11 +1036,11 @@ code it guards, and observed failing first.
      settings move to the new shape.
 5. [x] The merge patch: the loader, the sparse writer with its revision and lock, the refusals' JSON
    Pointers, the `.gitignore` entries, and the suite's isolation. U3 is measured here.
-6. [ ] The settings API — kinds and capabilities from the adapter boundary, through
+6. [x] The settings API — kinds and capabilities from the adapter boundary, through
    `application.settings` — and the Settings view, through `frontend-design`, with each field saying
    what it changes and when, and the state of a local patch that does not load.
-7. [ ] Documentation (Documentation plan).
-8. [ ] Verification, in the standing order (fact 31):
+7. [x] Documentation (Documentation plan).
+8. [x] Verification, in the standing order (fact 31), as revised by D14:
    - tasks 2–6 each iterate on the tests of the concerns they touch, named, with the replay of recorded
      histories wherever a run's policy is read, and focused browser probes for the view;
    - `make demo` once, on the finished implementation;
@@ -1039,7 +1048,8 @@ code it guards, and observed failing first.
    - one agent review round, fixed without further agents;
    - the external review;
    - after its PASS, the whole suite once on WSL and once on Windows;
-   - the operator's live check, including U1.
+   - the Settings-to-run deterministic gate on both hosts, including the exact 10+10 Plan and Build
+     boundaries and all four role/event prompt additions.
 
 ## Test-first and verification plan
 
@@ -1245,51 +1255,48 @@ code it guards, and observed failing first.
 - `make public-check` and `git diff --check` are clean, and the public check's control in a throwaway
   clone fails as invariant 11b says.
 - The whole suite once on WSL and once on Windows, after the external PASS.
-- The operator's live check:
-  - skills bound in the view reach a real turn, for Claude and for Codex (U1, measured already in
-    task 1);
-  - either agent is swapped under either role;
-  - both terminals take typing;
-  - an Apply during an open run leaves it as it was.
+- The Settings-to-run deterministic gate (D14): both shipped flows; role/profile, model, effort,
+  persona and stage-skill delivery; Apply during an open run leaving its snapshot unchanged; exact
+  10+10 Plan and Build prompts and stops; and Discard, with mocked role turns on both hosts.
 
 ## Documentation plan
 
 - **Authoritative stable owners:**
-  - [the architecture](../docs/architecture/structure.md): D3, D13, D17, D18, D19, D20, D21, D26, D28
+  - [the architecture](../../docs/architecture/structure.md): D3, D13, D17, D18, D19, D20, D21, D26, D28
     and D29, as in Decision 7, and the Composition table's rows for `policy.json`, `repos.json`,
     `nodes.py`, `trust.py` and the settings;
-  - [the main view](../docs/architecture/diagrams/main.md) and
-    [the processes view](../docs/architecture/diagrams/processes.md): the agents' CLIs as kinds behind
+  - [the main view](../../docs/architecture/diagrams/main.md) and
+    [the processes view](../../docs/architecture/diagrams/processes.md): the agents' CLIs as kinds behind
     adapters, where they name `claude · codex` today;
-  - [the agents' structure](../app/agents/docs/architecture/structure.md) and
-    [its main view](../app/agents/docs/architecture/diagrams/main.md): the adapter package as a part —
+  - [the agents' structure](../../app/agents/docs/architecture/structure.md) and
+    [its main view](../../app/agents/docs/architecture/diagrams/main.md): the adapter package as a part —
     its contract, its loader and naming rule, a kind's own validation, the turn hook as a sink that
     knows no vendor, and how to add a kind.
     - `app/agents/adapters/` routes by pattern — one module per kind — never by a list, so adding a
       kind edits no document.
     - Each adapter's docstring owns its vendor's facts, moved down from the architecture's decisions.
-  - [the application's structure](../app/application/docs/architecture/structure.md): `settings`, the
+  - [the application's structure](../../app/application/docs/architecture/structure.md): `settings`, the
     one loader and validator; the agents' preflight in `prepare`; tracing passed across as plain data;
     and the persona resolver's invariant, now also at a run's start;
-  - [the foundation's structure](../app/foundation/docs/architecture/structure.md) and
-    [its main view](../app/foundation/docs/architecture/diagrams/main.md): `.orchestra/`, the merge
+  - [the foundation's structure](../../app/foundation/docs/architecture/structure.md) and
+    [its main view](../../app/foundation/docs/architecture/diagrams/main.md): `.orchestra/`, the merge
     patch, its sparse writer and revision, `MAX_PERSONA_BYTES` and the wire invariant it serves, the
     role contract's access, and the one persona resolver's two rules;
-  - [the workspace's structure](../app/workspace/docs/architecture/structure.md): `.orchestra/repos.json`,
+  - [the workspace's structure](../../app/workspace/docs/architecture/structure.md): `.orchestra/repos.json`,
     `ORCHESTRA_REPOS`, and a preflight of `git` alone;
-  - [the observability's structure](../app/observability/docs/architecture/structure.md) and
-    [its main view](../app/observability/docs/architecture/diagrams/main.md): the private folder, its
+  - [the observability's structure](../../app/observability/docs/architecture/structure.md) and
+    [its main view](../../app/observability/docs/architecture/diagrams/main.md): the private folder, its
     sweep and the uploader's run, with no vendor's settings of its own;
-  - [the interfaces' structure](../app/interfaces/docs/architecture/structure.md): the settings API and
+  - [the interfaces' structure](../../app/interfaces/docs/architecture/structure.md): the settings API and
     the Settings view's module;
-  - [the trace contract](../docs/architecture/trace-contract.md): a step's metadata names its kind and
+  - [the trace contract](../../docs/architecture/trace-contract.md): a step's metadata names its kind and
     profile, model and effort, where it names the brain today;
-  - [docs/using.md](../docs/using.md): the Settings view, and the new names;
-  - [README.md](../README.md): the configuration table — `.orchestra/settings.json`, the local patch,
+  - [docs/using.md](../../docs/using.md): the Settings view, and the new names;
+  - [README.md](../../README.md): the configuration table — `.orchestra/settings.json`, the local patch,
     `.orchestra/repos.json`, `ORCHESTRA_SETTINGS`, `ORCHESTRA_REPOS`, `--settings` — and the skills
     route, now the Settings view;
-  - [tools/README.md](../tools/README.md): the new names;
-  - [tests/README.md](../tests/README.md): the rows of the modules whose guards change, and one each for
+  - [tools/README.md](../../tools/README.md): the new names;
+  - [tests/README.md](../../tests/README.md): the rows of the modules whose guards change, and one each for
     `application/test_activities.py` and `application/test_settings.py`.
 - **Duplication avoided:** the schemas are the validator's, and documents name them rather than list
   them. RFC 7396, RFC 6901 and the Agent Skills name rule are cited, never restated. A vendor's
@@ -1328,11 +1335,14 @@ code it guards, and observed failing first.
 ## Completion criteria
 
 - Every guard observed red, then green, and each task's touched concerns green as it goes.
-- `make demo`, `make public-check` and `git diff --check` pass on the finished implementation. The whole
-  suite passes once on each host after the external PASS, and a failure there is reported as one,
+- `make demo`, `make public-check` and `git diff --check` pass on the finished implementation. The
+  whole suites passed after the external PASS. The later Settings delivery change was checked by the
+  whole WSL suite and focused Settings delivery tests on both WSL and Windows, following the
+  deterministic-test rule in [tests/README.md](../../tests/README.md); a failure is reported as one,
   never counted as a pass.
 - U1 and U2 measured before the adapters were built, and the design adjusted to what they found.
-- The operator's live check passes, U1 included.
+- The Settings-to-run deterministic gate passes on both hosts (D14); further real-agent behavior
+  belongs to the independent UX and flows todos.
 - The documentation plan is done, with nothing unrelated in the diff.
 
 ## Review record
@@ -1499,7 +1509,7 @@ code it guards, and observed failing first.
 - **Refined:** only the settings drop `workspace_access`; the run's policy keeps it, written at the
   start. D13's list of configuration loses access (Decision 7).
 - **Noted, not this change's:** the Windows suite gate recorded in
-  [the Workbench UX todo](2026-09-25_2334-workbench-ux.md) is still red on the test runner's tree
+  [the Workbench UX todo](../2026-09-25_2334-workbench-ux.md) is still red on the test runner's tree
   wait, and waits on the operator's disposition there.
 - **Authority:** A2, A4 and A7 rewritten in place; Decisions 2, 3, 4 and 7; invariants 4 and 10;
   guards 4, 16 and 18. No decision changed.
@@ -1509,7 +1519,7 @@ code it guards, and observed failing first.
 - **Accepted, each checked against the code, and fixed:**
   1. A finished Windows class's job was only closed, which begins its processes' end without proving it,
      and `end()` printed an unproved end and went on. Every class now leaves through the one proved end,
-     and an unproved end fails it ([the Workbench UX todo](2026-09-25_2334-workbench-ux.md) holds the
+     and an unproved end fails it ([the Workbench UX todo](../2026-09-25_2334-workbench-ux.md) holds the
      runner's record). A POSIX class's group is ended when it finishes, too.
   2. `/api/flows` reads the settings, so a local patch that does not load failed the read that listed the
      flows, and the Settings view never showed its refusal. The view reads the settings first, and lists
@@ -1638,3 +1648,32 @@ code it guards, and observed failing first.
 - Both normal-boundary prompts now ask for an evidence-backed diagnosis, self-review, and ordinary continuation. The final architect PATCH/UNVERIFIED handoff uses `Why not converged` with cause classes, evidence, unresolved and disputed findings, and any exact operator decision. The user and architecture guides describe the updated handoff.
 - `tests/__init__.py` pins `ORCHESTRA_SETTINGS` to the shared settings file, so the profile-bound fixture helpers do not read a private local settings patch. The focused Windows `Routing` and `TraceShape` classes passed: 2 classes / 25 tests. `git diff --check` passed.
 - The prior full WSL and Windows suites remain green. The final live walkthrough is still pending explicit operator authorization for a normal Langfuse trace or a separately proven local-only route.
+- The final engineer handoff now asks for its own evidence-backed non-convergence diagnosis. It names the compact cause classes because `extended=0` can reach that turn without a prior reflection. Two focused Routing cases failed on the old prompt and passed after the correction; `git diff --check` passed. With no open feature runs, the stack and Workbench were restarted on the final code; `make check` reports all components up.
+
+### 2026-09-29 - local-only live walkthrough, stopped by Claude usage limit
+
+- The operator deferred Langfuse pairing for Settings acceptance. The earlier conclusion that `systemd-run --user --scope` drops shell environment values was a command-quoting error: a harmless sentinel reached a scoped child. Explicit dummy Langfuse keys and a loopback-only host override `.env` in the WSL worker. The disposable run targeted WSL; the Windows worker's separate WMI launch does not inherit this override. A CLI Stop under the same override reported connection refused at the loopback trace host. Langfuse was not an acceptance dependency.
+- Applied a temporary architect binding to the existing Codex profile, started one disposable WSL `architect-research` run through Workbench, then applied the original Claude binding again. Settings showed no pending changes. The active run still used Codex for both research and the later assessment: its terminal showed the configured model and effort, and both saved architect prompts began with `$architect`. The engineer's first prompt began with `/investigate-change`, and its Claude terminal ran the plan. Each live terminal accepted a typed character and Backspace without submitting a turn.
+- The first research approval and the plan review loop worked. The architect's PATCH correctly identified that testing only the CLI's default name would miss a hardcoded greeting. On the engineer's revision turn, Claude Code exited with `StopFailure` / `rate_limit` and reported a usage-limit reset at 3pm Europe/Moscow. Retrying before that reset would repeat the provider refusal. No plan approval, build, verification or final merge/discard gate was reached.
+- Stopped the run with Orchestra's CLI, then used the Workbench's authenticated local removal API. Workbench showed `STOPPED`; Git showed no run branch or worktree. The disposable base fixture and its empty worktree category were removed. The WSL worker was restarted in its normal environment; `make check` showed Temporal, both workers and Workbench up. During browser automation, confirmation dialogs closed without sending their action, and a fresh dialog control also failed to emit a `close` event in that browser backend. This does not establish a product UI defect; the human confirmation path remains unverified by this attempt.
+- Keep this todo in progress. The live acceptance still needs the later plan approval, build, verify and final Discard path when the chosen engineer provider is available. The previous full WSL and Windows suites passed before the final prompt-wording patch; its focused regressions passed afterward.
+
+### 2026-09-30 - joined Settings-to-run smoke with fake agents
+
+- Added one Workbench API smoke on the existing disposable Settings checkout and Temporal fake-agent harness. It applies an architect-research default flow, role/profile/model, persona, skill, review budget, and per-role guidance overrides; starts a run; changes Settings again; then checks the original run's research, plan reflection and exhaustion, guidance re-entry, approval, build, verification and final Discard. The recorded fake invocations prove the open run retains its selected Claude/Codex kinds, model and effort arguments, persona, skill, prompt additions, and 2+1 plan budget despite the later Apply. The literal 10+10 boundary remains covered by `Routing.test_review_rounds_reflect_once_after_ten_and_exhaust_with_evidence_at_twenty`.
+- Known-bad control: forced the run start to read the shared file while ignoring the applied patch; the smoke failed on the wrong first stage. Restoring the layered loader made it pass. Focused Windows smoke passed; focused WSL Workbench Settings API, Runs and Routing passed (3 classes / 40 tests); the full WSL suite passed (121 classes / 547 tests).
+- This closes the Settings-to-workflow logic gap without provider calls. The accepted live operator check still owns actual CLI skill loading, terminal interaction and human confirmation controls; the earlier walkthrough did not reach plan approval, build, verification or final Discard.
+
+### 2026-09-30 - Settings delivery regression suite
+
+- Moved the joined smoke into `tests/interfaces/test_settings_delivery.py` and expanded it into a Settings API to client to Temporal to scripted role-turn suite. It covers both shipped flows; an applied default and an explicit flow; role bindings, newly added and removed profiles, models and effort, personas, all five stage skills, Plan and Build normal/extended budgets, each role's reflection and final-turn addition, later Apply leaving an open run unchanged, restored settings reaching a new run, invalid local settings refusing a start, and final Discard. `tests/orchestration/test_round_boundaries.py` adds PASS and BLOCKER controls at the literal 10 and 20 review boundaries. Existing Settings API tests retain Apply, Revert, Reset and conflict coverage.
+- A previously hidden source mismatch surfaced when the joined test stopped patching the loader: a Workbench with its own `root` and `environ` read and applied settings there, but `POST /api/runs` started from the client's default settings source. The smoke failed on `plan-e1-1` instead of the configured `research-e1-1`. The Workbench now passes that same source to the client for run start; the formerly failing smoke passed without a loader patch.
+- Focused WSL verification passed: 20 classes / 104 tests across Settings delivery, Workbench and workflow. Focused Windows verification passed: 2 classes / 5 tests for Settings delivery and exact round boundaries. The full WSL suite passed: 123 classes / 551 tests. `make public-check` and `git diff --check` passed. The extra 10th-round BLOCKER case was added after these runs and checked separately on both hosts. These scripted turns prove what Orchestra sends to the runner seam and how its workflow routes; vendor skill loading, prompt interpretation and real terminal interaction still belong to a real-agent check.
+- A final coverage audit found that the literal 10+10 budget and prompt checks entered the workflow directly, while the Settings API smoke used 2+1. Added joined Settings API cases for Plan and Build 10+10 and all four role/event additions. Each proves no boundary guidance at turn 10, one reflection per role at turn 11, none at turn 12, both final handoffs at turn 20, the exhausted stop, guidance re-entry and Discard. A focused rerun exposed a test race: Discard's API acknowledgment precedes its Git activity. The suite now waits for the run's `DISCARDED` state before asserting cleanup. The updated focused suite passed on WSL and Windows: 2 classes / 7 tests on each. This covers the exact Settings-to-run boundary without asserting that every combination of editable values or a vendor's prompt interpretation has been exercised.
+- **Deterministic Settings gate: passed within its stated contract.** The scripted tests exercise the real Settings Apply, run snapshot, flow selection, Temporal workflow and activity path through the role-turn seam, then assert the selected kind, model, effort, skill invocation, persona, per-role review guidance, round boundaries and resulting stops. D14 supersedes the Settings-specific live gate. The UX and flows todos independently own any remaining real-agent walkthrough.
+- The operator closed this manually authored todo under D14 before a commit. Moving it exposed a
+  `public-check` export defect: it attempted to copy the removed tracked path, silently skipped that
+  copy and reported PASS. The export now skips deleted working-tree paths whose old content remains
+  in history, and records any other copy failure while keeping its tracked-file boundary. The
+  corrected `make public-check` passed without a missing-file error; the new todo file will be
+  scanned once staged by the operator. All 30 local links in this moved todo resolve.

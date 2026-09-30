@@ -121,13 +121,13 @@ def request(method, path, body=None, token=True, host=None, origin=None, at=None
     return response.status, (json.loads(raw) if "json" in kind else raw)
 
 
-def settings_server(test, root, environ):
+def settings_server(test, root, environ, call=None):
     """A workbench of the test's own over the settings of the checkout at `root`, as `environ` names them;
-    its port. Reading and applying settings asks Temporal nothing."""
+    its port. Settings-only tests need no Temporal call; a joined run test supplies one."""
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), http.server.BaseHTTPRequestHandler)
     server.RequestHandlerClass = workbench.make_handler(
-        lambda work, timeout=300: None, dict(E.SETTINGS, workbench_port=server.server_port), terminal.token(),
-        root=root, environ=environ)
+        call or (lambda work, timeout=300: None),
+        dict(E.SETTINGS, workbench_port=server.server_port), terminal.token(), root=root, environ=environ)
     server.daemon_threads = True
     threading.Thread(target=server.serve_forever, daemon=True).start()
     test.addCleanup(server.server_close)

@@ -7,11 +7,11 @@ repository, and the one this repository keeps for itself.
 | what you will find | where |
 |---|---|
 | the change being worked on now | the dated files beside this one |
-| what a merged change left behind | [done/](done/) |
+| a completed or merged change | [done/](done/) |
 
 A run started against this repository writes its reviewable plan here and, once the operator
 merges it, moves it to `done/` with a finished status line. A todo written by hand follows the
-same shape.
+same shape, and may move when the operator explicitly closes its defined scope before a commit.
 
 ## What a todo here may not contain
 

@@ -123,6 +123,7 @@ class Routing(Scenario):
         self.assertIn("Do not modify the todo merely to record this handoff", final_engineer_prompt)
         self.assertNotIn("handoff in the run's todo", final_engineer_prompt)
         self.assertIn("what remains unresolved", final_engineer_prompt)
+        self.assertIn("evidence-backed diagnosis of why this phase did not converge", final_engineer_prompt)
         self.assertLess(final_engineer_prompt.index("This is the final budgeted engineer turn"),
                         final_engineer_prompt.index("ENGINEER FINAL EXTRA"))
         final_prompt = " ".join(self.agent.calls[39]["prompt"].split())
@@ -156,6 +157,19 @@ class Routing(Scenario):
             review_rounds={"plan": {"normal": 2, "extended": 1}},
             review_prompts={event: {"engineer": ""} for event in ("after_normal", "at_limit")})
         self.assertEqual(prompt, no_additions)
+
+    def test_final_engineer_handoff_names_causes_without_a_reflection(self):
+        from app.agents import nodes
+        state = {"task": "t", "todo_path": "todo/task.md", "run_id": "r", "worktree_path": "/w",
+                 "phase": "plan", "round": 1, "episode": 1, "feedback": "", "guidance": ""}
+        prompt = nodes.compose_prompt("plan", POLICY["roles"]["engineer"], False, state, True, True,
+                                      review_rounds={"plan": {"normal": 2, "extended": 0}})
+        self.assertNotIn("# Convergence reflection", prompt)
+        self.assertIn("# Final budget handoff", prompt)
+        self.assertIn("evidence-backed diagnosis of why this phase did not converge", prompt)
+        for cause in ("task / requirements", "engineer", "reviewer",
+                      "legitimate complexity / new consequences", "external / tooling / evidence", "mixed / unknown"):
+            self.assertIn(cause, prompt)
 
     def test_blocker_reaches_human_only_via_architect(self):
         a1, _ = codex_review_first("BLOCKER", "premise wrong")

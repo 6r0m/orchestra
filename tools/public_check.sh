@@ -87,18 +87,25 @@ else
     pass "the scanner rejects a known-bad control"
 fi
 
-# What a push would actually carry: the tracked files as they stand, exported to a directory of
-# their own. Scanning the checkout itself would scan `.env`, `secrets/` and `tmp/` — ignored files
-# that hold real credentials by design, and whose absence from the push is checked above.
+# Tracked files still present in the working tree, exported to a directory of their own. Scanning
+# the checkout itself would scan `.env`, `secrets/` and `tmp/` — ignored files that hold real
+# credentials by design, and whose absence from the push is checked above.
 export_dir="$(mktemp -d)"
 trap 'rm -rf "$control" "$export_dir"' EXIT
-git ls-files -z | while IFS= read -r -d "" file; do
-    mkdir -p "$export_dir/$(dirname "$file")"
-    cp "$file" "$export_dir/$file"
-done
+if git ls-files -z > "$control/candidate-paths"; then
+    while IFS= read -r -d "" file; do
+        # An unstaged deletion has no working-tree bytes to export; its old content remains in history.
+        [ -e "$file" ] || continue
+        if ! mkdir -p "$export_dir/$(dirname "$file")" || ! cp -- "$file" "$export_dir/$file"; then
+            fail "could not export $file for the secret scan"
+        fi
+    done < "$control/candidate-paths"
+else
+    fail "could not list files for the secret scan"
+fi
 cp "$REPO/.gitleaks.toml" "$export_dir/" 2>/dev/null || true
 if gitleaks "$export_dir" detect --no-git --no-banner --redact --exit-code 1 >/tmp/gitleaks-tracked.txt 2>&1; then
-    pass "no secret in the files a push would carry"
+    pass "no secret in the tracked files still present"
 else
     fail "Gitleaks found something in a tracked file:"
     sed 's/^/     /' /tmp/gitleaks-tracked.txt | head -40

@@ -34,6 +34,7 @@ _CONVERGENCE_CAUSE_GUIDANCE = (
     "Choose one or more causes, cite evidence, and use mixed / unknown when attribution is unclear:\n- "
     + "\n- ".join(CONVERGENCE_CAUSES)
 )
+_CONVERGENCE_CAUSE_LABELS = ", ".join(cause.partition(":")[0] for cause in CONVERGENCE_CAUSES)
 CONVERGENCE_REFLECTION = {
     "engineer": """Before continuing, diagnose why this phase has not converged.
 
@@ -53,7 +54,9 @@ FINAL_REVIEW_SUMMARY = {
 
 In your final message, give the architect a concise, factual handoff: what you changed, what evidence you checked, which findings you addressed, which findings you refuted and with what evidence, what remains unresolved, and any concrete human or external decision that may still be required.
 
-Do not modify the todo merely to record this handoff.""",
+Include an evidence-backed diagnosis of why this phase did not converge. Use one or more of these cause classes: %s. Use mixed / unknown when the evidence cannot identify a more specific cause.
+
+Do not modify the todo merely to record this handoff.""" % _CONVERGENCE_CAUSE_LABELS,
     "architect": """This is the final budgeted review for this phase. Re-evaluate the current artifact and evidence as they stand now; do not add optional improvements merely because this is the last turn.
 
 Keep the normal verdict meanings. PASS if the reviewed requirements are satisfied. Return BLOCKER when the premise or architecture is unsafe, conflicts with an accepted invariant, cannot be repaired locally, or the task is harmful, mismatched, or the wrong problem (D15); also use it when safe progress requires a specific human or external decision. State the reason and evidence, and the exact decision when one is needed. PATCH and UNVERIFIED keep their normal meanings for other unresolved findings.

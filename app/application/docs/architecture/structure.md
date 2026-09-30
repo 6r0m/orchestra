@@ -39,8 +39,8 @@ query, a run's description, and who polls each task queue. Through the lifecycle
 part of the stack at a time: a start, a stop, its process's state, and the sweep.
 
 Settings composes the foundation's strict data validation with each selected kind's adapter,
-then hands a checked snapshot to a new run. The Workbench reads and applies settings through this
-owner; individual activities do not reload mutable settings.
+then hands a checked snapshot to a new run. The Workbench reads, applies and starts runs from the
+same settings source; individual activities do not reload mutable settings.
 
 Composition belongs here rather than inside a concern. `telemetry.final_diff(client, state,
 worktrees.review_diff)` is written that way on purpose: the trace records a change it is

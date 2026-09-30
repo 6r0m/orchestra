@@ -18,6 +18,7 @@ from temporalio.service import RPCError, RPCStatusCode
 
 from app.application import settings as S
 from app.foundation import flows
+from app.foundation import paths
 from app.foundation import policy as policy_mod
 from app.workspace import repos
 from app.orchestration import workflow as WF
@@ -196,14 +197,15 @@ def view(listed, status, health):
             "actions": list(stop["actions"]) if stop and not closed else []}
 
 
-async def start(client, task, repo=None, auto_proceed=False, settings_path=None, check=True, flow=None):
+async def start(client, task, repo=None, auto_proceed=False, settings_path=None, check=True, flow=None,
+                settings_root=paths.REPO, settings_environ=os.environ):
     """Start a run on `repo` (a descriptor's name, a path, or this repository), following `flow` (a file in
     `flows/`, the settings' `default_flow` when none is named); returns its handle.
 
     The flow is read and checked here, once, and the run is handed its steps and its policy made whole —
     each role's agent and persona's text among it: it never reads a flow, settings or a persona file, so
     none edited later changes a run already started."""
-    settings = S.load(settings_path)
+    settings = S.load(settings_path, root=settings_root, environ=settings_environ)
     selected = repos.select(repo)
     queue = policy_mod.queue(settings, selected["target"])
     name = flow or settings.get("default_flow")

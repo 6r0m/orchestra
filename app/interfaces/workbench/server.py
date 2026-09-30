@@ -243,7 +243,8 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
                         return self._send(HTTPStatus.BAD_REQUEST, {"error": "a task is required"})
                     handle = call(lambda client: runs.start(client, task, repo=body.get("repo") or None,
                                                             auto_proceed=bool(body.get("auto_proceed")),
-                                                            flow=body.get("flow") or None))
+                                                            flow=body.get("flow") or None,
+                                                            settings_root=root, settings_environ=environ))
                     return self._send(HTTPStatus.OK, {"run_id": handle.id})
                 if len(parts) == 3 and parts[0] == "runs" and RUN_ID.match(parts[1]) and parts[2] == "answer":
                     answer = {key: value for key, value in body.items() if key in ANSWER_KEYS}
