@@ -252,7 +252,7 @@ class SettingsDelivery(unittest.TestCase):
                         self.assertEqual(call["argv"][call["argv"].index("--sandbox") + 1], "read-only")
                     else:
                         self.assertEqual(call["argv"][call["argv"].index("--effort") + 1], "medium")
-                        self.assertEqual(call["argv"][call["argv"].index("--permission-mode") + 1], "bypassPermissions")
+                        self.assertEqual(call["argv"][call["argv"].index("--permission-mode") + 1], "dontAsk")
                 self.answer(run_id, final["stop"], "discard", confirm=True)
                 self.wait_until_discarded(run_id)
                 self.assertIn(("discard", run_id), git.calls)

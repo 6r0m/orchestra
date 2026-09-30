@@ -61,7 +61,9 @@ the page's address names the run open, so a reload keeps it and a new tab opens 
 
 If a vendor dialog waits in a live terminal, that running run also appears under Operator action.
 Open its terminal to answer or interrupt it. This is a terminal prompt, not a workflow stop; routine
-agent questions are denied and real blockers reach the normal workflow stop.
+agent questions are denied and real blockers reach the normal workflow stop. Only a Claude role
+reports such a dialog, through its hooks, and in practice a Claude architect: a Claude engineer is
+denied what it may not do rather than asked, and a Codex role never asks.
 
 *New run* opens the form that starts one — and with no runs at all, the page opens on it: on a
 repository named in `.orchestra/repos.json` or in the file named by `ORCHESTRA_REPOS` — its menu

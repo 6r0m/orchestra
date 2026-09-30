@@ -292,10 +292,9 @@ class Sessions(Scenario):
                 self.assertEqual(argv[argv.index("--ask-for-approval") + 1], "never")
                 self.assertIn('web_search="live"', argv)
             else:
-                # The engineer can carry out routine work without a permission dialog.
-                self.assertEqual(argv[argv.index("--permission-mode") + 1], "bypassPermissions")
-                self.assertIn("AskUserQuestion", argv)
-                self.assertIn("EnterPlanMode", argv)
+                # Never waits on a prompt, and may edit only inside its worktree.
+                self.assertEqual(argv[argv.index("--permission-mode") + 1], "dontAsk")
+                self.assertEqual(argv[argv.index("--allowedTools") + 1], "Edit(./**)")
 
     def test_a_windows_host_runs_codex_in_the_unelevated_sandbox(self):
         from app.agents.adapters import claude_code, codex
@@ -309,6 +308,17 @@ class Sessions(Scenario):
         skills = os.path.dirname(os.path.abspath(__file__))
         self.assertEqual(claude_code.host(claude, skills=skills), claude + ["--add-dir", skills],
                          "a Claude role reads its skills' references without a prompt")
+
+    def test_claude_engineer_is_denied_what_it_may_not_do_and_never_bypasses_the_checks(self):
+        from app.agents.adapters import claude_code
+        argv, _ = claude_code.command({"workspace_access": "write"}, None)
+        self.assertEqual(argv[argv.index("--permission-mode") + 1], "dontAsk",
+                         "bypassPermissions skips the protected-path and working-directory checks, and nothing "
+                         "here isolates the filesystem in their place")
+        self.assertEqual(argv[argv.index("--allowedTools") + 1:argv.index("--disallowedTools")], ["Edit(./**)"],
+                         "its file tools edit its worktree alone")
+        self.assertEqual(argv[argv.index("--disallowedTools") + 1:], ["AskUserQuestion", "EnterPlanMode"],
+                         "no vendor question, and no plan mode whose exit would wait on a dialog")
 
     def test_claude_architect_keeps_read_only_mode_without_vendor_questions(self):
         from app.agents.adapters import claude_code
@@ -597,7 +607,7 @@ class AnyProfileUnderAnyRole(Scenario):
         self.assertEqual(run.state["status"], "READY_FOR_HUMAN")
         self.assertEqual({call["kind"] for call in self.agent.calls}, {"claude-code"})
         modes = {call["name"]: call["argv"][call["argv"].index("--permission-mode") + 1] for call in self.agent.calls}
-        self.assertEqual(modes, {"plan-e1-1": "bypassPermissions", "assess-e1-1": "plan", "build-e2-1": "bypassPermissions",
+        self.assertEqual(modes, {"plan-e1-1": "dontAsk", "assess-e1-1": "plan", "build-e2-1": "dontAsk",
                                  "verify-e2-1": "plan"}, "the reviewer reads only, whatever it runs")
         sessions = run.state["agent_sessions"]
         self.assertNotEqual(sessions["engineer"], sessions["architect"], "one profile, two sessions")

@@ -39,7 +39,7 @@ and restart of it, so neither keeps a second copy of how the stack runs.
 Through the worker's WebSocket: the page attaches to a run's live terminals on whichever
 host is running them.
 Its Operator action list also projects a waiting vendor dialog from the active turn's local
-hook events; the workflow still owns actual stops and their answers.
+hook events — Claude's; Codex reports none — and the workflow still owns actual stops and their answers.
 
 There is no facade here: the CLI reads a repository descriptor and the page reads a
 terminal record directly. A completed turn's prompt and final output are read on demand from
