@@ -87,28 +87,48 @@ else
     pass "the scanner rejects a known-bad control"
 fi
 
+# The index is a separate snapshot: a staged secret can differ from a clean or deleted worktree file.
+# Export it without changing the index, and fail if any entry cannot be exported or scanned.
+index_dir="$(mktemp -d)"
+trap 'rm -rf "$control" "$index_dir"' EXIT
+if git checkout-index --all --ignore-skip-worktree-bits --prefix="$index_dir/"; then
+    if gitleaks "$index_dir" detect --no-git --no-banner --redact --exit-code 1 >"$control/gitleaks-index.txt" 2>&1; then
+        pass "no secret in the staged index"
+    else
+        fail "Gitleaks found something in the staged index:"
+        sed 's/^/     /' "$control/gitleaks-index.txt" | head -40
+    fi
+else
+    fail "could not export the staged index for the secret scan"
+fi
+
 # Tracked files still present in the working tree, exported to a directory of their own. Scanning
 # the checkout itself would scan `.env`, `secrets/` and `tmp/` — ignored files that hold real
 # credentials by design, and whose absence from the push is checked above.
 export_dir="$(mktemp -d)"
-trap 'rm -rf "$control" "$export_dir"' EXIT
+trap 'rm -rf "$control" "$index_dir" "$export_dir"' EXIT
+worktree_exported=true
 if git ls-files -z > "$control/candidate-paths"; then
     while IFS= read -r -d "" file; do
         # An unstaged deletion has no working-tree bytes to export; its old content remains in history.
         [ -e "$file" ] || continue
         if ! mkdir -p "$export_dir/$(dirname "$file")" || ! cp -- "$file" "$export_dir/$file"; then
             fail "could not export $file for the secret scan"
+            worktree_exported=false
         fi
     done < "$control/candidate-paths"
 else
     fail "could not list files for the secret scan"
+    worktree_exported=false
 fi
 cp "$REPO/.gitleaks.toml" "$export_dir/" 2>/dev/null || true
-if gitleaks "$export_dir" detect --no-git --no-banner --redact --exit-code 1 >/tmp/gitleaks-tracked.txt 2>&1; then
-    pass "no secret in the tracked files still present"
-else
-    fail "Gitleaks found something in a tracked file:"
-    sed 's/^/     /' /tmp/gitleaks-tracked.txt | head -40
+if [ "$worktree_exported" = true ]; then
+    if gitleaks "$export_dir" detect --no-git --no-banner --redact --exit-code 1 >/tmp/gitleaks-tracked.txt 2>&1; then
+        pass "no secret in the tracked files still present"
+    else
+        fail "Gitleaks found something in a tracked file:"
+        sed 's/^/     /' /tmp/gitleaks-tracked.txt | head -40
+    fi
 fi
 
 if [ -d "$REPO/.git" ]; then
