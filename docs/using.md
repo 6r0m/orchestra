@@ -103,8 +103,9 @@ Open a turn to read its final message first, with review verdict and feedback se
 text. Its exact new prompt and raw adapter output remain openable and copyable from the same local log.
 The vendor keeps the prior conversation in its own session. Review findings and research briefs remain separately openable; the current
 decision shows its own evidence first. A terminal is the continuous vendor session, including interaction
-during a turn; the turn record is its saved prompt and final output. A local record that has been removed
-is reported as unavailable. A large change is read in parts, a press each.
+during a turn; the turn record is its saved prompt and final output. A turn retried in a fresh session,
+its first one lost, shows both; a failed attempt's retry from before you pressed Continue stays in the local
+logs but is not shown as the new turn's. A local record that has been removed is reported as unavailable. A large change is read in parts, a press each.
 
 *Stop run* and *Force terminate* come after the decision, and while a run is stopping only *Force
 terminate* is offered. *Stop run* ends a run from whatever it is doing — an agent at work, a stop

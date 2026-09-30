@@ -74,6 +74,25 @@ def turn_files(rdir, name):
     return {ext: os.path.join(logs, "%s.%s" % (name, ext)) for ext in ("prompt", "out", "err", "events")}
 
 
+def turn_attempts(rdir, name):
+    """The files of each attempt the turn named `name` made: its first, then its retry in a fresh session while
+    that retry is this turn's. A Continue runs a turn again under its name and writes its prompt anew, so a
+    retry older than that prompt is the attempt before's: it stays where it is, and is not this turn's."""
+    first, retry = turn_files(rdir, name), turn_files(rdir, name + RETRIED)
+
+    def written(path):
+        try:
+            return os.stat(path, follow_symlinks=False).st_mtime
+        except OSError:
+            return None
+
+    began = written(first["prompt"])
+    retried = [stamp for stamp in map(written, retry.values()) if stamp is not None]
+    if retried and (began is None or max(retried) >= began):
+        return [first, retry]
+    return [first]
+
+
 def token():
     """The workbench's token, made once: random, never logged, never in the repository's history."""
     try:

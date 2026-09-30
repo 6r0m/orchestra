@@ -103,6 +103,18 @@ class AgentPrompt(unittest.TestCase):
         os.utime(retry, (500, 500))
         self.assertTrue(self.waiting(), "the first is the newer")
 
+    def test_a_retry_left_by_an_attempt_before_this_turn_is_not_its_own(self):
+        # A Continue runs the turn again under its name: its prompt is written anew, its events not yet.
+        retry = self.record(DIALOG, retried=True)
+        prompt = terminal.turn_files(self.rdir, self.name)["prompt"]
+        with open(prompt, "w", encoding="utf-8") as stream:
+            stream.write("the turn again")
+        os.utime(retry, (1000, 1000))
+        os.utime(prompt, (2000, 2000))
+        self.assertFalse(self.waiting(), "the dialog was the attempt before's")
+        os.utime(retry, (3000, 3000))
+        self.assertTrue(self.waiting(), "control: a retry after the turn's prompt is this turn's")
+
     @unittest.skipIf(os.name == "nt", "a symbolic link needs a privilege there")
     def test_a_linked_log_folder_or_events_file_is_never_followed(self):
         elsewhere = tempfile.mkdtemp(prefix="orchestra-prompt-elsewhere-")
@@ -777,7 +789,8 @@ class Runs(Scenario):
         says when a record is gone rather than inventing one."""
         brief, _ = configured_first_message("Brief: the scheduler.")
         self.host, self.agent = E.host([("research-e1-1", 0, brief), ("plan-e2-1", 0, "planned\n"),
-                                        ("assess-e2-1", 0, configured_review_resumed("PASS", "Direction: A."))],
+                                        # As its host records a turn: the kind's own output, whether resumed or not.
+                                        ("assess-e2-1", 0, configured_review_first("PASS", "Direction: A.")[0])],
                                        git=FakeWorktrees())
         self.host.runner = recorded(self.agent)
         status, started = request("POST", "/api/runs", {"task": "turn records", "repo": self.repo,
@@ -805,7 +818,8 @@ class Runs(Scenario):
             if stage in said:
                 self.assertEqual(final, said[stage], stage)
             else:
-                self.assertIn("Direction: A.", final, "the architect's review")
+                self.assertEqual(json.loads(final), {"verdict": "PASS", "feedback": "Direction: A."},
+                                 "the architect's review, read by its kind")
 
         rdir = terminal.run_dir(run_id)
         name = terminal.turn_name("plan", entries["plan"]["episode"], entries["plan"]["round"])
@@ -866,6 +880,56 @@ class Runs(Scenario):
                       "stage=plan&episode=x&round=1", "stage=plan&episode=1"):
             self.assertEqual(request("GET", "/api/runs/%s/turn?%s" % (run_id, query))[0], 400, query)
         self.assertEqual(request("GET", "/api/runs/no-such-run/turn?stage=plan&episode=1&round=1")[0], 404)
+
+    def test_a_turn_record_is_read_by_the_kind_that_wrote_it_whatever_it_says(self):
+        """A Claude engineer's answer that quotes Codex's own events stays its answer: the run's start names
+        each role's kind, and only that kind reads the role's record."""
+        settings = S.load()
+        self.assertEqual(settings["agents"][settings["roles"]["engineer"]["agent"]]["kind"], "claude-code",
+                         "this case is a Claude engineer's")
+        quoted = ("Codex prints one event a line, for example:\n"
+                  '{"type": "thread.started", "thread_id": "example"}\n'
+                  '{"type": "item.completed", "item": {"type": "agent_message", "text": "example result"}}\n'
+                  "The reader keeps the last agent message.\n")
+        assessed, _ = configured_review_first("PASS", "Direction: A.")
+        self.host, self.agent = E.host([("plan-e1-1", 0, quoted), ("assess-e1-1", 0, assessed)],
+                                       git=FakeWorktrees())
+        self.host.runner = recorded(self.agent)
+        run_id = self.start("quotes codex events")
+        body = self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "approval")
+        entries = {entry["stage"]: entry for entry in body["timeline"]}
+        [plan] = request("GET", turn_path(run_id, entries["plan"]))[1]["attempts"]
+        self.assertEqual(plan["output"], quoted)
+        self.assertNotIn("message", plan, "Claude's answer is its record, read by no other kind")
+        [assess] = request("GET", turn_path(run_id, entries["assess"]))[1]["attempts"]
+        self.assertEqual(json.loads(assess["message"]), {"verdict": "PASS", "feedback": "Direction: A."},
+                         "control: the Codex architect's record, read by Codex")
+
+    def test_a_continued_turn_never_shows_the_failed_attempts_retry_as_its_own(self):
+        """A resumed turn whose session is lost is retried in a fresh one; when that fails too, Continue runs
+        the turn again under the same name. The failed attempt's retry stays on disk, never shown as the new
+        turn's."""
+        patch, _ = configured_review_first("PATCH", "name the test")
+        lost = "No conversation found with session ID\n"
+        self.host, self.agent = E.host([
+            ("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, patch),
+            ("plan-e1-2", 1, lost), ("plan-e1-2-rehydrated", 1, "the fresh session failed\n"),
+            ("plan-e1-2", 0, "revised\n"), ("assess-e1-2", 0, configured_review_resumed("PASS"))],
+            git=FakeWorktrees())
+        self.host.runner = recorded(self.agent)
+        run_id = self.start("continue after a lost session")
+        failed = self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "failed")
+        status, answered = request("POST", "/api/runs/%s/answer" % run_id,
+                                   {"stop": failed["stop"]["id"], "action": "continue"})
+        self.assertEqual(status, 200, answered)
+        body = self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "approval")
+        [entry] = [entry for entry in body["timeline"] if entry["stage"] == "plan" and entry["round"] == 2]
+        attempts = request("GET", turn_path(run_id, entry))[1]["attempts"]
+        self.assertEqual([(each["attempt"], each["output"]) for each in attempts], [("original", "revised\n")],
+                         "only the turn that ran")
+        retry = terminal.turn_files(terminal.run_dir(run_id), terminal.turn_name("plan", 1, 2) + terminal.RETRIED)
+        with open(retry["out"], encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "the fresh session failed\n", "the failed attempt's retry is kept")
 
     def test_start_list_review_and_answer_a_run(self):
         a1, _ = configured_review_first("PASS", "Direction: A.")

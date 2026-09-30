@@ -158,6 +158,20 @@ async def execution(client, run_id):
         raise
 
 
+async def started(client, run_id):
+    """What a run was started with — its policy, each role's kind among it — as Temporal recorded that start,
+    whatever the settings say now; None when Temporal holds no such run."""
+    try:
+        async for event in client.get_workflow_handle(run_id).fetch_history_events(page_size=1):
+            payloads = event.workflow_execution_started_event_attributes.input.payloads
+            return (await client.data_converter.decode(payloads))[0]
+    except RPCError as error:
+        if error.status == RPCStatusCode.NOT_FOUND:
+            return None
+        raise
+    return None
+
+
 def view(listed, status, health):
     """What a run is now — the one reading every surface shows, derived from facts that exist.
 

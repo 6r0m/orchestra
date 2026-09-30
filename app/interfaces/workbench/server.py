@@ -76,7 +76,7 @@ STATUS_SECONDS = datetime.timedelta(seconds=5)
 
 def agent_prompt(view, rdir=None):
     """Whether the active turn has reported a vendor dialog still waiting in its terminal, as its kind reads
-    the turn's events — those of its retry in a fresh session when that is the newer."""
+    the turn's events — those of its retry in a fresh session when that is this turn's and the newer."""
     if view.get("state") != "running" or view.get("stage") not in stages.STAGE_ROLE:
         return False
     episode, round_number = view.get("episode"), view.get("round")
@@ -84,7 +84,7 @@ def agent_prompt(view, rdir=None):
         return False
     rdir = rdir or terminal.run_dir(view["run_id"])
     name = terminal.turn_name(view["stage"], episode, round_number + 1)
-    files = [terminal.turn_files(rdir, name + suffix)["events"] for suffix in ("", terminal.RETRIED)]
+    files = [attempt["events"] for attempt in terminal.turn_attempts(rdir, name)]
     if os.path.islink(rdir) or os.path.islink(os.path.dirname(files[0])):
         return False
     try:
@@ -434,8 +434,16 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
                     or len(episode) > 9 or len(round_number) > 9
                     or int(episode) < 1 or int(round_number) < 1):
                 return HTTPStatus.BAD_REQUEST, {"error": "name a completed turn by stage, episode and round"}
-            if call(lambda client: runs.execution(client, run_id)) is None:
+            start = call(lambda client: runs.started(client, run_id))
+            if start is None:
                 return HTTPStatus.NOT_FOUND, {"error": "no run %r" % run_id}
+            # The kind that wrote the turn's record reads it: the run's own, as its start names it — never
+            # whichever kind would take the record's words for its own.
+            role = ((start.get("policy") or {}).get("roles") or {}).get(stages.STAGE_ROLE[stage])
+            try:
+                kind = adapters.for_role(role) if role else None
+            except adapters.Refused:
+                kind = None
 
             rdir = terminal.run_dir(run_id)
             name = terminal.turn_name(stage, int(episode), int(round_number))
@@ -443,9 +451,8 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
             if os.path.islink(rdir) or os.path.islink(logs):
                 raise runs.Refusal("the turn's log directory cannot be followed through a link")
             attempts = []
-            for suffix in ("", terminal.RETRIED):
-                files = terminal.turn_files(rdir, name + suffix)
-                record = {"attempt": "retried with a new session" if suffix else "original"}
+            for index, files in enumerate(terminal.turn_attempts(rdir, name)):
+                record = {"attempt": "retried with a new session" if index else "original"}
                 for key, ext in (("input", "prompt"), ("output", "out")):
                     path = files[ext]
                     if os.path.islink(path):
@@ -458,10 +465,9 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
                         record[key] = saved.decode("utf-8")
                     except FileNotFoundError:
                         record[key] = None
-                if record["output"] is not None:
-                    # Read back by the kind whose record it is; a record that is its answer already has none.
-                    message = adapters.recorded_message(record["output"])
-                    if message is not None and message != record["output"]:
+                if record["output"] is not None and kind is not None:
+                    message = kind.final_message(record["output"])
+                    if message != record["output"]:
                         record["message"] = message
                 if record["input"] is not None or record["output"] is not None:
                     attempts.append(record)

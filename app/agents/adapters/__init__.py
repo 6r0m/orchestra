@@ -185,15 +185,6 @@ def waiting(events):
     return any(module.waiting(events) for module in usable() if hasattr(module, "waiting"))
 
 
-def recorded_message(out):
-    """A finished turn's answer read back from what it left alone, by the kind whose record names its own
-    session there; None when no kind's does — a record that is its answer already."""
-    for module in usable():
-        if module.session(out, None):
-            return module.final_message(out)
-    return None
-
-
 def skill(module, name):
     """A stage's skill as `module`'s kind invokes it, or None when that kind takes none."""
     return module.SKILL.format(name=name) if module.SKILL and name else None

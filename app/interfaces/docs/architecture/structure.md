@@ -43,8 +43,10 @@ hook events — Claude's; Codex reports none — and the workflow still owns act
 
 There is no facade here: the CLI reads a repository descriptor and the page reads a
 terminal record directly. A completed turn's prompt and final output are read on demand from
-the worker's local logs; the workflow's timeline stays compact. An indirection to hide those
-records would buy nothing.
+the worker's local logs; the workflow's timeline stays compact. Its final message is read by the
+kind that wrote it, as the run's start in Temporal names each role's, never guessed from the
+record's words; and a retry an earlier attempt left under the turn's name, before a Continue ran
+it again, is not shown as the turn's. An indirection to hide those records would buy nothing.
 
 ## Invariants
 
