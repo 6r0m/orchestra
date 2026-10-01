@@ -98,16 +98,24 @@ full live session.
 - **A1 [RESOLVED by D5]:** Q2 as asked. Every capability stays reachable: a Stop that cannot finish makes the run
   stopping, which offers Force terminate; a run whose status cannot be read is shown working, with both.
 - **A2 [RESOLVED by D6]:** Q3 as asked: no new state and no new record; a pruned tree is said to be gone.
-- **A3 [ACTIVE]:** no workflow change, no change to the turn logs a host writes, no change to any prompt.
+- **A3 [REJECTED by evidence]:** no workflow change, no change to the turn logs a host writes, no change to any
+  prompt. — A prompt's parts must come from `compose_prompt` itself and still reach the page, which needs them
+  recorded beside the prompt (external review, 2026-10-01). A6 replaces it.
 - **A4 [ACTIVE]:** the viewer opens a file whole by default (D1), its unchanged runs folded to three lines around
   each change and each fold a click away; a file over a size bound opens with its changes only and says so.
-- **A5 [ACTIVE]:** the Change section carries "Open in VS Code": a link that opens the run's worktree in VS Code,
+- **A5 [REJECTED by evidence]:** the Change section carries "Open in VS Code": a link that opens the run's worktree in VS Code,
   whose Source Control view lists the uncommitted change with its own diff. A plain `vscode://` link the browser
-  and VS Code each confirm; the server launches nothing.
+  and VS Code each confirm; the server launches nothing. — D1 asks the page itself to show the diff; an editor
+  hand-off is a follow-up, not this change (external review, 2026-10-01).
+- **A6 [ACTIVE]:** no workflow change and no change to any prompt's bytes. A turn's record gains one file beside
+  its prompt: the prompt's parts as `compose_prompt` built them. A turn recorded before that shows its exact
+  prompt, unsplit.
 
 ## Non-goals
 
-- No change to the workflow, what a stop offers, the turn logs, or the prompts (A3); no new run (D4).
+- No change to the workflow, what a stop offers, or a prompt's bytes (A6); no new run (D4).
+- Not in this change, each waiting for a need shown in use: a side-by-side view, syntax colours, an "Open in VS
+  Code" hand-off (A5).
 - No server-side cache, history store or push channel.
 - No review features beyond reading: no comments, staging or editing; no token or cost figures, which no record
   holds today.
@@ -158,6 +166,16 @@ full live session.
    worker reads it, keeping the worktree and branch (`client.stop`).
 10. **`make demo`** presses Stop run on waiting and working runs, Force terminate only on a run already stopping,
     and checks a merged run offers neither ([demo.py](../tools/demo.py)).
+11. **Every answer is a recorded Update.** `client.answer` sends it as the workflow's `answer` Update with the id
+    `answer:<stop-id>`, carrying the stop, the action, the role a revise names, its words and any confirmation
+    ([client.py](../app/application/client.py) `answer`, [workflow.py](../app/orchestration/workflow.py)
+    `FeatureRun.answer` and its validator). An accepted Update's event keeps its request
+    (`WorkflowExecutionUpdateAcceptedEventAttributes.accepted_request`, installed temporalio 1.33.0); one the
+    validator refuses never enters the history.
+12. **The patch's parts carry one identity.** `review_diff` returns a `snapshot` hash of the whole patch, and the
+    page reads its parts again from the start rather than join parts of two changes (`loadDiff` in
+    [change.js](../app/interfaces/workbench/static/change.js)). Its private index's tree (`git write-tree`, as
+    `worktrees.work_tree` makes one) names the same change as an object git can read later.
 
 ### Research (2026-10-01, primary sources; not yet measured here)
 
@@ -192,7 +210,8 @@ at a time. None diffs a turn's input against the one before.
 ### Inferences
 
 - A per-file read is cheap for git: `git diff --numstat -z` gives exact, unquoted paths and counts; `git diff
-  -U<n> -- <path>` gives one file whole.
+  -U<n> -- <path>` gives one file whole. Read between the base commit and the snapshot's tree, every read names the
+  same change whatever the live worktree does meanwhile.
 - An engineer turn's change is the difference between the tree the review before it judged (or the worktree's
   base) and the tree the review after it judged — both already recorded (fact 8).
 - Judged trees are unreferenced git objects; `git gc` may prune them after its expiry (two weeks by default), so
@@ -215,6 +234,9 @@ at a time. None diffs a turn's input against the one before.
   logs, attributed by the run's start (the UX todo's D7); the run's Temporal history records every activity's
   input and result (fact 8).
 - A prompt's shape is `compose_prompt`'s alone (fact 6).
+- Who owns what this change shows: Temporal the workflow's sequence and state, its Updates and its activities'
+  inputs and results; the host's turn logs a turn's exact prompt and vendor output; the vendor its conversation;
+  git the code, every tree and the change.
 
 ## Problem and root cause
 
@@ -229,19 +251,24 @@ at a time. None diffs a turn's input against the one before.
 
 ### Change view
 
-- **Server:** `review_diff` also returns the files — exact path, old path on a rename, status, lines added and
-  removed, binary — from `git diff --cached --numstat -z` and `--name-status -z` on the same private index. A
-  read naming one path returns that file's diff whole (`-U<its length>`), or its changes only on request or past
-  a size bound (A4). Both go through `ReviewDiff` as today, with optional arguments.
-- **Page:** the file list replaces the stat — directory quiet, file name in ink, never cut, status and counts at
-  the right. A click opens the file in the viewer, with Line by line / Side by side and Whole file / Changes
-  only. The raw patch moves into a bounded box, about ten lines, with Copy (D2).
-- **Viewer (D7):** the page's own, over git's whole-file diff of one file: the server sends that file with all
-  its context (`--unified` at least its length), the page parses the ` `, `+`, `-` and `\` lines, numbers old and
-  new lines, and builds every row with `textContent`. Added lines green, removed red; runs of unchanged lines
-  folded to three either side of a change, each fold a button that opens in place (A4); Line by line or Side by
-  side, where a run of removed lines pairs with the added lines after it. About 250 lines in one module, no
-  dependency. Syntax colours are the one gap — VS Code, a click away (A5), has them.
+- **One snapshot.** A change read makes the private index's tree (`git write-tree`) and returns it with the base
+  commit as the change's identity; every later read names that pair and is read from it — the file list, one
+  file, each part of the patch, and Copy. The live worktree moving meanwhile changes nothing already shown; Read it
+  again makes a new snapshot. Paths and object names are checked: a path must be one of that snapshot's files,
+  and is passed as a literal pathspec.
+- **Server:** `review_diff` returns the base, the tree and the files — exact path, old path on a rename, status,
+  lines added and removed, binary — from `git diff --numstat -z` and `--name-status -z` between them, in place of
+  the stat. A read naming one path returns that file's diff whole (`--unified` at least its length), or its changes
+  only past a size bound, said so (A4). All of it goes through `ReviewDiff`, with optional arguments.
+- **Page:** the file list replaces the stat — directory quiet, file name in ink, never cut, counts at the right.
+  A rename reads `old/path → new/path`; a new or deleted file opens like any other; a binary file is listed with
+  its status and says "Binary file — no text diff". A click opens the file in the viewer.
+- **Viewer (D7):** the page's own, one unified diff of one file: the page parses the ` `, `+`, `-` and `\` lines,
+  numbers old and new lines, and builds every row with `textContent`. Added lines green, removed red; runs of
+  unchanged lines folded to three either side of a change, each fold a button that opens in place (A4). One module,
+  no dependency.
+- **Raw patch (D2):** a bounded box of about ten lines, with Copy patch, which copies the complete patch of the
+  snapshot — every part, however many, read from the same tree.
 - **Why not a library (D7's search):** no ready-made viewer meets all three of this page's needs at once — loads
   with no build step, folds a whole file's unchanged runs, and keeps file text out of `innerHTML`. diff2html loads
   as a plain script but folds nothing and inserts escaped HTML; @pierre/diffs, the closest to VS Code, needs a
@@ -249,9 +276,6 @@ at a time. None diffs a turn's input against the one before.
   through React, Vue, Solid or Svelte ([Research](#research-2026-10-01-primary-sources-not-yet-measured-here)).
   diff2html's base bundle (~107 KB, no colours) stays the fallback, at the cost of an `innerHTML` exception and no
   folding.
-- **Open in VS Code (A5):** `vscode://file/<worktree>` for a Windows worktree; for a WSL one, VS Code's remote form
-  for the distribution and path, its exact spelling checked on the installed VS Code when built. VS Code asks
-  before opening such a link (since 1.84), and Edge asks before handing it on.
 
 ### History
 
@@ -275,15 +299,18 @@ Plan
   Collapsed it shows two lines; nothing opens by default.
 - **Received** is the turn's own new prompt — the vendor holds what came before — in labelled parts: the skill;
   the task and the persona, collapsed and marked "as the run started", on a session's first turn; the stage's
-  instructions; and each part carried in under its heading's plain name (the research brief to check, findings to
-  address, your guidance, a reflection or handoff). The exact prompt stays one click away, with Copy. The parts
-  come from one function beside `compose_prompt`, which owns those headings, and the run's start for the task and
-  persona; anything it cannot place shows as it is.
+  instructions; and each part carried in under a plain name (the research brief to check, findings to address,
+  your guidance, a reflection or handoff). The exact prompt stays one click away, with Copy. `compose_prompt`
+  builds the parts first and renders the prompt from them, byte for byte as today; the turn's record keeps the
+  parts beside the prompt (A6), and the page shows parts only when they render to the recorded prompt — otherwise,
+  and for a turn recorded before, the exact prompt unsplit.
 - **Produced** is the turn's final message, read by its kind: the brief, the plan's account, or the verdict and
   findings. An engineer turn adds the files it changed that round, from the trees the reviews before and after it
   judged (D6); a click opens them in the same viewer. A retry in a fresh session nests under its turn.
-- **Your answers are rows**, in your colour, between the turns they separate: approved, revised or guided — with
-  the words, read from the `# Operator guidance` part of the turn they fed — a Continue, a merge.
+- **Your answers are rows**, in your colour, at the time you gave them: each accepted `answer:<stop-id>` Update in
+  the run's Temporal history (fact 11) — approve, revise (to which role) or guide with your words, continue, merge
+  or discard. An answer no turn followed is a row all the same. The next turn's Received shows, on its own, how
+  your words reached its role.
 - **Said once.** The separate "The research brief" / "The review findings" disclosures and the nested "Recorded
   input and output" go; the decision above keeps the current evidence, and its turn below says "shown above".
 - Bodies load on demand, as today; terminals stay the live, full view.
@@ -309,14 +336,17 @@ action of its own ([GitHub Docs](https://docs.github.com/en/pull-requests/collab
 
 ### Premise / KISS gate
 
-- **Owners:** the run's host's git owns the change and every tree; `compose_prompt` owns a prompt's shape;
-  Temporal owns what each turn was given and returned; the page only shows them.
-- **Adds:** a file list and a per-file read on the existing `ReviewDiff` path; one diff-rendering module; one
-  prompt-parts function; one read of judged trees from history; one link (A5). No dependency.
+- **Owners:** Temporal the workflow's sequence and state, its Updates and its activities' inputs and results;
+  the host's turn logs a turn's exact prompt and vendor output; the vendor its conversation; git the code, every
+  tree and the change; `compose_prompt` a prompt's shape and parts. The page combines them and owns none.
+- **Adds:** a change snapshot (base and tree) that every change read names; a file list and a one-file read on the
+  existing `ReviewDiff` path; one diff-rendering module; prompt parts built by `compose_prompt` and recorded beside
+  the prompt; one read of the run's history for judged trees and answers. No dependency.
 - **Removes:** the stat block, the full-height patch as the reading surface, the duplicated History texts and the
   nested turn record; Force terminate at a stop.
-- **Given up, knowingly:** turn tokens and cost (no record holds them); a judged tree pruned by `git gc` (said, not
-  rebuilt); a timeline or graph view — a fixed loop reads best as a transcript.
+- **Given up, knowingly:** turn tokens and cost (no record holds them); a judged tree or a snapshot pruned by
+  `git gc` (said, not rebuilt); prompt parts for turns recorded before this change; a side-by-side view and syntax
+  colours until use shows the need; a timeline or graph view — a fixed loop reads best as a transcript.
 
 ### Alternatives considered
 
@@ -327,11 +357,18 @@ action of its own ([GitHub Docs](https://docs.github.com/en/pull-requests/collab
   against architecture D29's no-build page; @pierre/diffs also builds HTML strings and may need WASM.
 - **A terminal diff (delta, difftastic) shown in xterm.js.** A binary to install on every host; fixed width;
   nothing folds.
-- **The server launching VS Code (`code --diff`, `git difftool --tool=vscode`).** VS Code's own diff of one file,
-  but the Workbench would start processes on the operator's desktop from a page request, and from WSL for a
-  Windows worktree. The link (A5) gives the same window with the browser's and VS Code's own consent.
-- **Recording each turn's parts, trees and answers as new state or logs.** Duplicates what Temporal and the turn
-  logs already hold, and would not cover the saved run (D4). Rejected (A3).
+- **Handing off to VS Code** — a `vscode://` link, `code --diff`, `git difftool --tool=vscode`. Its own diff and
+  colours, but not what D1 asks — the page showing the change — and each form has a cross-host detail to own.
+  Deferred (A5).
+- **Parsing the recorded prompt into parts.** A second grammar beside `compose_prompt`'s headings, which would
+  drift from it. Rejected: the composer builds the parts once (external review).
+- **Reading an answer's words from the next prompt.** Indirect, and blind to approve, continue, merge, discard, an
+  answer's time and an answer no turn followed. Rejected: the run's history holds each answer (fact 11).
+- **Checking a later read against the list's snapshot and refusing.** Correct, but every click recomputes the
+  whole diff and a live worktree turns clicks into refusals; reading from the snapshot's tree never mixes and never
+  refuses.
+- **Recording trees or answers as new workflow state.** Duplicates what Temporal and git already hold, and would
+  not cover the saved run (D4).
 - **Langfuse as the history.** It is optional observability (architecture's rule); the page must stand alone.
 
 ## Required invariants
@@ -339,30 +376,34 @@ action of its own ([GitHub Docs](https://docs.github.com/en/pull-requests/collab
 1. Architecture D29 holds: the page reads the Workbench API and holds no run state; reads stay reads.
 2. Run text reaches the DOM only as text, in the diff viewer too.
 3. A run's change and every tree are read by the run's own host's git, as today.
-4. Every capability stays reachable: each answer, Stop run, Force terminate (working or stopping), the whole patch
+4. One change, one snapshot: the file list, a file, every patch part and Copy patch name the same base and tree;
+   nothing joins two snapshots.
+5. A prompt's bytes are unchanged: the parts `compose_prompt` builds render to exactly the prompt it makes today.
+6. Every capability stays reachable: each answer, Stop run, Force terminate (working or stopping), the whole patch
    and its copy, every turn's exact prompt and output.
-5. Nothing is attributed to the wrong turn or kind: the run's start names each role's kind; a retry older than its
-   turn's prompt is not the turn's; an answer's words belong to the turn they fed.
-6. The saved run and its worktree are not changed (D4); every check uses fixtures, the suite's fake agents or the
+7. Nothing is attributed to the wrong turn or kind: the run's start names each role's kind; a retry older than its
+   turn's prompt is not the turn's; an answer is the Update the run accepted, at the time it accepted it.
+8. The saved run and its worktree are not changed (D4); every check uses fixtures, the suite's fake agents or the
    demo's own runs.
 
 ## Implementation tasks
 
-1. [ ] Red evidence first ([below](#red-evidence)).
-2. [ ] **Change, server:** the file list and the one-file read in `review_diff`, through `ReviewDiff`'s optional
-   arguments; the file list replaces the stat in the API's answer.
+1. [ ] Red evidence first ([below](#red-evidence)); capture today's prompts for the byte-equality guard before
+   `compose_prompt` changes.
+2. [ ] **Change, server:** the snapshot (base and tree), the file list and the one-file read in `review_diff`,
+   every read from the snapshot, through `ReviewDiff`'s optional arguments; paths checked against the snapshot.
 3. [ ] **Run controls** ([Decision](#run-controls-at-a-stop), D5).
-4. [ ] **Change, page:** the file list, the viewer module (D7, A4) and the compact patch with Copy; the "Open in
-   VS Code" link (A5); the new module in `STATIC`.
-5. [ ] **Prompt parts:** the function beside `compose_prompt`, proven against prompts `compose_prompt` makes; the
-   turn route returns the parts with the exact prompt.
-6. [ ] **Round changes (D6):** read each review's judged tree from the run's history in
-   [client.py](../app/application/client.py); a route lists an engineer turn's files and reads one of them through
-   `ReviewDiff` with the two trees; a pruned tree is said.
+4. [ ] **Change, page:** the file list with renames and binaries said, the viewer module (D7, A4), the bounded
+   patch with Copy patch of the whole snapshot; the new module in `STATIC`.
+5. [ ] **Prompt parts:** `compose_prompt` builds parts and renders from them; the runner records them beside the
+   prompt; the turn route returns them when they render to the recorded prompt.
+6. [ ] **The run's history:** in [client.py](../app/application/client.py), one read of the run's events yields
+   each review's judged tree and each accepted answer; a route lists an engineer turn's files from the trees
+   around it and reads one through `ReviewDiff`; a pruned tree is said.
 7. [ ] **History:** turns as rows, Received and Produced, your answers as rows, retries nested, duplicates removed
    ([Decision](#history)).
-8. [ ] **Acceptance:** `make demo` opens a changed file in the viewer and reads a known line, and a build turn's
-   changed file; consumers updated for any changed label.
+8. [ ] **Acceptance:** `make demo` opens a changed file in the viewer and reads a known line, a build turn's
+   changed file, and an answer row; consumers updated for any changed label.
 9. [ ] **Docs** ([plan](#documentation-plan)); `web-design-review` on every changed page file; the
    `frontend-design` critique on fixture captures at 1600, 1280, 900 and 390 px.
 10. [ ] The verification matrix, the agents' round, the external review, the full suites — the operator's order.
@@ -373,12 +414,17 @@ action of its own ([GitHub Docs](https://docs.github.com/en/pull-requests/collab
 
 | case | kind | today |
 |---|---|---|
-| the API lists each changed file by its exact path — a long one, one with a space, a rename | permanent guard, `test_worktrees` on a real repository | only the stat, its long path cut |
+| the API lists each changed file by its exact path — a long one, one with a space, a rename, a binary | permanent guard, `test_worktrees` on a real repository | only the stat, its long path cut |
 | a one-file read returns that file whole and nothing else | permanent guard, `test_worktrees` | no such read |
-| prompt parts: each prompt `compose_prompt` makes (first turn, later turn, research, review, with guidance) splits into its parts and joins back to the same bytes | permanent guard, beside `compose_prompt`'s own tests in `test_workflow` | no parts |
-| a round's engineer turn lists the files between the judged trees around it, through the real workflow's history | permanent guard, `test_workbench` on the time-skipping server | no round changes |
+| the worktree changes after the list is read: the file read, the next patch part and the whole patch still come from the listed snapshot | permanent guard, `test_worktrees` | parts re-read from the start; no file read |
+| a patch larger than `PATCH_CHUNK` read whole for Copy equals `git diff` of the snapshot, byte for byte | permanent guard, `test_worktrees` | only the parts read so far exist on the page |
+| a path not in the snapshot, or one that is pathspec magic, is refused | permanent guard, `test_worktrees` | — |
+| prompt bytes: every prompt in a captured matrix of today's `compose_prompt` (first and later turns, research, plan, review, brief, findings, guidance, reflection, handoff) is reproduced byte for byte, and its parts render to it | permanent guard, beside `compose_prompt`'s tests in `test_workflow` | no parts |
+| a turn's record holds its parts, and the route returns them; a turn without them returns its prompt unsplit | permanent guard, `test_workbench` | — |
+| each accepted answer — approve, revise with words to one role, continue, discard — is a row with its action, words and time, one no turn followed included; a refused answer is not | permanent guard, `test_workbench` on the time-skipping server | answers absent |
+| a round's engineer turn lists the files between the judged trees around it | permanent guard, `test_workbench` | no round changes |
 | a judged tree that is gone is said gone | permanent guard, `test_worktrees` | — |
-| a file whose text is markup (`<img src=x onerror=…>`) shows as text in the viewer, every line numbered and its unchanged runs folded | acceptance, fixture page; `make demo` reads a known line of a changed file | no viewer |
+| a file whose text is markup (`<img src=x onerror=…>`) shows as text in the viewer, every line numbered and its unchanged runs folded; a rename and a binary said | acceptance, fixture page; `make demo` reads a known line of a changed file | no viewer |
 | a waiting run offers no Force terminate; a stopping one does | acceptance, `make demo` | both shown while waiting |
 | History shows each fact once, its answers as rows, at the four widths | reviewer-checked, fixture captures | duplicates (fact 5) |
 
@@ -400,7 +446,7 @@ action of its own ([GitHub Docs](https://docs.github.com/en/pull-requests/collab
 
 - Tasks 1–10 done; every red case seen red, then green.
 - `make demo` passes whole; the History and Change captures reviewed at four widths; `web-design-review` clean.
-- No change to the workflow, the turn logs, the prompts or the saved run.
+- No change to the workflow, any prompt's bytes or the saved run; the turn logs gain only the parts file (A6).
 
 ## Review record
 
@@ -421,3 +467,15 @@ action of its own ([GitHub Docs](https://docs.github.com/en/pull-requests/collab
 - **Q2:** `web-design-review` on today's controls, and Jenkins', GitHub's force actions and GitHub's close without
   merging; the result is [Run controls at a stop](#run-controls-at-a-stop).
 - **Authority:** D5–D7 added; Q1–Q3 closed; A1, A2 resolved; A5 added.
+
+### 2026-10-01 — external review of the design: PATCH
+
+- **Accepted, each checked against the code:** answers read from the run's accepted `answer:<stop-id>` Updates
+  (fact 11), not from the next prompt; prompt parts built by `compose_prompt` and rendered from, with a byte-equality
+  guard, not parsed back; one snapshot for the list, each file, each patch part and Copy — read from the snapshot's
+  tree, the reviewer's first option, rather than refusing; one unified view, side by side deferred; Open in VS Code
+  dropped (A5); Copy patch copies the whole snapshot, with a guard past `PATCH_CHUNK`; renames and binaries said;
+  ownership worded as the architecture states it.
+- **Made explicit:** parts can reach the page only if recorded beside the prompt, so A3 gives way to A6; a turn
+  recorded before shows its exact prompt unsplit — the saved run among them.
+- **Authority:** A3 and A5 rejected by evidence; A6 added.
