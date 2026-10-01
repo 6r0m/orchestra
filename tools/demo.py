@@ -388,6 +388,14 @@ class Demo:
               "the build turn's change since the review before it opens the same file, read from the trees the "
               "reviews judged")
         check(self.press(merged, "history", "you approved the plan"), "the history shows your approval as a row")
+        # The plan was sent back once: its second round only named the test, so its change is that line alone —
+        # the first round's lines are context, read from the tree the PATCH review recorded.
+        plan = self.api("/api/runs/%s" % merged)["state"]["plan"].replace(os.sep, "/")
+        check(self.press(merged, "round:plan:" + plan, "Test: greeting.txt says hello.")
+              and "+ Test: greeting.txt says hello." in self.said,
+              "the plan's second round shows the line it added in answer to the PATCH as added")
+        check(self.press(merged, "round:plan:" + plan, "# Add a greeting") and "+ # Add a greeting" not in self.said,
+              "and the first round's lines as unchanged context: after a PATCH, only that round's own change")
 
         step("the change merged by pressing Merge")
         check(self.press(merged, "turn-then:verify:Merge", "answered: merge"),
@@ -401,7 +409,7 @@ class Demo:
               "the base branch holds the change")
         check(self.press(merged, "absent:Stop run,Force terminate", "absent"),
               "the page offers the closed run neither Stop run nor Force terminate")
-        check(self.press(merged, "turn:verify", "PASS The change is the approved plan."),
+        check(self.press(merged, "turn:verify", "The change is the approved plan.") and "PASS" in self.said,
               "the page opens the verify turn and shows its verdict and feedback, read from the record its host "
               "wrote")
 

@@ -424,16 +424,20 @@ function drawHistory() {
   const roleOf = (stage) => (steps.find((step) => step.endsWith(":" + stage)) || "").split(":")[0]
     || STAGE_ROLES[stage];
   const turns = new Map(record.turns.map((turn) => [turnKey(turn), turn]));
-  // Your answers fall between the turns by when the run accepted them.
-  const items = [];
-  let next = 0;
-  for (const entry of timeline) {
-    while (next < record.answers.length && Date.parse(record.answers[next].at) < Date.parse(entry.at)) {
-      items.push({ answer: record.answers[next++] });
-    }
-    items.push({ entry: entry });
+  // Your answers follow the turn the run's history says each came after, in the history's own order; one after a
+  // turn the timeline does not show yet comes last.
+  const following = new Map();
+  for (const answer of record.answers) {
+    following.set(answer.after || "", [...(following.get(answer.after || "") || []), answer]);
   }
-  while (next < record.answers.length) items.push({ answer: record.answers[next++] });
+  const answersAfter = (key) => {
+    const found = following.get(key) || [];
+    following.delete(key);
+    return found.map((answer) => ({ answer: answer }));
+  };
+  const items = answersAfter("");
+  for (const entry of timeline) items.push({ entry: entry }, ...answersAfter(historyKey(entry)));
+  for (const key of [...following.keys()]) items.push(...answersAfter(key));
 
   const shown = [];
   if (record.said) shown.push(el("p", record.said, "hint"));
@@ -458,7 +462,18 @@ function drawHistory() {
 }
 
 function turnKey(turn) {
-  return "turn:" + turn.stage + ":" + turn.episode + ":" + turn.round;
+  return "turn:" + historyKey(turn);
+}
+
+// A turn as the run's history names it.
+function historyKey(turn) {
+  return turn.stage + ":" + turn.episode + ":" + turn.round;
+}
+
+// A turn named as the run's history names it, said: "build, round 2".
+function turnSaid(key) {
+  const [stage, , round] = key.split(":");
+  return stage + ", round " + round;
 }
 
 function firstLine(text) {
@@ -613,34 +628,37 @@ function refreshProduced(body, entry) {
   for (const shown of body.querySelectorAll(":scope > .attempt > .produced, :scope > .produced")) {
     const index = Number(shown.dataset.attempt);
     const counted = !attempts.length || index === attempts.length - 1;
-    shown.replaceWith(produced(attempts[index] || { input: null, output: null }, counted ? entry : null, index));
+    const opened = Boolean(shown.querySelector(":scope > details.turn-output[open]"));
+    shown.replaceWith(produced(attempts[index] || { input: null, output: null }, counted ? entry : null, index,
+      opened));
   }
 }
 
 // What the turn gave back: the run's own record of it — the brief, the verdict and findings — for the attempt that
-// counted, else what its record holds; said once, so the decision's evidence is pointed to, not repeated.
-function produced(attempt, entry, index) {
+// counted, else what its record holds; said once, so the decision's evidence is pointed to, not repeated. Closed, as
+// its prompt is, its verdict and first line in its summary; `opened` keeps it open when it is drawn again.
+function produced(attempt, entry, index, opened) {
   const box = el("div", null, "produced");
   box.dataset.attempt = index;
-  const label = el("div", null, "produced-label");
-  label.appendChild(el("h4", "Produced"));
-  box.appendChild(label);
+  box.appendChild(el("h4", "Produced"));
   const message = attempt.message ?? attempt.output;
   const review = entry && entry.verdict ? { verdict: entry.verdict, feedback: entry.feedback || "" }
     : reviewOutput(message);
   const text = review ? review.feedback : (entry && entry.brief) || message;
   if (text && shownAbove.has(text)) {
     box.appendChild(el("p", "Shown above, in the decision.", "hint"));
+  } else if (text === null || text === undefined) {
+    box.appendChild(el("p", "No local record of its answer.", "hint"));
+  } else if (!text && !review) {
+    box.appendChild(el("p", "The record holds no final message.", "hint"));
   } else {
-    if (review) box.appendChild(el("span", review.verdict, "verdict " + review.verdict));
-    if (text === null || text === undefined) {
-      box.appendChild(el("p", "No local record of its answer.", "hint"));
-    } else if (!text) {
-      box.appendChild(el("p", "The record holds no final message.", "hint"));
-    } else {
-      label.appendChild(copyButton(review ? review.verdict + "\n\n" + text : text, "what it produced"));
-      box.appendChild(el("div", text, "turn-prose"));
-    }
+    const output = el("details", null, "turn-output");
+    const summary = el("summary");
+    if (review) summary.append(el("span", review.verdict, "verdict " + review.verdict), " ");
+    summary.appendChild(el("span", text ? firstLine(text) : "no findings", "first-line"));
+    output.append(summary, field(review ? review.verdict + "\n\n" + text : text, "what it produced", text));
+    output.open = Boolean(opened);
+    box.appendChild(output);
   }
   if (attempt.output !== null && attempt.output !== undefined && attempt.output !== message) {
     const raw = el("details", null, "turn-raw");
@@ -672,9 +690,8 @@ function reviewOutput(message) {
   }
 }
 
-// An engineer turn's change as the reviews around it judged it: from the tree the review before it judged — or the
-// worktree's last commit, before any — to the tree the review after it judged. The worktree is live, so it is the
-// change that review judged, not proof of who wrote each line.
+// An engineer turn's change as the run's history pairs it with the reviews around it (`client.history`). The worktree
+// is live, so it is the change that review judged, not proof of who wrote each line.
 function roundChange(entry, runId) {
   const box = el("details", null, "round-change");
   box.dataset.historyDetail = "change:" + turnKey(entry);
@@ -688,43 +705,39 @@ function roundChange(entry, runId) {
 }
 
 async function loadRoundChange(entry, runId, box, summary, body) {
-  const turns = record.turns;
-  const index = turns.map(turnKey).lastIndexOf(turnKey(entry));
-  const reviewed = (turn) => turn && ["assess", "verify"].includes(turn.stage);
-  if (index < 0) {
-    body.replaceChildren(el("p", record.said || "The run's history is still being read; close this and open it "
-      + "again in a moment.", "hint"));
-    return;
-  }
-  const before = turns.slice(0, index).reverse().find(reviewed);
-  const after = turns.slice(index + 1).find(reviewed);
-  if (!after) {
-    body.replaceChildren(el("p", "No review has judged this turn's change yet; Change reads the worktree as it is "
-      + "now.", "hint"));
-    return;
-  }
-  if (!after.tree || (before && !before.tree)) {
-    body.replaceChildren(el("p", "The reviews around this turn recorded no tree, so its change cannot be read back.",
-      "hint"));
-    return;
-  }
-  box.dataset.loaded = "loading";
-  body.replaceChildren(el("p", "Reading the change…", "hint"));
-  const query = { tree: after.tree };
-  if (before) query.base = before.tree;
-  try {
-    const read = await api("/api/runs/" + encodeURIComponent(runId) + "/diff?" + new URLSearchParams(query));
-    if (!box.isConnected || runId !== selected) return;
-    summary.replaceChildren("Change since the previous review",
-      el("span", read.files_total === 1 ? "1 file" : read.files_total + " files", "hint"));
-    body.replaceChildren(read.files_total ? fileList(runId, read, read.files, read.files_total)
-      : el("p", "No file changed between the two reviews.", "hint"));
-    box.dataset.loaded = "yes";
-  } catch (error) {
-    if (!box.isConnected || runId !== selected) return;
-    delete box.dataset.loaded;
-    readAgain(body, "The change cannot be read: " + error.message,
-      () => loadRoundChange(entry, runId, box, summary, body));
+  const turn = [...record.turns].reverse().find((each) => historyKey(each) === historyKey(entry));
+  const change = turn && turn.change;
+  const said = (text) => body.replaceChildren(el("p", text, "hint"));
+  if (!change) {
+    said(record.said || "The run's history is still being read; close this and open it again in a moment.");
+  } else if (change.pending) {
+    said("No review has judged this turn's change yet; Change reads the worktree as it is now.");
+  } else if (change.unrecorded) {
+    said("The review after this turn recorded no tree, so its change cannot be read back.");
+  } else if (change.with) {
+    said("Shown with " + turnSaid(change.with) + ": a review between them recorded no tree, so the two turns' "
+      + "change cannot be told apart and is shown once, there.");
+  } else {
+    box.dataset.loaded = "loading";
+    said("Reading the change…");
+    const query = { tree: change.tree };
+    if (change.base) query.base = change.base;
+    try {
+      const read = await api("/api/runs/" + encodeURIComponent(runId) + "/diff?" + new URLSearchParams(query));
+      if (!box.isConnected || runId !== selected) return;
+      summary.replaceChildren("Change since the previous review",
+        el("span", read.files_total === 1 ? "1 file" : read.files_total + " files", "hint"));
+      const together = change.turns.length > 1 ? [el("p", "The change of " + change.turns.map(turnSaid).join(" and ")
+        + " together: a review between them recorded no tree, so they cannot be told apart.", "hint")] : [];
+      body.replaceChildren(...together, read.files_total ? fileList(runId, read, read.files, read.files_total)
+        : el("p", "No file changed between the two reviews.", "hint"));
+      box.dataset.loaded = "yes";
+    } catch (error) {
+      if (!box.isConnected || runId !== selected) return;
+      delete box.dataset.loaded;
+      readAgain(body, "The change cannot be read: " + error.message,
+        () => loadRoundChange(entry, runId, box, summary, body));
+    }
   }
 }
 

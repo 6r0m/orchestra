@@ -1,6 +1,6 @@
 # Workbench run evidence: the change by file, history as what each role received and produced
 
-**Status:** IMPLEMENTED — awaiting the external review (D8). Q1–Q3 are closed by D5–D7.
+**Status:** PASS (external review) — the operator's manual check next (D8). Q1–Q3 are closed by D5–D7.
 **Scope:** the Workbench run page's Change, History and run controls ([static/](../app/interfaces/workbench/static/),
 [server.py](../app/interfaces/workbench/server.py)); the change read on the run's host
 ([worktrees.py](../app/workspace/worktrees.py) `review_diff`, the `ReviewDiff` workflow and activity); Temporal
@@ -436,8 +436,9 @@ action of its own ([GitHub Docs](https://docs.github.com/en/pull-requests/collab
    empty list drawn, a history read error with no retry, an unread history taken for "no review yet"), and
    fixture captures at 1600, 1280, 900 and 390 px (one fix: the History's part classes collided with the stack
    panel's).
-10. [ ] The external review, then the full suites — the operator's order. No review agents (operator,
-    2026-10-01: *"no need more activate tester and reviewer agents"*).
+10. [x] The external review — PATCH, fixed, then PASS — and the full suites: WSL 580 tests OK, Windows 395 OK;
+    then the stack and the Workbench restarted, and the saved run read through them unchanged, still at its final
+    gate. No review agents (operator, 2026-10-01: *"no need more activate tester and reviewer agents"*).
 
 **Verification so far** (after the implementation review's fixes): WSL `run-tests.sh` on test_worktrees,
 test_workflow, test_terminal, test_activities, test_observability, test_architecture, test_replay — 245 tests OK —
@@ -554,3 +555,18 @@ checks; the stale-Produced fix also shown by a fixture control without it; `make
 - **Refuted:** failing the step for every verdict whose tree moved — it would turn a PATCH into a failed stop the
   operator must Continue; recording no tree keeps the evidence true and the routing as it was. "Tasks 1–10 done"
   is the completion criterion, not a status.
+- **Then PASS:** both refutations accepted by the reviewer; full suites green on both hosts.
+
+### 2026-10-01 — the operator's manual check
+
+- **Produced closed, as the prompt is** (operator: *"maybe hide produced with spolier too as prompt?"*): its verdict
+  and first line in its summary, kept open across redraws — the design's own Received ▸ / Produced ▸ shape.
+- **A build turn's change on a run whose PATCH review recorded no tree** (operator: *"another files I can't see
+  from ingeneer at his turn"*): the change now runs between the nearest reviews that did record one, and says it
+  takes in the engineer's other turns between them — on the saved run, its two build rounds together.
+- **Then corrected** (operator: *"how is it possible tow equals changes? … if reviewre says patch then shouodlbe only
+  patched changes … make more proper testing for proper order with content with different flows and orders"*): the
+  fallback gave two build turns the same change. The run's history now pairs each engineer turn with its trees
+  and places each answer after the turn it followed (`client.history`); turns a tree-less review stands between are
+  shown once, on the later. Tested on crafted histories and real workflow runs in every flow and order, each turn's
+  tree pair and each answer's place stated; a mutation giving each turn the same change fails both.

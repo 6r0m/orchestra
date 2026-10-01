@@ -320,8 +320,11 @@ summary:hover { color: var(--ink); }
 .attempt + .attempt { border-top: 1px solid var(--rule); padding-top: 12px; }
 .attempt > h4 { margin: 0; font-size: 13px; font-weight: 600; }
 .received, .produced { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; min-width: 0; }
-.received > h4, .produced h4 { margin: 0; font-size: 12px; font-weight: 600; color: var(--quiet); }
-.produced-label { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.received > h4, .produced > h4 { margin: 0; font-size: 12px; font-weight: 600; color: var(--quiet); }
+.turn-output > summary { cursor: pointer; font-size: 13px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.turn-output[open] > summary .first-line { display: none; }
+.turn-output .turn-field { margin-top: 8px; }
 .prompt-parts { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 13px; }
 .prompt-parts code { font-size: 12.5px; overflow-wrap: anywhere; }
 .part-name { color: var(--quiet); }

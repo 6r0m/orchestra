@@ -106,7 +106,8 @@ LATEST_TURN = ("const turns = document.querySelectorAll("
 OPEN_TURN = ("(stage => { " + LATEST_TURN + " if (!turn) return false;"
              " if (!turn.open) turn.querySelector('summary').click(); turn.scrollIntoView(); return true; })(%s)")
 TURN_SAID = ("(stage => { " + LATEST_TURN + " const field = turn && turn.querySelector('.produced');"
-             " return field ? field.innerText.replace(/\\s+/g, ' ') : ''; })(%s)")
+             " if (!field) return ''; field.querySelectorAll('details.turn-output').forEach((d) => { d.open = true; });"
+             " return field.innerText.replace(/\\s+/g, ' '); })(%s)")
 # A changed file opened as a click on its row opens it — in the run's change, or in a turn's change since the review
 # before it, that change opened first — and the lines its diff then shows.
 OPEN_FILE = ("((scope, path) => { const box = typeof scope === 'string' ? document.querySelector(scope) : scope;"

@@ -50,10 +50,11 @@ record's words; and a retry an earlier attempt left under the turn's name, befor
 it again, is not shown as the turn's. An indirection to hide those records would buy nothing.
 
 Through `application.client` as well, on demand: the run's Temporal history — when each turn ran,
-the tree each review judged and each answer the run accepted, in the phase of the step it answered — for
-the history's turns and answers; and the change, through `ReviewDiff` on the run's host, as one snapshot
-that every later read of it names — a part of its file list, a file, a part of the patch, Copy patch —
-and a round's change as the two judged trees around it. A turn read before says again what it produced
+each engineer turn's change as the trees of the reviews around it, and each answer the run accepted, after
+the turn it followed and in the phase of the step it answered — which decides the transcript's order and
+pairing, so the page only draws them; and the change, through `ReviewDiff` on the run's host, as one
+snapshot that every later read of it names — a part of its file list, a file, a part of the patch, Copy
+patch — and a round's change as the pair of trees its turn was given. A turn read before says again what it produced
 when the decision above moves on; nothing else of it is read again.
 
 ## Invariants

@@ -614,12 +614,16 @@ class Kept(unittest.TestCase):
 
 
 class HistoryRead(unittest.TestCase):
-    """What `client.history` reads from events as Temporal writes them: a turn's time is from when a worker took
-    it, never from when it was queued, and an answer is in the phase of the step it answered."""
+    """What `client.history` reads from events as Temporal writes them, in every order a run takes: a turn's time is
+    from when a worker took it; each engineer turn's change is the one the reviews around it judged, never another
+    turn's; and each answer sits after the turn it followed, in the phase of the step it answered."""
 
     T0 = datetime.datetime(2026, 10, 1, 12, 0, tzinfo=datetime.timezone.utc)
 
-    def test_a_turn_queued_long_before_a_worker_took_it_lasts_from_its_start(self):
+    def read(self, script):
+        """The history of a run whose events are `script`'s, each step as Temporal writes it:
+        ("turn", stage, phase, episode, round, result) a role turn queued, taken and completed; ("failed", stage, phase,
+        episode, round) one that failed; ("answer", action) an accepted answer; ("wait", minutes) time passing."""
         from google.protobuf.timestamp_pb2 import Timestamp
         from temporalio.api.common.v1 import ActivityType, Payloads
         from temporalio.api.history.v1 import (ActivityTaskCompletedEventAttributes, ActivityTaskFailedEventAttributes,
@@ -628,41 +632,40 @@ class HistoryRead(unittest.TestCase):
         from temporalio.api.update.v1 import Input, Meta, Request
         from temporalio.converter import DataConverter
 
+        events, clock, stops = [], [0.0], [0]
+
         def payloads(value):
             return Payloads(payloads=E.run(DataConverter.default.encode([value])))
 
-        def event(number, minutes, **attributes):
+        def event(**attributes):
             stamp = Timestamp()
-            stamp.FromDatetime(self.T0 + datetime.timedelta(minutes=minutes))
-            return HistoryEvent(event_id=number, event_time=stamp, **attributes)
+            stamp.FromDatetime(self.T0 + datetime.timedelta(minutes=clock[0]))
+            events.append(HistoryEvent(event_id=len(events) + 1, event_time=stamp, **attributes))
+            clock[0] += 1
+            return len(events)
 
-        def scheduled(number, minutes, stage, phase, episode):
-            return event(number, minutes, activity_task_scheduled_event_attributes=ActivityTaskScheduledEventAttributes(
-                activity_type=ActivityType(name="run_role"),
-                input=payloads({"stage": stage, "state": {"phase": phase, "episode": episode, "round": 0}})))
+        def scheduled(stage, phase, episode, round_number):
+            return event(activity_task_scheduled_event_attributes=ActivityTaskScheduledEventAttributes(
+                activity_type=ActivityType(name="run_role"), input=payloads(
+                    {"stage": stage, "state": {"phase": phase, "episode": episode, "round": round_number - 1}})))
 
-        def started(number, minutes, of):
-            return event(number, minutes,
-                         activity_task_started_event_attributes=ActivityTaskStartedEventAttributes(scheduled_event_id=of))
-
-        def completed(number, minutes, of, result):
-            return event(number, minutes, activity_task_completed_event_attributes=ActivityTaskCompletedEventAttributes(
-                scheduled_event_id=of, result=payloads(result)))
-
-        def answered(number, minutes, stop, action):
-            return event(number, minutes, workflow_execution_update_accepted_event_attributes=(
-                WorkflowExecutionUpdateAcceptedEventAttributes(accepted_request=Request(
-                    meta=Meta(update_id="answer:" + stop),
-                    input=Input(name="answer", args=payloads({"stop": stop, "action": action}))))))
-
-        # As Temporal writes a role turn's events: the start, written once the step ends, at when it began.
-        events = [scheduled(1, 0, "assess", "plan", 1), started(2, 0, 1), completed(3, 2, 1, {"judged_tree": "t1"}),
-                  answered(4, 3, "r1:1", "approve"),
-                  scheduled(5, 4, "build", "build", 2),
-                  event(6, 5, activity_task_failed_event_attributes=ActivityTaskFailedEventAttributes(scheduled_event_id=5)),
-                  answered(7, 30, "r1:2", "continue"),
-                  # No worker took it for twenty minutes; it then ran for thirty seconds.
-                  scheduled(8, 31, "build", "build", 2), started(9, 51, 8), completed(10, 51.5, 8, {})]
+        for step in script:
+            if step[0] == "turn":
+                of = scheduled(*step[1:5])
+                event(activity_task_started_event_attributes=ActivityTaskStartedEventAttributes(scheduled_event_id=of))
+                event(activity_task_completed_event_attributes=ActivityTaskCompletedEventAttributes(
+                    scheduled_event_id=of, result=payloads(step[5])))
+            elif step[0] == "failed":
+                of = scheduled(*step[1:5])
+                event(activity_task_failed_event_attributes=ActivityTaskFailedEventAttributes(scheduled_event_id=of))
+            elif step[0] == "answer":
+                stops[0] += 1
+                stop = "r1:%d" % stops[0]
+                event(workflow_execution_update_accepted_event_attributes=WorkflowExecutionUpdateAcceptedEventAttributes(
+                    accepted_request=Request(meta=Meta(update_id="answer:" + stop), input=Input(
+                        name="answer", args=payloads({"stop": stop, "action": step[1]})))))
+            else:
+                clock[0] += step[1]
 
         class Handle:
             async def fetch_history_events(self):
@@ -675,14 +678,118 @@ class HistoryRead(unittest.TestCase):
             def get_workflow_handle(self, run_id):
                 return Handle()
 
-        record = E.run(runs.history(Client(), "r1"))
-        at = lambda minutes: (self.T0 + datetime.timedelta(minutes=minutes)).isoformat()  # noqa: E731
-        self.assertEqual([(turn["stage"], turn["started"], turn["ended"], turn.get("tree")) for turn in record["turns"]],
-                         [("assess", at(0), at(2), "t1"), ("build", at(51), at(51.5), None)],
-                         "the failed build is no turn, and the one queued twenty minutes lasted thirty seconds")
-        self.assertEqual([(answer["action"], answer["phase"], answer["at"]) for answer in record["answers"]],
-                         [("approve", "plan", at(3)), ("continue", "build", at(30))],
-                         "the Continue answered the failed build's step, in its phase")
+        return E.run(runs.history(Client(), "r1"))
+
+    @staticmethod
+    def changes(record):
+        """Each engineer turn's change, by its key."""
+        return {"%s:%d:%d" % (turn["stage"], turn["episode"], turn["round"]): turn["change"]
+                for turn in record["turns"] if "change" in turn}
+
+    @staticmethod
+    def answers(record):
+        return [(answer["action"], answer["after"], answer["phase"]) for answer in record["answers"]]
+
+    def test_a_turn_queued_long_before_a_worker_took_it_lasts_from_its_start(self):
+        record = self.read([("turn", "assess", "plan", 1, 1, {"judged_tree": "t1"}), ("answer", "approve"),
+                            ("failed", "build", "build", 2, 1), ("wait", 20), ("answer", "continue"),
+                            # No worker took it for twenty minutes; it then ran for a minute.
+                            ("turn", "build", "build", 2, 1, {})])
+        build = record["turns"][-1]
+        self.assertEqual(datetime.datetime.fromisoformat(build["ended"]) -
+                         datetime.datetime.fromisoformat(build["started"]), datetime.timedelta(minutes=1),
+                         "from its start, not from when it was queued")
+        self.assertEqual([turn["stage"] for turn in record["turns"]], ["assess", "build"], "the failed build is no turn")
+
+    def test_patch_loops_in_both_phases_then_revisions_to_each_role(self):
+        record = self.read([
+            ("turn", "plan", "plan", 1, 1, {}), ("turn", "assess", "plan", 1, 1, {"judged_tree": "t1"}),
+            ("turn", "plan", "plan", 1, 2, {}),
+            ("turn", "assess", "plan", 1, 2, {"judged_tree": "t2", "assessed_tree": "t2"}), ("answer", "approve"),
+            ("turn", "build", "build", 2, 1, {}), ("turn", "verify", "build", 2, 1, {"judged_tree": "t3"}),
+            ("turn", "build", "build", 2, 2, {}),
+            ("turn", "verify", "build", 2, 2, {"judged_tree": "t4", "verified_tree": "t4"}), ("answer", "revise"),
+            ("turn", "build", "build", 3, 1, {}),
+            ("turn", "verify", "build", 3, 1, {"judged_tree": "t5", "verified_tree": "t5"}), ("answer", "revise"),
+            # Sent back to the architect: it verifies again, and no engineer turn comes between.
+            ("turn", "verify", "build", 4, 1, {"judged_tree": "t5", "verified_tree": "t5"}), ("answer", "merge")])
+        self.assertEqual(self.changes(record), {
+            "plan:1:1": {"base": None, "tree": "t1", "turns": ["plan:1:1"]},
+            "plan:1:2": {"base": "t1", "tree": "t2", "turns": ["plan:1:2"]},
+            "build:2:1": {"base": "t2", "tree": "t3", "turns": ["build:2:1"]},
+            "build:2:2": {"base": "t3", "tree": "t4", "turns": ["build:2:2"]},
+            "build:3:1": {"base": "t4", "tree": "t5", "turns": ["build:3:1"]}},
+            "each round's own change: after a PATCH, only what the engineer changed in answer to it")
+        self.assertEqual(self.answers(record), [("approve", "assess:1:2", "plan"), ("revise", "verify:2:2", "build"),
+                                                ("revise", "verify:3:1", "build"), ("merge", "verify:4:1", "build")])
+
+    def test_a_review_that_recorded_no_tree_joins_the_turns_around_it_once(self):
+        """A run recorded before a PATCH returned its tree, or a review the worktree moved under: the turns on either
+        side of it cannot be told apart, so their change is shown once, on the later turn, and the earlier one points
+        to it — never the same change twice."""
+        record = self.read([
+            ("turn", "plan", "plan", 1, 1, {}), ("turn", "assess", "plan", 1, 1, {"assessed_tree": "t1"}),
+            ("answer", "approve"),
+            ("turn", "build", "build", 2, 1, {}), ("turn", "verify", "build", 2, 1, {}),
+            ("turn", "build", "build", 2, 2, {}), ("turn", "verify", "build", 2, 2, {}),
+            ("turn", "build", "build", 2, 3, {}), ("turn", "verify", "build", 2, 3, {"verified_tree": "t4"})])
+        self.assertEqual(self.changes(record), {
+            "plan:1:1": {"base": None, "tree": "t1", "turns": ["plan:1:1"]},
+            "build:2:1": {"with": "build:2:3"}, "build:2:2": {"with": "build:2:3"},
+            "build:2:3": {"base": "t1", "tree": "t4", "turns": ["build:2:1", "build:2:2", "build:2:3"]}})
+        pairs = [(change["base"], change["tree"]) for change in self.changes(record).values() if "tree" in change]
+        self.assertEqual(len(pairs), len(set(pairs)), "no change is shown for two turns")
+
+    def test_a_turn_no_review_has_judged_yet_is_pending(self):
+        record = self.read([("turn", "plan", "plan", 1, 1, {}), ("turn", "assess", "plan", 1, 1, {"judged_tree": "t1"}),
+                            ("answer", "approve"), ("turn", "build", "build", 2, 1, {})])
+        self.assertEqual(self.changes(record)["build:2:1"], {"pending": True})
+        self.assertEqual(self.changes(record)["plan:1:1"], {"base": None, "tree": "t1", "turns": ["plan:1:1"]})
+        # Judged since, but by a review that recorded no tree, and none after it: said so, never pending.
+        record = self.read([("turn", "plan", "plan", 1, 1, {}), ("turn", "assess", "plan", 1, 1, {"judged_tree": "t1"}),
+                            ("answer", "approve"), ("turn", "build", "build", 2, 1, {}),
+                            ("turn", "verify", "build", 2, 1, {})])
+        self.assertEqual(self.changes(record)["build:2:1"], {"unrecorded": True})
+
+    def test_a_failed_step_continued_sits_in_its_own_phase_after_the_turn_before_it(self):
+        record = self.read([
+            ("turn", "plan", "plan", 1, 1, {}), ("turn", "assess", "plan", 1, 1, {"judged_tree": "t1"}),
+            ("answer", "approve"), ("failed", "build", "build", 2, 1), ("answer", "continue"),
+            ("turn", "build", "build", 2, 1, {}), ("turn", "verify", "build", 2, 1, {"judged_tree": "t2"}),
+            ("answer", "discard")])
+        self.assertEqual(self.answers(record), [("approve", "assess:1:1", "plan"), ("continue", "assess:1:1", "build"),
+                                                ("discard", "verify:2:1", "build")])
+        self.assertEqual(self.changes(record)["build:2:1"], {"base": "t1", "tree": "t2", "turns": ["build:2:1"]},
+                         "the failed attempt is no turn, and the one that ran owns the change")
+
+    def test_a_plan_assessed_again_after_it_changed_keeps_that_change_out_of_the_build(self):
+        """An approval that finds the plan changed since its pass assesses it again, with no engineer turn: the
+        change between is nobody's turn, and the build's starts from what that second assessment judged."""
+        record = self.read([
+            ("turn", "plan", "plan", 1, 1, {}), ("turn", "assess", "plan", 1, 1, {"judged_tree": "t1"}),
+            ("answer", "approve"), ("turn", "assess", "plan", 2, 1, {"judged_tree": "t2"}), ("answer", "approve"),
+            ("turn", "build", "build", 3, 1, {}), ("turn", "verify", "build", 3, 1, {"judged_tree": "t3"})])
+        self.assertEqual(self.changes(record), {"plan:1:1": {"base": None, "tree": "t1", "turns": ["plan:1:1"]},
+                                                "build:3:1": {"base": "t2", "tree": "t3", "turns": ["build:3:1"]}})
+        self.assertEqual(self.answers(record), [("approve", "assess:1:1", "plan"), ("approve", "assess:2:1", "plan")])
+
+    def test_research_first_then_a_blocker_answered_with_guidance(self):
+        record = self.read([
+            ("turn", "research", "research", 1, 1, {"output": "brief"}), ("answer", "approve"),
+            ("turn", "plan", "plan", 2, 1, {}), ("turn", "assess", "plan", 2, 1, {"judged_tree": "t1"}),
+            ("answer", "guide"),
+            ("turn", "plan", "plan", 3, 1, {}), ("turn", "assess", "plan", 3, 1, {"judged_tree": "t2"}),
+            ("answer", "approve")])
+        self.assertEqual(self.changes(record), {"plan:2:1": {"base": None, "tree": "t1", "turns": ["plan:2:1"]},
+                                                "plan:3:1": {"base": "t1", "tree": "t2", "turns": ["plan:3:1"]}},
+                         "research changes no file and owns no change")
+        self.assertEqual(self.answers(record), [("approve", "research:1:1", "research"), ("guide", "assess:2:1", "plan"),
+                                                ("approve", "assess:3:1", "plan")])
+
+    def test_an_answer_before_any_turn_follows_none(self):
+        record = self.read([("answer", "continue"), ("turn", "plan", "plan", 1, 1, {})])
+        self.assertEqual(self.answers(record), [("continue", None, None)])
+        self.assertEqual(self.changes(record), {"plan:1:1": {"pending": True}})
 
 
 def recorded(agent):
@@ -716,13 +823,14 @@ class Moving(FakeWorktrees):
         return "tree-%d" % self.changes
 
 
-def moving(git, agent):
-    """`agent`, recorded, with each engineer turn that finishes moving `git`'s tree."""
+def moving(git, agent, typed_during=()):
+    """`agent`, recorded, with each engineer turn that finishes moving `git`'s tree — and each turn named in
+    `typed_during` moving it too, as someone typing into the live terminal while that review judged."""
     run = recorded(agent)
 
     def turn(worktree, argv, run_dir, name, prompt, timeout_seconds, env, *, kind):
         rc, out = run(worktree, argv, run_dir, name, prompt, timeout_seconds, env, kind=kind)
-        if rc == 0 and name.split("-")[0] in ("plan", "build"):
+        if (rc == 0 and name.split("-")[0] in ("plan", "build")) or name in typed_during:
             git.changes += 1
         return rc, out
     return turn
@@ -1123,10 +1231,19 @@ class Runs(Scenario):
                          "every completed turn once — the failed build is no turn — and every review's tree")
         for turn in history["turns"]:
             self.assertLessEqual(turn["started"], turn["ended"])
-        self.assertEqual([(each["stop"], each["action"], each.get("text"), each["phase"])
+        self.assertEqual({"%s:%d:%d" % (turn["stage"], turn["episode"], turn["round"]): turn["change"]
+                          for turn in history["turns"] if "change" in turn},
+                         {"plan:1:1": {"base": None, "tree": "tree-1", "turns": ["plan:1:1"]},
+                          "plan:1:2": {"base": "tree-1", "tree": "tree-2", "turns": ["plan:1:2"]},
+                          "plan:2:1": {"base": "tree-2", "tree": "tree-3", "turns": ["plan:2:1"]},
+                          "build:3:1": {"base": "tree-3", "tree": "tree-4", "turns": ["build:3:1"]}},
+                         "each engineer turn's own change, the failed build's attempt none")
+        self.assertEqual([(each["stop"], each["action"], each.get("text"), each["after"], each["phase"])
                           for each in history["answers"]],
-                         [(answered[0], "revise", "split it in two", "plan"), (answered[1], "approve", None, "plan"),
-                          (answered[2], "continue", None, "build"), (answered[3], "discard", None, "build")],
+                         [(answered[0], "revise", "split it in two", "assess:1:2", "plan"),
+                          (answered[1], "approve", None, "assess:2:1", "plan"),
+                          (answered[2], "continue", None, "assess:2:1", "build"),
+                          (answered[3], "discard", None, "verify:3:1", "build")],
                          "each accepted answer in the phase of the step it answered — the Continue the failed "
                          "build's, which is no turn — the refused merge none of them, the discard no turn followed")
         times = [each["at"] for each in history["answers"]]
@@ -1606,3 +1723,130 @@ class Runs(Scenario):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Transcript(Scenario):
+    """A run's history read back through the page's route after real runs of the workflow, in each flow and order a
+    run can take: every engineer turn's change is the one between the trees the reviews around it judged — the
+    worktree's tree moves only with an engineer turn, or where someone typed — and every answer follows the turn
+    it came after, in the phase of the step it answered."""
+
+    setUp = Runs.setUp
+    workers_down = Runs.workers_down
+    start = Runs.start
+    wait_for = Runs.wait_for
+
+    def run_through(self, script, answers, typed_during=(), flow=None, closes=True):
+        """Run `script` on a moving worktree, giving each of `answers` — (reason, action, words) — at its stop in
+        turn, then read the run's history."""
+        git = Moving()
+        self.host, self.agent = E.host(script, git=git)
+        self.host.runner = moving(git, self.agent, typed_during)
+        if flow:
+            status, started = request("POST", "/api/runs", {"task": "a transcript", "repo": self.repo, "flow": flow})
+            self.assertEqual(status, 200, started)
+            run_id = started["run_id"]
+            self.addCleanup(lambda: E.Run.cleanup(type("R", (), {"run_id": run_id})()))
+        else:
+            run_id = self.start("a transcript")
+        given = []
+        for reason, action, words in answers:
+            stop = self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == reason
+                                 and body["stop"]["id"] not in given)["stop"]
+            body = dict(stop=stop["id"], action=action, **({"text": words} if words else {}))
+            if action == "discard":
+                body["confirm"] = True
+            status, sent = request("POST", "/api/runs/%s/answer" % run_id, body)
+            self.assertEqual(status, 200, sent)
+            given.append(stop["id"])
+        if closes:
+            self.wait_for(run_id, lambda body: body["view"]["state"] == "closed")
+        else:
+            self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["id"] not in given)
+        status, history = request("GET", "/api/runs/%s/history" % run_id)
+        self.assertEqual(status, 200, history)
+        changes = {"%s:%d:%d" % (turn["stage"], turn["episode"], turn["round"]): turn["change"]
+                   for turn in history["turns"] if "change" in turn}
+        return changes, [(answer["action"], answer["after"], answer["phase"]) for answer in history["answers"]]
+
+    def test_patch_loops_in_both_phases_then_a_revise_to_each_role_and_the_merge(self):
+        review = configured_review_resumed
+        changes, answers = self.run_through([
+            ("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, configured_review_first("PATCH", "name the test")[0]),
+            ("plan-e1-2", 0, "named\n"), ("assess-e1-2", 0, review("PASS")),
+            ("build-e2-1", 0, "built\n"), ("verify-e2-1", 0, review("PATCH", "cover the edge")),
+            ("build-e2-2", 0, "covered\n"), ("verify-e2-2", 0, review("PASS")),
+            ("build-e3-1", 0, "fixed\n"), ("verify-e3-1", 0, review("PASS")),
+            ("verify-e4-1", 0, review("PASS"))],
+            [("approval", "approve", None), ("final", "revise:engineer", "rename it"),
+             ("final", "revise:architect", "check the rename"), ("final", "merge", None)])
+        self.assertEqual(changes, {
+            "plan:1:1": {"base": None, "tree": "tree-1", "turns": ["plan:1:1"]},
+            "plan:1:2": {"base": "tree-1", "tree": "tree-2", "turns": ["plan:1:2"]},
+            "build:2:1": {"base": "tree-2", "tree": "tree-3", "turns": ["build:2:1"]},
+            "build:2:2": {"base": "tree-3", "tree": "tree-4", "turns": ["build:2:2"]},
+            "build:3:1": {"base": "tree-4", "tree": "tree-5", "turns": ["build:3:1"]}},
+            "after each PATCH, only what the engineer changed in answer to it")
+        self.assertEqual(answers, [("approve", "assess:1:2", "plan"), ("revise", "verify:2:2", "build"),
+                                   ("revise", "verify:3:1", "build"), ("merge", "verify:4:1", "build")])
+
+    def test_research_first_then_a_blocker_answered_with_guidance_then_a_discard(self):
+        brief, _ = configured_first_message("Brief: the scheduler.")
+        review = configured_review_resumed
+        changes, answers = self.run_through([
+            ("research-e1-1", 0, brief),
+            ("plan-e2-1", 0, "planned\n"), ("assess-e2-1", 0, review("BLOCKER", "the premise is wrong")),
+            ("plan-e3-1", 0, "replanned\n"), ("assess-e3-1", 0, review("PASS")),
+            ("build-e4-1", 0, "built\n"), ("verify-e4-1", 0, review("PASS"))],
+            [("approval", "approve", None), ("blocker", "guide", "keep one queue"), ("approval", "approve", None),
+             ("final", "discard", None)], flow="architect-research")
+        self.assertEqual(changes, {
+            "plan:2:1": {"base": None, "tree": "tree-1", "turns": ["plan:2:1"]},
+            "plan:3:1": {"base": "tree-1", "tree": "tree-2", "turns": ["plan:3:1"]},
+            "build:4:1": {"base": "tree-2", "tree": "tree-3", "turns": ["build:4:1"]}},
+            "research owns no change; the blocker's tree is the replanned plan's base")
+        self.assertEqual(answers, [("approve", "research:1:1", "research"), ("guide", "assess:2:1", "plan"),
+                                   ("approve", "assess:3:1", "plan"), ("discard", "verify:4:1", "build")])
+
+    def test_a_plan_changed_after_its_pass_is_assessed_again_and_its_change_is_no_turns(self):
+        git = Moving()
+        review = configured_review_resumed
+        self.host, self.agent = E.host([
+            ("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, configured_review_first("PASS", "Direction: A.")[0]),
+            ("assess-e2-1", 0, review("PASS")),
+            ("build-e3-1", 0, "built\n"), ("verify-e3-1", 0, review("PASS"))], git=git)
+        self.host.runner = moving(git, self.agent)
+        run_id = self.start("a plan edited before its approval")
+        first = self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "approval")["stop"]
+        git.changes += 1                                  # typed into the plan after its pass
+        self.assertEqual(request("POST", "/api/runs/%s/answer" % run_id, {"stop": first["id"], "action": "approve"})[0],
+                         200)
+        second = self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "approval"
+                               and body["stop"]["id"] != first["id"])["stop"]
+        self.assertEqual(request("POST", "/api/runs/%s/answer" % run_id, {"stop": second["id"], "action": "approve"})[0],
+                         200)
+        final = self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "final")["stop"]
+        self.assertEqual(request("POST", "/api/runs/%s/answer" % run_id,
+                                 {"stop": final["id"], "action": "discard", "confirm": True})[0], 200)
+        self.wait_for(run_id, lambda body: body["view"]["state"] == "closed")
+        history = request("GET", "/api/runs/%s/history" % run_id)[1]
+        changes = {"%s:%d:%d" % (turn["stage"], turn["episode"], turn["round"]): turn["change"]
+                   for turn in history["turns"] if "change" in turn}
+        self.assertEqual(changes, {"plan:1:1": {"base": None, "tree": "tree-1", "turns": ["plan:1:1"]},
+                                   "build:3:1": {"base": "tree-2", "tree": "tree-3", "turns": ["build:3:1"]}},
+                         "the edit after the pass is in neither turn's change")
+        self.assertEqual([(answer["action"], answer["after"], answer["phase"]) for answer in history["answers"]],
+                         [("approve", "assess:1:1", "plan"), ("approve", "assess:2:1", "plan"),
+                          ("discard", "verify:3:1", "build")])
+
+    def test_a_review_typed_under_records_no_tree_and_the_turns_around_it_are_shown_once(self):
+        review = configured_review_resumed
+        changes, answers = self.run_through([
+            ("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, configured_review_first("PATCH", "name the test")[0]),
+            ("plan-e1-2", 0, "named\n"), ("assess-e1-2", 0, review("PASS"))],
+            [], typed_during=("assess-e1-1",), closes=False)
+        self.assertEqual(changes, {
+            "plan:1:1": {"with": "plan:1:2"},
+            "plan:1:2": {"base": None, "tree": "tree-3", "turns": ["plan:1:1", "plan:1:2"]}},
+            "a PATCH review the worktree moved under judged no one tree: the two plans' change, once, on the later")
+        self.assertEqual(answers, [])

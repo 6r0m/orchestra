@@ -21,6 +21,7 @@ from app.application import settings as S
 from app.foundation import flows
 from app.foundation import paths
 from app.foundation import policy as policy_mod
+from app.foundation import stages
 from app.workspace import repos
 from app.orchestration import workflow as WF
 from app.workspace import worktrees
@@ -388,7 +389,9 @@ async def history(client, run_id):
     its result names — `judged_tree`, or for a pass `assessed_tree` or `verified_tree` — and a review whose
     result names none has none. An answer is the `answer:<stop-id>` Update the workflow accepted, as its
     accepted event recorded the request; one its validator refused never entered the history. Its phase is the
-    one of the last role turn begun before it, failed or not."""
+    one of the last role turn begun before it, failed or not, and it comes `after` the last turn completed before
+    it, by its key `stage:episode:round` — the transcript's order is the history's own, never one read from clocks.
+    Each engineer turn carries its `change` (`_changes`)."""
     def at(event):
         return event.event_time.ToDatetime(tzinfo=datetime.timezone.utc).isoformat()
 
@@ -424,12 +427,41 @@ async def history(client, run_id):
                     answer = await decoded(request.input.args.payloads)
                     answers.append({"stop": answer.get("stop"), "action": answer.get("action"),
                                     "role": answer.get("role"), "text": answer.get("text"), "at": at(event),
-                                    "phase": phase})
+                                    "phase": phase, "after": _turn_key(turns[-1]) if turns else None})
     except RPCError as error:
         if error.status == RPCStatusCode.NOT_FOUND:
             return None
         raise
+    _changes(turns)
     return {"turns": turns, "answers": answers}
+
+
+def _turn_key(turn):
+    return "%s:%d:%d" % (turn["stage"], turn["episode"], turn["round"])
+
+
+def _changes(turns):
+    """Give each engineer turn the change the reviews around it judged: from the tree the last review before it
+    recorded — the worktree's last commit (`base` None) before any — to the tree the first review after it recorded,
+    with the turns it holds. Engineer turns with a review between them that recorded no tree cannot be told apart, so
+    their change is one, given to the last of them, which the others point to (`with`); never the same change twice.
+    A turn no review has judged since is `pending`; one only reviews that recorded no tree have judged, `unrecorded`."""
+    base, waiting, judged = None, [], set()
+    for turn in turns:
+        if stages.STAGE_ROLE.get(turn["stage"]) == "engineer":
+            waiting.append(turn)
+        elif turn["stage"] in stages.REVIEWS and turn.get("tree"):
+            if waiting:
+                last = _turn_key(waiting[-1])
+                waiting[-1]["change"] = {"base": base, "tree": turn["tree"],
+                                         "turns": [_turn_key(each) for each in waiting]}
+                for each in waiting[:-1]:
+                    each["change"] = {"with": last}
+            waiting, judged, base = [], set(), turn["tree"]
+        elif turn["stage"] in stages.REVIEWS:
+            judged.update(_turn_key(each) for each in waiting)
+    for turn in waiting:
+        turn["change"] = {"unrecorded": True} if _turn_key(turn) in judged else {"pending": True}
 
 
 def not_kept(listed, status, removal=None):

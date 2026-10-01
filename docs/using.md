@@ -119,8 +119,10 @@ plan's account, the verdict and findings — said once: what the decision above 
 repeated, and said again in the turn once the decision moves on. An engineer's turn adds *Change since the previous review*: the files between the tree the
 review before it judged, or the worktree's last commit, and the tree the review after it judged, each
 opening in the same viewer. The worktree is live, so that is what the review judged, not proof of who
-wrote each line; a review records its tree only when the worktree did not move while it judged, and a
-review that recorded none, or a tree git has since pruned, is said so. A turn
+wrote each line. After a PATCH, a turn's change is only what that turn changed in answer to it. A review
+records its tree only when the worktree did not move while it judged; where one between two engineer turns
+recorded none, the two cannot be told apart, so their change is shown once, on the later turn, which says
+so, and the earlier one points to it; a tree git has since pruned is said gone. A turn
 retried in a fresh session, its first one lost, shows each attempt; a failed attempt's retry from before
 you pressed Continue stays in the local logs but is not shown as the new turn's. A local record that has
 been removed is reported as unavailable.
