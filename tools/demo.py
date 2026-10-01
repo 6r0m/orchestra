@@ -7,7 +7,8 @@ one: its own Workbench, and its own worker — the real worker, started and stop
 through the stack's one owner — on queues of its own, sharing only the live Temporal.
 
 One run goes the whole way: the engineer plans, the architect sends the plan back once and passes it,
-the plan is approved, the engineer builds, the architect verifies, and the change is merged. One is
+the plan is approved, the engineer builds, the architect verifies, its changed file is read in the page's
+viewer — in the change, and in the build's turn — and the change is merged. One is
 stopped while its engineer works, and one while it waits for approval — sent back first with a note
 typed into the page, which reaches the engineer's next plan; each ends stopped with its worktree and
 branch as they were. One is force-terminated when its Stop cannot finish, because its
@@ -380,6 +381,14 @@ class Demo:
                    "the final gate")
         check(True, "the engineer built and the architect verified")
 
+        step("the change read file by file, and the history as turns with your answers between")
+        check(self.press(merged, "file:greeting.txt", "hello"),
+              "the change lists greeting.txt by its path, and the page's viewer opens its diff with its line")
+        check(self.press(merged, "round:build:greeting.txt", "hello"),
+              "the build turn's change since the review before it opens the same file, read from the trees the "
+              "reviews judged")
+        check(self.press(merged, "history", "you approved the plan"), "the history shows your approval as a row")
+
         step("the change merged by pressing Merge")
         check(self.press(merged, "Merge", "answered: merge"), "the page sent the answer, with its confirmation")
         view = self.until(merged, closed, 300, "the merge")
@@ -420,6 +429,8 @@ class Demo:
                    "the plan again, and its approval")
         with open(os.path.join(paths.RUNTIME_ROOT, waiting, "logs", "plan-e2-1.prompt"), encoding="utf-8") as fh:
             check(note in fh.read(), "the note reached the engineer's next plan, word for word")
+        check(self.press(waiting, "absent:Force terminate", "absent"),
+              "while it waits for you, the page offers Stop run alone: nothing runs on its host to force")
         check(self.press(waiting, "Stop run", "stopping"), "the page sent the Stop")
         waited = self.until(waiting, closed, 120, "the Stop")
         check(waited["status"] == "STOPPED", "the run ended stopped")

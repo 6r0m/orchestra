@@ -69,9 +69,19 @@ def turn_name(stage, episode, attempt):
 
 def turn_files(rdir, name):
     """The files a turn named `name` leaves in the logs of the run at `rdir`, by what each holds: the prompt
-    it was given, what it answered, its errors and its events."""
+    it was given and the parts it was built from, what it answered, its errors and its events."""
     logs = os.path.join(rdir, "logs")
-    return {ext: os.path.join(logs, "%s.%s" % (name, ext)) for ext in ("prompt", "out", "err", "events")}
+    files = {ext: os.path.join(logs, "%s.%s" % (name, ext)) for ext in ("prompt", "out", "err", "events")}
+    files["parts"] = os.path.join(logs, "%s.parts.json" % name)
+    return files
+
+
+def record_parts(rdir, name, parts):
+    """Keep the parts a turn's prompt is built from beside the prompt the turn named `name` is given."""
+    path = turn_files(rdir, name)["parts"]
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        json.dump(parts, fh, ensure_ascii=False)
 
 
 def turn_attempts(rdir, name):

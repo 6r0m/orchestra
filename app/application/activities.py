@@ -263,11 +263,14 @@ class Activities:
         worktree = state["worktree_path"]
         client = self.client()
 
-        def compose(session_first):
-            return N.compose_prompt(stage, role, is_review, state, session_first=session_first,
+        def compose(session_first, named):
+            """The turn's prompt, its parts kept beside it under the attempt's own name for whoever shows it."""
+            parts = N.compose_parts(stage, role, is_review, state, session_first=session_first,
                                     stage_first=attempt == 1, logs=os.path.join(rdir, "logs"),
                                     skills=policy.get("stage_skills"), review_rounds=policy.get("review_rounds"),
                                     review_prompts=policy.get("review_prompts"))
+            terminal.record_parts(rdir, named, parts)
+            return N.render(parts)
 
         span = T.begin(client, state, stage, role_name, dict(adapters.view(role), kind=kind, agent=role.get("agent")),
                        log=os.path.relpath(os.path.join(rdir, "logs", name), paths.REPO))
@@ -295,7 +298,7 @@ class Activities:
             # a verdict must describe the plan or the change it actually read.
             judged = self.git.work_tree(worktree) if is_review else None
             argv, minted = N.build_argv(role, resume_id, traced)
-            rc, out = self.runner(worktree, adapter.host(argv), rdir, name, compose(resume_id is None),
+            rc, out = self.runner(worktree, adapter.host(argv), rdir, name, compose(resume_id is None, name),
                                   policy["timeout_seconds"], env, kind=kind)
             effective_resume = resume_id
             if rc != 0 and N.classify_failure(role, resume_id, rc, out,
@@ -307,8 +310,8 @@ class Activities:
                        "given the whole task again" % role_name)
                 effective_resume = None
                 argv, minted = N.build_argv(role, None, traced)
-                rc, out = self.runner(worktree, adapter.host(argv), rdir, name + terminal.RETRIED, compose(True),
-                                      policy["timeout_seconds"], env, kind=kind)
+                rc, out = self.runner(worktree, adapter.host(argv), rdir, name + terminal.RETRIED,
+                                      compose(True, name + terminal.RETRIED), policy["timeout_seconds"], env, kind=kind)
             if rc != 0:
                 raise N.TransportError("%s failed rc=%d — inspect %s/logs/%s.*" % (stage, rc, rdir, name))
             if self.git.guard(worktree, state["run_id"]) != before:
@@ -333,6 +336,9 @@ class Activities:
                     limit = policy["max_rounds"][state["phase"]]
                 gate_reason = routing.gate_reason_for(
                     verdict, args.get("gate"), rounds, limit, state.get("auto_proceed", False))
+                # What this review read, whatever its verdict: kept in the run's history, where the change since
+                # the review before can be read from it. The workflow decides nothing on it.
+                result["judged_tree"] = judged
                 if verdict == "PASS" and judged is not None:
                     if self.git.work_tree(worktree) != judged:
                         raise GitViolation("the worktree changed while the architect judged it, so what it "
@@ -430,10 +436,15 @@ class Activities:
     def review_diff(self, args):
         """The run's change as the operator reviews it, read by this host's own git. Reads only.
 
-        Bounded: `offset` asks for the next part of a change too large for one payload.
+        Bounded: `offset` asks for the next part of a change too large for one payload. `base` and `tree` name a
+        snapshot already read, or two judged trees; `file` one file of it.
         """
         try:
-            return self.git.review_diff(args["worktree_path"], args.get("offset", 0))
+            return self.git.review_diff(args["worktree_path"], args.get("offset", 0), args.get("base"),
+                                        args.get("tree"), args.get("file"))
+        except W.ChangeRefused as exc:
+            # What the reader asked for is not there to read: said as git said it, and never retried.
+            raise ApplicationError(str(exc), type="ChangeRefused", non_retryable=True) from exc
         except Exception as exc:
             raise _failure(exc) from exc
 

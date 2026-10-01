@@ -285,55 +285,169 @@ class View(Repo):
 
 
 class ReviewDiff(Repo):
-    """Reading a change for review: bounded, so no payload can be refused, and joining back exactly."""
+    """Reading a change: one snapshot named by its base and tree, each file by its exact path, every read of it
+    the same bytes whatever the worktree or the repository's settings do."""
 
-    def test_a_large_change_is_read_in_parts_that_join_back_into_the_whole_patch(self):
-        path = self.worktree("run1", change=False)
+    DEEP = "src/a-rather-long-directory-name/and-another-one-below-it/2026-09-30_1627-audit_the_codex_adapter_s_output.md"
+
+    def setUp(self):
+        super().setUp()
+        write(os.path.join(self.repo, "docs", "old name.md"), "".join("line %d of the guide\n" % n for n in range(1, 31)))
+        write(os.path.join(self.repo, "gone.txt"), "about to go\n")
+        write(os.path.join(self.repo, "long.txt"), "".join("line %d\n" % n for n in range(1, 41)))
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "more files")
+        self.path = self.worktree("run1", change=False)
+
+    def edit(self):
+        """A change holding every kind of file a list must say: added deep down, spaced, renamed and edited,
+        binary, deleted and modified."""
+        write(os.path.join(self.path, *self.DEEP.split("/")), "new\n")
+        write(os.path.join(self.path, "with space.txt"), "spaced\n")
+        os.rename(os.path.join(self.path, "docs", "old name.md"), os.path.join(self.path, "docs", "new name.md"))
+        with open(os.path.join(self.path, "docs", "new name.md"), "a", encoding="utf-8", newline="") as fh:
+            fh.write("one more line\n")
+        with open(os.path.join(self.path, "image.bin"), "wb") as fh:
+            fh.write(b"\x00\x01binary\x00")
+        os.remove(os.path.join(self.path, "gone.txt"))
+        write(os.path.join(self.path, "long.txt"),
+              "".join(("line %d\n" % n) if n != 20 else "changed 20\n" for n in range(1, 41)))
+
+    def diff(self, *args):
+        """git's own bytes of a diff, read by this test rather than the code under test."""
+        return subprocess.run(["git", "-C", self.path, "diff"] + list(args), capture_output=True, check=True).stdout
+
+    def test_each_changed_file_is_listed_by_its_exact_path(self):
+        self.edit()
+        read = W.review_diff(self.path)
+        self.assertRegex(read["base"], r"^[0-9a-f]{40}$", "the worktree's HEAD, whole")
+        self.assertEqual(read["base"], git(self.path, "rev-parse", "HEAD").strip())
+        self.assertEqual(read["tree"], W.work_tree(self.path), "the tree `git add -A` makes, and nothing staged")
+        self.assertEqual(git(self.path, "diff", "--cached", "--name-only"), "", "reading staged nothing")
+        files = {entry["path"]: entry for entry in read["files"]}
+        self.assertEqual(files, {
+            self.DEEP: {"path": self.DEEP, "old": None, "status": "A", "added": 1, "removed": 0, "binary": False},
+            "with space.txt": {"path": "with space.txt", "old": None, "status": "A", "added": 1, "removed": 0,
+                               "binary": False},
+            "docs/new name.md": {"path": "docs/new name.md", "old": "docs/old name.md", "status": "R", "added": 1,
+                                 "removed": 0, "binary": False},
+            "image.bin": {"path": "image.bin", "old": None, "status": "A", "added": None, "removed": None,
+                          "binary": True},
+            "gone.txt": {"path": "gone.txt", "old": None, "status": "D", "added": 0, "removed": 1, "binary": False},
+            "long.txt": {"path": "long.txt", "old": None, "status": "M", "added": 1, "removed": 1, "binary": False}})
+        self.assertEqual(read["files_total"], 6)
+        # Control: git's stat, which the page showed, cuts the long path.
+        self.assertNotIn(self.DEEP, read["summary"])
+        self.assertIn("...", read["summary"])
+
+    def test_a_file_is_read_whole_and_alone_or_its_changes_only_past_the_bound(self):
+        self.edit()
+        read = W.review_diff(self.path)
+        one = W.review_diff(self.path, base=read["base"], tree=read["tree"], file="long.txt")
+        self.assertEqual((one["base"], one["tree"], one["file"]["path"], one["whole"]),
+                         (read["base"], read["tree"], "long.txt", True))
+        lines = one["patch"].splitlines()
+        self.assertEqual(sum(line.startswith("diff --git ") for line in lines), 1, "that file alone")
+        self.assertEqual([line for line in lines if line.startswith("@@")], ["@@ -1,40 +1,40 @@"],
+                         "the whole file, every unchanged line with it")
+        renamed = W.review_diff(self.path, base=read["base"], tree=read["tree"], file="docs/new name.md")
+        self.assertIn("rename from docs/old name.md", renamed["patch"], "a rename read by both its paths")
+        self.assertIn("+one more line", renamed["patch"])
+        saved = W.FILE_LIMIT
+        W.FILE_LIMIT = 300
+        self.addCleanup(setattr, W, "FILE_LIMIT", saved)
+        short = W.review_diff(self.path, base=read["base"], tree=read["tree"], file="long.txt")
+        self.assertFalse(short["whole"], "past the bound, its changes only, and said so")
+        hunks = [line for line in short["patch"].splitlines() if line.startswith("@@")]
+        self.assertEqual(len(hunks), 1)
+        self.assertTrue(hunks[0].startswith("@@ -17,7 +17,7 @@"), hunks)
+
+    def test_every_read_comes_from_the_snapshot_it_names_whatever_the_worktree_does(self):
+        self.edit()
         # A character that spans several bytes, laid so that a part's edge falls inside one.
-        write(os.path.join(path, "big.txt"), "".join("строка %d ✓\n" % number for number in range(4000)))
+        write(os.path.join(self.path, "big.txt"), "".join("строка %d ✓\n" % number for number in range(4000)))
+        first = W.review_diff(self.path)
+        base, tree = first["base"], first["tree"]
+        # The worktree moves on after the list was read: its terminals stay live.
+        write(os.path.join(self.path, "long.txt"), "rewritten\n")
+        write(os.path.join(self.path, "big.txt"), "gone\n")
+        one = W.review_diff(self.path, base=base, tree=tree, file="long.txt")
+        self.assertIn("+changed 20", one["patch"], "the file as it was listed")
+        self.assertNotIn("rewritten", one["patch"])
         saved = W.PATCH_CHUNK
         W.PATCH_CHUNK = 1000
-        try:
-            whole, parts, reads, offset = None, [], [], 0
-            while True:
-                read = W.review_diff(path, offset)
-                self.assertLessEqual(len(read["patch"].encode("utf-8")), W.PATCH_CHUNK)
-                parts.append(read["patch"])
-                reads.append(read)
-                whole = read["total"]
-                if read["next"] >= read["total"]:
-                    break
-                self.assertGreater(read["next"], offset, "a part always moves forward")
-                offset = read["next"]
-        finally:
-            W.PATCH_CHUNK = saved
-        joined = "".join(parts)
+        self.addCleanup(setattr, W, "PATCH_CHUNK", saved)
+        parts, offset = [], 0
+        while True:
+            read = W.review_diff(self.path, offset, base=base, tree=tree)
+            self.assertLessEqual(len(read["patch"].encode("utf-8")), W.PATCH_CHUNK)
+            self.assertEqual((read["base"], read["tree"]), (base, tree), "every part names its snapshot")
+            parts.append(read["patch"])
+            if read["next"] >= read["total"]:
+                break
+            self.assertGreater(read["next"], offset, "a part always moves forward")
+            offset = read["next"]
         self.assertGreater(len(parts), 20, "the change is larger than one part")
-        self.assertEqual(len({read["snapshot"] for read in reads}), 1, "every part is of one change")
-        self.assertEqual(len(joined.encode("utf-8")), whole, "the parts are the whole patch, byte for byte")
-        self.assertEqual(joined, W.review_diff(path)["patch"][:len(joined)])
-        self.assertIn("строка 3999 ✓", joined, "and it reads as the text it is")
-
-    def test_a_change_edited_between_two_parts_is_a_different_snapshot(self):
-        path = self.worktree("run1", change=False)
-        write(os.path.join(path, "big.txt"), "".join("line %04d value\n" % number for number in range(500)))
-        first = W.review_diff(path, 0)
-        # Same size, different content: only the snapshot can tell the two changes apart.
-        write(os.path.join(path, "big.txt"),
-              "".join("line %04d VALUE\n" % number for number in range(500)))
-        second = W.review_diff(path, 0)
-        self.assertEqual(first["total"], second["total"], "the edit kept the patch exactly as long")
-        self.assertNotEqual(first["snapshot"], second["snapshot"],
-                            "a reader joining parts across this edit would show two changes as one")
+        self.assertEqual("".join(parts).encode("utf-8"),
+                         self.diff("--no-ext-diff", "--no-textconv", "--find-renames", "--no-color", base, tree),
+                         "the parts are the snapshot's whole patch, byte for byte")
+        self.assertNotEqual(W.review_diff(self.path)["tree"], tree, "control: read again, the change is new")
 
     def test_an_offset_inside_a_character_is_refused_not_mangled(self):
-        path = self.worktree("run1", change=False)
-        write(os.path.join(path, "big.txt"), "строка\n" * 50)
-        whole = W.review_diff(path, 0)["patch"].encode("utf-8")
+        write(os.path.join(self.path, "big.txt"), "строка\n" * 50)
+        first = W.review_diff(self.path)
+        whole = first["patch"].encode("utf-8")
         inside = next(i for i, byte in enumerate(whole) if byte & 0xC0 == 0x80)
         with self.assertRaises(RuntimeError) as caught:
-            W.review_diff(path, inside)
+            W.review_diff(self.path, inside, base=first["base"], tree=first["tree"])
         self.assertIn("inside a character", str(caught.exception))
+
+    def test_only_a_file_of_the_snapshot_is_read_and_its_path_is_never_a_pattern(self):
+        write(os.path.join(self.path, "[ab].txt"), "bracketed\n")
+        write(os.path.join(self.path, "a.txt"), "plain\n")
+        read = W.review_diff(self.path)
+        self.assertEqual(sorted(entry["path"] for entry in read["files"]), ["[ab].txt", "a.txt"])
+        one = W.review_diff(self.path, base=read["base"], tree=read["tree"], file="[ab].txt")
+        self.assertIn("+bracketed", one["patch"])
+        self.assertNotIn("plain", one["patch"], "`[ab].txt` named that file, never a pattern matching a.txt")
+        for asked in ("nope.txt", ":(glob)*", "*.txt", "", "../app.txt"):
+            with self.assertRaises(W.ChangeRefused, msg=asked) as caught:
+                W.review_diff(self.path, base=read["base"], tree=read["tree"], file=asked)
+            self.assertIn("is not a file of this change", str(caught.exception))
+
+    def test_the_repositorys_settings_add_no_helper_or_colour_and_keep_renames_found(self):
+        self.edit()
+        write(os.path.join(self.path, ".gitattributes"), "*.md diff=shout\n")
+        for key, value in (("diff.renames", "false"), ("color.ui", "always"),
+                           ("diff.shout.textconv", "sed s/^/CONVERTED:/")):
+            git(self.repo, "config", key, value)
+        read = W.review_diff(self.path)
+        renamed = [entry for entry in read["files"] if entry["path"] == "docs/new name.md"]
+        self.assertEqual([(entry["status"], entry["old"]) for entry in renamed], [("R", "docs/old name.md")])
+        one = W.review_diff(self.path, base=read["base"], tree=read["tree"], file="docs/new name.md")
+        for text in (read["patch"], one["patch"]):
+            self.assertNotIn("\x1b[", text, "no colour")
+            self.assertNotIn("CONVERTED:", text, "no text conversion")
+        # Control: the same reads without the explicit options follow the settings.
+        names = self.diff("--no-color", "--name-status", "-z", read["base"], read["tree"]).split(b"\0")
+        self.assertIn(b"docs/old name.md", names)
+        self.assertFalse([name for name in names if name.startswith(b"R")])
+        self.assertEqual(names[names.index(b"docs/old name.md") - 1], b"D", "a rename shown as a delete")
+        plain = self.diff(read["base"], read["tree"])
+        self.assertIn(b"\x1b[", plain)
+        self.assertIn(b"CONVERTED:", plain)
+
+    def test_a_tree_git_no_longer_holds_is_said_gone_and_a_name_that_is_no_object_refused(self):
+        with self.assertRaises(W.ChangeRefused) as caught:
+            W.review_diff(self.path, tree="0" * 40)
+        self.assertIn("no longer holds", str(caught.exception))
+        for asked in ("HEAD", "--output=x", "abc", "0" * 39):
+            with self.assertRaises(W.ChangeRefused, msg=asked) as caught:
+                W.review_diff(self.path, tree=asked)
+            self.assertIn("is not an object name", str(caught.exception))
+        head = git(self.path, "rev-parse", "HEAD").strip()
+        self.assertEqual(W.review_diff(self.path, base=head, tree=W.work_tree(self.path))["files"], [],
+                         "control: a pair git holds is read")
 
 
 class Merge(Repo):

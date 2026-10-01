@@ -358,6 +358,21 @@ def discard(repo, worktree, run_id):
 # large change is read in chunks instead of failing the review it is needed for.
 PATCH_CHUNK = 512 * 1024
 SUMMARY_LIMIT = 128 * 1024
+# One file's diff is read whole up to this many bytes, and past it its changes alone; the list names at most
+# this many files. Both stay inside one payload beside the rest of a read.
+FILE_LIMIT = 512 * 1024
+FILES_LIMIT = 2000
+# Every diff of a change is read with these, whatever the repository or its user configured: no external
+# diff or text conversion runs, rename detection is on and the text is uncoloured. Git still bounds its
+# exhaustive rename search by `diff.renameLimit`, so a rename past that bound reads as a delete and an add.
+DIFF = ["--no-ext-diff", "--no-textconv", "--find-renames", "--no-color"]
+# Context enough for any file: its diff holds it whole.
+WHOLE = "-U2147483647"
+OBJECT = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+
+
+class ChangeRefused(RuntimeError):
+    """A read of a change naming what it cannot read: no object, one git no longer holds, a file not in it."""
 
 
 def _chunk(text, offset, limit):
@@ -379,19 +394,47 @@ def _chunk(text, offset, limit):
     return part.decode("utf-8", "replace"), offset + len(part), len(data)
 
 
-def review_diff(path, offset=0):
-    """The change a human reviews, exactly as `gdiff -s` copies it.
+def _files(numstat, status):
+    """Each file of a diff from its `--numstat -z` and `--name-status -z`: exact paths, never quoted or cut."""
+    counts, tokens, at = {}, numstat.split("\0"), 0
+    while at < len(tokens) and tokens[at]:
+        added, removed, name = tokens[at].split("\t", 2)
+        if name:
+            at += 1
+        else:
+            name, at = tokens[at + 2], at + 3          # a rename: its old path, then its new
+        counts[name] = (added, removed)
+    files, tokens, at = [], status.split("\0"), 0
+    while at < len(tokens) and tokens[at]:
+        letter = tokens[at][0]
+        if letter in "RC":
+            old, name, at = tokens[at + 1], tokens[at + 2], at + 3
+        else:
+            old, name, at = None, tokens[at + 1], at + 2
+        added, removed = counts.get(name, ("-", "-"))
+        binary = added == "-"
+        files.append({"path": name, "old": old, "status": letter, "added": None if binary else int(added),
+                      "removed": None if binary else int(removed), "binary": binary})
+    return files
 
-    `gdiff -s` stages everything the work tree holds (`git add -A`, gitignored
-    paths excluded) and copies `git diff --no-ext-diff --no-textconv --cached`,
-    so a new file arrives with its contents rather than as a name. The same
-    commands run here against a private copy of the index, because reading a
-    change for review must not change what anyone has staged. Returns the
-    worktree's HEAD, the diff's stat, and `PATCH_CHUNK` bytes of the patch from
-    `offset` with the patch's whole size, so the reader can ask for the rest.
 
-    Raises on any git failure: a worktree that could not be read is not a
-    worktree without changes.
+def review_diff(path, offset=0, base=None, tree=None, file=None):
+    """A run's change as a human reviews it: one snapshot, named by its base and its tree, and read from them.
+
+    Without `tree`, the change now: the worktree's HEAD and the tree `git add -A` would commit, made on a
+    private copy of the index (`work_tree`), so reading a change for review changes nothing anyone staged, and
+    a new file arrives with its contents. With `tree`, the change from `base` — the worktree's HEAD when not
+    given — to that tree: a snapshot read before, or the trees two reviews judged. Either is read with `DIFF`,
+    so every read of one snapshot is the same bytes whatever the live worktree does meanwhile.
+
+    Returns the base, the tree, each changed file with its exact path (`FILES_LIMIT` of them) and the diff's
+    stat, and `PATCH_CHUNK` bytes of the patch from `offset` with its whole size, so the reader can ask for
+    the rest. With `file`, one of the snapshot's files instead: its diff whole up to `FILE_LIMIT`, its changes
+    alone past it, and which.
+
+    Raises ChangeRefused for a name that is no object, an object git no longer holds — it prunes unreferenced
+    ones after a while — or a file not in the change; on any git failure, RuntimeError: a worktree that could
+    not be read is not a worktree without changes.
     """
     if not path:
         raise RuntimeError("no worktree path in the run's state")
@@ -405,24 +448,45 @@ def review_diff(path, offset=0):
                 done.stderr.decode("utf-8", "replace").strip()[:300]))
         return done.stdout.decode("utf-8", "replace")
 
-    base = git(["rev-parse", "--short", "HEAD"]).strip()
-    index = git(["rev-parse", "--path-format=absolute", "--git-path", "index"]).strip()
-    with tempfile.TemporaryDirectory(prefix="review-index-") as private:
-        env = dict(os.environ, GIT_INDEX_FILE=os.path.join(private, "index"))
-        # Starting from the real index, not from HEAD, keeps anything already
-        # staged exactly as `git add -A` on top of it would see it.
-        if os.path.exists(index):
-            shutil.copyfile(index, env["GIT_INDEX_FILE"])
-        git(["add", "-A"], env)
-        diff = ["diff", "--no-ext-diff", "--no-textconv", "--cached"]
-        summary, _, summary_total = _chunk(git(diff + ["--stat"], env), 0, SUMMARY_LIMIT)
-        whole = git(diff, env)
-        patch, following, total = _chunk(whole, offset, PATCH_CHUNK)
-        return {"base": base, "summary": summary, "summary_total": summary_total,
-                "patch": patch, "offset": offset, "next": following, "total": total,
-                # Which change this part belongs to: the parts of one review must be one change, and a
-                # worktree whose terminals stay live can be edited between two reads of the same size.
-                "snapshot": hashlib.sha256(whole.encode("utf-8")).hexdigest()[:32]}
+    def held(name):
+        if not isinstance(name, str) or not OBJECT.match(name):
+            raise ChangeRefused("%r is not an object name" % (name,))
+        if subprocess.run(["git", "-C", path, "cat-file", "-e", name], capture_output=True, timeout=60).returncode:
+            raise ChangeRefused("git no longer holds %s: it prunes what nothing refers to after a while" % name)
+        return name
+
+    if tree is None:
+        base, tree = git(["rev-parse", "HEAD"]).strip(), work_tree(path)
+    else:
+        base = held(base) if base is not None else git(["rev-parse", "HEAD"]).strip()
+        tree = held(tree)
+    pair = [base, tree]
+
+    def listed():
+        return _files(git(["diff"] + DIFF + ["--numstat", "-z"] + pair),
+                      git(["diff"] + DIFF + ["--name-status", "-z"] + pair))
+
+    if file is not None:
+        entry = next((each for each in listed() if each["path"] == file), None)
+        if entry is None:
+            raise ChangeRefused("%r is not a file of this change" % (file,))
+        # Its paths are names, never patterns: `[ab].txt` is that file, not a.txt.
+        literal = dict(os.environ, GIT_LITERAL_PATHSPECS="1")
+        named = ["--"] + [name for name in (entry["old"], entry["path"]) if name]
+        text, whole = git(["diff"] + DIFF + [WHOLE] + pair + named, literal), True
+        if len(text.encode("utf-8")) > FILE_LIMIT:
+            text, whole = git(["diff"] + DIFF + ["-U3"] + pair + named, literal), False
+            if len(text.encode("utf-8")) > FILE_LIMIT:
+                raise ChangeRefused("%s's changes are too large to show here; copy the patch for them" % file)
+        return {"base": base, "tree": tree, "file": entry, "patch": text, "whole": whole}
+    read = {"base": base, "tree": tree}
+    if not offset:
+        files = listed()
+        summary, _, summary_total = _chunk(git(["diff"] + DIFF + ["--stat"] + pair), 0, SUMMARY_LIMIT)
+        read.update(files=files[:FILES_LIMIT], files_total=len(files), summary=summary, summary_total=summary_total)
+    patch, following, total = _chunk(git(["diff"] + DIFF + pair), offset, PATCH_CHUNK)
+    read.update(patch=patch, offset=offset, next=following, total=total)
+    return read
 
 
 def view(repo, base):

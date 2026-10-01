@@ -408,13 +408,15 @@ class Acceptance:
         check(code == 0 and "READY_FOR_HUMAN" in out, "the answered run built, verified and reached READY_FOR_HUMAN")
 
         step("the change at the final gate is read in parts that join into the patch git itself prints")
-        parts, snapshots, offset, reads = [], set(), 0, 0
+        parts, snapshots, offset, reads, named = [], set(), 0, 0, {}
         while reads <= 50:
             # Through the whole path the page uses: the ReviewDiff workflow, the activity on this
-            # run's own worker, and a Temporal payload — which is where the size limit bit.
-            read = await runs.review_diff(client, run1, offset)
+            # run's own worker, and a Temporal payload — which is where the size limit bit. The first read
+            # makes the snapshot; every later one names it.
+            read = await runs.review_diff(client, run1, offset, **named)
             parts.append(read["patch"])
-            snapshots.add(read["snapshot"])
+            snapshots.add((read["base"], read["tree"]))
+            named = {"base": read["base"], "tree": read["tree"]}
             reads += 1
             if read["next"] >= read["total"]:
                 break

@@ -1,6 +1,6 @@
 # Workbench run evidence: the change by file, history as what each role received and produced
 
-**Status:** REVIEW REQUIRED — investigation only; nothing implemented. Q1–Q3 are closed by D5–D7.
+**Status:** IMPLEMENTED — awaiting the external review (D8). Q1–Q3 are closed by D5–D7.
 **Scope:** the Workbench run page's Change, History and run controls ([static/](../app/interfaces/workbench/static/),
 [server.py](../app/interfaces/workbench/server.py)); the change read on the run's host
 ([worktrees.py](../app/workspace/worktrees.py) `review_diff`, the `ReviewDiff` workflow and activity); Temporal
@@ -80,6 +80,10 @@ full live session.
   - Reason: not stated.
   - Date/source: 2026-10-01, operator: *"q1 - search web for best solutions as for our goal cleanly see files
     modifeid click on it and see + - with colors"*.
+- **D8** Implement this todo, once the external reviewer's last wording correction is in.
+  - Effect: the design is approved; implementation starts, test first.
+  - Reason: not stated.
+  - Date/source: 2026-10-01, operator: *"check reviewer and /implement-approved-change"*.
 
 ### Operator gates
 
@@ -111,6 +115,10 @@ full live session.
   and its retry in a fresh session, whose prompt is composed anew — gains one file beside that attempt's prompt:
   its parts as `compose_prompt` built them, named as `terminal.turn_files` and `RETRIED` name the attempt's other
   files. An attempt recorded before that shows its exact prompt, unsplit.
+- **A7 [ACTIVE]:** a review's activity result carries the tree it judged as `judged_tree` whatever its verdict, so
+  every round's change can be read back (fact 8). Still no workflow change: the workflow reads no new key, and
+  recorded histories replay. A run recorded before has trees only on its passes — measured on the saved run: its
+  PATCH verify has none — and the page says so for those rounds.
 
 ## Non-goals
 
@@ -156,10 +164,12 @@ full live session.
 7. **The operator's answers are not timeline entries.** A review entry records the gate it stopped at
    (`entry.gate`); a revise's or guide's words become the state's `guidance` and reach the next turn's prompt as
    `# Operator guidance` (`_stop`, `_run`); approve carries no words. A round after an answer starts a new episode.
-8. **Each review records the tree it judged.** An assess or verify computes the worktree's tree before the
-   architect reads it (`worktrees.work_tree`: `git add -A` into a private index, `git write-tree`) and returns it
-   as `assessed_tree` / `verified_tree` (`run_role` in [activities.py](../app/application/activities.py)). The
-   workflow keeps only the latest; every activity's input and result is in the run's Temporal history.
+8. **A review records the tree it judged — on a PASS only.** An assess or verify computes the worktree's tree
+   before the architect reads it (`worktrees.work_tree`: `git add -A` into a private index, `git write-tree`) and
+   returns it as `assessed_tree` / `verified_tree` only when it passes (`run_role` in
+   [activities.py](../app/application/activities.py)); a PATCH, UNVERIFIED or BLOCKER review returns none. The
+   workflow keeps only the latest; every activity's input and result is in the run's Temporal history. Found in
+   implementation (the history test's PATCH review had no tree); A7 closes it.
 9. **The run's controls at a stop.** While a run waits or failed, the page shows its answers, then Stop run and
    Force terminate (`renderControls`; the [UX todo](2026-09-25_2334-workbench-ux.md)'s A3). "Stopping" is the
    workflow's own `STOPPING` status (`view` in [client.py](../app/application/client.py)); a run whose status
@@ -260,10 +270,13 @@ at a time. None diffs a turn's input against the one before.
   again makes a new snapshot.
 - **One diff policy.** Every git diff this change reads — the file list, a file, the patch and its parts, a review's
   change — compares two trees (the base and the snapshot, or two judged trees) with the same explicit options:
-  `--no-ext-diff --no-textconv --find-renames --no-color`. No repository or user setting then changes what the
-  page shows: no external diff or text conversion runs, renames are found whatever `diff.renames` says, and
-  `color.ui=always` puts no escape codes in the text. A selected path must be one of that snapshot's files and is
-  passed as a literal pathspec; object names are checked as object names.
+  `--no-ext-diff --no-textconv --find-renames --no-color`. These pin the behaviours the page relies on: no
+  external diff or text conversion runs, rename detection is on whatever `diff.renames` says, and the text is
+  uncoloured whatever `color.ui` says. Git may still bound its exhaustive rename search (`diff.renameLimit`), and
+  no `-l0` lifts that bound, which would risk quadratic work: a rename git detects shows as `old → new`, otherwise
+  as a delete and an add. Paths come from the `-z` lists, never from a patch's headers, which follow `diff.noprefix`.
+  A selected path must be one of that snapshot's files and is passed as a literal pathspec; object names are
+  checked as object names.
 - **Server:** `review_diff` returns the base, the tree and the files — exact path, old path on a rename, status,
   lines added and removed, binary — from `git diff --numstat -z` and `--name-status -z` between them, in place of
   the stat. A read naming one path returns that file's diff whole (`--unified` at least its length), or its changes
@@ -351,7 +364,8 @@ action of its own ([GitHub Docs](https://docs.github.com/en/pull-requests/collab
   tree and the change; `compose_prompt` a prompt's shape and parts. The page combines them and owns none.
 - **Adds:** a change snapshot (base and tree) that every change read names; a file list and a one-file read on the
   existing `ReviewDiff` path; one diff-rendering module; prompt parts built by `compose_prompt` and recorded beside
-  the prompt; one read of the run's history for judged trees and answers. No dependency.
+  the prompt; a review's judged tree in its result whatever its verdict (A7); one read of the run's history for
+  judged trees and answers. No dependency.
 - **Removes:** the stat block, the full-height patch as the reading surface, the duplicated History texts and the
   nested turn record; Force terminate at a stop.
 - **Given up, knowingly:** turn tokens and cost (no record holds them); a judged tree or a snapshot pruned by
@@ -387,8 +401,8 @@ action of its own ([GitHub Docs](https://docs.github.com/en/pull-requests/collab
 2. Run text reaches the DOM only as text, in the diff viewer too.
 3. A run's change and every tree are read by the run's own host's git, as today.
 4. One change, one snapshot, one diff policy: the file list, a file, every patch part and Copy patch name the same
-   base and tree and read it with the same options; nothing joins two snapshots, and no repository setting changes
-   what is shown.
+   base and tree and read it with the same options; nothing joins two snapshots, and no repository setting turns
+   on an external diff, text conversion or colour, or turns rename detection off.
 5. A prompt's bytes are unchanged: the parts `compose_prompt` builds render to exactly the prompt it makes today.
 6. Every capability stays reachable: each answer, Stop run, Force terminate (working or stopping), the whole patch
    and its copy, every turn's exact prompt and output.
@@ -399,25 +413,35 @@ action of its own ([GitHub Docs](https://docs.github.com/en/pull-requests/collab
 
 ## Implementation tasks
 
-1. [ ] Red evidence first ([below](#red-evidence)); capture today's prompts for the byte-equality guard before
-   `compose_prompt` changes.
-2. [ ] **Change, server:** the snapshot (base and tree), the file list and the one-file read in `review_diff`,
-   every read from the snapshot, through `ReviewDiff`'s optional arguments; paths checked against the snapshot.
-3. [ ] **Run controls** ([Decision](#run-controls-at-a-stop), D5).
-4. [ ] **Change, page:** the file list with renames and binaries said, the viewer module (D7, A4), the bounded
-   patch with Copy patch of the whole snapshot; the new module in `STATIC`.
-5. [ ] **Prompt parts:** `compose_prompt` builds parts and renders from them; the runner records them beside the
-   prompt; the turn route returns them when they render to the recorded prompt.
-6. [ ] **The run's history:** in [client.py](../app/application/client.py), one read of the run's events yields
-   each review's judged tree and each accepted answer; a route lists the change since the previous review for an
-   engineer turn from the trees around it and reads one file through `ReviewDiff`; a pruned tree is said.
-7. [ ] **History:** turns as rows, Received and Produced, your answers as rows, retries nested, duplicates removed
-   ([Decision](#history)).
-8. [ ] **Acceptance:** `make demo` opens a changed file in the viewer and reads a known line, a build turn's
-   changed file, and an answer row; consumers updated for any changed label.
-9. [ ] **Docs** ([plan](#documentation-plan)); `web-design-review` on every changed page file; the
-   `frontend-design` critique on fixture captures at 1600, 1280, 900 and 390 px.
-10. [ ] The verification matrix, the agents' round, the external review, the full suites — the operator's order.
+1. [x] Red evidence first; today's prompts captured into `tests/fixtures/prompts.json` before `compose_prompt`
+   changed. Each guard seen red for its reason: no `compose_parts`; no `parts` on a turn; the diff route not
+   passing the snapshot; no `tree`/`files`/`ChangeRefused`, `base` short; no history route — then, with the route,
+   the PATCH review's tree missing (fact 8, A7).
+2. [x] **Change, server:** `worktrees.review_diff` — snapshot, file list, one-file read, `DIFF`, literal paths,
+   `ChangeRefused`; `ReviewDiff`'s arguments passed through unchanged; `client.review_diff` turns a refusal into
+   the page's 400.
+3. [x] **Run controls:** `renderControls`; the UX todo's A3 updated.
+4. [x] **Change, page:** `static/diff.js` (file list, viewer, Copy patch), `change.js`, `#change` in
+   `index.html`, `/diff.js` in `STATIC`.
+5. [x] **Prompt parts:** `nodes.compose_parts`/`render`/`PARTS`; `terminal.record_parts` beside each attempt's
+   prompt; the turn route's `parts` while they render to the prompt.
+6. [x] **The run's history:** `client.history` and `/api/runs/<id>/history`; a round's change through
+   `/diff?base=&tree=`; a review's `judged_tree` (A7). Measured on the saved run (read only): 0.07 s, 7 turns, 2
+   answers, its PATCH verify without a tree.
+7. [x] **History:** turns as rows with Received and Produced, answers as rows, retries as attempts, said once.
+8. [x] **Acceptance:** `make demo` passed whole, 82 checks: a changed file read in the viewer, the build turn's
+   change since the review before it, the approval as a history row, no Force terminate while waiting.
+9. [x] **Docs**, `web-design-review` (five findings, fixed: a span's ignored label, rows not virtualised, an
+   empty list drawn, a history read error with no retry, an unread history taken for "no review yet"), and
+   fixture captures at 1600, 1280, 900 and 390 px (one fix: the History's part classes collided with the stack
+   panel's).
+10. [ ] The external review, then the full suites — the operator's order. No review agents (operator,
+    2026-10-01: *"no need more activate tester and reviewer agents"*).
+
+**Verification so far:** WSL `run-tests.sh` on test_worktrees, test_workflow, test_workbench,
+test_observability, test_terminal, test_activities, test_architecture, test_replay — 301 tests OK; Windows
+`run-tests.ps1` on test_worktrees, test_workflow, test_terminal, test_activities, test_architecture,
+test_replay — 176 tests OK; `make demo` passed; `make public-check` passed; `git diff --check` clean.
 
 ## Test-first and verification plan
 
@@ -459,7 +483,8 @@ action of its own ([GitHub Docs](https://docs.github.com/en/pull-requests/collab
 
 - Tasks 1–10 done; every red case seen red, then green.
 - `make demo` passes whole; the History and Change captures reviewed at four widths; `web-design-review` clean.
-- No change to the workflow, any prompt's bytes or the saved run; the turn logs gain only the parts file (A6).
+- No change to the workflow, any prompt's bytes or the saved run; the turn logs gain only the parts file (A6),
+  a review's result only its judged tree (A7).
 
 ## Review record
 
@@ -500,3 +525,17 @@ action of its own ([GitHub Docs](https://docs.github.com/en/pull-requests/collab
   every read, with a control against repository settings.
 - **Added beyond the review:** `--no-color` in that policy — a repository or user set to `color.ui=always` would
   otherwise put escape codes into the patch and the file the page parses.
+
+### 2026-10-01 — external review of the design, third pass: PATCH, then PASS
+
+- **Accepted:** the diff policy's claim narrowed — `diff.renameLimit` still bounds rename detection (probed: at
+  `1`, four renamed and edited files list as four deletes and four adds, with `git diff` and `diff-tree` alike);
+  no `-l0`; invariant 4 says what the options pin.
+- **Added beyond the review:** the same probe showed `git diff` follows `diff.noprefix` in a patch's headers, so
+  paths are read only from the `-z` lists.
+- **Authority:** D8 added; implementation starts.
+
+### 2026-10-01 — implemented
+
+- **Built** as decided, with A7 added on evidence (fact 8 corrected); tasks 1–9 done, evidence under
+  [tasks](#implementation-tasks). Awaiting the external review.

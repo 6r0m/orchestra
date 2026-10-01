@@ -633,6 +633,29 @@ def turn_path(run_id, entry):
         {"stage": entry["stage"], "episode": entry["episode"], "round": entry["round"]}))
 
 
+class Moving(FakeWorktrees):
+    """A worktree whose tree moves on with each engineer turn that finishes, as the engineer's work moves it."""
+
+    def __init__(self):
+        super().__init__()
+        self.changes = 0
+
+    def work_tree(self, path):
+        return "tree-%d" % self.changes
+
+
+def moving(git, agent):
+    """`agent`, recorded, with each engineer turn that finishes moving `git`'s tree."""
+    run = recorded(agent)
+
+    def turn(worktree, argv, run_dir, name, prompt, timeout_seconds, env, *, kind):
+        rc, out = run(worktree, argv, run_dir, name, prompt, timeout_seconds, env, kind=kind)
+        if rc == 0 and name.split("-")[0] in ("plan", "build"):
+            git.changes += 1
+        return rc, out
+    return turn
+
+
 class Runs(Scenario):
     """A run seen, reviewed and answered through the workbench, exactly as the workflow allows."""
 
@@ -931,6 +954,110 @@ class Runs(Scenario):
         with open(retry["out"], encoding="utf-8") as fh:
             self.assertEqual(fh.read(), "the fresh session failed\n", "the failed attempt's retry is kept")
 
+    def test_a_turn_shows_what_it_received_in_the_parts_its_prompt_was_built_from(self):
+        """The composer's parts, recorded beside the prompt, come back with the turn while they render to that
+        prompt; parts that do not, unreadable ones or none show the prompt unsplit."""
+        a1, _ = configured_review_first("PASS", "Direction: A.")
+        self.host, self.agent = E.host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)], git=FakeWorktrees())
+        self.host.runner = recorded(self.agent)
+        run_id = self.start("a turn in parts")
+        body = self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "approval")
+        entries = {entry["stage"]: entry for entry in body["timeline"]}
+        [plan] = request("GET", turn_path(run_id, entries["plan"]))[1]["attempts"]
+        self.assertEqual(plan["input"], self.agent.calls[0]["prompt"])
+        self.assertEqual("".join(part["text"] + "\n" for part in plan["parts"]), plan["input"],
+                         "the parts are the prompt, byte for byte")
+        self.assertLessEqual({"task", "persona", "instructions"}, {part["part"] for part in plan["parts"]})
+        [assess] = request("GET", turn_path(run_id, entries["assess"]))[1]["attempts"]
+        self.assertEqual("".join(part["text"] + "\n" for part in assess["parts"]), assess["input"])
+
+        parts = terminal.turn_files(terminal.run_dir(run_id), terminal.turn_name("plan", 1, 1))["parts"]
+        with open(parts, encoding="utf-8") as fh:
+            recorded_parts = json.load(fh)
+        for changed in (json.dumps(recorded_parts[:-1]), "not json", json.dumps({"part": "task"}), None):
+            if changed is None:
+                os.remove(parts)
+            else:
+                with open(parts, "w", encoding="utf-8") as fh:
+                    fh.write(changed)
+            status, record = request("GET", turn_path(run_id, entries["plan"]))
+            self.assertEqual(status, 200, record)
+            [plan] = record["attempts"]
+            self.assertNotIn("parts", plan, changed)
+            self.assertEqual(plan["input"], self.agent.calls[0]["prompt"], "the prompt, unsplit")
+
+    def test_a_lost_sessions_retry_records_its_own_parts_beside_its_own_prompt(self):
+        """A session lost on resume is retried in a fresh one with the whole task again: a prompt composed anew,
+        whose parts are its own, never the first attempt's."""
+        patch, _ = configured_review_first("PATCH", "name the test")
+        self.host, self.agent = E.host([
+            ("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, patch),
+            ("plan-e1-2", 1, "No conversation found with session ID\n"), ("plan-e1-2-rehydrated", 0, "revised\n"),
+            ("assess-e1-2", 0, configured_review_resumed("PASS"))], git=FakeWorktrees())
+        self.host.runner = recorded(self.agent)
+        run_id = self.start("a session lost on resume")
+        body = self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "approval")
+        [entry] = [entry for entry in body["timeline"] if entry["stage"] == "plan" and entry["round"] == 2]
+        first, retry = request("GET", turn_path(run_id, entry))[1]["attempts"]
+        self.assertEqual((first["attempt"], retry["attempt"]), ("original", "retried with a new session"))
+        self.assertEqual((first["input"], retry["input"]), (self.agent.calls[2]["prompt"], self.agent.calls[3]["prompt"]))
+        for attempt in (first, retry):
+            self.assertEqual("".join(part["text"] + "\n" for part in attempt["parts"]), attempt["input"],
+                             attempt["attempt"])
+        self.assertNotIn("task", [part["part"] for part in first["parts"]], "a resumed turn carries its delta")
+        self.assertIn("task", [part["part"] for part in retry["parts"]], "the fresh session is given the task again")
+
+    def test_the_runs_history_holds_each_judged_tree_and_each_accepted_answer(self):
+        """Every review's tree, whatever its verdict, and every answer the run accepted — with its words and when
+        — read back from the run's own Temporal history; an answer the workflow refused is none of them."""
+        git = Moving()
+        patch, _ = configured_review_first("PATCH", "name the test")
+        self.host, self.agent = E.host([
+            ("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, patch),
+            ("plan-e1-2", 0, "revised\n"), ("assess-e1-2", 0, configured_review_resumed("PASS")),
+            ("plan-e2-1", 0, "split\n"), ("assess-e2-1", 0, configured_review_resumed("PASS")),
+            ("build-e3-1", 1, ""), ("build-e3-1", 0, "built\n"), ("verify-e3-1", 0, configured_review_resumed("PASS"))],
+            git=git)
+        self.host.runner = moving(git, self.agent)
+        run_id = self.start("a run with every answer")
+        answered = []
+
+        def answer(reason, action, **more):
+            stop = self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == reason
+                                 and body["stop"]["id"] not in answered)["stop"]
+            status, body = request("POST", "/api/runs/%s/answer" % run_id, dict(more, stop=stop["id"], action=action))
+            self.assertEqual(status, 200, body)
+            answered.append(stop["id"])
+
+        answer("approval", "revise", text="split it in two")
+        stop = self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "approval"
+                             and body["stop"]["id"] not in answered)["stop"]
+        self.assertEqual(request("POST", "/api/runs/%s/answer" % run_id, {"stop": stop["id"], "action": "merge"})[0],
+                         422, "refused by the workflow")
+        answer("approval", "approve")
+        answer("failed", "continue")
+        answer("final", "discard", confirm=True)
+        self.wait_for(run_id, lambda body: body["state"]["status"] == "DISCARDED")
+
+        status, history = request("GET", "/api/runs/%s/history" % run_id)
+        self.assertEqual(status, 200, history)
+        self.assertEqual([(turn["stage"], turn["episode"], turn["round"], turn.get("tree")) for turn in history["turns"]],
+                         [("plan", 1, 1, None), ("assess", 1, 1, "tree-1"), ("plan", 1, 2, None),
+                          ("assess", 1, 2, "tree-2"), ("plan", 2, 1, None), ("assess", 2, 1, "tree-3"),
+                          ("build", 3, 1, None), ("verify", 3, 1, "tree-4")],
+                         "every completed turn once — the failed build is no turn — and every review's tree")
+        for turn in history["turns"]:
+            self.assertLessEqual(turn["started"], turn["ended"])
+        self.assertEqual([(each["stop"], each["action"], each.get("text")) for each in history["answers"]],
+                         [(answered[0], "revise", "split it in two"), (answered[1], "approve", None),
+                          (answered[2], "continue", None), (answered[3], "discard", None)],
+                         "each accepted answer, the refused merge none of them, the discard no turn followed")
+        times = [each["at"] for each in history["answers"]]
+        self.assertEqual(times, sorted(times))
+        self.assertLess(history["turns"][3]["ended"], times[0], "an answer is when the run accepted it")
+        self.assertLess(times[0], history["turns"][4]["started"])
+        self.assertEqual(request("GET", "/api/runs/no-such-run/history")[0], 404)
+
     def test_start_list_review_and_answer_a_run(self):
         a1, _ = configured_review_first("PASS", "Direction: A.")
         git = FakeWorktrees()
@@ -971,13 +1098,26 @@ class Runs(Scenario):
                          409, "an answer for a stop the run has left is refused")
         self.assertEqual([verdict["verdict"] for verdict in body["timeline"] if verdict.get("verdict")], ["PASS", "PASS"])
 
+        worktree = "/fake/worktree/%s" % run_id
         status, diff = request("GET", "/api/runs/%s/diff" % run_id)
-        self.assertEqual((status, diff["base"], diff["offset"]), (200, "abc1234", 0))
+        self.assertEqual((status, diff["base"], diff["tree"], diff["offset"]), (200, "b" * 40, "c" * 40, 0))
         self.assertEqual((diff["total"], diff["next"]), (len(diff["patch"]), len(diff["patch"])),
                          "a change read whole says so")
-        self.assertIn(("review_diff", "/fake/worktree/%s" % run_id, 0), git.calls)
-        status, part = request("GET", "/api/runs/%s/diff?offset=5" % run_id)
+        self.assertIn(("review_diff", worktree, 0, None, None, None), git.calls, "the change now: a new snapshot")
+        snapshot = {"base": diff["base"], "tree": diff["tree"]}
+        status, part = request("GET", "/api/runs/%s/diff?%s" % (run_id, urllib.parse.urlencode(dict(snapshot, offset=5))))
         self.assertEqual((status, part["offset"]), (200, 5), "the rest of a change too large for one payload")
+        self.assertIn(("review_diff", worktree, 5, diff["base"], diff["tree"], None), git.calls, "from its snapshot")
+        status, one = request("GET", "/api/runs/%s/diff?%s" % (run_id, urllib.parse.urlencode(
+            dict(snapshot, file="dir/a b.txt"))))
+        self.assertEqual((status, one["file"]["path"]), (200, "dir/a b.txt"), one)
+        self.assertIn(("review_diff", worktree, 0, diff["base"], diff["tree"], "dir/a b.txt"), git.calls)
+        git.diff_refusal = "nope is not a file of this change"
+        status, refused = request("GET", "/api/runs/%s/diff?%s" % (run_id, urllib.parse.urlencode(
+            dict(snapshot, file="nope"))))
+        self.assertEqual(status, 400, refused)
+        self.assertIn("nope is not a file of this change", refused["error"], "its host's git said why")
+        git.diff_refusal = None
         self.assertEqual(request("GET", "/api/runs/%s/diff?offset=x" % run_id)[0], 400)
 
         status, view = request("GET", "/api/worktrees?repo=" + urllib.parse.quote(self.repo))

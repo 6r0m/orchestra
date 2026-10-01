@@ -39,6 +39,7 @@ from app.foundation import policy as P
 from app.foundation import stages
 from app.workspace import repos
 from app.agents import adapters
+from app.agents import nodes
 from app.agents import terminal
 
 # The page is this server's own, served from beside it.
@@ -57,6 +58,7 @@ STATIC = {"/": ("index.html", "text/html; charset=utf-8"),
           "/rail.js": ("rail.js", JS),
           "/run.js": ("run.js", JS),
           "/change.js": ("change.js", JS),
+          "/diff.js": ("diff.js", JS),
           "/terminals.js": ("terminals.js", JS),
           "/worktrees.js": ("worktrees.js", JS),
           "/settings.js": ("settings.js", JS),
@@ -105,6 +107,24 @@ def agent_prompt(view, rdir=None):
         if isinstance(event, dict):
             events.append(event)
     return adapters.waiting(events)
+
+
+def turn_parts(path, prompt):
+    """The parts a turn's prompt was built from, as recorded beside it — only while they render to that prompt,
+    byte for byte; None for a turn with none, or with parts that are unreadable or no longer its prompt's."""
+    if prompt is None or os.path.islink(path):
+        return None
+    try:
+        with open(path, "rb") as fh:
+            saved = fh.read(MAX_TURN_FILE + 1)
+        parts = json.loads(saved.decode("utf-8")) if len(saved) <= MAX_TURN_FILE else None
+    except (OSError, ValueError):
+        return None
+    if not isinstance(parts, list) or not all(
+            isinstance(part, dict) and set(part) == {"part", "text"} and isinstance(part["part"], str)
+            and isinstance(part["text"], str) for part in parts):
+        return None
+    return parts if nodes.render(parts) == prompt else None
 
 
 class Loop:
@@ -249,13 +269,20 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
                         return self._send(*self._run(run_id))
                     if parts[2:] == ["turn"]:
                         return self._send(*self._turn(run_id))
+                    if parts[2:] == ["history"]:
+                        record = call(lambda client: runs.history(client, run_id))
+                        if record is None:
+                            return self._send(HTTPStatus.NOT_FOUND, {"error": "no run %r" % run_id})
+                        return self._send(HTTPStatus.OK, record)
                     if parts[2:] == ["diff"]:
-                        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query, keep_blank_values=True)
                         asked = (query.get("offset") or ["0"])[0]
                         if not asked.isdigit():
                             return self._send(HTTPStatus.BAD_REQUEST, {"error": "offset must be a whole number"})
-                        return self._send(HTTPStatus.OK,
-                                          call(lambda client: runs.review_diff(client, run_id, int(asked))))
+                        # Which snapshot, and which of its files: its host's git checks every one of them.
+                        base, tree, file = ((query.get(key) or [None])[0] for key in ("base", "tree", "file"))
+                        return self._send(HTTPStatus.OK, call(lambda client: runs.review_diff(
+                            client, run_id, int(asked), base=base, tree=tree, file=file)))
                 return self._send(HTTPStatus.NOT_FOUND, {"error": "not found"})
             except Exception as exc:                # noqa: BLE001 - every failure is answered
                 return self._error(exc)
@@ -469,6 +496,9 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
                     message = kind.final_message(record["output"])
                     if message != record["output"]:
                         record["message"] = message
+                parts = turn_parts(files["parts"], record["input"])
+                if parts is not None:
+                    record["parts"] = parts
                 if record["input"] is not None or record["output"] is not None:
                     attempts.append(record)
             return HTTPStatus.OK, {"attempts": attempts}

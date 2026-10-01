@@ -248,9 +248,12 @@
           <p class="result" id="change-result" role="status"></p>
         </div>
         <p class="hint" id="change-said"></p>
-        <pre class="stat" id="diff-summary"></pre>
-        <pre class="patch" id="diff-patch" tabindex="0" aria-label="The change's patch"></pre>
-        <button type="button" id="diff-more" hidden></button>
+        <div id="diff-files"></div>
+        <div class="raw-patch" id="diff-raw" hidden>
+          <div class="evidence-label"><span>Patch</span><span class="hint" id="diff-size"></span>
+            <button type="button" class="copy" id="diff-copy">Copy patch</button></div>
+          <pre class="patch-raw" id="diff-patch" tabindex="0" translate="no" aria-label="The change's patch"></pre>
+        </div>
       </section>
 
       <div class="controls" id="run-controls" hidden>
@@ -283,7 +286,8 @@
 
       <section class="history" id="history" aria-labelledby="history-title">
         <h2 id="history-title">History</h2>
-        <p class="hint">Open a turn for its final message. Its prompt and raw output record are there when you need them; the vendor keeps prior session context.</p>
+        <p class="hint">Each turn: what its role was given and what it gave back, with your answers between. The
+          terminals hold each session in full.</p>
         <div id="timeline"></div>
         <details class="legend">
           <summary>What the verdicts mean</summary>

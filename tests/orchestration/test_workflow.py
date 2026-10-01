@@ -634,6 +634,81 @@ class AnyProfileUnderAnyRole(Scenario):
             self.assertIn(fh.readline().strip(), self.agent.calls[0]["prompt"], "its persona file, as it named it")
 
 
+ENGINEER = {"kind": "claude-code", "workspace_access": "write", "persona": "You are the engineer of {{TODO_PATH}}.\n"}
+ARCHITECT = {"kind": "codex", "workspace_access": "read", "persona": "You are the architect judging {{TODO_PATH}}.\n"}
+TURN = {"task": "Add a retry to the export job.", "todo_path": "todo/2026-10-01_1200-export.md", "run_id": "r1",
+        "worktree_path": "/w", "phase": "plan", "round": 0, "episode": 1, "feedback": "", "guidance": ""}
+ROUNDS = {"build": {"normal": 2, "extended": 2}}
+# Every shape a turn's prompt takes: each stage, a session's first turn and a later one, a session born again,
+# and each part carried in. Their prompts as the composer made them before it built parts are in
+# fixtures/prompts.json; a deliberate change to a prompt changes its case's text there.
+PROMPT_CASES = {
+    "research, a session's first turn": dict(
+        stage="research", stage_cfg=ARCHITECT, is_review=False, state=dict(TURN, phase="research"),
+        session_first=True, stage_first=True, skills={"research": "architect"}),
+    "research, born again with its brief and your words": dict(
+        stage="research", stage_cfg=ARCHITECT, is_review=False,
+        state=dict(TURN, phase="research", episode=2, brief="Brief: one job per tenant.",
+                   guidance="Look at the scheduler too."),
+        session_first=True, stage_first=True),
+    "plan, the first turn after research": dict(
+        stage="plan", stage_cfg=ENGINEER, is_review=False, state=dict(TURN, episode=2, brief="Brief: one job per tenant."),
+        session_first=True, stage_first=True, skills={"plan": "investigate-change"}),
+    "plan, a later turn": dict(
+        stage="plan", stage_cfg=ENGINEER, is_review=False, state=dict(TURN, round=1, feedback="Name the test."),
+        session_first=False, stage_first=False, skills={"plan": "investigate-change"}),
+    "plan, a later turn with your words": dict(
+        stage="plan", stage_cfg=ENGINEER, is_review=False,
+        state=dict(TURN, round=1, feedback="Name the test.", guidance="Keep it to one module."),
+        session_first=False, stage_first=False),
+    "assess, the first in a session that researched": dict(
+        stage="assess", stage_cfg=ARCHITECT, is_review=True, state=TURN, session_first=False, stage_first=True,
+        skills={"assess": "architect"}),
+    "assess, a later turn": dict(
+        stage="assess", stage_cfg=ARCHITECT, is_review=True, state=dict(TURN, round=1, feedback="Name the test."),
+        session_first=False, stage_first=False),
+    "assess, a session born again mid-loop": dict(
+        stage="assess", stage_cfg=ARCHITECT, is_review=True, state=dict(TURN, round=2, feedback="Name the test."),
+        session_first=True, stage_first=False),
+    "build, the first turn with your words": dict(
+        stage="build", stage_cfg=ENGINEER, is_review=False,
+        state=dict(TURN, phase="build", episode=3, guidance="Approved; mind the lock."),
+        session_first=False, stage_first=True, skills={"build": "implement-approved-change"}),
+    "verify, a convergence reflection with your guidance": dict(
+        stage="verify", stage_cfg=ARCHITECT, is_review=True,
+        state=dict(TURN, phase="build", round=2, feedback="Still racy.", convergence={"phase": "build", "round": 2},
+                   convergence_seen=[]),
+        session_first=False, stage_first=False, review_rounds=ROUNDS,
+        review_prompts={"after_normal": {"architect": "Name the cause."}}),
+    "build, the final budgeted turn": dict(
+        stage="build", stage_cfg=ENGINEER, is_review=False, state=dict(TURN, phase="build", round=3, feedback="Still racy."),
+        session_first=False, stage_first=False, review_rounds=ROUNDS,
+        review_prompts={"at_limit": {"engineer": "Hand off cleanly."}}),
+}
+
+
+class PromptParts(unittest.TestCase):
+    """A turn's prompt is built as labelled parts and rendered from them, byte for byte the prompt it was."""
+
+    def test_every_prompt_renders_from_its_parts_exactly_as_it_was(self):
+        from app.agents import nodes as N
+        with open(os.path.join(HERE, "fixtures", "prompts.json"), encoding="utf-8") as fh:
+            captured = json.load(fh)
+        self.assertEqual(sorted(captured), sorted(PROMPT_CASES))
+        named = set()
+        for name, case in PROMPT_CASES.items():
+            args = dict(case, logs="/runtime/r1/logs")
+            prompt = N.compose_prompt(**args)
+            self.assertEqual(prompt, captured[name], name)
+            parts = N.compose_parts(**args)
+            self.assertEqual(N.render(parts), prompt, name)
+            for part in parts:
+                self.assertEqual(set(part), {"part", "text"}, name)
+                self.assertIn(part["part"], N.PARTS, name)
+            named.update(part["part"] for part in parts)
+        self.assertEqual(named, set(N.PARTS), "the matrix holds every part a prompt can carry")
+
+
 class Policy(unittest.TestCase):
     """Settings are validated whole: here their shape and references, and each kind's own values through its
     adapter (`application/test_settings.py`)."""

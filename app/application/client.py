@@ -13,7 +13,8 @@ from temporalio.api.taskqueue.v1 import TaskQueue
 from temporalio.api.workflowservice.v1 import DescribeTaskQueueRequest
 from temporalio.client import Client, WorkflowExecutionStatus, WorkflowFailureError, WorkflowUpdateFailedError
 from temporalio.common import WorkflowIDConflictPolicy, WorkflowIDReusePolicy
-from temporalio.exceptions import TimeoutError as StepTimeout, TimeoutType, WorkflowAlreadyStartedError
+from temporalio.exceptions import (ApplicationError, TimeoutError as StepTimeout, TimeoutType,
+                                   WorkflowAlreadyStartedError)
 from temporalio.service import RPCError, RPCStatusCode
 
 from app.application import settings as S
@@ -350,8 +351,10 @@ async def runs(client, limit=200, cursor=None):
     return listed, (page.next_page_token or None) if read >= limit else None
 
 
-async def review_diff(client, run_id, offset=0):
-    """The run's change as its target host's git reads it, from `offset` bytes into the patch."""
+async def review_diff(client, run_id, offset=0, base=None, tree=None, file=None):
+    """The run's change as its target host's git reads it (`worktrees.review_diff`): the change now, or the
+    snapshot `base` and `tree` name, from `offset` bytes into its patch — or its one `file`. A read naming what
+    that git cannot read is refused, saying why."""
     current = await readable_status(client, run_id)
     if current is None:
         raise NotWaiting("no run %r" % run_id)
@@ -359,11 +362,64 @@ async def review_diff(client, run_id, offset=0):
     if not path:
         raise Refusal("run %s has no worktree yet" % run_id)
     await preflight(client, queues(current["workflow_queue"], current["queue"]))
-    # On the run's own workflow queue: its own stack's worker reads its change.
-    return await client.execute_workflow(
-        WF.ReviewDiff.run, {"worktree_path": path, "queue": current["queue"], "offset": offset},
-        id="diff-%s-%s" % (run_id, os.urandom(4).hex()), task_queue=current["workflow_queue"],
-        execution_timeout=datetime.timedelta(minutes=5))
+    named = {key: value for key, value in (("base", base), ("tree", tree), ("file", file)) if value is not None}
+    try:
+        # On the run's own workflow queue: its own stack's worker reads its change.
+        return await client.execute_workflow(
+            WF.ReviewDiff.run, dict(named, worktree_path=path, queue=current["queue"], offset=offset),
+            id="diff-%s-%s" % (run_id, os.urandom(4).hex()), task_queue=current["workflow_queue"],
+            execution_timeout=datetime.timedelta(minutes=5))
+    except WorkflowFailureError as error:
+        cause = error.cause.cause if error.cause is not None and error.cause.cause is not None else error.cause
+        if isinstance(cause, ApplicationError) and cause.type == "ChangeRefused":
+            raise Refusal(cause.message) from error
+        raise
+
+
+async def history(client, run_id):
+    """What the run's Temporal history holds that its status does not: each turn that completed — its stage,
+    episode, round, when it started and ended, and for a review the tree it judged — and each answer the run
+    accepted, with its words and when. None when Temporal holds no such run.
+
+    A review's tree is the one its result names — `judged_tree`, or for a pass `assessed_tree` or
+    `verified_tree` — and a review whose result names none has none. An answer is the `answer:<stop-id>`
+    Update the workflow accepted, as its accepted event recorded the request; one its validator refused
+    never entered the history."""
+    def at(event):
+        return event.event_time.ToDatetime(tzinfo=datetime.timezone.utc).isoformat()
+
+    async def decoded(payloads):
+        return (await client.data_converter.decode(payloads))[0]
+
+    turns, answers, scheduled = [], [], {}
+    try:
+        async for event in client.get_workflow_handle(run_id).fetch_history_events():
+            if event.HasField("activity_task_scheduled_event_attributes"):
+                attributes = event.activity_task_scheduled_event_attributes
+                if attributes.activity_type.name == "run_role":
+                    scheduled[event.event_id] = (await decoded(attributes.input.payloads), at(event))
+            elif event.HasField("activity_task_completed_event_attributes"):
+                attributes = event.activity_task_completed_event_attributes
+                if attributes.scheduled_event_id in scheduled:
+                    args, started = scheduled.pop(attributes.scheduled_event_id)
+                    result, state = await decoded(attributes.result.payloads), args["state"]
+                    turn = {"stage": args["stage"], "episode": state.get("episode", 1),
+                            "round": state.get("round", 0) + 1, "started": started, "ended": at(event)}
+                    tree = result.get("judged_tree") or result.get("assessed_tree") or result.get("verified_tree")
+                    if tree:
+                        turn["tree"] = tree
+                    turns.append(turn)
+            elif event.HasField("workflow_execution_update_accepted_event_attributes"):
+                request = event.workflow_execution_update_accepted_event_attributes.accepted_request
+                if request.meta.update_id.startswith("answer:"):
+                    answer = await decoded(request.input.args.payloads)
+                    answers.append({"stop": answer.get("stop"), "action": answer.get("action"),
+                                    "role": answer.get("role"), "text": answer.get("text"), "at": at(event)})
+    except RPCError as error:
+        if error.status == RPCStatusCode.NOT_FOUND:
+            return None
+        raise
+    return {"turns": turns, "answers": answers}
 
 
 def not_kept(listed, status, removal=None):

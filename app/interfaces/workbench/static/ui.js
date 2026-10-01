@@ -47,14 +47,24 @@ function seconds(iso) {
   return Math.max(0, Math.floor((Date.now() - Date.parse(iso)) / 1000));
 }
 
-// How long since `iso`: "42 sec", "12 min", "1 hr, 5 min".
-export function duration(iso) {
-  const s = seconds(iso);
-  if (Number.isNaN(s)) return "";
+// `s` seconds said: "42 sec", "12 min", "1 hr, 5 min".
+function spoken(s) {
   const parts = s < 60 ? { seconds: Math.max(1, s) } : s < 3600 ? { minutes: Math.floor(s / 60) }
     : { hours: Math.floor(s / 3600), minutes: Math.floor(s / 60) % 60 };
   if (lasting) return lasting.format(parts);
   return Object.entries(parts).map(([unit, n]) => n + " " + unit.slice(0, 3)).join(" ");
+}
+
+// How long since `iso`.
+export function duration(iso) {
+  const s = seconds(iso);
+  return Number.isNaN(s) ? "" : spoken(s);
+}
+
+// How long from `start` to `end`.
+export function lasted(start, end) {
+  const s = Math.max(0, Math.round((Date.parse(end) - Date.parse(start)) / 1000));
+  return Number.isNaN(s) ? "" : spoken(s);
 }
 
 // When `iso` was, from now: "4 hr. ago".

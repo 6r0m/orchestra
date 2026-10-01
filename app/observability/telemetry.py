@@ -865,9 +865,8 @@ def final_diff(client, values, read_diff):
             trace_context=_work_item_context(client, values), values=values,
             input={"base": "%s (worktree HEAD at run start)" % base,
                    "worktree": path, "status": values.get("status"),
-                   "command": "gdiff -s: git add -A, then git diff "
-                              "--no-ext-diff --no-textconv --cached "
-                              "(on a private copy of the index)"},
+                   "command": "git add -A and git write-tree on a private copy of the index, then "
+                              "git diff --no-ext-diff --no-textconv --find-renames --no-color <base> <tree>"},
             output={"summary": summary.strip() or "(no changes)",
                     "patch": shown or None,
                     # Cut here, or already cut by the bounded read the change came through.

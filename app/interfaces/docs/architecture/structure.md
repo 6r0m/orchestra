@@ -24,7 +24,7 @@ print, serve and exit. The page holds no state of its own.
 | `cli.py` | the command line over the shared client and the stack's owner |
 | `worker.py` | this host's Temporal worker and the queues it polls |
 | `workbench/server.py` | the page's HTTP server and its small JSON API |
-| `workbench/static/` | the page itself: HTML, CSS, its JavaScript as native modules — the stack, runs, new-run form, Settings, terminals, per-turn history, changes, worktrees, and `app.js` their entry — and a pinned xterm.js |
+| `workbench/static/` | the page itself: HTML, CSS, its JavaScript as native modules — the stack, runs, new-run form, Settings, terminals, the history as turns and answers, the change and its file-by-file diff viewer, worktrees, and `app.js` their entry — and a pinned xterm.js |
 | `workbench/orchestra-workbench.service` | the systemd user unit the page runs as, rendered for a checkout by `make workbench-install` |
 
 ## Relationships
@@ -42,11 +42,18 @@ Its Operator action list also projects a waiting vendor dialog from the active t
 hook events — Claude's; Codex reports none — and the workflow still owns actual stops and their answers.
 
 There is no facade here: the CLI reads a repository descriptor and the page reads a
-terminal record directly. A completed turn's prompt and final output are read on demand from
-the worker's local logs; the workflow's timeline stays compact. Its final message is read by the
-kind that wrote it, as the run's start in Temporal names each role's, never guessed from the
+terminal record directly. A completed turn's prompt, the parts it was built from and its final
+output are read on demand from the worker's local logs; the workflow's timeline stays compact. Its
+parts are shown only while they render to its prompt, byte for byte, and its final message is read
+by the kind that wrote it, as the run's start in Temporal names each role's, never guessed from the
 record's words; and a retry an earlier attempt left under the turn's name, before a Continue ran
 it again, is not shown as the turn's. An indirection to hide those records would buy nothing.
+
+Through `application.client` as well, on demand: the run's Temporal history — when each turn ran,
+the tree each review judged and each answer the run accepted — for the history's turns and answers;
+and the change, through `ReviewDiff` on the run's host, as one snapshot that every later read of it
+names — a file, a part of the patch, Copy patch — and a round's change as the two judged trees
+around it.
 
 ## Invariants
 
@@ -55,7 +62,7 @@ it again, is not shown as the turn's. An indirection to hide those records would
 - **The workbench never manages its own process (D32).** Systemd runs it; it starts and stops the stack, and the stack never includes it.
 - **A stop's answers are the ones it publishes (D6).** The page and the command line offer exactly the actions a stop publishes; the page owns their labels, colours and dialogs, the command line their shorthands and how each is typed, and neither keeps its own list.
 - **Everything listens on `127.0.0.1`**, and the API and the terminal sockets accept only the page's token, from the page's own origin. The terminal sockets take that token in the handshake's own header, never in a URL.
-- **Agent text reaches the page as terminal bytes or as text, never as markup.**
+- **Agent text reaches the page as terminal bytes or as text, never as markup** — a file's lines in the diff viewer too.
 
 ## Accepted decisions
 

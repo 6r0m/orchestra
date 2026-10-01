@@ -206,9 +206,28 @@ def _verdict_object(value):
     return found
 
 
+# What a prompt can carry, each a part of its own: the skill it invokes, the task and the role's persona on a
+# session's first turn, the stage's instructions or a review's re-check, and what is carried in.
+PARTS = ("skill", "task", "persona", "instructions", "recheck", "brief", "previous-brief", "findings", "guidance",
+         "reflection", "reflection-guidance", "handoff", "handoff-guidance")
+
+
+def render(parts):
+    """The prompt `parts` make: their texts, one after another on lines of their own."""
+    return "\n".join(part["text"] for part in parts) + "\n"
+
+
 def compose_prompt(stage, stage_cfg, is_review, state, session_first,
                    stage_first, logs="the run's logs", skills=None, review_rounds=None, review_prompts=None):
-    """Everything a stage needs, explicitly from state — no hidden memory.
+    """The prompt a turn is given: its parts (`compose_parts`), rendered."""
+    return render(compose_parts(stage, stage_cfg, is_review, state, session_first, stage_first, logs=logs,
+                                skills=skills, review_rounds=review_rounds, review_prompts=review_prompts))
+
+
+def compose_parts(stage, stage_cfg, is_review, state, session_first,
+                  stage_first, logs="the run's logs", skills=None, review_rounds=None, review_prompts=None):
+    """Everything a stage needs, explicitly from state — no hidden memory — as the labelled parts its prompt
+    is rendered from: `{"part": <one of PARTS>, "text": ...}`, in order.
 
     HOW a role acts lives in its persona, which the run carries from its start, so
     no later edit reaches it (a run started before agent profiles still reads its
@@ -224,7 +243,12 @@ def compose_prompt(stage, stage_cfg, is_review, state, session_first,
     rehydrated role gets.
     """
     todo = state["todo_path"]
-    lines = []
+    parts = []
+
+    def add(part, *lines):
+        # Each part holds at least one line, so the prompt its parts render is exactly its lines joined.
+        parts.append({"part": part, "text": "\n".join(lines)})
+
     # The operator may bind a skill to a stage (`stage_skills`): its methodology, which this component
     # does not own. An invocation only takes effect as the prompt's very first characters (measured: a
     # trailing one is inert), so it leads the composed prompt and everything after it — task, persona,
@@ -234,62 +258,63 @@ def compose_prompt(stage, stage_cfg, is_review, state, session_first,
     named = (skills or {}).get(stage)
     skill = adapters.skill(adapters.for_role(stage_cfg), named[1:] if named and named.startswith("/") else named)
     if skill and (session_first or stage_first):
-        lines += [skill, ""]
+        add("skill", skill, "")
     if session_first:
-        lines += ["# Task", state["task"], "",
-                  _template(stage_cfg, todo)]        # the ROLE's persona file
+        add("task", "# Task", state["task"], "")
+        add("persona", _template(stage_cfg, todo))        # the ROLE's persona file
     # A session being born has no memory to lean on, so it always gets the
     # full current-stage bootstrap — whatever the attempt number. Without
     # this a session lost mid-loop would be rehydrated with a delta that
     # references findings and instructions it never received.
     if stage_first or session_first:
-        lines += [stages.STAGE_ASK[stage].replace("{{TODO_PATH}}", todo).replace("{{LOGS}}", logs)]
+        add("instructions", stages.STAGE_ASK[stage].replace("{{TODO_PATH}}", todo).replace("{{LOGS}}", logs))
         # A flow that began with research hands its brief to the plan that turns it into a todo, and a
         # research session born again gets the brief it gave, which the operator's feedback is about.
         if stage == "plan" and state.get("brief"):
-            lines += ["", "# The architect's research brief — check its abstract todo against the code",
-                      state["brief"]]
+            add("brief", "", "# The architect's research brief — check its abstract todo against the code",
+                state["brief"])
         elif stage == "research" and session_first and state.get("brief"):
-            lines += ["", "# Your previous brief", state["brief"]]
+            add("previous-brief", "", "# Your previous brief", state["brief"])
         if state.get("feedback"):
-            lines += ["",
-                      "# Your prior findings on this artifact — re-check each"
-                      if is_review else "# Architect findings to address",
-                      state["feedback"]]
+            add("findings", "",
+                "# Your prior findings on this artifact — re-check each"
+                if is_review else "# Architect findings to address",
+                state["feedback"])
     else:
         if is_review:
-            lines += ["The artifact was revised in response to your findings — "
-                      "re-check whether each was addressed or explicitly refuted; "
-                      "re-verify refutations against the code before insisting.",
-                      "(Your stage instructions are unchanged: judge the artifact "
-                      "at %s and end with the verdict JSON.)" % todo]
+            add("recheck",
+                "The artifact was revised in response to your findings — "
+                "re-check whether each was addressed or explicitly refuted; "
+                "re-verify refutations against the code before insisting.",
+                "(Your stage instructions are unchanged: judge the artifact "
+                "at %s and end with the verdict JSON.)" % todo)
         else:
-            lines += ["# Architect findings to address", state.get("feedback", ""),
-                      "Handle them per your feedback-handling instructions: fix "
-                      "what is valid; refute what is not, with evidence "
-                      "(todo: %s)." % todo]
+            add("findings", "# Architect findings to address", state.get("feedback", ""),
+                "Handle them per your feedback-handling instructions: fix "
+                "what is valid; refute what is not, with evidence "
+                "(todo: %s)." % todo)
     if state.get("guidance"):
-        lines += ["", "# Operator guidance", state["guidance"]]
+        add("guidance", "", "# Operator guidance", state["guidance"])
     convergence = state.get("convergence") or {}
     role_name = stages.STAGE_ROLE[stage]
     seen = state.get("convergence_seen") or []
     if (convergence.get("phase") == state.get("phase") and
             (session_first or role_name not in seen)):
         extra = ((review_prompts or {}).get("after_normal") or {}).get(role_name, "").strip()
-        lines += ["", "# Convergence reflection",
-                  "The normal review budget of %d iterations has elapsed.\n\n%s" %
-                  (convergence["round"], CONVERGENCE_REFLECTION[role_name])]
+        add("reflection", "", "# Convergence reflection",
+            "The normal review budget of %d iterations has elapsed.\n\n%s" %
+            (convergence["round"], CONVERGENCE_REFLECTION[role_name]))
         if extra:
-            lines += ["", "# Operator's additional reflection guidance", extra]
+            add("reflection-guidance", "", "# Operator's additional reflection guidance", extra)
     thresholds = (review_rounds or {}).get(state.get("phase"))
     if thresholds:
         review_number = state.get("round", 0) + 1
         if review_number >= thresholds["normal"] + thresholds["extended"]:
             extra = ((review_prompts or {}).get("at_limit") or {}).get(role_name, "").strip()
-            lines += ["", "# Final budget handoff", FINAL_REVIEW_SUMMARY[role_name]]
+            add("handoff", "", "# Final budget handoff", FINAL_REVIEW_SUMMARY[role_name])
             if extra:
-                lines += ["", "# Operator's additional final-turn guidance", extra]
-    return "\n".join(lines) + "\n"
+                add("handoff-guidance", "", "# Operator's additional final-turn guidance", extra)
+    return parts
 
 
 def _template(role_cfg, todo_path):

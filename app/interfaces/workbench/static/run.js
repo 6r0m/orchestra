@@ -4,10 +4,11 @@
 
 import { api } from "./api.js";
 import { $, PARTS, at, blockedBy, clock, code, confirmAction, copyButton, decisionTitle, doing, el, headline,
-  outcome, report, score, unchanged, wrote } from "./ui.js";
+  lasted, outcome, report, score, unchanged, wrote } from "./ui.js";
 import { stackButton, stackReading } from "./stack.js";
 import { showTerminals, updateTerminals } from "./terminals.js";
 import { placeChange, readOnceFor, showChangeFor } from "./change.js";
+import { chevron, fileList } from "./diff.js";
 import { removeKept } from "./worktrees.js";
 
 // How an answer is shown. Which answers a stop takes comes with the stop, and whether one is accepted is
@@ -63,6 +64,8 @@ export function show(runId) {
   selected = runId;
   shownStop = null;
   shownAbove = new Set();
+  record = { key: null, turns: [], answers: [], said: "" };
+  drawn = { view: null, timeline: [] };
   // Nothing of the run shown before stays under this one's title, even while this one cannot be read.
   for (const id of ["run-facts", "run-score", "run-now", "run-blocked", "run-kept", "timeline", "lines"]) {
     delete $(id).dataset.drew;
@@ -106,7 +109,7 @@ export async function refreshRun() {
   renderStop(status.stop, status.timeline);
   renderKept(runId, view);
   renderChange(view, status.stop, status.timeline);
-  renderHistory(view, status.timeline);
+  renderHistory(view, status.timeline, status.stop);
   if (!unchanged($("lines"), status.lines)) $("lines").textContent = status.lines.join("\n");
   showTerminals(runId, state.target);
   // A failed step's terminal is where its failure shows.
@@ -214,14 +217,20 @@ function renderBlocked(view) {
     stackButton("start", host, "Start the " + PARTS[host], $("run-blocked-result"))));
 }
 
-// The run's own controls, after its decision: while it is open and not stopping, Stop run then Force
-// terminate; while it is stopping, Force terminate alone; once closed, neither.
+// The run's own controls, after its decision. While it waits for you nothing runs on its host, so a Stop ends it:
+// Stop run alone, quiet, its consequence beside it. While it works, Stop run then Force terminate — a run whose
+// status cannot be read shows as working, so a Stop its worker never reads can still be forced; while it is
+// stopping, Force terminate alone; once closed, neither.
 function renderControls(view) {
   const stopping = view.state === "stopping";
+  const atStop = view.state === "waiting" || view.state === "failed";
   $("run-controls").hidden = view.state === "closed";
   $("run-stop").hidden = stopping;
+  $("run-stop").classList.toggle("quiet", atStop);
+  $("run-terminate").hidden = atStop;
   $("run-controls-hint").textContent = stopping
-    ? "The Stop waits for what the run's host is already doing; Force terminate closes the run at once." : "";
+    ? "The Stop waits for what the run's host is already doing; Force terminate closes the run at once."
+    : atStop ? "Ends the run here without merging; its worktree and branch stay." : "";
 }
 
 async function lifecycle(kind, button) {
@@ -370,134 +379,266 @@ function renderChange(view, stop, timeline) {
   if (judged) readOnceFor(stop);
 }
 
-function renderHistory(view, timeline) {
+// What the run's Temporal history adds to its timeline — when each turn started, the tree each review judged, and
+// your answers — read again whenever the timeline or the stop moves on.
+let record = { key: null, turns: [], answers: [], said: "" };
+let drawn = { view: null, timeline: [] };
+
+function renderHistory(view, timeline, stop) {
+  drawn = { view: view, timeline: timeline };
+  const key = JSON.stringify([selected, timeline.length, stop && stop.id, view.state]);
+  if (record.key !== key) {
+    record.key = key;
+    readRecord(selected, key);
+  }
+  drawHistory();
+}
+
+async function readRecord(runId, key) {
+  try {
+    const read = await api("/api/runs/" + encodeURIComponent(runId) + "/history");
+    if (runId !== selected || record.key !== key) return;
+    record = { key: key, turns: read.turns, answers: read.answers, said: "" };
+  } catch (error) {
+    if (runId !== selected || record.key !== key) return;
+    // Read again at the page's next read of the run.
+    record = { key: null, turns: record.turns, answers: record.answers,
+      said: "Your answers and each round's change cannot be read now: " + error.message
+        + ". The page tries again as it reads the run." };
+  }
+  drawHistory();
+}
+
+// One transcript in the run's order, by phase: each turn a row — who, which stage and round, its verdict, how long
+// it took, when — opening to what it received and what it produced; your answers rows of their own between.
+function drawHistory() {
+  const { view, timeline } = drawn;
   const root = $("timeline");
-  if (unchanged(root, [timeline, [...shownAbove]])) return;
+  if (!view || unchanged(root, [timeline, record.turns, record.answers, record.said, [...shownAbove]])) return;
   const openDetails = new Set([...root.querySelectorAll("details[open][data-history-detail]")]
     .map((detail) => detail.dataset.historyDetail));
-  // A completed turn's record does not change: one already read keeps its node, and what was opened in it.
-  const readTurns = new Map([...root.querySelectorAll("details.turn-evidence[data-loaded='yes']")]
-    .map((detail) => [detail.dataset.historyDetail, detail]));
+  // A completed turn's record does not change: one already read keeps what it shows, and what was opened in it.
+  const bodies = new Map([...root.querySelectorAll("details.turn > .turn-body[data-loaded='yes']")]
+    .map((body) => [body.parentElement.dataset.historyDetail, body]));
   const steps = view.flow ? view.flow.steps : [];
   const roleOf = (stage) => (steps.find((step) => step.endsWith(":" + stage)) || "").split(":")[0]
     || STAGE_ROLES[stage];
-  root.replaceChildren();
-  // A run's phases are its flow's work stages, in the order it took them.
-  for (const phase of [...new Set(timeline.map((entry) => entry.phase))]) {
-    const box = el("section", null, "phase");
-    box.appendChild(el("h3", phase.charAt(0).toUpperCase() + phase.slice(1)));
-    let episode = null;
-    for (const entry of timeline.filter((each) => each.phase === phase)) {
-      // A new episode of a phase starts with the operator's answer — a revise, or guidance.
-      box.appendChild(historyEntry(entry, roleOf(entry.stage), episode !== null && entry.episode !== episode,
-        openDetails, readTurns));
-      episode = entry.episode;
+  const turns = new Map(record.turns.map((turn) => [turnKey(turn), turn]));
+  // Your answers fall between the turns by when the run accepted them.
+  const items = [];
+  let next = 0;
+  for (const entry of timeline) {
+    while (next < record.answers.length && Date.parse(record.answers[next].at) < Date.parse(entry.at)) {
+      items.push({ answer: record.answers[next++] });
     }
-    root.appendChild(box);
+    items.push({ entry: entry });
   }
-  if (!root.children.length) root.appendChild(el("p", "No step has finished yet.", "hint"));
+  while (next < record.answers.length) items.push({ answer: record.answers[next++] });
+
+  const shown = [];
+  if (record.said) shown.push(el("p", record.said, "hint"));
+  let box = null;
+  let phase = null;
+  for (const item of items) {
+    const itsPhase = item.entry ? item.entry.phase : phase || (timeline[0] && timeline[0].phase);
+    if (!box || itsPhase !== phase) {
+      phase = itsPhase;
+      box = el("section", null, "phase");
+      box.appendChild(el("h3", phase ? phase.charAt(0).toUpperCase() + phase.slice(1) : "Before any turn"));
+      shown.push(box);
+    }
+    box.appendChild(item.entry
+      ? turnRow(item.entry, roleOf(item.entry.stage), turns.get(turnKey(item.entry)), openDetails, bodies)
+      : answerRow(item.answer, phase));
+  }
+  if (!items.length) shown.push(el("p", "No step has finished yet.", "hint"));
+  root.replaceChildren(...shown);
 }
 
-// One round: who did what, its verdict, where it stopped for you, and its words — kept whole, and closed
-// when the decision above already shows them.
-function historyEntry(entry, role, answered, openDetails, readTurns) {
-  const row = el("div", null, "entry");
-  const head = el("div", null, "entry-head");
-  const what = el("span");
-  if (role) what.append(el("span", role, "role " + role), " ");
-  what.append(entry.stage);
-  head.append(what, el("span", "round " + entry.round + (answered ? ", after your answer" : ""), "hint"));
+function turnKey(turn) {
+  return "turn:" + turn.stage + ":" + turn.episode + ":" + turn.round;
+}
+
+function firstLine(text) {
+  return text.trim().split("\n")[0];
+}
+
+function turnRow(entry, role, turn, openDetails, bodies) {
+  const key = turnKey(entry);
+  const row = el("details", null, "turn");
+  row.dataset.historyDetail = key;
+  if (role) row.dataset.role = role;
+  const head = el("span", null, "turn-head");
+  head.appendChild(chevron());
+  if (role) head.append(el("span", role, "role " + role));
+  head.append(el("span", entry.stage + ", round " + entry.round, "turn-what"));
   if (entry.verdict) head.appendChild(el("span", entry.verdict, "verdict " + entry.verdict));
   if (entry.gate) head.appendChild(el("span", "stopped for " + (GATES[entry.gate] || entry.gate), "hint"));
+  if (turn) head.appendChild(el("span", lasted(turn.started, turn.ended), "hint took"));
   const time = el("time", at(entry.at));
   time.dateTime = entry.at || "";
   head.appendChild(time);
-  row.appendChild(head);
-  const text = entry.brief || entry.feedback;
-  if (text) {
-    const more = el("details");
-    more.dataset.historyDetail = "result:" + entry.stage + ":" + entry.episode + ":" + entry.round;
-    more.append(el("summary", shownAbove.has(text) ? "Shown above, in the decision"
-      : entry.brief ? "The research brief" : "The review findings"), el("div", text, "prose"));
-    more.open = openDetails.has(more.dataset.historyDetail);
-    row.appendChild(more);
-  }
-  const key = "turn:" + entry.stage + ":" + entry.episode + ":" + entry.round;
-  if (readTurns.has(key)) {
-    row.appendChild(readTurns.get(key));
-    return row;
-  }
-  const turn = el("details", null, "turn-evidence");
-  turn.dataset.historyDetail = key;
-  const content = el("div", null, "turn-content");
-  turn.append(el("summary", "Recorded input and output"), content);
-  turn.addEventListener("toggle", () => {
-    if (turn.open && !turn.dataset.loaded) loadTurn(turn, content, entry, selected);
+  const summary = el("summary", null);
+  summary.appendChild(head);
+  const said = entry.brief || entry.feedback;
+  if (said) summary.appendChild(el("span", shownAbove.has(said) ? "Shown above, in the decision" : firstLine(said),
+    "turn-preview"));
+  const body = bodies.get(key) || el("div", null, "turn-body");
+  row.append(summary, body);
+  row.addEventListener("toggle", () => {
+    if (row.open && !body.dataset.loaded) loadTurn(body, entry, role, selected);
   });
-  turn.open = openDetails.has(turn.dataset.historyDetail);
-  row.appendChild(turn);
+  row.open = openDetails.has(key);
   return row;
 }
 
-async function loadTurn(turn, content, entry, runId) {
-  turn.dataset.loaded = "loading";
-  content.replaceChildren(el("p", "Reading the turn…", "hint"));
-  const query = new URLSearchParams({ stage: entry.stage, episode: entry.episode, round: entry.round });
-  let record;
+// How an answer reads in the transcript, by its action and the phase it was given in.
+const APPROVED = { research: "approved the research brief", plan: "approved the plan", build: "approved the build" };
+
+function answerSaid(answer, phase) {
+  switch (answer.action) {
+    case "approve": return APPROVED[phase] || "approved";
+    case "revise": return answer.role ? "sent it back to the " + answer.role : "asked for a revision";
+    case "guide": return "guided the run";
+    case "continue": return "continued after the failure";
+    case "merge": return "merged";
+    case "discard": return "discarded the run's work";
+    default: return answer.action;
+  }
+}
+
+function answerRow(answer, phase) {
+  const row = el("div", null, "answer");
+  const head = el("div", null, "turn-head");
+  head.append(el("span", "you", "role you"), el("span", answerSaid(answer, phase), "turn-what"));
+  const time = el("time", at(answer.at));
+  time.dateTime = answer.at || "";
+  head.appendChild(time);
+  row.appendChild(head);
+  if (answer.text) row.appendChild(el("div", answer.text, "answer-words"));
+  return row;
+}
+
+async function loadTurn(body, entry, role, runId) {
+  body.dataset.loaded = "loading";
+  body.replaceChildren(el("p", "Reading the turn…", "hint"));
+  let read;
   try {
-    record = await api("/api/runs/" + encodeURIComponent(runId) + "/turn?" + query);
+    read = await api("/api/runs/" + encodeURIComponent(runId) + "/turn?"
+      + new URLSearchParams({ stage: entry.stage, episode: entry.episode, round: entry.round }));
   } catch (error) {
-    if (turn.isConnected && runId === selected) {
-      delete turn.dataset.loaded;
-      turnReadAgain(content, "The turn cannot be read: " + error.message, turn, entry, runId, true);
+    if (body.isConnected && runId === selected) {
+      delete body.dataset.loaded;
+      readAgain(body, "The turn cannot be read: " + error.message, () => loadTurn(body, entry, role, runId));
     }
     return;
   }
-  if (!turn.isConnected || runId !== selected) return;
-  if (!record.attempts.length) {
-    delete turn.dataset.loaded;
-    turnReadAgain(content, "This turn's local record is unavailable.", turn, entry, runId, false);
-  } else {
-    content.replaceChildren(...record.attempts.map((attempt) => {
-      const box = el("section", null, "turn-attempt");
-      if (record.attempts.length > 1) box.appendChild(el("h4", attempt.attempt));
-      const message = attempt.message ?? attempt.output;
-      const review = reviewOutput(message);
-      const output = el("div", null, "turn-field");
-      const outputLabel = el("div", null, "evidence-label");
-      outputLabel.appendChild(el("span", "Final message"));
-      if (message) outputLabel.appendChild(copyButton(review
-        ? review.verdict + "\n\n" + review.feedback : message, "the final message"));
-      output.appendChild(outputLabel);
-      if (review) {
-        output.append(el("span", review.verdict, "verdict " + review.verdict),
-          el("div", review.feedback, "turn-prose"));
-      } else {
-        output.appendChild(el("div", message === null ? "No local record."
-          : message || "The record holds no final message.", "turn-prose"));
-      }
-      box.appendChild(output);
-
-      const prompt = el("details", null, "turn-prompt");
-      const promptBody = el("div", null, "turn-field");
-      if (attempt.input !== null) promptBody.appendChild(copyButton(attempt.input, "the prompt sent to the agent"));
-      promptBody.appendChild(el("div", attempt.input === null ? "No local record." : attempt.input, "turn-prose"));
-      prompt.append(el("summary", "Prompt sent to the agent"), promptBody);
-      box.appendChild(prompt);
-
-      if (attempt.output !== null && (attempt.output !== message || review)) {
-        const raw = el("details", null, "turn-raw");
-        const rawBody = el("div", null, "turn-field");
-        const record = el("pre", attempt.output, "code");
-        record.translate = false;
-        rawBody.append(copyButton(attempt.output, "the raw output record"), record);
-        raw.append(el("summary", "Raw output record"), rawBody);
-        box.appendChild(raw);
-      }
-      return box;
-    }));
+  if (!body.isConnected || runId !== selected) return;
+  const attempts = read.attempts;
+  const shown = attempts.map((attempt, index) => {
+    const box = el("section", null, "attempt");
+    if (attempts.length > 1) box.appendChild(el("h4", index ? "Retried with a new session" : "First attempt"));
+    box.append(received(attempt, role), produced(attempt, index === attempts.length - 1 ? entry : null));
+    return box;
+  });
+  if (!attempts.length) {
+    shown.push(el("p", "This turn's local record is unavailable: what it received is not known here.", "hint"));
+    shown.push(produced({ input: null, output: null }, entry));
   }
-  if (record.attempts.length) turn.dataset.loaded = "yes";
+  if (role === "engineer") shown.push(roundChange(entry, runId));
+  body.replaceChildren(...shown);
+  body.dataset.loaded = "yes";
+}
+
+// A prompt's parts by plain names; the task and the persona are the run's own, as it started.
+const PART_NAMES = { skill: "The stage's skill", task: "The task", persona: "The role's persona",
+  instructions: "The stage's instructions", recheck: "Re-check your findings", brief: "The research brief to check",
+  "previous-brief": "Its previous brief", guidance: "Your guidance", reflection: "A convergence reflection",
+  "reflection-guidance": "Your reflection guidance", handoff: "The final-budget handoff",
+  "handoff-guidance": "Your final-turn guidance" };
+
+function partName(part, role) {
+  if (part === "findings") return role === "architect" ? "Its findings to re-check" : "The findings to address";
+  return PART_NAMES[part] || part;
+}
+
+// What the turn was given: its own new prompt — the vendor holds what came before — in the parts it was built
+// from, a short one said in place; and the exact prompt, to copy.
+function received(attempt, role) {
+  const box = el("div", null, "received");
+  box.appendChild(el("h4", "Received"));
+  if (attempt.input === null) {
+    box.appendChild(el("p", "No local record of its prompt.", "hint"));
+    return box;
+  }
+  if (attempt.parts) {
+    const list = el("ul", null, "prompt-parts");
+    for (const part of attempt.parts) {
+      const text = part.text.trim();
+      const name = partName(part.part, role);
+      const started = part.part === "task" || part.part === "persona" ? " — as the run started" : "";
+      const item = el("li");
+      if (!text.includes("\n") && text.length <= 100) {
+        item.append(el("span", name + started + ": ", "part-name"), code(text));
+      } else {
+        const one = el("details", null, "prompt-part");
+        const label = el("summary", name);
+        if (started) label.appendChild(el("span", started, "hint"));
+        one.append(label, el("div", text, "turn-prose"));
+        item.appendChild(one);
+      }
+      list.appendChild(item);
+    }
+    box.appendChild(list);
+  }
+  const exact = el("details", null, "turn-prompt");
+  exact.append(el("summary", attempt.parts ? "The exact prompt" : "Its prompt, as sent"),
+    field(attempt.input, "the prompt sent to the agent"));
+  box.appendChild(exact);
+  return box;
+}
+
+// What the turn gave back: the run's own record of it — the brief, the verdict and findings — for the attempt that
+// counted, else what its record holds; said once, so the decision's evidence is pointed to, not repeated.
+function produced(attempt, entry) {
+  const box = el("div", null, "produced");
+  const label = el("div", null, "produced-label");
+  label.appendChild(el("h4", "Produced"));
+  box.appendChild(label);
+  const message = attempt.message ?? attempt.output;
+  const review = entry && entry.verdict ? { verdict: entry.verdict, feedback: entry.feedback || "" }
+    : reviewOutput(message);
+  const text = review ? review.feedback : (entry && entry.brief) || message;
+  if (text && shownAbove.has(text)) {
+    box.appendChild(el("p", "Shown above, in the decision.", "hint"));
+  } else {
+    if (review) box.appendChild(el("span", review.verdict, "verdict " + review.verdict));
+    if (text === null || text === undefined) {
+      box.appendChild(el("p", "No local record of its answer.", "hint"));
+    } else if (!text) {
+      box.appendChild(el("p", "The record holds no final message.", "hint"));
+    } else {
+      label.appendChild(copyButton(review ? review.verdict + "\n\n" + text : text, "what it produced"));
+      box.appendChild(el("div", text, "turn-prose"));
+    }
+  }
+  if (attempt.output !== null && attempt.output !== undefined && attempt.output !== message) {
+    const raw = el("details", null, "turn-raw");
+    const record = el("pre", attempt.output, "code");
+    record.translate = false;
+    const inside = el("div", null, "turn-field");
+    inside.append(copyButton(attempt.output, "the raw output record"), record);
+    raw.append(el("summary", "Raw output record"), inside);
+    box.appendChild(raw);
+  }
+  return box;
+}
+
+// Text kept whole, with its copy: `shown` when what is shown differs from what is copied.
+function field(text, what, shown) {
+  const box = el("div", null, "turn-field");
+  box.append(copyButton(text, what), el("div", shown ?? text, "turn-prose"));
+  return box;
 }
 
 function reviewOutput(message) {
@@ -511,11 +652,67 @@ function reviewOutput(message) {
   }
 }
 
-function turnReadAgain(content, message, turn, entry, runId, refused) {
-  const line = el("p", message, refused ? "alert" : "hint");
-  line.setAttribute("role", refused ? "alert" : "status");
+// An engineer turn's change as the reviews around it judged it: from the tree the review before it judged — or the
+// worktree's last commit, before any — to the tree the review after it judged. The worktree is live, so it is the
+// change that review judged, not proof of who wrote each line.
+function roundChange(entry, runId) {
+  const box = el("details", null, "round-change");
+  box.dataset.historyDetail = "change:" + turnKey(entry);
+  const summary = el("summary", "Change since the previous review");
+  const body = el("div", null, "round-change-body");
+  box.append(summary, body);
+  box.addEventListener("toggle", () => {
+    if (box.open && !box.dataset.loaded) loadRoundChange(entry, runId, box, summary, body);
+  });
+  return box;
+}
+
+async function loadRoundChange(entry, runId, box, summary, body) {
+  const turns = record.turns;
+  const index = turns.map(turnKey).lastIndexOf(turnKey(entry));
+  const reviewed = (turn) => turn && ["assess", "verify"].includes(turn.stage);
+  if (index < 0) {
+    body.replaceChildren(el("p", record.said || "The run's history is still being read; close this and open it "
+      + "again in a moment.", "hint"));
+    return;
+  }
+  const before = turns.slice(0, index).reverse().find(reviewed);
+  const after = turns.slice(index + 1).find(reviewed);
+  if (!after) {
+    body.replaceChildren(el("p", "No review has judged this turn's change yet; Change reads the worktree as it is "
+      + "now.", "hint"));
+    return;
+  }
+  if (!after.tree || (before && !before.tree)) {
+    body.replaceChildren(el("p", "The reviews around this turn recorded no tree, so its change cannot be read back.",
+      "hint"));
+    return;
+  }
+  box.dataset.loaded = "loading";
+  body.replaceChildren(el("p", "Reading the change…", "hint"));
+  const query = { tree: after.tree };
+  if (before) query.base = before.tree;
+  try {
+    const read = await api("/api/runs/" + encodeURIComponent(runId) + "/diff?" + new URLSearchParams(query));
+    if (!box.isConnected || runId !== selected) return;
+    summary.replaceChildren("Change since the previous review",
+      el("span", read.files_total === 1 ? "1 file" : read.files_total + " files", "hint"));
+    body.replaceChildren(read.files_total ? fileList(runId, read, read.files, read.files_total)
+      : el("p", "No file changed between the two reviews.", "hint"));
+    box.dataset.loaded = "yes";
+  } catch (error) {
+    if (!box.isConnected || runId !== selected) return;
+    delete box.dataset.loaded;
+    readAgain(body, "The change cannot be read: " + error.message,
+      () => loadRoundChange(entry, runId, box, summary, body));
+  }
+}
+
+function readAgain(body, message, again) {
+  const line = el("p", message, "alert");
+  line.setAttribute("role", "alert");
   const retry = el("button", "Read again");
   retry.type = "button";
-  retry.onclick = () => loadTurn(turn, content, entry, runId);
-  content.replaceChildren(line, retry);
+  retry.onclick = again;
+  body.replaceChildren(line, retry);
 }

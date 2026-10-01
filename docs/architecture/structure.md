@@ -289,7 +289,8 @@ still lands on a checkout.
   round in its metadata and the architect's verdict scored on it; each stop for a human and the
   answer given to it, an approval carrying the plan's summary or the research brief; each agent's
   own turns and tool calls, nested by that vendor's
-  tracing plugin under the step that caused them; and the final diff as `gdiff -s` copies it, cut
+  tracing plugin under the step that caused them; and the final diff as the page reads the change — what
+  `gdiff -s` copies, under git's default settings — cut
   at a size cap and marked truncated when it exceeds one, redacted and marked when it held a secret.
   The names, levels, scores and dimensions that views and the dashboard select on are the
   [trace contract](trace-contract.md). The provider session store owns the full conversation
@@ -389,10 +390,12 @@ still lands on a checkout.
   run waiting for an answer is never off the list and everything Temporal still retains is reachable. A
   run that waits shows its stop first, with that stop's answers as buttons and what to judge them by;
   then both roles' terminals from their host's worker, the one at work open and an idle one opened when
-  the operator opens it; its flow with the step it is at, the rounds of each phase with each verdict and
-  its feedback and a research step's brief, plus each completed turn's recorded prompt and final output
-  read on demand from its local logs, its change as its target host's git reads it, and links to
-  its Temporal and Langfuse pages. The page's address names the run open, so a reload keeps it.
+  the operator opens it; its flow with the step it is at; its history as a transcript — each completed
+  turn with what it received, in the parts its prompt was built from, and what it produced, read on
+  demand from its local logs, an engineer's turn with the change the reviews around it judged, and the
+  operator's answers as the run's Temporal history accepted them; its change as its target host's git
+  reads it, one snapshot listed file by file, each file's diff drawn by the page's own viewer as text,
+  and the whole patch to copy; and links to its Temporal and Langfuse pages. The page's address names the run open, so a reload keeps it.
   A terminal connected again adds only what its record gained — the record only grows, and every
   connection streams it from its start — so what the operator reads is never drawn again under them; a
   worker holds a role's terminal only from that role's first turn on it, so after a restart the page

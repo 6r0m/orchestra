@@ -95,20 +95,40 @@ answers are the stop's own, as buttons. The note is labelled with the answers it
 note typed for a stop stays while you look at other runs; an answer the workflow refuses is said
 beside what it concerns, and a merge or a discard asks first.
 
+The change is read as one snapshot of the worktree — its last commit and the tree its files make — and
+listed file by file, each by its whole path: a rename as its old path and its new one, a binary file
+said so. Open a file to see its diff as an editor shows one: both line numbers, added lines green,
+removed red, long unchanged runs folded a click away. A file too large to show whole shows its changes
+alone, and says so. The patch sits below in a small box; *Copy patch* copies all of it, however large,
+from the same snapshot, and *Read it again* reads a new one.
+
 Both roles' terminals follow, the one at work open and an idle one closed until you open it. Each is the
 vendor's own CLI: press Esc to interrupt a working agent, type to steer it. What you read in one is
 never drawn again under you: after its worker restarts it keeps its record until its role's next turn,
-which it then adds to. The history lists each completed turn by stage, role, round, verdict and time.
-Open a turn to read its final message first, with review verdict and feedback separated into readable
-text. Its exact new prompt and raw adapter output remain openable and copyable from the same local log.
-The vendor keeps the prior conversation in its own session. Review findings and research briefs remain separately openable; the current
-decision shows its own evidence first. A terminal is the continuous vendor session, including interaction
-during a turn; the turn record is its saved prompt and final output. A turn retried in a fresh session,
-its first one lost, shows both; a failed attempt's retry from before you pressed Continue stays in the local
-logs but is not shown as the new turn's. A local record that has been removed is reported as unavailable. A large change is read in parts, a press each.
+which it then adds to. A terminal holds the whole session, including whatever you typed during a turn.
 
-*Stop run* and *Force terminate* come after the decision, and while a run is stopping only *Force
-terminate* is offered. *Stop run* ends a run from whatever it is doing — an agent at work, a stop
+The history is the run as a transcript, phase by phase: each completed turn a row — its role, stage,
+round, verdict, how long it took and when — and your answers rows of their own between them, with your
+words and when the run took them. Open a turn to see what it received and what it produced. *Received*
+is the turn's own new prompt — the vendor keeps the conversation before it in its session — in the parts
+it was built from: the stage's skill, the task and the role's persona as the run started on a session's
+first turn, the stage's instructions, and what it was handed, such as the research brief to check, the
+findings to address or your guidance; the exact prompt is beside them, to copy. A turn whose parts were
+not recorded shows its exact prompt alone. *Produced* is its answer as the run kept it — the brief, the
+plan's account, the verdict and findings — said once: what the decision above shows is pointed to, not
+repeated. An engineer's turn adds *Change since the previous review*: the files between the tree the
+review before it judged, or the worktree's last commit, and the tree the review after it judged, each
+opening in the same viewer. The worktree is live, so that is what the review judged, not proof of who
+wrote each line; a review that recorded no tree, or a tree git has since pruned, is said so. A turn
+retried in a fresh session, its first one lost, shows each attempt; a failed attempt's retry from before
+you pressed Continue stays in the local logs but is not shown as the new turn's. A local record that has
+been removed is reported as unavailable.
+
+*Stop run* comes after the decision. While a run waits for you nothing runs on its host, so it is the
+one control offered there, quiet, saying it ends the run without merging and keeps its worktree and
+branch. While a run works, *Force terminate* follows it — a run whose status cannot be read is shown
+working — and while a run is stopping only *Force terminate* is offered. *Stop run* ends a run from
+whatever it is doing — an agent at work, a stop
 waiting, a failed stage, the final gate, a host whose worker is down — and keeps its worktree and branch
 as they are. A merge or discard already running is let finish first, and decides how the run ends.
 *Force terminate* is for a run a Stop cannot finish: it closes the run at once with no cleanup, but

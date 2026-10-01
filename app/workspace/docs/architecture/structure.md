@@ -10,7 +10,7 @@ through that repository's own git — create the worktree, guard it, merge it or
 - `repos` — which repository, target host, base branch, worktree root and todo convention a run uses:
   configured in `.orchestra/repos.json` (or the file named by `ORCHESTRA_REPOS`), detected otherwise,
   and refused when neither.
-- `worktrees` — the run's worktree through the target's own git: create, guard, merge, discard, and the view the page lists.
+- `worktrees` — the run's worktree through the target's own git: create, guard, merge, discard, the view the page lists, and the change as a person reviews it.
 
 ## Does not own
 
@@ -42,6 +42,7 @@ the operator's own repositories, and a missing file means no descriptors rather 
 
 - **Only the controller changes a worktree's git state (D27).** Agents never stage, commit, merge or push (D11). Around every role-run a digest of HEAD, the run's branch, `MERGE_HEAD` and the staged content is compared; a change fails the stage.
 - **Every git side effect reads what git already holds first (D24)**, so an attempt whose worker died after git wrote is adopted when it runs again, never applied twice.
+- **A change is one snapshot, read one way.** Reading the change makes its tree on a private copy of the index, staging nothing; the worktree's HEAD and that tree name it, and every later read — its file list, one file, each part of its patch — names them again, so none mixes in what the live worktree did meanwhile. A round's change is the same read between two trees its reviews judged; a tree git has pruned is said gone. Every read passes the same diff options, so no repository or user setting runs an external diff or text conversion, colours the text or turns rename detection off; paths come from git's NUL-separated lists, and a file is named literally, never as a pattern.
 - **One authority per repository fact, refusing when there is none (D26).** A Windows target refuses a path Windows cannot use as a working directory, which it would otherwise silently replace with `C:\Windows`.
 
 ## Accepted decisions

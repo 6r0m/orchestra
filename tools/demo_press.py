@@ -1,6 +1,6 @@
 """Press one of the Workbench's own buttons in a headless browser, as the operator would.
 
-    python tools/demo_press.py <workbench url> <run id | stack | start> <button label | task | terminal:role | turn:stage | hold:role:label | absent:label,...> <what the page should say> [note]
+    python tools/demo_press.py <workbench url> <run id | stack | start> <button label | task | terminal:role | turn:stage | file:path | round:stage:path | history | hold:role:label | absent:label,...> <what the page should say> [note]
 
 The Windows side of `make demo` (WSL cannot reach Windows' loopback, and Windows reaches the
 Workbench's): headless Edge, driven over the DevTools protocol, opens the page, opens the run by its
@@ -11,8 +11,11 @@ given a note, it types it into the stop's own note first, as an answer's words a
 opens New run and types the task into the page's own form, with the first repository it offers, and
 presses Start run. Given `terminal:<role>`, it presses nothing: it opens that role's terminal, if it is
 closed, and reads its screen as the page shows it, live from its host. Given `turn:<stage>`, it presses
-nothing either: it opens the run's latest turn of that stage in its history and reads the final message the
-page shows from that turn's record. It waits for the page to report
+nothing either: it opens the run's latest turn of that stage in its history and reads what the page shows it
+produced, from that turn's record. Given `file:<path>`, it opens that file of the run's change and reads the
+lines its diff shows; given `round:<stage>:<path>`, the same file in the change since the review before the run's
+latest turn of that stage; given `history`, it reads the run's history: each exits 0 once what it reads holds the
+words expected. It waits for the page to report
 what came of the press — the status line, or the alert, beside the control — and its exit code says
 whether the page's words begin as expected; for a terminal, whether it shows them. Given
 `hold:<role>:<label>`, it first opens that role's terminal — its record, while the run's worker holds no
@@ -93,16 +96,31 @@ OPEN_TERMINAL = ("(role => { const box = document.getElementById('terminal-' + r
 SCREEN = ("(role => { const rows = document.querySelector('#term-' + role + ' .xterm-rows');"
           " return rows ? rows.innerText : ''; })(%s)")
 
-# A stage's latest turn in the run's history, opened as a click on its summary opens it, and the final message
-# the page then shows from its record.
-OPEN_TURN = ("(stage => { const turns = document.querySelectorAll("
-             "'#timeline details.turn-evidence[data-history-detail^=\"turn:' + stage + ':\"]');"
-             " const turn = turns[turns.length - 1]; if (!turn) return false;"
+# A stage's latest turn in the run's history, opened as a click on its summary opens it, and what the page then
+# shows it produced, from its record.
+LATEST_TURN = ("const turns = document.querySelectorAll("
+               "'#timeline details.turn[data-history-detail^=\"turn:' + stage + ':\"]');"
+               " const turn = turns[turns.length - 1];")
+OPEN_TURN = ("(stage => { " + LATEST_TURN + " if (!turn) return false;"
              " if (!turn.open) turn.querySelector('summary').click(); turn.scrollIntoView(); return true; })(%s)")
-TURN_SAID = ("(stage => { const turns = document.querySelectorAll("
-             "'#timeline details.turn-evidence[data-history-detail^=\"turn:' + stage + ':\"]');"
-             " const field = turns.length && turns[turns.length - 1].querySelector('.turn-field');"
+TURN_SAID = ("(stage => { " + LATEST_TURN + " const field = turn && turn.querySelector('.produced');"
              " return field ? field.innerText.replace(/\\s+/g, ' ') : ''; })(%s)")
+# A changed file opened as a click on its row opens it — in the run's change, or in a turn's change since the review
+# before it, that change opened first — and the lines its diff then shows.
+OPEN_FILE = ("((scope, path) => { const box = typeof scope === 'string' ? document.querySelector(scope) : scope;"
+             " const file = box && [...box.querySelectorAll('details.file')].find((f) => f.dataset.path === path);"
+             " if (!file) return false; if (!file.open) file.querySelector('summary').click(); file.scrollIntoView();"
+             " return true; })(%s, %s)")
+FILE_LINES = ("((scope, path) => { const box = document.querySelector(scope);"
+              " const file = box && [...box.querySelectorAll('details.file')].find((f) => f.dataset.path === path);"
+              " return file ? [...file.querySelectorAll('.diff .ln')].map((l) => l.innerText.replace(/\\s+/g, ' ')"
+              ".trim()) : []; })(%s, %s)")
+OPEN_ROUND = ("(stage => { " + LATEST_TURN + " if (!turn) return false;"
+              " if (!turn.open) turn.querySelector('summary').click();"
+              " const change = turn.querySelector('details.round-change'); if (!change) return false;"
+              " if (!change.open) change.querySelector('summary').click(); change.scrollIntoView();"
+              " if (!turn.id) turn.id = 'pressed-turn'; return '#' + turn.id; })(%s)")
+HISTORY_SAID = "document.getElementById('timeline').innerText.replace(/\\s+/g, ' ')"
 
 # A role's terminal watched: the connections the page opens for it, and the xterm it makes — whose buffer,
 # selection and scroll are read from it, not from what it drew. Then opened, as a click on its summary opens it:
@@ -186,6 +204,25 @@ def main(url, run_id, label, said, note=None):
                 message = wait(lambda: (lambda text: text if said in text else "")(
                     page.value(TURN_SAID % json.dumps(stage))), 60, "the %s turn's record to show %r" % (stage, said))
                 print("opened the %s turn's record in the Workbench: %r" % (stage, " ".join(message.split())))
+                return 0
+            if label.startswith(("file:", "round:", "history")):
+                page.value(OPEN % json.dumps(run_id))
+                wait(lambda: page.value(OPENED), 60, "the run")
+                if label == "history":
+                    shown = wait(lambda: (lambda text: text if said in text else "")(page.value(HISTORY_SAID)), 60,
+                                 "the history to say %r" % said)
+                    print("read the run's history in the Workbench: it says %r" % said)
+                    return 0
+                if label.startswith("file:"):
+                    scope, path = "#change", label.split(":", 1)[1]
+                else:
+                    stage, path = label.split(":", 2)[1:]
+                    scope = wait(lambda: page.value(OPEN_ROUND % json.dumps(stage)), 60,
+                                 "the %s turn's change since the review before it" % stage)
+                wait(lambda: page.value(OPEN_FILE % (json.dumps(scope), json.dumps(path))), 60, "the file %s" % path)
+                lines = wait(lambda: [line for line in page.value(FILE_LINES % (json.dumps(scope), json.dumps(path)))
+                                      if said in line], 60, "the diff of %s to show %r" % (path, said))
+                print("opened %s in the Workbench's viewer: it shows %r" % (path, lines[0]))
                 return 0
             if label.startswith("absent:"):
                 labels = label.split(":", 1)[1].split(",")
