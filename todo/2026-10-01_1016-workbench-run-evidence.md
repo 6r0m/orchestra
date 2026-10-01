@@ -24,7 +24,7 @@ dependencies).
 
 On a run's page the operator understands the run quickly: which files its change touches, each readable as a
 proper diff; and, turn by turn, what each role was given and what it gave back — its conclusion, its verdict and
-the files it changed that round — with the operator's own answers between. The terminals stay the place for the
+the change since the previous review — with the operator's own answers between. The terminals stay the place for the
 full live session.
 
 ## Authority register
@@ -107,9 +107,10 @@ full live session.
   whose Source Control view lists the uncommitted change with its own diff. A plain `vscode://` link the browser
   and VS Code each confirm; the server launches nothing. — D1 asks the page itself to show the diff; an editor
   hand-off is a follow-up, not this change (external review, 2026-10-01).
-- **A6 [ACTIVE]:** no workflow change and no change to any prompt's bytes. A turn's record gains one file beside
-  its prompt: the prompt's parts as `compose_prompt` built them. A turn recorded before that shows its exact
-  prompt, unsplit.
+- **A6 [ACTIVE]:** no workflow change and no change to any prompt's bytes. Each attempt's record — a turn's first,
+  and its retry in a fresh session, whose prompt is composed anew — gains one file beside that attempt's prompt:
+  its parts as `compose_prompt` built them, named as `terminal.turn_files` and `RETRIED` name the attempt's other
+  files. An attempt recorded before that shows its exact prompt, unsplit.
 
 ## Non-goals
 
@@ -212,8 +213,10 @@ at a time. None diffs a turn's input against the one before.
 - A per-file read is cheap for git: `git diff --numstat -z` gives exact, unquoted paths and counts; `git diff
   -U<n> -- <path>` gives one file whole. Read between the base commit and the snapshot's tree, every read names the
   same change whatever the live worktree does meanwhile.
-- An engineer turn's change is the difference between the tree the review before it judged (or the worktree's
-  base) and the tree the review after it judged — both already recorded (fact 8).
+- The change since the previous review is the difference between the tree the review before an engineer turn
+  judged (or the run's base) and the tree the review after it judged — both already recorded (fact 8). The
+  worktree is live — its terminals take typing, and anything on the host can write to it — so that difference is
+  what the next review judged, not proof of who wrote each line.
 - Judged trees are unreferenced git objects; `git gc` may prune them after its expiry (two weeks by default), so
   an old round's diff can become unreadable, and must say so.
 
@@ -254,8 +257,13 @@ at a time. None diffs a turn's input against the one before.
 - **One snapshot.** A change read makes the private index's tree (`git write-tree`) and returns it with the base
   commit as the change's identity; every later read names that pair and is read from it — the file list, one
   file, each part of the patch, and Copy. The live worktree moving meanwhile changes nothing already shown; Read it
-  again makes a new snapshot. Paths and object names are checked: a path must be one of that snapshot's files,
-  and is passed as a literal pathspec.
+  again makes a new snapshot.
+- **One diff policy.** Every git diff this change reads — the file list, a file, the patch and its parts, a review's
+  change — compares two trees (the base and the snapshot, or two judged trees) with the same explicit options:
+  `--no-ext-diff --no-textconv --find-renames --no-color`. No repository or user setting then changes what the
+  page shows: no external diff or text conversion runs, renames are found whatever `diff.renames` says, and
+  `color.ui=always` puts no escape codes in the text. A selected path must be one of that snapshot's files and is
+  passed as a literal pathspec; object names are checked as object names.
 - **Server:** `review_diff` returns the base, the tree and the files — exact path, old path on a rename, status,
   lines added and removed, binary — from `git diff --numstat -z` and `--name-status -z` between them, in place of
   the stat. A read naming one path returns that file's diff whole (`--unified` at least its length), or its changes
@@ -286,7 +294,7 @@ Plan
  ▌engineer  plan, round 1                               4 min   16:20
    Received  /investigate-change, the task, the engineer's persona, plan instructions      ▸
    Produced  "Wrote the plan to todo/2026-…-export.md: one job per tenant, …"           ▸
-             1 file changed  todo/2026-09-30_1627-….md  +120                             ▸ opens the viewer
+             Change since the previous review  1 file  +120                               ▸ opens the viewer
  ▌architect assess, round 1      PATCH                  2 min   16:24
    Received  plan review instructions                                                   ▸
    Produced  PATCH  "The plan does not name the test that proves it."                   ▸
@@ -305,8 +313,10 @@ Plan
   parts beside the prompt (A6), and the page shows parts only when they render to the recorded prompt — otherwise,
   and for a turn recorded before, the exact prompt unsplit.
 - **Produced** is the turn's final message, read by its kind: the brief, the plan's account, or the verdict and
-  findings. An engineer turn adds the files it changed that round, from the trees the reviews before and after it
-  judged (D6); a click opens them in the same viewer. A retry in a fresh session nests under its turn.
+  findings. An engineer turn adds **Change since the previous review**: the files between the tree the review
+  before it judged (or the run's base) and the tree the review after it judged (D6), each opening in the same
+  viewer. It is said as that, never as the files the engineer wrote: the worktree is live, so the delta is what the
+  next review judged. A retry in a fresh session nests under its turn, with its own Received.
 - **Your answers are rows**, in your colour, at the time you gave them: each accepted `answer:<stop-id>` Update in
   the run's Temporal history (fact 11) — approve, revise (to which role) or guide with your words, continue, merge
   or discard. An answer no turn followed is a row all the same. The next turn's Received shows, on its own, how
@@ -376,8 +386,9 @@ action of its own ([GitHub Docs](https://docs.github.com/en/pull-requests/collab
 1. Architecture D29 holds: the page reads the Workbench API and holds no run state; reads stay reads.
 2. Run text reaches the DOM only as text, in the diff viewer too.
 3. A run's change and every tree are read by the run's own host's git, as today.
-4. One change, one snapshot: the file list, a file, every patch part and Copy patch name the same base and tree;
-   nothing joins two snapshots.
+4. One change, one snapshot, one diff policy: the file list, a file, every patch part and Copy patch name the same
+   base and tree and read it with the same options; nothing joins two snapshots, and no repository setting changes
+   what is shown.
 5. A prompt's bytes are unchanged: the parts `compose_prompt` builds render to exactly the prompt it makes today.
 6. Every capability stays reachable: each answer, Stop run, Force terminate (working or stopping), the whole patch
    and its copy, every turn's exact prompt and output.
@@ -398,8 +409,8 @@ action of its own ([GitHub Docs](https://docs.github.com/en/pull-requests/collab
 5. [ ] **Prompt parts:** `compose_prompt` builds parts and renders from them; the runner records them beside the
    prompt; the turn route returns them when they render to the recorded prompt.
 6. [ ] **The run's history:** in [client.py](../app/application/client.py), one read of the run's events yields
-   each review's judged tree and each accepted answer; a route lists an engineer turn's files from the trees
-   around it and reads one through `ReviewDiff`; a pruned tree is said.
+   each review's judged tree and each accepted answer; a route lists the change since the previous review for an
+   engineer turn from the trees around it and reads one file through `ReviewDiff`; a pruned tree is said.
 7. [ ] **History:** turns as rows, Received and Produced, your answers as rows, retries nested, duplicates removed
    ([Decision](#history)).
 8. [ ] **Acceptance:** `make demo` opens a changed file in the viewer and reads a known line, a build turn's
@@ -419,10 +430,12 @@ action of its own ([GitHub Docs](https://docs.github.com/en/pull-requests/collab
 | the worktree changes after the list is read: the file read, the next patch part and the whole patch still come from the listed snapshot | permanent guard, `test_worktrees` | parts re-read from the start; no file read |
 | a patch larger than `PATCH_CHUNK` read whole for Copy equals `git diff` of the snapshot, byte for byte | permanent guard, `test_worktrees` | only the parts read so far exist on the page |
 | a path not in the snapshot, or one that is pathspec magic, is refused | permanent guard, `test_worktrees` | — |
+| in a repository set to `diff.renames=false` and `color.ui=always`, with a `diff` driver configured, the list still shows a rename as one file `old → new` and the patch holds no escape codes; control: the same reads without the explicit options show the rename as a delete and an add | permanent guard, `test_worktrees` | `review_diff` passes no `--find-renames` or `--no-color` |
 | prompt bytes: every prompt in a captured matrix of today's `compose_prompt` (first and later turns, research, plan, review, brief, findings, guidance, reflection, handoff) is reproduced byte for byte, and its parts render to it | permanent guard, beside `compose_prompt`'s tests in `test_workflow` | no parts |
 | a turn's record holds its parts, and the route returns them; a turn without them returns its prompt unsplit | permanent guard, `test_workbench` | — |
+| a lost session's retry records its own parts: each attempt's parts render byte for byte to that attempt's own prompt, the first's and the retry's | permanent guard, `test_workbench` through the real activity and the recording runner | — |
 | each accepted answer — approve, revise with words to one role, continue, discard — is a row with its action, words and time, one no turn followed included; a refused answer is not | permanent guard, `test_workbench` on the time-skipping server | answers absent |
-| a round's engineer turn lists the files between the judged trees around it | permanent guard, `test_workbench` | no round changes |
+| an engineer turn's change since the previous review lists the files between the judged trees around it | permanent guard, `test_workbench` | no round changes |
 | a judged tree that is gone is said gone | permanent guard, `test_worktrees` | — |
 | a file whose text is markup (`<img src=x onerror=…>`) shows as text in the viewer, every line numbered and its unchanged runs folded; a rename and a binary said | acceptance, fixture page; `make demo` reads a known line of a changed file | no viewer |
 | a waiting run offers no Force terminate; a stopping one does | acceptance, `make demo` | both shown while waiting |
@@ -479,3 +492,11 @@ action of its own ([GitHub Docs](https://docs.github.com/en/pull-requests/collab
 - **Made explicit:** parts can reach the page only if recorded beside the prompt, so A3 gives way to A6; a turn
   recorded before shows its exact prompt unsplit — the saved run among them.
 - **Authority:** A3 and A5 rejected by evidence; A6 added.
+
+### 2026-10-01 — external review of the design, second pass: PATCH
+
+- **Accepted:** prompt parts per attempt, a retry's beside its own prompt (A6 rewritten in place); a review's tree
+  delta named "Change since the previous review", never the engineer's authorship; one explicit diff policy for
+  every read, with a control against repository settings.
+- **Added beyond the review:** `--no-color` in that policy — a repository or user set to `color.ui=always` would
+  otherwise put escape codes into the patch and the file the page parses.
