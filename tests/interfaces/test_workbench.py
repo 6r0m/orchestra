@@ -613,6 +613,78 @@ class Kept(unittest.TestCase):
         self.assertIn("removed already", runs.not_kept(self.listed(), self.status(status="STOPPED"), "COMPLETED"))
 
 
+class HistoryRead(unittest.TestCase):
+    """What `client.history` reads from events as Temporal writes them: a turn's time is from when a worker took
+    it, never from when it was queued, and an answer is in the phase of the step it answered."""
+
+    T0 = datetime.datetime(2026, 10, 1, 12, 0, tzinfo=datetime.timezone.utc)
+
+    def test_a_turn_queued_long_before_a_worker_took_it_lasts_from_its_start(self):
+        from google.protobuf.timestamp_pb2 import Timestamp
+        from temporalio.api.common.v1 import ActivityType, Payloads
+        from temporalio.api.history.v1 import (ActivityTaskCompletedEventAttributes, ActivityTaskFailedEventAttributes,
+                                               ActivityTaskScheduledEventAttributes, ActivityTaskStartedEventAttributes,
+                                               HistoryEvent, WorkflowExecutionUpdateAcceptedEventAttributes)
+        from temporalio.api.update.v1 import Input, Meta, Request
+        from temporalio.converter import DataConverter
+
+        def payloads(value):
+            return Payloads(payloads=E.run(DataConverter.default.encode([value])))
+
+        def event(number, minutes, **attributes):
+            stamp = Timestamp()
+            stamp.FromDatetime(self.T0 + datetime.timedelta(minutes=minutes))
+            return HistoryEvent(event_id=number, event_time=stamp, **attributes)
+
+        def scheduled(number, minutes, stage, phase, episode):
+            return event(number, minutes, activity_task_scheduled_event_attributes=ActivityTaskScheduledEventAttributes(
+                activity_type=ActivityType(name="run_role"),
+                input=payloads({"stage": stage, "state": {"phase": phase, "episode": episode, "round": 0}})))
+
+        def started(number, minutes, of):
+            return event(number, minutes,
+                         activity_task_started_event_attributes=ActivityTaskStartedEventAttributes(scheduled_event_id=of))
+
+        def completed(number, minutes, of, result):
+            return event(number, minutes, activity_task_completed_event_attributes=ActivityTaskCompletedEventAttributes(
+                scheduled_event_id=of, result=payloads(result)))
+
+        def answered(number, minutes, stop, action):
+            return event(number, minutes, workflow_execution_update_accepted_event_attributes=(
+                WorkflowExecutionUpdateAcceptedEventAttributes(accepted_request=Request(
+                    meta=Meta(update_id="answer:" + stop),
+                    input=Input(name="answer", args=payloads({"stop": stop, "action": action}))))))
+
+        # As Temporal writes a role turn's events: the start, written once the step ends, at when it began.
+        events = [scheduled(1, 0, "assess", "plan", 1), started(2, 0, 1), completed(3, 2, 1, {"judged_tree": "t1"}),
+                  answered(4, 3, "r1:1", "approve"),
+                  scheduled(5, 4, "build", "build", 2),
+                  event(6, 5, activity_task_failed_event_attributes=ActivityTaskFailedEventAttributes(scheduled_event_id=5)),
+                  answered(7, 30, "r1:2", "continue"),
+                  # No worker took it for twenty minutes; it then ran for thirty seconds.
+                  scheduled(8, 31, "build", "build", 2), started(9, 51, 8), completed(10, 51.5, 8, {})]
+
+        class Handle:
+            async def fetch_history_events(self):
+                for each in events:
+                    yield each
+
+        class Client:
+            data_converter = DataConverter.default
+
+            def get_workflow_handle(self, run_id):
+                return Handle()
+
+        record = E.run(runs.history(Client(), "r1"))
+        at = lambda minutes: (self.T0 + datetime.timedelta(minutes=minutes)).isoformat()  # noqa: E731
+        self.assertEqual([(turn["stage"], turn["started"], turn["ended"], turn.get("tree")) for turn in record["turns"]],
+                         [("assess", at(0), at(2), "t1"), ("build", at(51), at(51.5), None)],
+                         "the failed build is no turn, and the one queued twenty minutes lasted thirty seconds")
+        self.assertEqual([(answer["action"], answer["phase"], answer["at"]) for answer in record["answers"]],
+                         [("approve", "plan", at(3)), ("continue", "build", at(30))],
+                         "the Continue answered the failed build's step, in its phase")
+
+
 def recorded(agent):
     """`agent`, leaving each turn's prompt and output in its run's logs under the name its activity gave the
     turn, as the host's terminal runner records them."""
@@ -974,7 +1046,10 @@ class Runs(Scenario):
         parts = terminal.turn_files(terminal.run_dir(run_id), terminal.turn_name("plan", 1, 1))["parts"]
         with open(parts, encoding="utf-8") as fh:
             recorded_parts = json.load(fh)
-        for changed in (json.dumps(recorded_parts[:-1]), "not json", json.dumps({"part": "task"}), None):
+        # The bytes alone are not enough: a part under a name no prompt has is not one of the prompt's parts.
+        unknown = [dict(part, part="secret") if part["part"] == "task" else part for part in recorded_parts]
+        for changed in (json.dumps(recorded_parts[:-1]), "not json", json.dumps({"part": "task"}),
+                        json.dumps(unknown), None):
             if changed is None:
                 os.remove(parts)
             else:
@@ -1048,10 +1123,12 @@ class Runs(Scenario):
                          "every completed turn once — the failed build is no turn — and every review's tree")
         for turn in history["turns"]:
             self.assertLessEqual(turn["started"], turn["ended"])
-        self.assertEqual([(each["stop"], each["action"], each.get("text")) for each in history["answers"]],
-                         [(answered[0], "revise", "split it in two"), (answered[1], "approve", None),
-                          (answered[2], "continue", None), (answered[3], "discard", None)],
-                         "each accepted answer, the refused merge none of them, the discard no turn followed")
+        self.assertEqual([(each["stop"], each["action"], each.get("text"), each["phase"])
+                          for each in history["answers"]],
+                         [(answered[0], "revise", "split it in two", "plan"), (answered[1], "approve", None, "plan"),
+                          (answered[2], "continue", None, "build"), (answered[3], "discard", None, "build")],
+                         "each accepted answer in the phase of the step it answered — the Continue the failed "
+                         "build's, which is no turn — the refused merge none of them, the discard no turn followed")
         times = [each["at"] for each in history["answers"]]
         self.assertEqual(times, sorted(times))
         self.assertLess(history["turns"][3]["ended"], times[0], "an answer is when the run accepted it")
@@ -1103,15 +1180,23 @@ class Runs(Scenario):
         self.assertEqual((status, diff["base"], diff["tree"], diff["offset"]), (200, "b" * 40, "c" * 40, 0))
         self.assertEqual((diff["total"], diff["next"]), (len(diff["patch"]), len(diff["patch"])),
                          "a change read whole says so")
-        self.assertIn(("review_diff", worktree, 0, None, None, None), git.calls, "the change now: a new snapshot")
+        self.assertIn(("review_diff", worktree, 0, None, None, None, None), git.calls,
+                      "the change now: a new snapshot")
         snapshot = {"base": diff["base"], "tree": diff["tree"]}
         status, part = request("GET", "/api/runs/%s/diff?%s" % (run_id, urllib.parse.urlencode(dict(snapshot, offset=5))))
         self.assertEqual((status, part["offset"]), (200, 5), "the rest of a change too large for one payload")
-        self.assertIn(("review_diff", worktree, 5, diff["base"], diff["tree"], None), git.calls, "from its snapshot")
+        self.assertIn(("review_diff", worktree, 5, diff["base"], diff["tree"], None, None), git.calls,
+                      "from its snapshot")
         status, one = request("GET", "/api/runs/%s/diff?%s" % (run_id, urllib.parse.urlencode(
             dict(snapshot, file="dir/a b.txt"))))
         self.assertEqual((status, one["file"]["path"]), (200, "dir/a b.txt"), one)
-        self.assertIn(("review_diff", worktree, 0, diff["base"], diff["tree"], "dir/a b.txt"), git.calls)
+        self.assertIn(("review_diff", worktree, 0, diff["base"], diff["tree"], "dir/a b.txt", None), git.calls)
+        status, more = request("GET", "/api/runs/%s/diff?%s" % (run_id, urllib.parse.urlencode(
+            dict(snapshot, files_from=2000))))
+        self.assertEqual(status, 200, more)
+        self.assertIn(("review_diff", worktree, 0, diff["base"], diff["tree"], None, 2000), git.calls,
+                      "the rest of a long list, from the same snapshot")
+        self.assertEqual(request("GET", "/api/runs/%s/diff?files_from=x" % run_id)[0], 400)
         git.diff_refusal = "nope is not a file of this change"
         status, refused = request("GET", "/api/runs/%s/diff?%s" % (run_id, urllib.parse.urlencode(
             dict(snapshot, file="nope"))))

@@ -100,8 +100,8 @@ class FakeWorktrees:
         return [{"path": "/fake/worktrees/one", "branch": "one", "state": "unmerged"},
                 {"path": "/fake/worktrees/two", "branch": "two", "state": "merged"}]
 
-    def review_diff(self, path, offset=0, base=None, tree=None, file=None):
-        self.calls.append(("review_diff", path, offset, base, tree, file))
+    def review_diff(self, path, offset=0, base=None, tree=None, file=None, files_from=None):
+        self.calls.append(("review_diff", path, offset, base, tree, file, files_from))
         if self.diff_refusal:
             from app.workspace import worktrees
             raise worktrees.ChangeRefused(self.diff_refusal)

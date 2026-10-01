@@ -336,16 +336,20 @@ class Activities:
                     limit = policy["max_rounds"][state["phase"]]
                 gate_reason = routing.gate_reason_for(
                     verdict, args.get("gate"), rounds, limit, state.get("auto_proceed", False))
-                # What this review read, whatever its verdict: kept in the run's history, where the change since
-                # the review before can be read from it. The workflow decides nothing on it.
-                result["judged_tree"] = judged
-                if verdict == "PASS" and judged is not None:
-                    if self.git.work_tree(worktree) != judged:
+                if judged is not None:
+                    unchanged = self.git.work_tree(worktree) == judged
+                    if verdict == "PASS" and not unchanged:
                         raise GitViolation("the worktree changed while the architect judged it, so what it "
                                            "passed is not what is there; continue to %s it again" % stage)
-                    # What the run may go on with: exactly what was judged here — the plan the
-                    # operator is about to approve, or the change a merge may commit.
-                    result["assessed_tree" if stage == "assess" else "verified_tree"] = judged
+                    if verdict == "PASS":
+                        # What the run may go on with: exactly what was judged here — the plan the
+                        # operator is about to approve, or the change a merge may commit.
+                        result["assessed_tree" if stage == "assess" else "verified_tree"] = judged
+                    if unchanged:
+                        # What this review read, whatever its verdict, kept in the run's history for the change since
+                        # the review before; a tree that moved under any other verdict is none it judged, and that
+                        # verdict still routes. The workflow decides nothing on it.
+                        result["judged_tree"] = judged
         except Exception as exc:
             # A failed step leaves no agent behind, whichever check failed it.
             terminal.end_agent(state["run_id"], role_name)
@@ -436,12 +440,13 @@ class Activities:
     def review_diff(self, args):
         """The run's change as the operator reviews it, read by this host's own git. Reads only.
 
-        Bounded: `offset` asks for the next part of a change too large for one payload. `base` and `tree` name a
-        snapshot already read, or two judged trees; `file` one file of it.
+        Bounded: `offset` asks for the next part of a change too large for one payload, `files_from` for the
+        next part of its file list. `base` and `tree` name a snapshot already read, or two judged trees; `file`
+        one file of it.
         """
         try:
             return self.git.review_diff(args["worktree_path"], args.get("offset", 0), args.get("base"),
-                                        args.get("tree"), args.get("file"))
+                                        args.get("tree"), args.get("file"), args.get("files_from"))
         except W.ChangeRefused as exc:
             # What the reader asked for is not there to read: said as git said it, and never retried.
             raise ApplicationError(str(exc), type="ChangeRefused", non_retryable=True) from exc

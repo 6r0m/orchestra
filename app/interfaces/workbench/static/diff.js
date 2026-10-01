@@ -22,10 +22,36 @@ export function fileList(runId, snapshot, files, total) {
   const list = el("ul", null, "file-list");
   list.append(...files.map((file) => fileItem(runId, snapshot, file)));
   box.append(list);
-  if (total > files.length) {
-    box.append(el("p", (total - files.length) + " more files are not listed here; Copy patch holds every one.",
-      "hint"));
-  }
+  if (total > files.length) box.append(listMore(runId, snapshot, list, files.length, total));
+  return box;
+}
+
+// The rest of a list too long for one read, a part at a time, from the same snapshot.
+function listMore(runId, snapshot, list, listed, total) {
+  const box = el("div", null, "actions");
+  const button = el("button", "List more files");
+  button.type = "button";
+  const said = el("p", null, "hint");
+  said.setAttribute("role", "status");
+  const left = () => { said.textContent = listed + " of " + total + " listed"; };
+  left();
+  button.onclick = async () => {
+    button.disabled = true;
+    try {
+      const read = await api(diffPath(runId, { base: snapshot.base, tree: snapshot.tree, files_from: listed }));
+      list.append(...read.files.map((file) => fileItem(runId, snapshot, file)));
+      listed += read.files.length;
+      if (listed >= total || !read.files.length) {
+        box.remove();
+        return;
+      }
+      left();
+    } catch (error) {
+      said.textContent = "The rest of the list cannot be read: " + error.message + ". Try again.";
+    }
+    button.disabled = false;
+  };
+  box.append(button, said);
   return box;
 }
 

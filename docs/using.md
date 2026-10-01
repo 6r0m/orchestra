@@ -97,7 +97,7 @@ beside what it concerns, and a merge or a discard asks first.
 
 The change is read as one snapshot of the worktree — its last commit and the tree its files make — and
 listed file by file, each by its whole path: a rename as its old path and its new one, a binary file
-said so. Open a file to see its diff as an editor shows one: both line numbers, added lines green,
+said so; a very long list comes a part at a time, *List more files* reading the rest of the same snapshot. Open a file to see its diff as an editor shows one: both line numbers, added lines green,
 removed red, long unchanged runs folded a click away. A file too large to show whole shows its changes
 alone, and says so. The patch sits below in a small box; *Copy patch* copies all of it, however large,
 from the same snapshot, and *Read it again* reads a new one.
@@ -108,18 +108,19 @@ never drawn again under you: after its worker restarts it keeps its record until
 which it then adds to. A terminal holds the whole session, including whatever you typed during a turn.
 
 The history is the run as a transcript, phase by phase: each completed turn a row — its role, stage,
-round, verdict, how long it took and when — and your answers rows of their own between them, with your
-words and when the run took them. Open a turn to see what it received and what it produced. *Received*
+round, verdict, how long it ran from when a worker took it, and when — and your answers rows of their own
+between them, in the phase of the step they answered, with your words and when the run took them. Open a turn to see what it received and what it produced. *Received*
 is the turn's own new prompt — the vendor keeps the conversation before it in its session — in the parts
 it was built from: the stage's skill, the task and the role's persona as the run started on a session's
 first turn, the stage's instructions, and what it was handed, such as the research brief to check, the
 findings to address or your guidance; the exact prompt is beside them, to copy. A turn whose parts were
 not recorded shows its exact prompt alone. *Produced* is its answer as the run kept it — the brief, the
 plan's account, the verdict and findings — said once: what the decision above shows is pointed to, not
-repeated. An engineer's turn adds *Change since the previous review*: the files between the tree the
+repeated, and said again in the turn once the decision moves on. An engineer's turn adds *Change since the previous review*: the files between the tree the
 review before it judged, or the worktree's last commit, and the tree the review after it judged, each
 opening in the same viewer. The worktree is live, so that is what the review judged, not proof of who
-wrote each line; a review that recorded no tree, or a tree git has since pruned, is said so. A turn
+wrote each line; a review records its tree only when the worktree did not move while it judged, and a
+review that recorded none, or a tree git has since pruned, is said so. A turn
 retried in a fresh session, its first one lost, shows each attempt; a failed attempt's retry from before
 you pressed Continue stays in the local logs but is not shown as the new turn's. A local record that has
 been removed is reported as unavailable.

@@ -116,7 +116,8 @@ full live session.
   its parts as `compose_prompt` built them, named as `terminal.turn_files` and `RETRIED` name the attempt's other
   files. An attempt recorded before that shows its exact prompt, unsplit.
 - **A7 [ACTIVE]:** a review's activity result carries the tree it judged as `judged_tree` whatever its verdict, so
-  every round's change can be read back (fact 8). Still no workflow change: the workflow reads no new key, and
+  every round's change can be read back (fact 8) — only when the worktree did not move while it judged; a moved
+  one records none, and its verdict routes as before. Still no workflow change: the workflow reads no new key, and
   recorded histories replay. A run recorded before has trees only on its passes — measured on the saved run: its
   PATCH verify has none — and the page says so for those rounds.
 
@@ -438,10 +439,12 @@ action of its own ([GitHub Docs](https://docs.github.com/en/pull-requests/collab
 10. [ ] The external review, then the full suites — the operator's order. No review agents (operator,
     2026-10-01: *"no need more activate tester and reviewer agents"*).
 
-**Verification so far:** WSL `run-tests.sh` on test_worktrees, test_workflow, test_workbench,
-test_observability, test_terminal, test_activities, test_architecture, test_replay — 301 tests OK; Windows
-`run-tests.ps1` on test_worktrees, test_workflow, test_terminal, test_activities, test_architecture,
-test_replay — 176 tests OK; `make demo` passed; `make public-check` passed; `git diff --check` clean.
+**Verification so far** (after the implementation review's fixes): WSL `run-tests.sh` on test_worktrees,
+test_workflow, test_terminal, test_activities, test_observability, test_architecture, test_replay — 245 tests OK —
+and test_workbench's Runs, HistoryRead and Access — 43 OK; Windows `run-tests.ps1` on test_worktrees,
+test_workflow, test_terminal, test_activities, test_architecture, test_replay — 177 OK; `make demo` passed, 83
+checks; the stale-Produced fix also shown by a fixture control without it; `make public-check` passed;
+`git diff --check` clean.
 
 ## Test-first and verification plan
 
@@ -539,3 +542,15 @@ test_replay — 176 tests OK; `make demo` passed; `make public-check` passed; `g
 
 - **Built** as decided, with A7 added on evidence (fact 8 corrected); tasks 1–9 done, evidence under
   [tasks](#implementation-tasks). Awaiting the external review.
+
+### 2026-10-01 — external review of the implementation: PATCH
+
+- **Accepted, each red first:** a review records its judged tree only when the worktree did not move while it
+  judged; a file is diffed whole only when git's sizes say each side is within the bound, decided before any
+  diff runs; a turn's time runs from its started event, not its scheduling; a turn read before says again what it
+  produced when the decision above moves on (`make demo`, the verify turn across the merge); an answer is in the
+  phase of the last role turn begun before it; a long file list goes on from the same snapshot (*List more
+  files*); recorded parts under a name no prompt has are not shown.
+- **Refuted:** failing the step for every verdict whose tree moved — it would turn a PATCH into a failed stop the
+  operator must Continue; recording no tree keeps the evidence true and the routing as it was. "Tasks 1–10 done"
+  is the completion criterion, not a status.

@@ -1,6 +1,6 @@
 """Press one of the Workbench's own buttons in a headless browser, as the operator would.
 
-    python tools/demo_press.py <workbench url> <run id | stack | start> <button label | task | terminal:role | turn:stage | file:path | round:stage:path | history | hold:role:label | absent:label,...> <what the page should say> [note]
+    python tools/demo_press.py <workbench url> <run id | stack | start> <button label | task | terminal:role | turn:stage | turn-then:stage:label | file:path | round:stage:path | history | hold:role:label | absent:label,...> <what the page should say> [note]
 
 The Windows side of `make demo` (WSL cannot reach Windows' loopback, and Windows reaches the
 Workbench's): headless Edge, driven over the DevTools protocol, opens the page, opens the run by its
@@ -15,7 +15,9 @@ nothing either: it opens the run's latest turn of that stage in its history and 
 produced, from that turn's record. Given `file:<path>`, it opens that file of the run's change and reads the
 lines its diff shows; given `round:<stage>:<path>`, the same file in the change since the review before the run's
 latest turn of that stage; given `history`, it reads the run's history: each exits 0 once what it reads holds the
-words expected. It waits for the page to report
+words expected. Given `turn-then:<stage>:<label>`, it opens that turn first, presses the button, and reads the
+turn again in the same page once what it produced is said anew: its exit code also says whether it is said
+there, not pointed to the decision above. It waits for the page to report
 what came of the press — the status line, or the alert, beside the control — and its exit code says
 whether the page's words begin as expected; for a terminal, whether it shows them. Given
 `hold:<role>:<label>`, it first opens that role's terminal — its record, while the run's worker holds no
@@ -174,7 +176,7 @@ def main(url, run_id, label, said, note=None):
                              "--user-data-dir=" + profile, "about:blank"],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     asked = []
-    held = None
+    held = then = None
     try:
         # Edge writes the port it chose into its profile once it listens.
         port = wait(lambda: open(os.path.join(profile, "DevToolsActivePort")).readline().strip(), 30,
@@ -233,6 +235,15 @@ def main(url, run_id, label, said, note=None):
                 offered = [text for text in labels if page.value(SHOWN % json.dumps(text))]
                 print("the Workbench offers run %s %s" % (run_id, ", ".join(offered) or "none of: " + ", ".join(labels)))
                 return 1 if offered else 0
+            if label.startswith("turn-then:"):
+                # A turn opened before the press, and what it produced read again once the run has moved on, in
+                # the same page: what was shown above is said in the turn once the decision no longer shows it.
+                stage, label = label.split(":", 2)[1:]
+                page.value(OPEN % json.dumps(run_id))
+                wait(lambda: page.value(OPENED), 60, "the run")
+                wait(lambda: page.value(OPEN_TURN % json.dumps(stage)), 60, "the %s turn in the history" % stage)
+                then = {"stage": stage,
+                        "before": wait(lambda: page.value(TURN_SAID % json.dumps(stage)), 60, "its record")}
             if label.startswith("hold:"):
                 role, label = label.split(":", 2)[1:]
                 page.value(OPEN % json.dumps(run_id))
@@ -277,6 +288,10 @@ def main(url, run_id, label, said, note=None):
                 time.sleep(0.2)
             # A stack action waits until what it started is up: a worker polling, Temporal answering.
             shown = wait(lambda: page.value(SAID % json.dumps(region)), 300, "the page's word on it")
+            if then:
+                then["after"] = wait(lambda: (lambda text: text if text != then["before"] else "")(
+                    page.value(TURN_SAID % json.dumps(then["stage"]))), 300,
+                    "the %s turn to say again what it produced" % then["stage"])
             if held:
                 # The role's next turn, on its worker: the page connects to it again and adds what it drew,
                 # below what was there.
@@ -294,6 +309,9 @@ def main(url, run_id, label, said, note=None):
     print("pressed %r in the Workbench: the page said %r" % (label, shown))
     for text in asked:
         print("it asked: %s" % text)
+    if then:
+        print("its %s turn, opened before: %r, then %r" % (then["stage"], then["before"], then["after"]))
+        return 0 if shown.startswith(said) and "Shown above" not in then["after"] else 1
     if held:
         before, after = held["before"], held["after"]
         print("its %s terminal, its record's first line %r selected: after %d s %d connection, the view at line "

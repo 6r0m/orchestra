@@ -418,7 +418,7 @@ def _files(numstat, status):
     return files
 
 
-def review_diff(path, offset=0, base=None, tree=None, file=None):
+def review_diff(path, offset=0, base=None, tree=None, file=None, files_from=None):
     """A run's change as a human reviews it: one snapshot, named by its base and its tree, and read from them.
 
     Without `tree`, the change now: the worktree's HEAD and the tree `git add -A` would commit, made on a
@@ -427,10 +427,11 @@ def review_diff(path, offset=0, base=None, tree=None, file=None):
     given — to that tree: a snapshot read before, or the trees two reviews judged. Either is read with `DIFF`,
     so every read of one snapshot is the same bytes whatever the live worktree does meanwhile.
 
-    Returns the base, the tree, each changed file with its exact path (`FILES_LIMIT` of them) and the diff's
-    stat, and `PATCH_CHUNK` bytes of the patch from `offset` with its whole size, so the reader can ask for
-    the rest. With `file`, one of the snapshot's files instead: its diff whole up to `FILE_LIMIT`, its changes
-    alone past it, and which.
+    Returns the base, the tree, each changed file with its exact path (`FILES_LIMIT` of them, `files_total` in
+    all) and the diff's stat, and `PATCH_CHUNK` bytes of the patch from `offset` with its whole size, so the
+    reader can ask for the rest. With `files_from`, the snapshot's files from that one on instead, again
+    `FILES_LIMIT` of them. With `file`, one of the snapshot's files: its diff whole when each side is at most
+    `FILE_LIMIT` bytes, its changes alone otherwise, and which.
 
     Raises ChangeRefused for a name that is no object, an object git no longer holds — it prunes unreferenced
     ones after a while — or a file not in the change; on any git failure, RuntimeError: a worktree that could
@@ -473,12 +474,24 @@ def review_diff(path, offset=0, base=None, tree=None, file=None):
         # Its paths are names, never patterns: `[ab].txt` is that file, not a.txt.
         literal = dict(os.environ, GIT_LITERAL_PATHSPECS="1")
         named = ["--"] + [name for name in (entry["old"], entry["path"]) if name]
-        text, whole = git(["diff"] + DIFF + [WHOLE] + pair + named, literal), True
-        if len(text.encode("utf-8")) > FILE_LIMIT:
+        # Whole only when each side is small, decided before any diff runs: a large file with one changed line is
+        # never diffed whole only to be thrown away. A side whose size git does not give is not read whole.
+        sides = ([] if entry["status"] == "A" else ["%s:%s" % (base, entry["old"] or entry["path"])]) + (
+            [] if entry["status"] == "D" else ["%s:%s" % (tree, entry["path"])])
+        sizes = [subprocess.run(["git", "-C", path, "cat-file", "-s", side], capture_output=True, timeout=60)
+                 for side in sides]
+        whole = all(done.returncode == 0 and done.stdout.strip().isdigit() and int(done.stdout) <= FILE_LIMIT
+                    for done in sizes)
+        text = git(["diff"] + DIFF + [WHOLE] + pair + named, literal) if whole else None
+        if text is None or len(text.encode("utf-8")) > FILE_LIMIT:
             text, whole = git(["diff"] + DIFF + ["-U3"] + pair + named, literal), False
             if len(text.encode("utf-8")) > FILE_LIMIT:
                 raise ChangeRefused("%s's changes are too large to show here; copy the patch for them" % file)
         return {"base": base, "tree": tree, "file": entry, "patch": text, "whole": whole}
+    if files_from is not None:
+        files = listed()
+        return {"base": base, "tree": tree, "files": files[files_from:files_from + FILES_LIMIT],
+                "files_total": len(files), "files_from": files_from}
     read = {"base": base, "tree": tree}
     if not offset:
         files = listed()

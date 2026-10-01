@@ -110,8 +110,9 @@ def agent_prompt(view, rdir=None):
 
 
 def turn_parts(path, prompt):
-    """The parts a turn's prompt was built from, as recorded beside it — only while they render to that prompt,
-    byte for byte; None for a turn with none, or with parts that are unreadable or no longer its prompt's."""
+    """The parts a turn's prompt was built from, as recorded beside it — only while each is a part a prompt has
+    and they render to that prompt, byte for byte; None for a turn with none, or with parts that are unreadable or
+    no longer its prompt's."""
     if prompt is None or os.path.islink(path):
         return None
     try:
@@ -121,7 +122,7 @@ def turn_parts(path, prompt):
     except (OSError, ValueError):
         return None
     if not isinstance(parts, list) or not all(
-            isinstance(part, dict) and set(part) == {"part", "text"} and isinstance(part["part"], str)
+            isinstance(part, dict) and set(part) == {"part", "text"} and part["part"] in nodes.PARTS
             and isinstance(part["text"], str) for part in parts):
         return None
     return parts if nodes.render(parts) == prompt else None
@@ -276,13 +277,16 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
                         return self._send(HTTPStatus.OK, record)
                     if parts[2:] == ["diff"]:
                         query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query, keep_blank_values=True)
-                        asked = (query.get("offset") or ["0"])[0]
-                        if not asked.isdigit():
-                            return self._send(HTTPStatus.BAD_REQUEST, {"error": "offset must be a whole number"})
+                        asked, files_from = ((query.get(key) or [default])[0]
+                                             for key, default in (("offset", "0"), ("files_from", None)))
+                        if not asked.isdigit() or not (files_from is None or files_from.isdigit()):
+                            return self._send(HTTPStatus.BAD_REQUEST,
+                                              {"error": "offset and files_from must be whole numbers"})
                         # Which snapshot, and which of its files: its host's git checks every one of them.
                         base, tree, file = ((query.get(key) or [None])[0] for key in ("base", "tree", "file"))
                         return self._send(HTTPStatus.OK, call(lambda client: runs.review_diff(
-                            client, run_id, int(asked), base=base, tree=tree, file=file)))
+                            client, run_id, int(asked), base=base, tree=tree, file=file,
+                            files_from=None if files_from is None else int(files_from))))
                 return self._send(HTTPStatus.NOT_FOUND, {"error": "not found"})
             except Exception as exc:                # noqa: BLE001 - every failure is answered
                 return self._error(exc)

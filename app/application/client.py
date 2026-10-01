@@ -351,10 +351,10 @@ async def runs(client, limit=200, cursor=None):
     return listed, (page.next_page_token or None) if read >= limit else None
 
 
-async def review_diff(client, run_id, offset=0, base=None, tree=None, file=None):
+async def review_diff(client, run_id, offset=0, base=None, tree=None, file=None, files_from=None):
     """The run's change as its target host's git reads it (`worktrees.review_diff`): the change now, or the
-    snapshot `base` and `tree` name, from `offset` bytes into its patch — or its one `file`. A read naming what
-    that git cannot read is refused, saying why."""
+    snapshot `base` and `tree` name, from `offset` bytes into its patch — or its file list from `files_from`, or
+    its one `file`. A read naming what that git cannot read is refused, saying why."""
     current = await readable_status(client, run_id)
     if current is None:
         raise NotWaiting("no run %r" % run_id)
@@ -362,7 +362,8 @@ async def review_diff(client, run_id, offset=0, base=None, tree=None, file=None)
     if not path:
         raise Refusal("run %s has no worktree yet" % run_id)
     await preflight(client, queues(current["workflow_queue"], current["queue"]))
-    named = {key: value for key, value in (("base", base), ("tree", tree), ("file", file)) if value is not None}
+    named = {key: value for key, value in (("base", base), ("tree", tree), ("file", file), ("files_from", files_from))
+             if value is not None}
     try:
         # On the run's own workflow queue: its own stack's worker reads its change.
         return await client.execute_workflow(
@@ -378,33 +379,41 @@ async def review_diff(client, run_id, offset=0, base=None, tree=None, file=None)
 
 async def history(client, run_id):
     """What the run's Temporal history holds that its status does not: each turn that completed — its stage,
-    episode, round, when it started and ended, and for a review the tree it judged — and each answer the run
-    accepted, with its words and when. None when Temporal holds no such run.
+    episode, round, when a worker took it and when it ended, and for a review the tree it judged — and each
+    answer the run accepted, with its words, when, and the phase of the step it answered. None when Temporal
+    holds no such run.
 
-    A review's tree is the one its result names — `judged_tree`, or for a pass `assessed_tree` or
-    `verified_tree` — and a review whose result names none has none. An answer is the `answer:<stop-id>`
-    Update the workflow accepted, as its accepted event recorded the request; one its validator refused
-    never entered the history."""
+    A turn's start is its started event's time — when a worker took it, which Temporal records as such even
+    though it writes that event only once the step ends — never when it was queued. A review's tree is the one
+    its result names — `judged_tree`, or for a pass `assessed_tree` or `verified_tree` — and a review whose
+    result names none has none. An answer is the `answer:<stop-id>` Update the workflow accepted, as its
+    accepted event recorded the request; one its validator refused never entered the history. Its phase is the
+    one of the last role turn begun before it, failed or not."""
     def at(event):
         return event.event_time.ToDatetime(tzinfo=datetime.timezone.utc).isoformat()
 
     async def decoded(payloads):
         return (await client.data_converter.decode(payloads))[0]
 
-    turns, answers, scheduled = [], [], {}
+    turns, answers, scheduled, started, phase = [], [], {}, {}, None
     try:
         async for event in client.get_workflow_handle(run_id).fetch_history_events():
             if event.HasField("activity_task_scheduled_event_attributes"):
                 attributes = event.activity_task_scheduled_event_attributes
                 if attributes.activity_type.name == "run_role":
-                    scheduled[event.event_id] = (await decoded(attributes.input.payloads), at(event))
+                    args = await decoded(attributes.input.payloads)
+                    scheduled[event.event_id] = (args, at(event))
+                    phase = args["state"].get("phase") or phase
+            elif event.HasField("activity_task_started_event_attributes"):
+                started[event.activity_task_started_event_attributes.scheduled_event_id] = at(event)
             elif event.HasField("activity_task_completed_event_attributes"):
                 attributes = event.activity_task_completed_event_attributes
                 if attributes.scheduled_event_id in scheduled:
-                    args, started = scheduled.pop(attributes.scheduled_event_id)
+                    args, queued = scheduled.pop(attributes.scheduled_event_id)
                     result, state = await decoded(attributes.result.payloads), args["state"]
                     turn = {"stage": args["stage"], "episode": state.get("episode", 1),
-                            "round": state.get("round", 0) + 1, "started": started, "ended": at(event)}
+                            "round": state.get("round", 0) + 1,
+                            "started": started.get(attributes.scheduled_event_id, queued), "ended": at(event)}
                     tree = result.get("judged_tree") or result.get("assessed_tree") or result.get("verified_tree")
                     if tree:
                         turn["tree"] = tree
@@ -414,7 +423,8 @@ async def history(client, run_id):
                 if request.meta.update_id.startswith("answer:"):
                     answer = await decoded(request.input.args.payloads)
                     answers.append({"stop": answer.get("stop"), "action": answer.get("action"),
-                                    "role": answer.get("role"), "text": answer.get("text"), "at": at(event)})
+                                    "role": answer.get("role"), "text": answer.get("text"), "at": at(event),
+                                    "phase": phase})
     except RPCError as error:
         if error.status == RPCStatusCode.NOT_FOUND:
             return None

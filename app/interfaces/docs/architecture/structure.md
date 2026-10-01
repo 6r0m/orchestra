@@ -50,10 +50,11 @@ record's words; and a retry an earlier attempt left under the turn's name, befor
 it again, is not shown as the turn's. An indirection to hide those records would buy nothing.
 
 Through `application.client` as well, on demand: the run's Temporal history — when each turn ran,
-the tree each review judged and each answer the run accepted — for the history's turns and answers;
-and the change, through `ReviewDiff` on the run's host, as one snapshot that every later read of it
-names — a file, a part of the patch, Copy patch — and a round's change as the two judged trees
-around it.
+the tree each review judged and each answer the run accepted, in the phase of the step it answered — for
+the history's turns and answers; and the change, through `ReviewDiff` on the run's host, as one snapshot
+that every later read of it names — a part of its file list, a file, a part of the patch, Copy patch —
+and a round's change as the two judged trees around it. A turn read before says again what it produced
+when the decision above moves on; nothing else of it is read again.
 
 ## Invariants
 

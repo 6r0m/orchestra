@@ -440,7 +440,9 @@ function drawHistory() {
   let box = null;
   let phase = null;
   for (const item of items) {
-    const itsPhase = item.entry ? item.entry.phase : phase || (timeline[0] && timeline[0].phase);
+    // An answer is in the phase of the step it answered, which may be one no completed turn shows: a failed one.
+    const itsPhase = item.entry ? item.entry.phase
+      : item.answer.phase || phase || (timeline[0] && timeline[0].phase);
     if (!box || itsPhase !== phase) {
       phase = itsPhase;
       box = el("section", null, "phase");
@@ -484,6 +486,7 @@ function turnRow(entry, role, turn, openDetails, bodies) {
   if (said) summary.appendChild(el("span", shownAbove.has(said) ? "Shown above, in the decision" : firstLine(said),
     "turn-preview"));
   const body = bodies.get(key) || el("div", null, "turn-body");
+  if (bodies.has(key)) refreshProduced(body, entry);
   row.append(summary, body);
   row.addEventListener("toggle", () => {
     if (row.open && !body.dataset.loaded) loadTurn(body, entry, role, selected);
@@ -535,15 +538,17 @@ async function loadTurn(body, entry, role, runId) {
   }
   if (!body.isConnected || runId !== selected) return;
   const attempts = read.attempts;
+  body.attempts = attempts;
+  body.dataset.above = JSON.stringify([...shownAbove]);
   const shown = attempts.map((attempt, index) => {
     const box = el("section", null, "attempt");
     if (attempts.length > 1) box.appendChild(el("h4", index ? "Retried with a new session" : "First attempt"));
-    box.append(received(attempt, role), produced(attempt, index === attempts.length - 1 ? entry : null));
+    box.append(received(attempt, role), produced(attempt, index === attempts.length - 1 ? entry : null, index));
     return box;
   });
   if (!attempts.length) {
     shown.push(el("p", "This turn's local record is unavailable: what it received is not known here.", "hint"));
-    shown.push(produced({ input: null, output: null }, entry));
+    shown.push(produced({ input: null, output: null }, entry, 0));
   }
   if (role === "engineer") shown.push(roundChange(entry, runId));
   body.replaceChildren(...shown);
@@ -598,10 +603,25 @@ function received(attempt, role) {
   return box;
 }
 
+// What a turn read before produced, said again for the decision now above: what it shows is pointed to, and
+// what it no longer shows is said here again. The rest of the turn — and what was opened in it — stays.
+function refreshProduced(body, entry) {
+  const above = JSON.stringify([...shownAbove]);
+  if (body.dataset.loaded !== "yes" || body.dataset.above === above) return;
+  body.dataset.above = above;
+  const attempts = body.attempts || [];
+  for (const shown of body.querySelectorAll(":scope > .attempt > .produced, :scope > .produced")) {
+    const index = Number(shown.dataset.attempt);
+    const counted = !attempts.length || index === attempts.length - 1;
+    shown.replaceWith(produced(attempts[index] || { input: null, output: null }, counted ? entry : null, index));
+  }
+}
+
 // What the turn gave back: the run's own record of it — the brief, the verdict and findings — for the attempt that
 // counted, else what its record holds; said once, so the decision's evidence is pointed to, not repeated.
-function produced(attempt, entry) {
+function produced(attempt, entry, index) {
   const box = el("div", null, "produced");
+  box.dataset.attempt = index;
   const label = el("div", null, "produced-label");
   label.appendChild(el("h4", "Produced"));
   box.appendChild(label);

@@ -353,14 +353,47 @@ class ReviewDiff(Repo):
         renamed = W.review_diff(self.path, base=read["base"], tree=read["tree"], file="docs/new name.md")
         self.assertIn("rename from docs/old name.md", renamed["patch"], "a rename read by both its paths")
         self.assertIn("+one more line", renamed["patch"])
+        # Whether a file is read whole is decided from its sizes before any diff runs: a large file with one
+        # change never has its whole diff made, only to be thrown away.
+        calls = []
+        run = subprocess.run
+
+        def recorded(argv, *args, **kwargs):
+            calls.append(list(argv))
+            return run(argv, *args, **kwargs)
         saved = W.FILE_LIMIT
-        W.FILE_LIMIT = 300
         self.addCleanup(setattr, W, "FILE_LIMIT", saved)
+        self.addCleanup(setattr, W.subprocess, "run", run)
+        W.subprocess.run = recorded
+        size = os.path.getsize(os.path.join(self.path, "long.txt"))
+        W.FILE_LIMIT = size - 1
         short = W.review_diff(self.path, base=read["base"], tree=read["tree"], file="long.txt")
         self.assertFalse(short["whole"], "past the bound, its changes only, and said so")
         hunks = [line for line in short["patch"].splitlines() if line.startswith("@@")]
         self.assertEqual(len(hunks), 1)
         self.assertTrue(hunks[0].startswith("@@ -17,7 +17,7 @@"), hunks)
+        self.assertFalse([argv for argv in calls if W.WHOLE in argv], "no whole diff of a file past the bound")
+        calls.clear()
+        W.FILE_LIMIT = saved
+        self.assertTrue(W.review_diff(self.path, base=read["base"], tree=read["tree"], file="long.txt")["whole"])
+        self.assertTrue([argv for argv in calls if W.WHOLE in argv], "control: one well under the bound is read whole")
+
+    def test_a_list_too_long_for_one_read_goes_on_from_the_same_snapshot(self):
+        self.edit()
+        saved = W.FILES_LIMIT
+        W.FILES_LIMIT = 4
+        self.addCleanup(setattr, W, "FILES_LIMIT", saved)
+        first = W.review_diff(self.path)
+        self.assertEqual((len(first["files"]), first["files_total"]), (4, 6))
+        write(os.path.join(self.path, "later.txt"), "after the list was read\n")
+        rest = W.review_diff(self.path, base=first["base"], tree=first["tree"], files_from=4)
+        self.assertEqual((rest["base"], rest["tree"], rest["files_total"], rest["files_from"]),
+                         (first["base"], first["tree"], 6, 4))
+        listed = [entry["path"] for entry in first["files"] + rest["files"]]
+        self.assertEqual(sorted(listed), sorted([self.DEEP, "with space.txt", "docs/new name.md", "image.bin",
+                                                 "gone.txt", "long.txt"]),
+                         "every file of the snapshot once, the one written since in none")
+        self.assertNotIn("patch", rest, "a page of the list is the list alone")
 
     def test_every_read_comes_from_the_snapshot_it_names_whatever_the_worktree_does(self):
         self.edit()

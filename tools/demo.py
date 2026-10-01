@@ -390,7 +390,11 @@ class Demo:
         check(self.press(merged, "history", "you approved the plan"), "the history shows your approval as a row")
 
         step("the change merged by pressing Merge")
-        check(self.press(merged, "Merge", "answered: merge"), "the page sent the answer, with its confirmation")
+        check(self.press(merged, "turn-then:verify:Merge", "answered: merge"),
+              "the page sent the answer, with its confirmation")
+        check("The change is the approved plan." in self.said.splitlines()[-1],
+              "the verify turn opened at the gate, its verdict pointed to the decision, says it in the same page once "
+              "the run has merged")
         view = self.until(merged, closed, 300, "the merge")
         check(view["status"] == "MERGED", "the run ended merged")
         check("greeting.txt" in git(self.repo, "ls-tree", "--name-only", "develop"),
