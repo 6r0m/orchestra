@@ -1,7 +1,7 @@
 # The engineer closes the todo out after the architect's PASS; the merge commits exactly what the gate showed
 
-**Status:** IMPLEMENTED, the external reviewer's PATCH applied — awaiting its re-review (D3). The full suite on
-both hosts and the restart acceptance are not run yet.
+**Status:** IMPLEMENTED, the external reviewer's second PATCH applied — awaiting its re-review (D3). The full
+suite on both hosts, the restart acceptance and a run with real agents are not run yet.
 **Scope:** the run's finalisation: a `closeout` stage ([stages.py](../app/foundation/stages.py)), its flow rules
 ([flows.py](../app/foundation/flows.py), [flows/](../flows/README.md)), the workflow's path through it
 ([workflow.py](../app/orchestration/workflow.py)), its checks and the reopening of a change that goes back
@@ -47,10 +47,9 @@ repository keeps finished todos — and Merge commits exactly that tree.
 - **A1 [RESOLVED by Q1]** A closeout sits between a `verify` and the merge. `flows.load` refuses a building flow
   without one; `flows.check`, which the workflow runs on a run's recorded steps at every replay, does not — so
   the runs started before closeouts go on replaying, and the controller still finishes their plan at the merge.
-- **A2 [ACTIVE]** What a closeout may change besides the todo folders is the repository's to name: `closeout_docs`
-  in its descriptor, each a path as git globs it. Unnamed, it is this repository's own convention, as the todo
-  folders are — every `README.md` and every `docs/` folder. The default is the agent's choice; the reviewer's
-  example was `README.md` and `docs/`.
+- **A2 [RESOLVED by D3 — the reviewer's and the agent's decision]** What a closeout may change besides the todo
+  folders is the repository's to name: `closeout_docs` in its descriptor, each a path as git globs it. An entry
+  that names none, or no entry, leaves a closeout the todo alone: no code calls a file a document.
 - **A3 [ACTIVE]** A change that goes back from the final gate — a revise, or a merge in conflict — is reopened
   before its role's turn: each path changed since the verified tree is again as the architect verified it, bar
   one changed again since. The build closes out anew once it passes.
@@ -59,6 +58,9 @@ repository keeps finished todos — and Merge commits exactly that tree.
 - **A5 [ACTIVE]** The closeout's ask says what must be left and what may be touched; how a todo is finished is
   the engineer's persona's. No skill is bound to the stage here: skills are the host's, not this repository's,
   and a bound skill a host lacks refuses every run on it (`prepare`). Binding one is a line in `stage_skills`.
+- **A6 [ACTIVE]** A run of the first closeouts is told by the name its closeout recorded for the tree it left,
+  `closeout_tree` (F10). Such a tree is held as a final tree is, and a conflict over it reopens nothing, as those
+  runs recorded. No run of that shape is known outside the recordings, so one still open gains no reopening.
 
 ## Non-goals
 
@@ -93,6 +95,12 @@ repository keeps finished todos — and Merge commits exactly that tree.
   tell a document from behaviour.
 - **F9** Git's own pathspecs leave out a folder taken literally and a glob — `docs/` the folder, `**/README.md`
   the file wherever it is — from a tree-to-tree diff, measured with git 2.55 and 2.54.
+- **F10** Two recordings of a run that closes out are published, each by the code of its round. The first names
+  the closeout's tree `closeout_tree` and goes from its conflict straight to the engineer; the second names it
+  `final_tree` and commands a `reopen` there. Both carry the same three patch markers and none for that
+  reopening, so no marker tells them apart; the name their closeout recorded does. The workflow as the second
+  round left it failed the first's replay at its revise: *activity type of scheduled event 'reopen' does not
+  match*.
 
 ### Refuted
 
@@ -105,7 +113,11 @@ repository keeps finished todos — and Merge commits exactly that tree.
   is not created or bound here (A5): it belongs to the host's skills, outside this repository.
 - **"Rerun … `make demo` + acceptance" before the PASS, then "only then restart".** The acceptance restarts the
   live stack — its own first lines say so — which would put the live workers on this code before the PASS. It
-  waits; `make demo`, a stack of its own beside the live one, does not.
+  waits; `make demo`, a stack of its own beside the live one, does not. The reviewer accepted both.
+- **"Put the conflict's reopening behind a named `workflow.patched` branch."** Its aim is met; its mechanism
+  would break the rule it serves. F10: the second recording reopens at its conflict with no marker, and a
+  history without a patch's marker replays that patch as absent — so the second published recording would stop
+  replaying, as the first had. The recorded name decides instead (A6), and both replay as they were written.
 
 ## Decision
 
@@ -114,7 +126,8 @@ that builds schedules it between the `verify` and the merge. Once its turn ends 
 repository's own descriptor: nothing changed from the verified tree but the todo folders and the documents the
 repository names; and the todo is gone from its path and, where the repository keeps it, in the done folder.
 Either failing fails the step, `closeout_violation`. The tree it left is the run's `final_tree`: the final gate
-holds it and the merge commits it, finishing no plan itself. A change that goes back is reopened first (A3).
+holds it and the merge commits it, finishing no plan itself. A change that goes back is reopened first (A3),
+bar a conflict over a tree the first closeouts left (A6).
 The closeout is a phase of its own in the trace and judges nothing; the build's count of judgements stays
 across it, so that build's first judgement is scored once.
 
@@ -133,8 +146,8 @@ before closeouts are gone, two ways a plan is finished, by the steps a run recor
    verified tree with the controller's move — and refuses a worktree that is no longer it, changing nothing.
 3. A change that goes back from the final gate is reopened before any role's turn; a reopening that fails stops
    the run there.
-4. Every recorded history replays; a run started before closeouts takes no new step. No flow file starts
-   another run like them.
+4. Every recorded history replays as it was written, none recorded over; a run started before closeouts takes
+   no new step. No flow file starts another run like them.
 5. The architect stays read-only and writes nothing (D2).
 
 ## Implementation tasks
@@ -144,7 +157,9 @@ before closeouts are gone, two ways a plan is finished, by the steps a run recor
       copy that keeps its time (F6).
 - [x] The activity's checks and the `reopen` activity; the workflow's closeout segment, the reopening on a
       revise and on a conflict, the build's count kept.
-- [x] The descriptor's `closeout_docs`, its default and its validation.
+- [x] The descriptor's `closeout_docs` and its validation; none unless the entry names them.
+- [x] The first closeouts' recording as it was written, the second under a name of its own; the tree's first
+      name read by the workflow and the history, the first closeouts' conflict path kept.
 - [x] The history's closeout change; the trace's phase and error type; the page's words for the stage.
 - [x] The demo's and the acceptance's fake engineer close out.
 - [x] The stable documents ([Documentation plan](#documentation-plan)).
@@ -163,6 +178,8 @@ What each of the reviewer's tests is, here:
 | a revise returns to the reviewed loop | `test_stops.Closeout`, both roles; `test_worktrees.Closeout` for the undo |
 | the todo is at its path when the conflict's build starts | `test_worktrees.Closeout` on a real conflict, the merge still under way; `test_stops.Closeout`: reopened before that turn |
 | a new building flow requires a closeout | `test_flows`, with its control: the same steps hold as recorded ones; `test_workflow.Flows`: its file starts no run |
+| a run of the first closeouts still replays, and shows its closeout's change | `test_replay`, both recordings; `test_workbench.HistoryRead` |
+| no file is a document unless the repository names it | `test_repos`: an entry that names none, and no entry; `test_activities.Closeout`: such a repository's closeout has the todo alone |
 
 The results of each run, the controls and what was not run are in the [review record](#review-record).
 
@@ -180,8 +197,8 @@ a live run's to show.
 
 ## Completion criteria
 
-- The external reviewer's PASS (D3); then the full suite once on both hosts and the restart acceptance.
-- A live run closes its todo out and merges the tree its gate showed.
+- The external reviewer's PASS (D3); then the full suite once on both hosts, then the restart acceptance.
+- A run with real agents closes its todo out and merges the tree its gate showed.
 
 ## Review record
 
@@ -194,10 +211,6 @@ a live run's to show.
   flow read to start a run must close out (Q1); the run's tree is `final_tree`, and the workflow, the flow rules
   and the activity name `stages.FINAL`, never the stage; the closeout's method left the ask for the persona.
 - **Refuted:** see [Refuted](#refuted) — the skill, in part, and the acceptance before the PASS.
-- **A recorded history replaced.** `closeout_revise_conflict_merge` was recorded on the first implementation,
-  an hour before this round changed what that run commands — a second reopening, another key. No run of that
-  shape exists outside the test server: both shipped flows were refused by the running stack throughout, and
-  this host holds no closeout turn's log. It was recorded again rather than kept behind a patch.
 - **Verification, the modules the change touches, by the repository's own runners, one host after the other:**
   WSL — flows, policy, workflow, stops, replay, round boundaries, worktrees, repos, activities, settings,
   workbench, settings delivery, cli, observability, trace parity, terminals, architecture and the public
@@ -215,4 +228,31 @@ a live run's to show.
 - **Residual risk, said once:** what a closeout writes lands with no architect's review. The operator reads the
   closeout's own change in its turn's row.
 - **Deployment note:** a Workbench and workers started before this change refuse both shipped flows — *no such
-  action* — until they are restarted. A run started before it keeps the controller's move at its merge.
+  action* — until they are restarted. A run started before it keeps the controller's move at its merge. A
+  repository whose closeouts are to bring documents up to date names them in its own entry of the operator's
+  `.orchestra/repos.json` — this one's are `**/README.md` and `**/docs/**` — and only once the stack runs this
+  code: the code before it refuses an entry with a key it does not know.
+
+### 2026-10-07 — the external reviewer's second PATCH
+
+- **Trigger:** two findings. The round before had recorded over a published history, against the replay rule;
+  and a repository that named no documents was given every `README.md` and `docs/` folder by the code.
+- **Applied:** the first recording is back as it was written, byte for byte, and replays; the second is kept,
+  byte for byte, under a name of its own (F10, A6); the history reads a closeout's tree under either name. No
+  default names a document (A2); the persona says what to do where the stage names none.
+- **Refuted:** the marker, in mechanism only — see [Refuted](#refuted).
+- **Red first:** with the first recording back and the workflow as the round before left it, the replay failed
+  on that recording alone (F10).
+- **Verification, the modules the change touches, one host after the other:** Windows — replay, stops,
+  workflow, repos, worktrees, activities, flows, policy, trace parity, architecture and the history's reading:
+  57 classes, 307 tests, OK. WSL — those and round boundaries, settings, workbench, settings delivery, cli,
+  observability and the public check's own tests: 100 classes, 496 tests, OK.
+- **Controls, one guard out at a time, each put back and the tree byte for byte as before:** the tree's first
+  name unread by the workflow, and a conflict over such a tree reopened — the first recording stops replaying
+  either way; a patch marker deciding the conflict's reopening instead of the recorded name — the second
+  recording stops replaying, *scheduled event 'reopen' does not match activity command 'run_role'*; the first
+  name unread by the history, and documents named by default — their tests fail.
+- **`make demo`:** passed, the closeout a turn of the run that merges and its todo in the done folder inside the
+  merge. **`make public-check`:** passed; the second recording, not yet tracked under its new name, is the blob
+  the round before published.
+- **Not run:** the full suite; `tests/acceptance_restart.py`; a run with real agents.

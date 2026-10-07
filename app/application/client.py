@@ -387,11 +387,12 @@ async def history(client, run_id):
     A turn's start is its started event's time — when a worker took it, which Temporal records as such even
     though it writes that event only once the step ends — never when it was queued. A review's tree is the one
     its result names — `judged_tree`, or for a pass `assessed_tree` or `verified_tree` — and a review whose
-    result names none has none; the work that makes a build final names the one it left, `final_tree`. An
-    answer is the `answer:<stop-id>` Update the workflow accepted, as its accepted event recorded the request; one its validator refused never entered the history. Its phase is the
-    one of the last role turn begun before it, failed or not, and it comes `after` the last turn completed before
-    it, by its key `stage:episode:round` — the transcript's order is the history's own, never one read from clocks.
-    Each engineer turn carries its `change` (`_changes`)."""
+    result names none has none; the work that makes a build final names the one it left, `final_tree` — or
+    `closeout_tree`, as the first closeouts named it. An answer is the `answer:<stop-id>` Update the workflow
+    accepted, as its accepted event recorded the request; one its validator refused never entered the history.
+    Its phase is the one of the last role turn begun before it, failed or not, and it comes `after` the last turn
+    completed before it, by its key `stage:episode:round` — the transcript's order is the history's own, never one
+    read from clocks. Each engineer turn carries its `change` (`_changes`)."""
     def at(event):
         return event.event_time.ToDatetime(tzinfo=datetime.timezone.utc).isoformat()
 
@@ -418,7 +419,7 @@ async def history(client, run_id):
                             "round": state.get("round", 0) + 1,
                             "started": started.get(attributes.scheduled_event_id, queued), "ended": at(event)}
                     tree = (result.get("judged_tree") or result.get("assessed_tree") or result.get("verified_tree")
-                            or result.get("final_tree"))
+                            or result.get("final_tree") or result.get("closeout_tree"))
                     if tree:
                         turn["tree"] = tree
                     turns.append(turn)

@@ -773,6 +773,15 @@ class HistoryRead(unittest.TestCase):
                                                 ("revise", "closeout:3:1", "closeout"),
                                                 ("merge", "closeout:5:1", "closeout")])
 
+    def test_a_closeout_recorded_under_its_trees_first_name_keeps_its_change(self):
+        """The first closeouts named the tree they left `closeout_tree`: a run recorded then still shows what its
+        closeout changed."""
+        record = self.read([
+            ("turn", "build", "build", 2, 1, {}),
+            ("turn", "verify", "build", 2, 1, {"judged_tree": "t2", "verified_tree": "t2"}),
+            ("turn", "closeout", "closeout", 3, 1, {"closeout_tree": "t3"}), ("answer", "merge")])
+        self.assertEqual(self.changes(record)["closeout:3:1"], {"base": "t2", "tree": "t3", "turns": ["closeout:3:1"]})
+
     def test_a_failed_step_continued_sits_in_its_own_phase_after_the_turn_before_it(self):
         record = self.read([
             ("turn", "plan", "plan", 1, 1, {}), ("turn", "assess", "plan", 1, 1, {"judged_tree": "t1"}),

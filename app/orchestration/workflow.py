@@ -92,6 +92,7 @@ class FeatureRun:
         self.lines = []
         self.timeline = []
         self.stopping = False
+        self.conflict_reopens = True
 
     @workflow.run
     async def run(self, start):
@@ -286,10 +287,14 @@ class FeatureRun:
                 # stage's prompt carries it.
                 s["brief"] = result["output"]
                 entry["brief"] = result["output"]
-            if "final_tree" in result:
-                # What the final gate holds from here on: the operator judges it, and a merge commits it
-                # or refuses.
-                s["final_tree"] = result["final_tree"]
+            # What the final gate holds from here on: the operator judges it, and a merge commits it or
+            # refuses. `closeout_tree` is what the first closeouts named it, in the runs recorded then; those
+            # resolved a merge's conflict without reopening the change, so a run holding a tree so named
+            # still does, and replays.
+            for name in ("final_tree", "closeout_tree"):
+                if name in result:
+                    s["final_tree"] = result[name]
+                    self.conflict_reopens = name == "final_tree"
             self._line("%s completed" % label)
         self.timeline.append(entry)
         return True
@@ -389,8 +394,11 @@ class FeatureRun:
                 self._line("merge conflict: %s" % ", ".join(merged["files"]))
                 # The conflict goes back to the run's agents, never resolved here — reopened first, as a
                 # change sent back is: its todo is closed out in the run's commit, and the roles that
-                # resolve and verify are asked to read it where it was.
-                if not await self._reopened():
+                # resolve and verify are asked to read it where it was. Bar the tree the first closeouts
+                # left (`_stage`), which is only let go of.
+                if not self.conflict_reopens:
+                    s.pop("final_tree", None)
+                elif not await self._reopened():
                     continue
                 s.update(status="RUNNING", round=0, gate_reason="", episode=s["episode"] + 1,
                          guidance="Merging %s conflicts with %s. The base branch is merged into this "

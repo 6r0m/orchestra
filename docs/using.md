@@ -94,7 +94,7 @@ change at the final gate, the blocker or the last finding, or the failure, whole
 final gate the change is the one the engineer's closeout left — the todo cut to its record and in the
 repository's done folder — and it is exactly what Merge commits. The architect did not judge the
 closeout, which may touch only the todo and the documents the repository names (`closeout_docs` in
-its entry in `.orchestra/repos.json`; every `README.md` and `docs/` folder when it names none): its
+its entry in `.orchestra/repos.json`; the todo alone when it names none): its
 turn in the history opens what it changed since the architect's verification. A revise undoes it
 before its role's turn. Its
 answers are the stop's own, as buttons. The note is labelled with the answers it is sent with, and a

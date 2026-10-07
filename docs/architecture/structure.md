@@ -378,7 +378,8 @@ still lands on a checkout.
   No review follows that turn, so two facts are checked instead, by the repository's own
   descriptor: it changed nothing but the todo folders and the documents the repository
   names (`closeout_docs`, as git globs them — never a file's type, since a persona or a
-  skill is Markdown and is behaviour), and the todo is gone from where it was and, where
+  skill is Markdown and is behaviour; a repository that names none leaves it the todo
+  alone), and the todo is gone from where it was and, where
   the repository keeps it, in the done folder. Either one failing fails the step. The
   architect's `PASS` accepts the implementation, and the operator judges the closeout.
   The tree it left is the run's final tree, the one the final gate holds. At
@@ -399,7 +400,10 @@ still lands on a checkout.
   merges again, and the run branch gains one reconciliation merge commit. A run started
   before closeouts recorded a flow with none: it holds the tree the architect's last
   `PASS` verified, and the controller finishes its plan at the merge — moved to the done
-  folder with a finished status line, or deleted.
+  folder with a finished status line, or deleted. A run of the first closeouts recorded
+  the tree it left as `closeout_tree`, and resolved a conflict with the change not
+  reopened: a tree so named is held as a final tree is, and a conflict over it still
+  reopens nothing, so those runs replay (D25).
   After a merge the worktree, its branch and its environment go; a discard removes
   them unmerged. A run whose flow has no build never reaches the final gate: it
   ends `DONE` after its last stage, merging nothing, and keeps its worktree and

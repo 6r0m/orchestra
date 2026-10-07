@@ -5,7 +5,9 @@ so the histories recorded before the change still replay:
 `python tests/record_histories.py [name ...]` — the named histories only, every one when none is
 named. A new history is recorded by its name alone, so the ones older code wrote stay as they were:
 `approval_abort` and `failed_abort` are runs ended by an `abort` answer, which no stop offers now, so
-they cannot be recorded again — they prove that runs which took one still replay.
+they cannot be recorded again — they prove that runs which took one still replay. Nor can
+`closeout_revise_conflict_merge`, the run of the first closeouts: its closeout named the tree it left
+`closeout_tree`, and its merge's conflict was resolved with the change not reopened.
 """
 import base64
 import json
@@ -219,10 +221,10 @@ def plan_only_done():
     return run
 
 
-def closeout_revise_conflict_merge():
+def closeout_revise_conflict_reopen_merge():
     """A flow that closes out: the engineer's closeout after the architect's pass; a change sent back from the
-    final gate, reopened before it is built, verified and closed out again; then a merge that conflicts, resolved
-    with no reopening, closed out once more and merged."""
+    final gate, reopened before it is built, verified and closed out again; then a merge that conflicts, the
+    change reopened again before it is resolved, closed out once more and merged."""
     a1, _ = codex_review_first("PASS")
     E.host([("plan-e1-1", 0, "p\n"), ("assess-e1-1", 0, a1),
             ("build-e2-1", 0, "b\n"), ("verify-e2-1", 0, codex_review_resumed("PASS")),
@@ -242,7 +244,7 @@ def closeout_revise_conflict_merge():
 
 RECORDINGS = (patch_loop_approval_merge, blocker_guidance_failure_continue_discard, final_revise_conflict_merge,
               approval_stop, final_merge_stop_lands, final_merge_no_worker_continue, research_revise_plan_merge,
-              plan_only_done, closeout_revise_conflict_merge)
+              plan_only_done, closeout_revise_conflict_reopen_merge)
 
 
 def main(names):

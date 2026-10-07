@@ -119,13 +119,13 @@ class Refusals(Layout):
         self.assertEqual((resolved["todo_dir"], resolved["todo_name"], resolved["todo_done_dir"]),
                          ("todo/00_current", "%Y%m%d-%H%M_{slug}", "todo/done"))
 
-    def test_the_documents_a_closeout_may_change_default_to_this_repositorys_and_an_entry_names_its_own(self):
+    def test_the_documents_a_closeout_may_change_are_the_ones_an_entry_names_and_no_others(self):
         self.branch("develop")
-        self.assertEqual(self.resolve()["closeout_docs"], ["**/README.md", "**/docs/**"])
+        self.assertEqual(self.resolve()["closeout_docs"], [],
+                         "no entry names any: a closeout has the todo alone, and no file is a document by its name")
         self.assertEqual(self.resolve(dict(self.selected, closeout_docs=["README.md", "handbook/"]))["closeout_docs"],
                          ["README.md", "handbook/"])
-        self.assertEqual(self.resolve(dict(self.selected, closeout_docs=[]))["closeout_docs"], [],
-                         "none named: a closeout has the todo alone, never the default again")
+        self.assertEqual(self.resolve(dict(self.selected, closeout_docs=[]))["closeout_docs"], [])
 
 
 class Selection(unittest.TestCase):

@@ -38,10 +38,9 @@ FLAGS = {"lfs_pointers"}
 # The documents a closeout may bring up to date once the architect has passed the build, each a path as
 # git globs it — `docs/` is that folder, `**/README.md` that file wherever it is. Which files are
 # documents is the repository's to say, never a file's type: a persona, a skill or an agent's instructions
-# is Markdown too, and is behaviour. This repository's own convention unless the entry states the
-# repository's; none at all leaves a closeout the todo alone.
+# is Markdown too, and is behaviour. So nothing here names any: an entry that lists none, or no entry at
+# all, leaves a closeout the todo alone.
 PATHS = {"closeout_docs"}
-CLOSEOUT_DOCS = ("**/README.md", "**/docs/**")
 # Where a run's plan is written, where it moves once merged, and its name: this
 # repository's own convention unless the entry states the repository's.
 TODO_DEFAULTS = {"todo_dir": "todo", "todo_done_dir": "todo/done", "todo_name": "%Y-%m-%d_%H%M-{slug}"}
@@ -244,6 +243,6 @@ def resolve(selected, target_root, which=shutil.which):
         raise Refused("the worktree root %s is not on a Windows drive: %s" % (root, UNC_REASON))
     resolved = {"repo_path": path, "base_branch": base, "worktree_root": root}
     resolved.update({key: selected.get(key, value) for key, value in TODO_DEFAULTS.items()})
-    resolved["closeout_docs"] = list(selected.get("closeout_docs", CLOSEOUT_DOCS))
+    resolved["closeout_docs"] = list(selected.get("closeout_docs", ()))
     resolved["lfs_pointers"] = selected.get("lfs_pointers", False)
     return resolved

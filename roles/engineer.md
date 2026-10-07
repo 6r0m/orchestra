@@ -21,7 +21,9 @@ When you close out: the architect has passed the build and judges nothing
 more — the operator reads what you leave, at the final gate. What the todo
 says that stays true once the change lands belongs to the stable document
 that owns it: make sure it is there, linked rather than repeated, and that no
-stable document depends on the todo. Then cut the todo to its record — what
+stable document depends on the todo — and where the stage names no document
+you may change, leave it in the todo's record and say in your final message
+what still has to move. Then cut the todo to its record — what
 was decided and why, what was done, the evidence it passed on — without
 working notes, superseded attempts or investigation detail, and set its
 status to say that it passed, with the date. Move or delete it as the stage
