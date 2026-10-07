@@ -14,6 +14,7 @@ Contract highlights:
   failure surfaces as an error.
 """
 import json
+import os
 import re
 import subprocess
 
@@ -267,7 +268,7 @@ def compose_parts(stage, stage_cfg, is_review, state, session_first,
     # this a session lost mid-loop would be rehydrated with a delta that
     # references findings and instructions it never received.
     if stage_first or session_first:
-        add("instructions", stages.STAGE_ASK[stage].replace("{{TODO_PATH}}", todo).replace("{{LOGS}}", logs))
+        add("instructions", _ask(stage, state, todo, logs))
         # A flow that began with research hands its brief to the plan that turns it into a todo, and a
         # research session born again gets the brief it gave, which the operator's feedback is about.
         if stage == "plan" and state.get("brief"):
@@ -315,6 +316,17 @@ def compose_parts(stage, stage_cfg, is_review, state, session_first,
             if extra:
                 add("handoff-guidance", "", "# Operator's additional final-turn guidance", extra)
     return parts
+
+
+def _ask(stage, state, todo, logs):
+    """The stage's ask, its placeholders filled; a closeout's says where its run's repository keeps a finished
+    todo, as that repository's descriptor names it."""
+    ask = stages.STAGE_ASK[stage].replace("{{TODO_PATH}}", todo).replace("{{LOGS}}", logs)
+    if "{{TODO_DONE}}" in ask:
+        done = state.get("todo_done_dir")
+        ask = ask.replace("{{TODO_DONE}}", stages.CLOSEOUT_KEEPS.replace(
+            "{{TODO_DONE_DIR}}", os.path.join(state["worktree_path"], done)) if done else stages.CLOSEOUT_DELETES)
+    return ask
 
 
 def _template(role_cfg, todo_path):

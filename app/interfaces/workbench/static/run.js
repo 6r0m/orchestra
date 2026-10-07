@@ -42,7 +42,7 @@ const LIFECYCLE = {
 };
 const GATES = { approval: "your approval", blocker: "your guidance", exhausted: "your guidance" };
 const STAGE_ROLES = { research: "architect", plan: "engineer", assess: "architect", build: "engineer",
-  verify: "architect" };
+  verify: "architect", closeout: "engineer" };
 
 let selected = null;
 let shownStop = null;
@@ -444,9 +444,9 @@ function drawHistory() {
   let box = null;
   let phase = null;
   for (const item of items) {
-    // An answer is in the phase of the step it answered, which may be one no completed turn shows: a failed one.
-    const itsPhase = item.entry ? item.entry.phase
-      : item.answer.phase || phase || (timeline[0] && timeline[0].phase);
+    // An answer is in the phase of the step it answered, which may be one no completed turn shows — a failed one —
+    // or none: an answer before any role's step is under its own heading.
+    const itsPhase = item.entry ? item.entry.phase : item.answer.phase || null;
     if (!box || itsPhase !== phase) {
       phase = itsPhase;
       box = el("section", null, "phase");
@@ -470,10 +470,12 @@ function historyKey(turn) {
   return turn.stage + ":" + turn.episode + ":" + turn.round;
 }
 
-// A turn named as the run's history names it, said: "build, round 2".
+// A turn the run's history names, said as its row says it: "build, round 2, at 16:31" — its time tells it from the
+// same stage and round of another episode.
 function turnSaid(key) {
   const [stage, , round] = key.split(":");
-  return stage + ", round " + round;
+  const turn = record.turns.find((each) => historyKey(each) === key);
+  return stage + ", round " + round + (turn && turn.ended ? ", at " + at(turn.ended) : "");
 }
 
 function firstLine(text) {
@@ -628,7 +630,8 @@ function refreshProduced(body, entry) {
   for (const shown of body.querySelectorAll(":scope > .attempt > .produced, :scope > .produced")) {
     const index = Number(shown.dataset.attempt);
     const counted = !attempts.length || index === attempts.length - 1;
-    const opened = Boolean(shown.querySelector(":scope > details.turn-output[open]"));
+    const opened = { output: Boolean(shown.querySelector(":scope > details.turn-output[open]")),
+      raw: Boolean(shown.querySelector(":scope > details.turn-raw[open]")) };
     shown.replaceWith(produced(attempts[index] || { input: null, output: null }, counted ? entry : null, index,
       opened));
   }
@@ -636,7 +639,8 @@ function refreshProduced(body, entry) {
 
 // What the turn gave back: the run's own record of it — the brief, the verdict and findings — for the attempt that
 // counted, else what its record holds; said once, so the decision's evidence is pointed to, not repeated. Closed, as
-// its prompt is, its verdict and first line in its summary; `opened` keeps it open when it is drawn again.
+// its prompt is, its verdict and first line in its summary; `opened` keeps it and its raw record open when it is drawn
+// again.
 function produced(attempt, entry, index, opened) {
   const box = el("div", null, "produced");
   box.dataset.attempt = index;
@@ -657,11 +661,12 @@ function produced(attempt, entry, index, opened) {
     if (review) summary.append(el("span", review.verdict, "verdict " + review.verdict), " ");
     summary.appendChild(el("span", text ? firstLine(text) : "no findings", "first-line"));
     output.append(summary, field(review ? review.verdict + "\n\n" + text : text, "what it produced", text));
-    output.open = Boolean(opened);
+    output.open = Boolean(opened && opened.output);
     box.appendChild(output);
   }
   if (attempt.output !== null && attempt.output !== undefined && attempt.output !== message) {
     const raw = el("details", null, "turn-raw");
+    raw.open = Boolean(opened && opened.raw);
     const record = el("pre", attempt.output, "code");
     record.translate = false;
     const inside = el("div", null, "turn-field");

@@ -138,7 +138,8 @@ class SettingsDelivery(unittest.TestCase):
         script.extend([("plan-e3-1", 0, "revised after guidance\n"),
                        ("assess-e3-1", 0, review_resumed_for(configured, "architect", "PASS")),
                        ("build-e4-1", 0, "built\n"),
-                       ("verify-e4-1", 0, review_resumed_for(configured, "architect", "PASS"))])
+                       ("verify-e4-1", 0, review_resumed_for(configured, "architect", "PASS")),
+                       ("closeout-e5-1", 0, "closed out\n")])
         run_id, self.host, self.agent, git = self.start(script)
         research = wait_for(run_id, "approval")
         self.assertEqual(research["view"]["flow"]["name"], "architect-research")
@@ -189,10 +190,11 @@ class SettingsDelivery(unittest.TestCase):
                              {"stop": approval["stop"]["id"], "action": "approve"})
         self.assertEqual(status, 200, answer)
         final = wait_for(run_id, "final")
-        self.assertEqual([call["name"] for call in self.agent.calls[-2:]], ["build-e4-1", "verify-e4-1"])
-        self.assertEqual([call["kind"] for call in self.agent.calls[-2:]], ["codex", "claude-code"])
-        self.assertIn("smoke-engineer", self.agent.calls[-2]["argv"])
-        self.assertIn("smoke-architect", self.agent.calls[-1]["argv"])
+        self.assertEqual([call["name"] for call in self.agent.calls[-3:]],
+                         ["build-e4-1", "verify-e4-1", "closeout-e5-1"])
+        self.assertEqual([call["kind"] for call in self.agent.calls[-3:]], ["codex", "claude-code", "codex"])
+        for at, model in ((-3, "smoke-engineer"), (-2, "smoke-architect"), (-1, "smoke-engineer")):
+            self.assertIn(model, self.agent.calls[at]["argv"])
         status, answer = ask("POST", "/api/runs/%s/answer" % run_id,
                              {"stop": final["stop"]["id"], "action": "discard", "confirm": True})
         self.assertEqual(status, 200, answer)
@@ -210,7 +212,7 @@ class SettingsDelivery(unittest.TestCase):
             {"pointer": "/roles/architect/agent", "value": "smoke-codex"},
             {"pointer": "/default_flow", "value": "architect-research"},
         ] + [{"pointer": "/stage_skills/" + stage, "value": "smoke-" + stage}
-             for stage in ("research", "plan", "assess", "build", "verify")]
+             for stage in ("research", "plan", "assess", "build", "verify", "closeout")]
         configured = self.apply(*changes)
         self.assertEqual(configured["default_flow"], "architect-research")
 
@@ -220,13 +222,15 @@ class SettingsDelivery(unittest.TestCase):
                     script = [("plan-e1-1", 0, "planned\n"),
                               ("assess-e1-1", 0, review_first_for(configured, "architect", "PASS")[0]),
                               ("build-e2-1", 0, "built\n"),
-                              ("verify-e2-1", 0, review_resumed_for(configured, "architect", "PASS"))]
+                              ("verify-e2-1", 0, review_resumed_for(configured, "architect", "PASS")),
+                              ("closeout-e3-1", 0, "closed out\n")]
                 else:
                     script = [("research-e1-1", 0, first_message_for(configured, "architect", "brief")[0]),
                               ("plan-e2-1", 0, "planned\n"),
                               ("assess-e2-1", 0, review_resumed_for(configured, "architect", "PASS")),
                               ("build-e3-1", 0, "built\n"),
-                              ("verify-e3-1", 0, review_resumed_for(configured, "architect", "PASS"))]
+                              ("verify-e3-1", 0, review_resumed_for(configured, "architect", "PASS")),
+                              ("closeout-e4-1", 0, "closed out\n")]
                 run_id, _, agent, git = self.start(script, flow=selected)
                 if selected is None:
                     research = self.wait_for(run_id, "approval")
@@ -237,8 +241,8 @@ class SettingsDelivery(unittest.TestCase):
                 self.assertEqual(approval["view"]["flow"]["name"], selected or "architect-research")
                 self.answer(run_id, approval["stop"], "approve")
                 final = self.wait_for(run_id, "final")
-                expected = ["plan", "assess", "build", "verify"] if selected else [
-                    "research", "plan", "assess", "build", "verify"]
+                expected = ["plan", "assess", "build", "verify", "closeout"] if selected else [
+                    "research", "plan", "assess", "build", "verify", "closeout"]
                 self.assertEqual([call["name"].split("-")[0] for call in agent.calls], expected)
                 for call in agent.calls:
                     stage = call["name"].split("-")[0]
@@ -266,7 +270,8 @@ class SettingsDelivery(unittest.TestCase):
         reverted_script = [("plan-e1-1", 0, "planned\n"),
                            ("assess-e1-1", 0, review_first_for(restored, "architect", "PASS")[0]),
                            ("build-e2-1", 0, "built\n"),
-                           ("verify-e2-1", 0, review_resumed_for(restored, "architect", "PASS"))]
+                           ("verify-e2-1", 0, review_resumed_for(restored, "architect", "PASS")),
+                           ("closeout-e3-1", 0, "closed out\n")]
         run_id, _, agent, git = self.start(reverted_script, flow="engineer-code")
         approval = self.wait_for(run_id, "approval")
         self.answer(run_id, approval["stop"], "approve")
@@ -300,7 +305,8 @@ class SettingsDelivery(unittest.TestCase):
                            ("verify-e2-%d" % round_, 0,
                             review_resumed_for(configured, "architect", "PATCH", "build gap"))))
         script.extend((("build-e3-1", 0, "revised\n"),
-                       ("verify-e3-1", 0, review_resumed_for(configured, "architect", "PASS"))))
+                       ("verify-e3-1", 0, review_resumed_for(configured, "architect", "PASS")),
+                       ("closeout-e4-1", 0, "closed out\n")))
         run_id, _, agent, git = self.start(script)
         approval = self.wait_for(run_id, "approval")
         self.assertEqual(approval["state"]["phase"], "plan")
@@ -322,9 +328,12 @@ class SettingsDelivery(unittest.TestCase):
             self.assertIn("diagnose why this phase has not converged", agent.calls[at]["prompt"])
         self.answer(run_id, exhausted["stop"], "guide", text="fix the build gap")
         final = self.wait_for(run_id, "final")
-        self.assertEqual([call["name"] for call in agent.calls[-2:]], ["build-e3-1", "verify-e3-1"])
-        self.assertIn("fix the build gap", agent.calls[-2]["prompt"])
-        self.assertNotIn("BUILD ENGINEER REFLECT", agent.calls[-2]["prompt"])
+        self.assertEqual([call["name"] for call in agent.calls[-3:]],
+                         ["build-e3-1", "verify-e3-1", "closeout-e4-1"])
+        self.assertIn("fix the build gap", agent.calls[-3]["prompt"])
+        self.assertNotIn("BUILD ENGINEER REFLECT", agent.calls[-3]["prompt"])
+        for said in ("fix the build gap", "BUILD ENGINEER REFLECT", "BUILD ENGINEER HANDOFF", "# Final budget handoff"):
+            self.assertNotIn(said, agent.calls[-1]["prompt"], "a closeout is no turn of the build's budgeted loop")
         self.answer(run_id, final["stop"], "discard", confirm=True)
         self.wait_until_discarded(run_id)
         self.assertIn(("discard", run_id), git.calls)
@@ -348,7 +357,8 @@ class SettingsDelivery(unittest.TestCase):
         script.extend((("plan-e2-1", 0, "revised\n"),
                        ("assess-e2-1", 0, review_resumed_for(configured, "architect", "PASS")),
                        ("build-e3-1", 0, "built\n"),
-                       ("verify-e3-1", 0, review_resumed_for(configured, "architect", "PASS"))))
+                       ("verify-e3-1", 0, review_resumed_for(configured, "architect", "PASS")),
+                       ("closeout-e4-1", 0, "closed out\n")))
         run_id, _, agent, git = self.start(script, flow="engineer-code")
         exhausted = self.wait_for(run_id, "exhausted")
         self.assertEqual((exhausted["state"]["phase"], exhausted["state"]["round"]), ("plan", 20))
@@ -398,7 +408,8 @@ class SettingsDelivery(unittest.TestCase):
                            ("verify-e2-%d" % round_, 0,
                             review_resumed_for(configured, "architect", "PATCH"))))
         script.extend((("build-e3-1", 0, "revised\n"),
-                       ("verify-e3-1", 0, review_resumed_for(configured, "architect", "PASS"))))
+                       ("verify-e3-1", 0, review_resumed_for(configured, "architect", "PASS")),
+                       ("closeout-e4-1", 0, "closed out\n")))
         run_id, _, agent, git = self.start(script, flow="engineer-code")
         approval = self.wait_for(run_id, "approval")
         self.answer(run_id, approval["stop"], "approve")

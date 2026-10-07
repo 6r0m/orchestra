@@ -1,4 +1,4 @@
-"""A run's worktree, through the target host's own git: create, guard, merge, discard, list.
+"""A run's worktree, through the target host's own git: create, guard, reopen, merge, discard, list.
 
 Only this module stages, commits or merges, and only for the run it is given.
 Every side effect reads what git already holds before acting, so an attempt whose
@@ -162,9 +162,57 @@ def work_tree(path):
     with tempfile.TemporaryDirectory(prefix="orchestra-index-") as private:
         env = dict(os.environ, GIT_INDEX_FILE=os.path.join(private, "index"))
         if os.path.exists(index):
-            shutil.copyfile(index, env["GIT_INDEX_FILE"])
+            # With the time it was written: git takes an entry no older than its index for one whose stat
+            # cannot be trusted, and compares its content. A copy stamped now would trust the stat of a file
+            # rewritten to the same size in the second the index was written, and leave that edit out of
+            # the tree (measured).
+            shutil.copy2(index, env["GIT_INDEX_FILE"])
         git(path, "add", "-A", env=env)
         return git(path, "write-tree", env=env).stdout.strip()
+
+
+def changed(path, base, tree):
+    """What differs from the tree `base` to `tree`, each as `(status, path)`: `A` a file added, `D` one
+    removed, `M` or `T` one changed — a move its removal and its addition, each path as git names it."""
+    tokens = git(path, "diff", "--no-renames", "--name-status", "-z", base, tree).stdout.split("\0")
+    return list(zip(tokens[0::2], tokens[1::2]))
+
+
+def reopen(worktree, closeout_tree, verified_tree):
+    """Undo a closeout: each path it changed is again as the architect verified it, so the run's todo is
+    where its roles are asked to read it. Returns the paths left alone because they changed again after the
+    closeout — someone's later work, which the next review judges.
+
+    Files are written and removed, as the closeout made them; nothing is staged. Every file is read from
+    git before any is touched, so a tree git cannot read changes nothing — and run again it finds its own
+    work done.
+    """
+    now = work_tree(worktree)
+    since = {name for _, name in changed(worktree, closeout_tree, now)}
+    apart = {name for _, name in changed(worktree, verified_tree, now)}
+    kept, restored, removed = [], [], []
+    for status, name in changed(worktree, verified_tree, closeout_tree):
+        target = os.path.join(worktree, *name.split("/"))
+        if name in since:
+            if name in apart:
+                kept.append(name)
+        elif status == "A":
+            removed.append(target)
+        else:
+            # Bytes, as the verified plan is put back after a refused commit.
+            original = subprocess.run(["git", "-C", worktree, "cat-file", "blob", "%s:%s" % (verified_tree, name)],
+                                      capture_output=True, timeout=60)
+            if original.returncode != 0:
+                raise GitError("git cat-file in %s: rc=%d %s" % (
+                    worktree, original.returncode, original.stderr.decode("utf-8", "replace").strip()[:500]))
+            restored.append((target, original.stdout))
+    for target, content in restored:
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, "wb") as fh:
+            fh.write(content)
+    for target in removed:
+        os.remove(target)
+    return sorted(kept)
 
 
 def _merging(path):
@@ -256,7 +304,12 @@ def _unfinish_plan(worktree, verified_tree, plan, done_dir):
 
 
 def merge(repo, worktree, run_id, base, verified_tree, plan, done_dir, message, merge_message):
-    """Commit the verified change on the run branch and merge it into the local base branch.
+    """Commit the run's change on the run branch and merge it into the local base branch.
+
+    `verified_tree` is the tree the run holds for its merge, and the worktree must still be it. A run
+    whose engineer closed it out hands the tree that closeout left and no `plan`, and exactly that tree is
+    committed. A run with no closeout hands the tree the architect verified and its `plan`, which is
+    finished here: moved to `done_dir`, or deleted where the repository has none.
 
     Returns `{"result": "merged", "commit": ...}` once the base holds the merge and the
     worktree, branch and environment are gone, or `{"result": "conflict", "files": [...]}`
@@ -271,17 +324,24 @@ def merge(repo, worktree, run_id, base, verified_tree, plan, done_dir, message, 
         raise MergeRefused("the run's branch or worktree is gone and %s holds no merge of it" % base)
     merging = _merging(worktree)
     if not merging and verified_tree and not _clean(worktree):
-        # Only while the work is uncommitted: a written work commit is merged, never undone.
-        _unfinish_plan(worktree, verified_tree, plan, done_dir)
+        # Only while the work is uncommitted: a written work commit is merged, never undone. An attempt
+        # whose commit was refused left the change staged, and a finished plan moved.
+        if plan:
+            _unfinish_plan(worktree, verified_tree, plan, done_dir)
+        else:
+            git(worktree, "reset", "-q")
     if merging or not _clean(worktree):
-        # Only the change the architect verified is committed.
+        # Only the tree the run holds for its merge is committed.
         if work_tree(worktree) != verified_tree:
-            raise MergeRefused("the worktree no longer matches the change the architect verified")
+            raise MergeRefused("the worktree no longer matches the change the architect verified" if plan else
+                               "the worktree changed after its closeout, so it is no longer the change that "
+                               "was offered for this merge")
         if merging:
             git(worktree, "add", "-A")
             git(worktree, "commit", "--no-edit", "-m", "Merge %s into %s" % (base, run_id))
         else:
-            _finish_plan(worktree, plan, done_dir)
+            if plan:
+                _finish_plan(worktree, plan, done_dir)
             git(worktree, "add", "-A")
             git(worktree, "commit", "-m", message)
     if git(repo, "rev-list", "--count", "refs/heads/%s..refs/heads/%s" % (base, run_id)).stdout.strip() == "0":

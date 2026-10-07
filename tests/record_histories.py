@@ -219,9 +219,30 @@ def plan_only_done():
     return run
 
 
+def closeout_revise_conflict_merge():
+    """A flow that closes out: the engineer's closeout after the architect's pass; a change sent back from the
+    final gate, reopened before it is built, verified and closed out again; then a merge that conflicts, resolved
+    with no reopening, closed out once more and merged."""
+    a1, _ = codex_review_first("PASS")
+    E.host([("plan-e1-1", 0, "p\n"), ("assess-e1-1", 0, a1),
+            ("build-e2-1", 0, "b\n"), ("verify-e2-1", 0, codex_review_resumed("PASS")),
+            ("closeout-e3-1", 0, "c\n"),
+            ("build-e4-1", 0, "tightened\n"), ("verify-e4-1", 0, codex_review_resumed("PASS")),
+            ("closeout-e5-1", 0, "c\n"),
+            ("build-e6-1", 0, "resolved\n"), ("verify-e6-1", 0, codex_review_resumed("PASS")),
+            ("closeout-e7-1", 0, "c\n")],
+           git=FakeWorktrees([{"result": "conflict", "files": ["app.txt"]}, {"result": "merged", "commit": "c1"}]))
+    run = E.Run(auto=True, flow=["engineer:plan", "architect:assess", "you:approve", "engineer:build",
+                                 "architect:verify", "engineer:closeout", "you:merge"])
+    run.answer("revise engineer tighten the guard")
+    run.answer("merge")
+    run.answer("merge")
+    return run
+
+
 RECORDINGS = (patch_loop_approval_merge, blocker_guidance_failure_continue_discard, final_revise_conflict_merge,
               approval_stop, final_merge_stop_lands, final_merge_no_worker_continue, research_revise_plan_merge,
-              plan_only_done)
+              plan_only_done, closeout_revise_conflict_merge)
 
 
 def main(names):

@@ -307,6 +307,170 @@ class FinalGate(Scenario):
         self.assertFalse(run.closed(), "a Stop is what ends a run; an abort ends nothing")
 
 
+CLOSED = ["engineer:plan", "architect:assess", "you:approve", "engineer:build", "architect:verify",
+          "engineer:closeout", "you:merge"]
+
+
+class Closing(FakeWorktrees):
+    """A worktree that holds what the architect verified until the engineer's closeout has run, what that
+    closeout left from then on, and what the architect verified again once the change is reopened."""
+
+    def __init__(self, merge_results=None, reopen_failures=0):
+        super().__init__(merge_results)
+        self.turns = []
+        self.reopened_after = None
+        self.reopen_failures = reopen_failures
+
+    def work_tree(self, path):
+        closed = bool(self.turns) and self.turns[-1]["name"].startswith("closeout")
+        return "closeout-tree" if closed and self.reopened_after != len(self.turns) else "verified-tree"
+
+    def reopen(self, worktree, closeout_tree, verified_tree):
+        if self.reopen_failures:
+            self.reopen_failures -= 1
+            raise RuntimeError("git says no")
+        # With how many turns had run by then: a change is reopened before any role reads it again.
+        self.calls.append(("reopen", closeout_tree, verified_tree, len(self.turns)))
+        self.reopened_after = len(self.turns)
+        return []
+
+
+class Closeout(Scenario):
+    """A flow that closes out: the architect's PASS goes to the engineer's closeout, the tree that turn left is
+    what the final gate holds and the merge commits, and a change sent back is reopened first."""
+
+    def closed(self, extra=(), changes=(), **git):
+        self.git = Closing(**git)
+        self.git.closeout_changes = list(changes)
+        self.host, self.agent = E.host(to_ready() + [("closeout-e3-1", 0, "closed out\n")] + list(extra),
+                                       git=self.git)
+        self.git.turns = self.agent.calls
+        run = E.Run(auto=True, flow=CLOSED)
+        self.addCleanup(run.cleanup)
+        return run
+
+    def ready(self, *args, **kwargs):
+        run = self.closed(*args, **kwargs)
+        self.assertEqual((run.stop["reason"], run.state["status"]), ("final", "READY_FOR_HUMAN"))
+        return run
+
+    def test_a_pass_goes_to_the_engineers_closeout_and_only_then_to_the_final_gate(self):
+        run = self.ready()
+        self.assertEqual(self.names(), ["plan-e1-1", "assess-e1-1", "build-e2-1", "verify-e2-1", "closeout-e3-1"])
+        self.assertEqual((run.state["step"], run.state["verified_tree"], run.state["closeout_tree"]),
+                         (6, "verified-tree", "closeout-tree"), "the gate holds what the closeout left")
+        closeout = self.agent.calls[-1]
+        self.assertEqual(closeout["argv"][closeout["argv"].index("--permission-mode") + 1], "dontAsk",
+                         "the engineer closes out, with its write access")
+        for said in (run.state["todo_path"], os.path.join(run.state["worktree_path"], "todo/done"), "git mv"):
+            self.assertIn(said, closeout["prompt"])
+        self.assertNotIn("# Architect findings to address", closeout["prompt"], "a PASS leaves no finding to address")
+        self.assertEqual([(entry["stage"], entry["phase"]) for entry in run.status["timeline"]][-2:],
+                         [("verify", "build"), ("closeout", "closeout")])
+
+    def test_control_a_flow_without_a_closeout_goes_from_the_pass_to_the_final_gate(self):
+        git = FakeWorktrees()
+        run = self.drive(to_ready(), git=git, auto=True, flow=CLOSED[:5] + ["you:merge"])
+        self.assertEqual((run.stop["reason"], self.names()[-1]), ("final", "verify-e2-1"))
+        self.assertNotIn("closeout_tree", run.state)
+        run.answer("merge")
+        self.assertEqual((git.calls[-1][2], git.finished), ("verified-tree", [run.state["plan"]]),
+                         "the controller finishes the plan of a run whose flow has no closeout")
+
+    def test_the_merge_commits_the_tree_the_closeout_left_and_finishes_no_plan_itself(self):
+        run = self.ready()
+        code, out = run.answer("merge")
+        self.assertEqual((code, run.state["status"]), (0, "MERGED"), out)
+        self.assertEqual(self.git.calls[-1], ("merge", run.run_id, "closeout-tree",
+                                              "2026-09-15_1200-toy_task: toy task", "Merge 2026-09-15_1200-toy_task"))
+        self.assertEqual(self.git.finished, [None], "the engineer closed the plan out; the controller moves nothing")
+
+    def test_a_closeout_that_changed_what_the_architect_verified_stops_the_run_before_the_gate(self):
+        changes = [("D", "todo/2026-09-15_1200-toy_task.md"), ("A", "todo/done/2026-09-15_1200-toy_task.md"),
+                   ("M", "docs/guide.md"), ("M", "app/main.py"), ("A", "tests/test_main.py")]
+        run = self.closed([("closeout-e3-1", 0, "closed out again\n")], changes=changes)
+        self.assertEqual((run.stop["reason"], run.state["status"]), ("failed", "RUNNING"))
+        self.assertIn("closeout_violation", run.stop["feedback"])
+        for named in ("app/main.py", "tests/test_main.py"):
+            self.assertIn(named, run.stop["feedback"])
+        for allowed in ("docs/guide.md", "todo/done"):
+            self.assertNotIn(allowed, run.stop["feedback"], "the todo and documentation are a closeout's to change")
+        self.assertNotIn("closeout_tree", run.state, "a tree a refused closeout left is none the gate may hold")
+        # Put back by whoever fixes the cause, the closeout runs again and the run reaches its gate.
+        self.git.closeout_changes = changes[:3]
+        code, out = run.answer("continue")
+        self.assertEqual((code, run.stop["reason"], run.state["closeout_tree"]), (0, "final", "closeout-tree"), out)
+        self.assertEqual(self.names()[-2:], ["closeout-e3-1", "closeout-e3-1"])
+
+    def test_a_revise_reopens_the_change_before_the_engineer_builds_and_it_is_closed_out_anew(self):
+        run = self.ready([("build-e4-1", 0, "tightened\n"), ("verify-e4-1", 0, codex_review_resumed("PASS")),
+                          ("closeout-e5-1", 0, "closed out\n")])
+        run.answer("revise engineer tighten the guard")
+        run.status = E.run(E.cli.follow(run.handle))
+        self.assertEqual((run.stop["reason"], run.state["closeout_tree"]), ("final", "closeout-tree"))
+        self.assertEqual(self.names()[-3:], ["build-e4-1", "verify-e4-1", "closeout-e5-1"])
+        self.assertEqual([call for call in self.git.calls if call[0] == "reopen"],
+                         [("reopen", "closeout-tree", "verified-tree", 5)],
+                         "undone once, to the tree the architect verified, before the engineer's next turn")
+        by_name = {call["name"]: call for call in self.agent.calls}
+        self.assertIn("tighten the guard", by_name["build-e4-1"]["prompt"])
+        self.assertNotIn("tighten the guard", by_name["closeout-e5-1"]["prompt"], "the words were the build's")
+        self.assertEqual([(entry["stage"], entry["phase"]) for entry in run.status["timeline"]][-3:],
+                         [("build", "build"), ("verify", "build"), ("closeout", "closeout")])
+        self.assertEqual(run.state["phase_rounds"], 2, "the build's judgements are counted on across its closeout")
+
+    def test_a_revise_to_the_architect_reopens_the_change_and_verifies_without_building(self):
+        run = self.ready([("verify-e4-1", 0, codex_review_resumed("PASS")), ("closeout-e5-1", 0, "closed out\n")])
+        run.answer("revise architect re-check the error path")
+        run.status = E.run(E.cli.follow(run.handle))
+        self.assertEqual(run.stop["reason"], "final")
+        self.assertEqual(self.names()[-2:], ["verify-e4-1", "closeout-e5-1"])
+        self.assertEqual([call[3] for call in self.git.calls if call[0] == "reopen"], [5])
+        self.assertIn("re-check the error path", self.agent.calls[-2]["prompt"])
+
+    def test_a_change_that_cannot_be_reopened_stops_for_the_operator_and_no_role_reads_it(self):
+        run = self.ready([("build-e4-1", 0, "tightened\n"), ("verify-e4-1", 0, codex_review_resumed("PASS")),
+                          ("closeout-e5-1", 0, "closed out\n")], reopen_failures=1)
+        code, out = run.answer("revise engineer tighten the guard")
+        self.assertEqual((code, run.stop["reason"]), (2, "failed"), out)
+        self.assertIn("git says no", run.stop["feedback"])
+        self.assertEqual(self.names()[-1], "closeout-e3-1", "no role's turn ran on a change still closed out")
+        self.assertEqual(run.state["closeout_tree"], "closeout-tree")
+        run.answer("continue")
+        run.status = E.run(E.cli.follow(run.handle))
+        self.assertEqual((run.stop["reason"], self.names()[-3:]),
+                         ("final", ["build-e4-1", "verify-e4-1", "closeout-e5-1"]))
+
+    def test_a_conflict_goes_back_to_the_build_its_closeout_already_committed(self):
+        run = self.ready([("build-e4-1", 0, "resolved\n"), ("verify-e4-1", 0, codex_review_resumed("PASS")),
+                          ("closeout-e5-1", 0, "nothing left to close\n")],
+                         merge_results=[{"result": "conflict", "files": ["app.txt"]},
+                                        {"result": "merged", "commit": "abc123"}])
+        run.answer("merge")
+        run.status = E.run(E.cli.follow(run.handle))
+        self.assertEqual(run.stop["reason"], "final", "resolved, verified, closed out and offered again")
+        self.assertEqual(self.names()[-3:], ["build-e4-1", "verify-e4-1", "closeout-e5-1"])
+        self.assertIn("app.txt", {call["name"]: call for call in self.agent.calls}["build-e4-1"]["prompt"])
+        self.assertEqual([call for call in self.git.calls if call[0] == "reopen"], [],
+                         "what is committed on the run's branch is not undone")
+        code, _ = run.answer("merge")
+        self.assertEqual((code, run.state["status"], run.state["merge_commit"]), (0, "MERGED", "abc123"))
+        self.assertEqual(self.git.finished, [None, None])
+
+    def test_the_closeout_is_told_where_this_repository_keeps_a_finished_todo(self):
+        from app.agents import nodes
+        state = {"task": "t", "run_id": "r", "worktree_path": "/w", "todo_path": "/w/todo/x.md", "phase": "closeout",
+                 "round": 0, "episode": 3, "feedback": "", "guidance": "", "todo_done_dir": "todo/done"}
+        engineer = E.POLICY["roles"]["engineer"]
+        kept = nodes.compose_prompt("closeout", engineer, False, state, False, True)
+        self.assertIn("keeps a finished todo in %s" % os.path.join("/w", "todo/done"), kept)
+        deleted = nodes.compose_prompt("closeout", engineer, False, dict(state, todo_done_dir=None), False, True)
+        self.assertIn("deletes a finished todo", deleted)
+        self.assertNotIn("todo/done", deleted)
+        for prompt in (kept, deleted):
+            self.assertNotIn("{{", prompt, "every placeholder of the ask is filled")
+
+
 class Lifecycle(Scenario):
     """Runs ended from outside them, as the Workbench and the command line end them."""
 

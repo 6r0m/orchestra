@@ -70,7 +70,17 @@ FAKE = textwrap.dedent("""\
         message = json.dumps({"verdict": "PASS", "feedback": "Direction: the acceptance change."})
     else:
         todo = re.search(r"write the reviewable todo to exactly: (\\S+)", prompt)
-        if todo:
+        closing = re.search(r"Close out its todo at (\\S+?), and change", prompt)
+        done = re.search(r"keeps a finished todo in (\\S+?): move it there", prompt)
+        if closing:
+            # A closeout run again finds its own work done.
+            if os.path.exists(closing.group(1)):
+                closed = open(closing.group(1)).read().replace("**Status:** DRAFT", "**Status:** PASS")
+                os.remove(closing.group(1))
+                if done:
+                    os.makedirs(done.group(1), exist_ok=True)
+                    open(os.path.join(done.group(1), os.path.basename(closing.group(1))), "w").write(closed)
+        elif todo:
             os.makedirs(os.path.dirname(todo.group(1)), exist_ok=True)
             open(todo.group(1), "w").write("**Status:** DRAFT\\nthe acceptance plan\\n")
         elif "Implement the approved todo" in prompt:

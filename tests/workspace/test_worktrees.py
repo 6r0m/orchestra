@@ -191,6 +191,28 @@ class Guard(Repo):
         git(path, "commit", "-q", "-m", "agent commit")
         self.assertNotEqual(W.guard(path, "run1"), staged, "git commit is detected")
 
+    def test_an_edit_only_its_content_tells_is_in_the_tree_a_review_and_a_merge_are_held_to(self):
+        """A file rewritten to the same size in the second its index was written looks unchanged by its stat.
+        Git's own index knows to compare content then, and the private copy the tree is computed on must."""
+        import time
+        from unittest import mock
+        path = self.worktree("run1", change=False)
+        git(path, "config", "core.trustctime", "false")     # what ctime tells differs by host
+        index = git(path, "rev-parse", "--path-format=absolute", "--git-path", "index").strip()
+        app, then = os.path.join(path, "app.txt"), time.time() - 30
+        os.utime(app, (then, then))
+        git(path, "update-index", "--refresh")
+        os.utime(index, (then, then))                        # written in the second its file was
+        write(app, "two\n")                                  # the same four bytes long
+        os.utime(app, (then, then))
+        edit = git(path, "hash-object", "app.txt").strip()
+        self.assertEqual(git(path, "rev-parse", W.work_tree(path) + ":app.txt").strip(), edit)
+        # Control: a copy stamped when it was made trusts the stat, and the edit is not in its tree.
+        with mock.patch.object(W.shutil, "copy2", shutil.copyfile):
+            stale = git(path, "rev-parse", W.work_tree(path) + ":app.txt").strip()
+        self.assertEqual(stale, git(path, "rev-parse", "HEAD:app.txt").strip())
+        self.assertNotEqual(stale, edit)
+
     def test_a_role_that_stages_fails_its_stage(self):
         path = self.worktree("run1")
 
@@ -607,6 +629,134 @@ class Merge(Repo):
         self.assertEqual(git(self.repo, "show", "develop:app.txt"), "one\nthe base moved\nrun1\n")
         history = git(self.repo, "log", "--format=%s", "develop").splitlines()
         self.assertIn("Merge develop into run1", history, "one reconciliation merge commit, no rebase")
+
+
+class Closeout(Repo):
+    """A run whose engineer closed it out: what that closeout changed is read path by path, the tree it left is
+    exactly what a merge commits, and a change sent back is the one the architect verified again."""
+
+    PLAN = "todo/2026-09-15_1200-run1.md"
+    DONE = "todo/done/2026-09-15_1200-run1.md"
+    MESSAGES = ("2026-09-15_1200-run1: the change", "Merge 2026-09-15_1200-run1")
+
+    def at(self, path, name):
+        return os.path.join(path, *name.split("/"))
+
+    def closed(self):
+        """A run's worktree as its engineer's closeout left it — the todo moved to the done folder and cut, a
+        document edited — with the tree the architect verified before it and the tree it left."""
+        path = self.worktree("run1")
+        write(self.at(path, "docs/guide.md"), "the guide\n")
+        verified = W.work_tree(path)
+        os.remove(self.at(path, self.PLAN))
+        write(self.at(path, self.DONE), "**Status:** PASS 2026-09-15, as the engineer wrote it\nthe record\n")
+        write(self.at(path, "docs/guide.md"), "the guide\nwhat stays true\n")
+        return path, verified, W.work_tree(path)
+
+    def merge_closed(self, path, tree):
+        # No plan for the controller to finish: the closeout has.
+        return W.merge(self.repo, path, "run1", "develop", tree, None, os.path.join("todo", "done"), *self.MESSAGES)
+
+    def test_what_a_closeout_changed_is_read_path_by_path_a_move_as_its_two_ends(self):
+        path, verified, closeout = self.closed()
+        self.assertEqual(sorted(W.changed(path, verified, closeout)),
+                         [("A", self.DONE), ("D", self.PLAN), ("M", "docs/guide.md")])
+        self.assertEqual(W.changed(path, closeout, closeout), [], "control: a tree against itself changed nothing")
+
+    def test_a_merge_commits_exactly_the_tree_the_closeout_left(self):
+        path, _, closeout = self.closed()
+        # What the operator reads at the final gate is that tree: the todo where its closeout put it.
+        read = W.review_diff(path)
+        self.assertEqual(read["tree"], closeout)
+        self.assertEqual(sorted(entry["path"] for entry in read["files"]), ["app.txt", "docs/guide.md", self.DONE])
+        self.assertEqual(self.merge_closed(path, closeout)["result"], "merged")
+        self.assertEqual(git(self.repo, "rev-parse", "develop^2^{tree}").strip(), closeout,
+                         "the work commit is the tree the operator reviewed, byte for byte")
+        self.assertEqual(git(self.repo, "show", "develop:" + self.DONE),
+                         "**Status:** PASS 2026-09-15, as the engineer wrote it\nthe record\n")
+        self.assertNotIn(self.PLAN, git(self.repo, "ls-tree", "-r", "--name-only", "develop").split())
+        self.assertFalse(os.path.exists(path), "and everything the run owned is gone, as after any merge")
+        # Control: a run with no closeout has the controller finish its plan, so its commit is not the tree
+        # the merge was handed.
+        other = self.worktree("run2")
+        handed = W.work_tree(other)
+        self.assertEqual(self.merge("run2", other)["result"], "merged")
+        self.assertNotEqual(git(self.repo, "rev-parse", "develop^2^{tree}").strip(), handed)
+
+    def test_a_change_made_after_the_closeout_is_refused_and_nothing_is_committed_or_merged(self):
+        path, _, closeout = self.closed()
+        write(self.at(path, "app.txt"), "edited after the closeout\n")
+        with self.assertRaisesRegex(W.MergeRefused, "changed after its closeout"):
+            self.merge_closed(path, closeout)
+        self.assertEqual(self.merges_on_develop(), [])
+        self.assertEqual(git(self.repo, "rev-list", "--count", "develop..run1").strip(), "0", "no work commit either")
+        self.assertEqual(git(path, "diff", "--cached", "--name-only").strip(), "", "and nothing was staged")
+        with open(self.at(path, "app.txt"), encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "edited after the closeout\n", "the worktree is as it was found")
+
+    def test_a_closed_out_merge_whose_commit_failed_merges_when_continued(self):
+        path, _, closeout = self.closed()
+        hooks = git(self.repo, "config", "core.hooksPath").strip()
+        marker = os.path.join(self.tmp, "failed-once").replace("\\", "/")
+        write(os.path.join(hooks, "pre-commit"), "#!/bin/sh\n[ -e '%s' ] && exit 0\ntouch '%s'\nexit 1\n"
+              % (marker, marker))
+        os.chmod(os.path.join(hooks, "pre-commit"), 0o755)
+        with self.assertRaises(W.GitError):
+            self.merge_closed(path, closeout)
+        self.assertTrue(os.path.exists(self.at(path, self.DONE)), "the closed-out todo stays where its engineer put it")
+        self.assertIn(self.DONE, git(path, "diff", "--cached", "--name-only").split(),
+                      "the precondition: the failed attempt left the change staged")
+        # Tried again on a worktree that moved meanwhile, it is refused with nothing left staged for a role to find.
+        write(self.at(path, "app.txt"), "typed after the failed merge\n")
+        with self.assertRaises(W.MergeRefused):
+            self.merge_closed(path, closeout)
+        self.assertEqual(git(path, "diff", "--cached", "--name-only").strip(), "")
+        write(self.at(path, "app.txt"), "one\nrun1\n")
+        self.assertEqual(self.merge_closed(path, closeout)["result"], "merged")
+        self.assertEqual(git(self.repo, "rev-parse", "develop^2^{tree}").strip(), closeout)
+
+    def test_a_conflict_after_a_closeout_merges_once_resolved_with_nothing_moved_again(self):
+        path, _, closeout = self.closed()
+        write(os.path.join(self.repo, "app.txt"), "one\nthe base moved\n")
+        git(self.repo, "commit", "-q", "-am", "base moved")
+        result = self.merge_closed(path, closeout)
+        self.assertEqual((result["result"], result["files"]), ("conflict", ["app.txt"]))
+        write(self.at(path, "app.txt"), "one\nthe base moved\nrun1\n")
+        self.assertEqual(self.merge_closed(path, W.work_tree(path))["result"], "merged")
+        tree = git(self.repo, "ls-tree", "-r", "--name-only", "develop").split()
+        self.assertIn(self.DONE, tree)
+        self.assertNotIn(self.PLAN, tree)
+
+    def test_a_reopened_change_is_the_tree_the_architect_verified_and_nothing_is_staged(self):
+        path, verified, closeout = self.closed()
+        self.assertEqual(W.reopen(path, closeout, verified), [])
+        self.assertEqual(W.work_tree(path), verified)
+        with open(self.at(path, self.PLAN), encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "**Status:** DRAFT\nplan\n", "the todo is back where its roles read it")
+        self.assertFalse(os.path.exists(self.at(path, self.DONE)))
+        self.assertEqual(git(path, "diff", "--cached", "--name-only").strip(), "", "files are written, none staged")
+        self.assertEqual(W.reopen(path, closeout, verified), [], "reopened again, it is found as it should be")
+        self.assertEqual(W.work_tree(path), verified)
+
+    def test_a_reopen_keeps_what_was_changed_again_after_the_closeout(self):
+        path, verified, closeout = self.closed()
+        write(self.at(path, "docs/guide.md"), "the guide\nwhat stays true\nand what was typed at the gate\n")
+        write(self.at(path, "app.txt"), "typed at the gate too\n")
+        self.assertEqual(W.reopen(path, closeout, verified), ["docs/guide.md"],
+                         "a path changed again since is someone's later work, and is said")
+        with open(self.at(path, "docs/guide.md"), encoding="utf-8") as fh:
+            self.assertIn("typed at the gate", fh.read())
+        with open(self.at(path, "app.txt"), encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "typed at the gate too\n", "what the closeout never touched is left alone")
+        self.assertTrue(os.path.exists(self.at(path, self.PLAN)), "the todo is back all the same")
+        self.assertFalse(os.path.exists(self.at(path, self.DONE)))
+
+    def test_a_reopen_that_cannot_read_the_verified_tree_changes_nothing(self):
+        path, _, closeout = self.closed()
+        before = W.work_tree(path)
+        with self.assertRaises(W.GitError):
+            W.reopen(path, closeout, "0" * 40)
+        self.assertEqual(W.work_tree(path), before, "a tree git does not hold is not a tree without the todo")
 
 
 class Adopt(Repo):

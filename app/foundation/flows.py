@@ -63,8 +63,8 @@ def check(steps):
                                   % (where, ", ".join("%s:%s" % (OPERATOR, gate) for gate in GATES)))
             if action == "approve" and before not in tuple(stages.REVIEWS) + stages.ANSWERS:
                 raise InvalidFlow("%s: an approval follows a review or a research" % where)
-            if action == "merge" and (before != "verify" or after is not None):
-                raise InvalidFlow("%s: the merge is the last step, right after a verify" % where)
+            if action == "merge" and (before not in ("verify", "closeout") or after is not None):
+                raise InvalidFlow("%s: the merge is the last step, right after a verify or its closeout" % where)
             continue
         if action not in stages.STAGE_ROLE:
             raise InvalidFlow("%s: no such action; the actions are %s" % (where, ", ".join(stages.STAGES)))
@@ -76,6 +76,10 @@ def check(steps):
             raise InvalidFlow("%s: %s judges a %s right before it" % (where, action, stages.REVIEWS[action]))
         if action == "build" and not planned:
             raise InvalidFlow("%s: a build implements a plan, and no plan comes before it" % where)
+        # A flow may leave it out: the controller then finishes the plan at the merge, as it did for every
+        # run started before closeouts — whose recorded steps must go on holding here, or they stop replaying.
+        if action == "closeout" and (before != "verify" or after != "merge"):
+            raise InvalidFlow("%s: a closeout comes between a verify and the merge" % where)
         if action in stages.ANSWERS and planned:
             raise InvalidFlow("%s: research comes before any plan, which starts from its brief" % where)
         planned = planned or action == "plan"

@@ -1,6 +1,6 @@
 # Workbench run evidence: the change by file, history as what each role received and produced
 
-**Status:** PASS (external review) — the operator's manual check next (D8). Q1–Q3 are closed by D5–D7.
+**Status:** the manual check's changes — awaiting the external re-review (D8). Q1–Q3 are closed by D5–D7.
 **Scope:** the Workbench run page's Change, History and run controls ([static/](../app/interfaces/workbench/static/),
 [server.py](../app/interfaces/workbench/server.py)); the change read on the run's host
 ([worktrees.py](../app/workspace/worktrees.py) `review_diff`, the `ReviewDiff` workflow and activity); Temporal
@@ -436,9 +436,9 @@ action of its own ([GitHub Docs](https://docs.github.com/en/pull-requests/collab
    empty list drawn, a history read error with no retry, an unread history taken for "no review yet"), and
    fixture captures at 1600, 1280, 900 and 390 px (one fix: the History's part classes collided with the stack
    panel's).
-10. [x] The external review — PATCH, fixed, then PASS — and the full suites: WSL 580 tests OK, Windows 395 OK;
-    then the stack and the Workbench restarted, and the saved run read through them unchanged, still at its final
-    gate. No review agents (operator, 2026-10-01: *"no need more activate tester and reviewer agents"*).
+10. [ ] The external review, then the full suites and the restart — on the code as it is then. The suites that
+    passed (WSL 580, Windows 395) and the restart after them proved the revision before the manual check's changes,
+    not these. No review agents (operator, 2026-10-01: *"no need more activate tester and reviewer agents"*).
 
 **Verification so far** (after the implementation review's fixes): WSL `run-tests.sh` on test_worktrees,
 test_workflow, test_terminal, test_activities, test_observability, test_architecture, test_replay — 245 tests OK —
@@ -570,3 +570,11 @@ checks; the stale-Produced fix also shown by a fixture control without it; `make
   and places each answer after the turn it followed (`client.history`); turns a tree-less review stands between are
   shown once, on the later. Tested on crafted histories and real workflow runs in every flow and order, each turn's
   tree pair and each answer's place stated; a mutation giving each turn the same change fails both.
+
+### 2026-10-01 — external review of the manual check's changes: PATCH
+
+- **Accepted:** a pointer or a together-note named a turn by stage and round alone, which two episodes can share —
+  now with the time its row shows (the reviewer's episode number appears nowhere on the page); an answer before any
+  turn fell back to the first phase — now under its own heading; Raw output record closed on a redraw — kept open;
+  task 10 reopened, its suites having proved the revision before. Shown on the fixture page; the tree-less
+  blocker answered with guidance pinned server-side.

@@ -17,18 +17,20 @@ from app.foundation import flows  # noqa: E402
 from app.foundation import policy as P  # noqa: E402
 
 CODE = ["engineer:plan", "architect:assess", "you:approve", "engineer:build", "architect:verify", "you:merge"]
+# The same, its engineer closing out between the verify and the merge.
+CLOSED = CODE[:5] + ["engineer:closeout", "you:merge"]
 
 
 class Shipped(unittest.TestCase):
-    def test_both_shipped_flows_hold_and_the_policy_names_one_of_them(self):
-        self.assertEqual(flows.load("engineer-code"), CODE)
+    def test_both_shipped_flows_hold_close_out_and_the_policy_names_one_of_them(self):
+        self.assertEqual(flows.load("engineer-code"), CLOSED)
         research = flows.load("architect-research")
         self.assertEqual(research[:2], ["architect:research", "you:approve"])
-        self.assertEqual(research[2:], CODE)
+        self.assertEqual(research[2:], CLOSED)
         self.assertEqual(P.load()["default_flow"], "engineer-code")
         self.assertEqual([found["name"] for found in flows.available()], ["architect-research", "engineer-code"])
 
-    def test_the_order_runs_took_before_flows_is_todays_and_itself_a_flow(self):
+    def test_the_order_runs_took_before_flows_never_changes_and_is_itself_a_flow(self):
         self.assertEqual(list(flows.LEGACY_FLOW), CODE)
         flows.check(list(flows.LEGACY_FLOW))
 
@@ -77,6 +79,20 @@ class Rules(unittest.TestCase):
         self.refused(CODE[:-1], "a flow that builds ends at the merge")
         self.refused(CODE[:3] + ["you:merge"], "the merge is the last step, right after a verify")
         self.refused(CODE + ["architect:research"], "the merge is the last step")
+
+    def test_a_closeout_comes_between_a_verify_and_the_merge(self):
+        self.assertEqual(flows.check(CLOSED), CLOSED)
+        self.assertEqual(flows.check(CODE), CODE, "a flow with none holds, as every run started before closeouts")
+        between = "a closeout comes between a verify and the merge"
+        self.refused(CODE[:3] + ["engineer:closeout", "you:merge"], "step 4, 'engineer:closeout': " + between)
+        self.refused(CODE[:5] + ["engineer:closeout"], between)
+        self.refused(CODE[:5] + ["engineer:closeout", "you:approve"], between)
+        self.refused(["engineer:plan", "architect:assess", "engineer:closeout"], between)
+        self.refused(CODE[:5] + ["architect:closeout", "you:merge"], "closeout is the engineer's")
+        # A run takes it as work of its own, no review after it, the merge its gate.
+        taken = [(part["work"][1], part["review"] and part["review"][1], part["gate"] and part["gate"][1])
+                 for part in flows.segments(CLOSED)]
+        self.assertEqual(taken[-2:], [("build", "verify", None), ("closeout", None, "merge")])
 
     def test_a_run_is_handed_its_flow_as_a_name_and_its_steps_taken_as_given(self):
         self.assertEqual(flows.steps_of({"name": "mine", "steps": CODE}), CODE)

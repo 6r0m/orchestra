@@ -106,7 +106,18 @@ FAKE = textwrap.dedent("""\
         message = json.dumps({"verdict": verdict[0], "feedback": verdict[1]})
     else:
         todo = re.search(r"write the reviewable todo to exactly: (\\S+)", prompt)
-        if "Implement the approved todo" in prompt:
+        closing = re.search(r"Close out its todo at (\\S+?), and change", prompt)
+        done = re.search(r"keeps a finished todo in (\\S+?): move it there", prompt)
+        if closing:
+            say("closing out the todo...", "moving it to the done folder...")
+            # A closeout run again finds its own work done.
+            if os.path.exists(closing.group(1)):
+                closed = open(closing.group(1)).read().replace("**Status:** DRAFT", "**Status:** PASS")
+                os.remove(closing.group(1))
+                if done:
+                    os.makedirs(done.group(1), exist_ok=True)
+                    open(os.path.join(done.group(1), os.path.basename(closing.group(1))), "w").write(closed)
+        elif "Implement the approved todo" in prompt:
             say("implementing the approved plan...", "running the test...")
             open("greeting.txt", "w").write("hello\\n")
         elif todo:

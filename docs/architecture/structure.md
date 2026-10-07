@@ -124,12 +124,12 @@ Do not re-derive a `states/` layer here.
   therefore import nothing of ours — `app/foundation/envpath.py`, `app/agents/ptyhost.py`
   and `app/agents/turn_hook.py`.
 - **D2** **Two roles**: **engineer** (write access — plans the
-  change, then builds it; one session, full context arc) and **architect**
-  (read-only — researches where a flow begins with it, assesses the plan, then
-  verifies the build; one session, so the judge of the plan is the verifier of
-  its execution). Five stages — `research`, `plan`, `assess`, `build`, `verify`
-  — in the order the run's flow gives them, one workflow; `engineer-code`,
-  `plan → assess → build → verify`, is the default.
+  change, builds it, then closes its todo out; one session, full context arc) and
+  **architect** (read-only — researches where a flow begins with it, assesses the
+  plan, then verifies the build; one session, so the judge of the plan is the
+  verifier of its execution). Six stages — `research`, `plan`, `assess`, `build`,
+  `verify`, `closeout` — in the order the run's flow gives them, one workflow;
+  `engineer-code`, `plan → assess → build → verify → closeout`, is the default.
 - **D13** **Config vs code:** which brain, model and reasoning effort a role
   uses, budgets, access, target hosts, repository descriptors and role
   personalities (`roles/engineer.md`, `roles/architect.md` — sent at session
@@ -142,15 +142,16 @@ Do not re-derive a `states/` layer here.
   its **flow**, one file in `flows/` holding `role:action` steps, read and
   checked when a run starts and handed to it whole — the workflow never reads a
   flow, a run keeps the one it started with, and a start that carries no flow
-  at all, as none did before flows, follows `LEGACY_FLOW`, today's default
-  order. A flow keeps these rules: from
+  at all, as none did before flows, follows `LEGACY_FLOW`, the order runs took
+  then. A flow keeps these rules: from
   one to `MAX_FLOW_STEPS` steps, the bound that keeps a run the bounded work one
   workflow is for; each step's role the one its action is the stages'; every
-  `plan` followed by its `assess` and every `build` by its `verify`, so an
-  engineer's work always reaches a review (D4); an approval only after a review
+  `plan` followed by its `assess` and every `build` by its `verify`, so a plan
+  and a build always reach a review (D4); an approval only after a review
   or a `research`; a `research` only before any `plan`, which starts from its
-  brief; a `build` only after a `plan`; and a flow that builds ends with the
-  merge, right after a `verify` (D24). A run is handed its flow as `{name, steps}`
+  brief; a `build` only after a `plan`; a `closeout` only between a `verify` and
+  the merge; and a flow that builds ends with the merge, right after a `verify`
+  or its `closeout` (D24). A run is handed its flow as `{name, steps}`
   and takes it as given: one of another shape, or that breaks a rule, ends the
   run `REFUSED` before any step. A flow's name is its file's, by one grammar
   (`flows.is_name`) wherever a name is taken — a file, the policy's
@@ -196,8 +197,10 @@ checkout root is derived once, in `app/foundation/paths.py`, and the suite prove
 still lands on a checkout.
 
 - **D4** **Only architect verdicts route** — `PASS / PATCH / BLOCKER /
-  UNVERIFIED`. Engineer output always goes to the architect; an engineer-side
-  blocker or open question reaches the human only through the architect.
+  UNVERIFIED`. A plan and a build always go to the architect; an engineer-side
+  blocker or open question reaches the human only through the architect. The
+  one engineer turn no architect judges is the closeout: it may change only
+  the todo and documentation, and the operator judges it at the final gate (D24).
 - **D7** **Sessions:** one persistent CLI session per `(run_id, role)`;
   resume by exact stored id (Claude `--session-id` minted by us, Codex the
   thread its first turn completed in), never `--last`. Session = disposable
@@ -224,8 +227,8 @@ still lands on a checkout.
   leaves the agent running, live. The verified tree is the worktree as the architect's verify
   turn began, and a change during that turn fails the step. The merge and the discard end the
   run's agents before git touches the worktree, and close the viewers attached to them, so
-  nothing changes the worktree between the check of the verified tree and the commit, and a
-  page attaches again to whatever terminal comes next.
+  nothing changes the worktree between the check of the tree the run holds for its merge (D24)
+  and the commit, and a page attaches again to whatever terminal comes next.
 
   The agent runs in a pseudo-terminal under `ptyhost.py`, launched through `launch.py`, so its
   whole descendant tree is contained by a primitive native to the host: on POSIX a transient
@@ -285,7 +288,7 @@ still lands on a checkout.
   what the Temporal web UI shows. The trace store — a self-hosted Langfuse, written by
   `telemetry.py` — owns the debugging history of a run: one work item per run, its session named
   by its start time and task, holding a phase for each work stage of its flow — research, plan,
-  build; in each, every round's engineer and architect step, named for its kind of step with the
+  build, closeout; in each, every round's engineer and architect step, named for its kind of step with the
   round in its metadata and the architect's verdict scored on it; each stop for a human and the
   answer given to it, an approval carrying the plan's summary or the research brief; each agent's
   own turns and tool calls, nested by that vendor's
@@ -363,26 +366,41 @@ still lands on a checkout.
   limits. A start whose id meets a run Temporal still retains draws a fresh one; a
   Windows worktree whose deepest file or folder would pass those limits, measured
   on that repository's base branch, is refused before it exists; and an existing
-  branch of the run's name is adopted only while it still points at the base. At `READY_FOR_HUMAN` the run waits at its final gate for `merge`,
-  `revise engineer|architect <feedback>` or a confirmed `discard`; a defect goes
-  back into the run, to the role the operator names. `merge` commits only the
-  tree the architect's last `PASS` verified: the plan moves to the repository's
-  done folder with a finished status line — or, where the repository deletes a
-  finished task (a null `todo_done_dir`), is deleted — the change lands as one commit whose
+  branch of the run's name is adopted only while it still points at the base.
+  Once the architect has passed the build, a flow that closes out — `engineer:closeout`,
+  as both shipped flows do — has the engineer close the todo out: what it says that
+  stays true is with the stable document that owns it, the todo is cut to its record,
+  its status says it passed, and it is moved to the repository's done folder — or
+  deleted, where the repository deletes a finished task (a null `todo_done_dir`). No
+  review follows that turn, so it may change only the repository's todo folders and its
+  documentation (`stages.closeout_may_change`) and anything else fails the step: the
+  architect's `PASS` accepts the implementation, and the operator judges the closeout.
+  The tree it left is the one the final gate holds. At `READY_FOR_HUMAN` the run waits at
+  its final gate for `merge`, `revise engineer|architect <feedback>` or a confirmed
+  `discard`; a defect goes back into the run, to the role the operator names — its
+  closeout undone first, each path it changed again as the architect verified it, bar one
+  changed again since, which the next review judges — and the build closes out anew
+  once it passes. `merge` commits exactly the tree the gate holds, and refuses when the
+  worktree is no longer that tree: the change lands as one commit whose
   message is the plan's name and a few words of the task, and the base branch
   gains an explicit `--no-ff` merge commit named for the plan — in the base's
   checkout when it is checked out there, which refuses staged changes that are
-  the operator's, and otherwise without touching any checkout. A conflict never
+  the operator's, and otherwise without touching any checkout. A run whose flow has no
+  closeout — every run started before closeouts — holds the tree the architect's last
+  `PASS` verified, and the controller finishes its plan at the merge: moved to the done
+  folder with a finished status line, or deleted. A conflict never
   resolves in the controller: the base is merged into the run's worktree with its
   conflict markers, the engineer resolves the files, the architect verifies, the
-  operator merges again, and the run branch gains one reconciliation merge commit.
+  engineer closes out what that left, the operator merges again, and the run branch
+  gains one reconciliation merge commit.
   After a merge the worktree, its branch and its environment go; a discard removes
   them unmerged. A run whose flow has no build never reaches the final gate: it
   ends `DONE` after its last stage, merging nothing, and keeps its worktree and
   branch for the operator, as a stopped run does (D31). Every git side effect reads what git already holds first, so an
   attempt whose worker died after git wrote is adopted when it runs again, never
-  applied twice; a merge whose commit was refused after the plan was finished is put
-  back to the verified plan and staged nothing, and merges when continued.
+  applied twice; a merge whose commit was refused is put back when it is tried again —
+  nothing staged, and a plan the controller had finished as it was verified — and then
+  merges.
 
 - **D29** **The workbench is the operator's surface.** One page on `http://127.0.0.1:<workbench_port>`
   lists every run Temporal holds, grouped by whether it waits for the operator, runs or has
@@ -392,7 +410,8 @@ still lands on a checkout.
   then both roles' terminals from their host's worker, the one at work open and an idle one opened when
   the operator opens it; its flow with the step it is at; its history as a transcript — each completed
   turn with what it received, in the parts its prompt was built from, and what it produced, read on
-  demand from its local logs, an engineer's turn with the change the reviews around it judged, and the
+  demand from its local logs, an engineer's turn with the change the reviews around it judged — a
+  closeout's with what it changed since the architect's verification — and the
   operator's answers as the run's Temporal history accepted them; its change as its target host's git
   reads it, one snapshot listed file by file, each file's diff drawn by the page's own viewer as text,
   and the whole patch to copy; and links to its Temporal and Langfuse pages. The page's address names the run open, so a reload keeps it.
@@ -570,7 +589,7 @@ constrains.
 |---|---|
 | D1 Temporal owns the workflow, D5 round budget and single attempts, D8 compact state | [Owns](#owns) |
 | D9 no chat-UI automation on critical accounts, D11 agents never stage, commit or push | [Does not own](#does-not-own) |
-| D2 two roles and five stages, D13 config versus code and the flows, D22 environments, D30 source organised by concern | [Composition](#composition) |
+| D2 two roles and six stages, D13 config versus code and the flows, D22 environments, D30 source organised by concern | [Composition](#composition) |
 | D4 verdict routing, D7 sessions, D17 execution seam, D18 model as configuration, D20 observability owners, D21 provider session stores, D23 a task queue per host, D32 the stack's one owner, D24 worktree lifecycle and final gate, D29 the workbench | [Relationships and dependency direction](#relationships-and-dependency-direction) |
 | D3, D6, D10, D14, D15, D16, D31 Stop and force terminate, D18b, D19, D25 determinism, D26 repository facts, D27 controller-only git | [Invariants](#invariants) |
 | D28 containment, live-terminal and plugin-build limits | [Risks and technical debt](#risks-and-technical-debt) |

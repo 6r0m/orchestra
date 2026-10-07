@@ -78,6 +78,10 @@ class FakeWorktrees:
         self.merge_results = list(merge_results or [{"result": "merged", "commit": "c0ffee"}])
         # What a read of the change is refused with, as its host's git would refuse it; None reads it.
         self.diff_refusal = None
+        # What each merge was handed to finish itself: the run's plan, or None when its closeout already had.
+        self.finished = []
+        # What a closeout changed since the architect's verification, as `changed` names it.
+        self.closeout_changes = []
 
     def create(self, repo, base, root, run_id, target, lfs_pointers=False):
         self.calls.append(("create", run_id, target))
@@ -89,8 +93,16 @@ class FakeWorktrees:
     def work_tree(self, path):
         return "verified-tree"
 
+    def changed(self, path, base, tree):
+        return list(self.closeout_changes)
+
+    def reopen(self, worktree, closeout_tree, verified_tree):
+        self.calls.append(("reopen", closeout_tree, verified_tree))
+        return []
+
     def merge(self, repo, worktree, run_id, base, verified_tree, plan, done_dir, message, merge_message):
         self.calls.append(("merge", run_id, verified_tree, message, merge_message))
+        self.finished.append(plan)
         return self.merge_results.pop(0)
 
     def discard(self, repo, worktree, run_id):

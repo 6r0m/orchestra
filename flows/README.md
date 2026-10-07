@@ -10,5 +10,8 @@ and a flow that breaks one is refused with the rule it broke. A flow's name is i
 
 | flow | file |
 |---|---|
-| the engineer starts, from the code: plan, assessment, your approval, build, verification, the merge | [engineer-code.json](engineer-code.json) |
+| the engineer starts, from the code: plan, assessment, your approval, build, verification, the engineer's closeout of the todo, the merge | [engineer-code.json](engineer-code.json) |
 | the architect starts, researching: its brief, your approval, then as `engineer-code` | [architect-research.json](architect-research.json) |
+
+A flow that leaves `engineer:closeout` out still merges: the controller then moves the plan to the
+done folder itself, as [the architecture's D24](../docs/architecture/structure.md) says.

@@ -205,6 +205,11 @@ class FeatureRun:
                 outcome = await self._final_gate()
                 if outcome == "done":
                     return s
+                if work == "closeout":
+                    # The change is open again: back to the build this closeout finished, which closes out
+                    # anew once the architect passes it.
+                    at -= 1
+                    s["phase"] = self.segments[at]["work"][1]
                 review_next = outcome == "review"
                 continue
             stands = await self._plan_stands() if work == "plan" else True
@@ -281,6 +286,9 @@ class FeatureRun:
                 # stage's prompt carries it.
                 s["brief"] = result["output"]
                 entry["brief"] = result["output"]
+            if "closeout_tree" in result:
+                # What the final gate holds from here on: the operator judges it, and a merge commits it or refuses.
+                s["closeout_tree"] = result["closeout_tree"]
             self._line("%s completed" % label)
         self.timeline.append(entry)
         return True
@@ -333,8 +341,11 @@ class FeatureRun:
         """On to the flow's next work stage, in a phase of its own."""
         s = self.state
         # The operator's words were for the stage just approved, never for the next one.
-        s.update(phase=work, round=0, phase_rounds=0, feedback="", guidance="", gate_reason="",
-                 episode=s["episode"] + 1)
+        s.update(phase=work, round=0, feedback="", guidance="", gate_reason="", episode=s["episode"] + 1)
+        if work != "closeout":
+            # A closeout judges nothing, and a revise takes the run back to the build it finished: that
+            # build's count of judgements stays for it.
+            s["phase_rounds"] = 0
         if self.review_rounds:
             s.update(convergence=None, convergence_seen=[])
         opened = await self._trace("open_phase", {"state": s, "phase": work})
@@ -357,6 +368,17 @@ class FeatureRun:
                 self._line("DISCARDED")
                 return "done"
             if answer["action"] == "revise":
+                if s.get("closeout_tree"):
+                    # The change is sent back, so its closeout is undone first: the todo is again where the
+                    # roles are asked to read it, and the worktree what the architect last verified.
+                    self._doing("reopen")
+                    reopened = await self._until_done("reopen", lambda: self._git("reopen", {"state": s}))
+                    if reopened is None:
+                        continue
+                    s.pop("closeout_tree")
+                    if reopened["kept"]:
+                        self._line("reopened; changed again after the closeout, and left as they are: %s"
+                                   % ", ".join(reopened["kept"]))
                 # A defect found at the gate goes back into the run, to the role the operator names.
                 s.update(status="RUNNING", guidance=answer["text"], round=0, gate_reason="",
                          episode=s["episode"] + 1)
@@ -372,7 +394,9 @@ class FeatureRun:
                 self._line("MERGED %s" % merged["commit"])
                 return "done"
             if merged["result"] == "conflict":
-                # The conflict goes back to the run's agents, never resolved here.
+                # The conflict goes back to the run's agents, never resolved here. A closeout is in the run's
+                # commit by now, so it is not undone: what the resolution leaves is closed out again.
+                s.pop("closeout_tree", None)
                 s.update(status="RUNNING", round=0, gate_reason="", episode=s["episode"] + 1,
                          guidance="Merging %s conflicts with %s. The base branch is merged into this "
                                   "worktree with conflict markers in: %s. Resolve every conflict in the "

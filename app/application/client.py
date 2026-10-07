@@ -387,7 +387,8 @@ async def history(client, run_id):
     A turn's start is its started event's time — when a worker took it, which Temporal records as such even
     though it writes that event only once the step ends — never when it was queued. A review's tree is the one
     its result names — `judged_tree`, or for a pass `assessed_tree` or `verified_tree` — and a review whose
-    result names none has none. An answer is the `answer:<stop-id>` Update the workflow accepted, as its
+    result names none has none; a closeout's is the one it left, `closeout_tree`. An answer is the
+    `answer:<stop-id>` Update the workflow accepted, as its
     accepted event recorded the request; one its validator refused never entered the history. Its phase is the
     one of the last role turn begun before it, failed or not, and it comes `after` the last turn completed before
     it, by its key `stage:episode:round` — the transcript's order is the history's own, never one read from clocks.
@@ -417,7 +418,8 @@ async def history(client, run_id):
                     turn = {"stage": args["stage"], "episode": state.get("episode", 1),
                             "round": state.get("round", 0) + 1,
                             "started": started.get(attributes.scheduled_event_id, queued), "ended": at(event)}
-                    tree = result.get("judged_tree") or result.get("assessed_tree") or result.get("verified_tree")
+                    tree = (result.get("judged_tree") or result.get("assessed_tree") or result.get("verified_tree")
+                            or result.get("closeout_tree"))
                     if tree:
                         turn["tree"] = tree
                     turns.append(turn)
@@ -445,10 +447,15 @@ def _changes(turns):
     recorded — the worktree's last commit (`base` None) before any — to the tree the first review after it recorded,
     with the turns it holds. Engineer turns with a review between them that recorded no tree cannot be told apart, so
     their change is one, given to the last of them, which the others point to (`with`); never the same change twice.
-    A turn no review has judged since is `pending`; one only reviews that recorded no tree have judged, `unrecorded`."""
+    A turn no review has judged since is `pending`; one only reviews that recorded no tree have judged, `unrecorded`.
+    A closeout has no review after it and records the tree it left itself: its change is from the tree the last
+    review recorded to that one — what the operator alone judges — and it moves no later turn's start, since a
+    change sent back is reopened to the tree that review judged."""
     base, waiting, judged = None, [], set()
     for turn in turns:
-        if stages.STAGE_ROLE.get(turn["stage"]) == "engineer":
+        if stages.STAGE_ROLE.get(turn["stage"]) == "engineer" and turn.get("tree"):
+            turn["change"] = {"base": base, "tree": turn["tree"], "turns": [_turn_key(turn)]}
+        elif stages.STAGE_ROLE.get(turn["stage"]) == "engineer":
             waiting.append(turn)
         elif turn["stage"] in stages.REVIEWS and turn.get("tree"):
             if waiting:

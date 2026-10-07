@@ -684,6 +684,12 @@ PROMPT_CASES = {
         stage="build", stage_cfg=ENGINEER, is_review=False, state=dict(TURN, phase="build", round=3, feedback="Still racy."),
         session_first=False, stage_first=False, review_rounds=ROUNDS,
         review_prompts={"at_limit": {"engineer": "Hand off cleanly."}}),
+    # In a repository that deletes a finished todo: one that keeps them names a folder as its host spells it
+    # (`test_stops.Closeout`), which no fixture read on both hosts can hold.
+    "closeout, the first turn after the architect's pass": dict(
+        stage="closeout", stage_cfg=ENGINEER, is_review=False,
+        state=dict(TURN, phase="closeout", episode=4, todo_done_dir=None),
+        session_first=False, stage_first=True, review_rounds=ROUNDS),
 }
 
 

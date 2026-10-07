@@ -751,6 +751,28 @@ class HistoryRead(unittest.TestCase):
                             ("turn", "verify", "build", 2, 1, {})])
         self.assertEqual(self.changes(record)["build:2:1"], {"unrecorded": True})
 
+    def test_a_closeouts_change_is_from_the_tree_the_architect_verified_to_the_tree_it_left(self):
+        """A closeout records the tree it left itself, and no review follows it: its change is what the operator
+        alone judges at the final gate. A change reopened starts again from the tree the architect verified."""
+        record = self.read([
+            ("turn", "plan", "plan", 1, 1, {}), ("turn", "assess", "plan", 1, 1, {"judged_tree": "t1"}),
+            ("answer", "approve"),
+            ("turn", "build", "build", 2, 1, {}),
+            ("turn", "verify", "build", 2, 1, {"judged_tree": "t2", "verified_tree": "t2"}),
+            ("turn", "closeout", "closeout", 3, 1, {"closeout_tree": "t3"}), ("answer", "revise"),
+            ("turn", "build", "build", 4, 1, {}),
+            ("turn", "verify", "build", 4, 1, {"judged_tree": "t4", "verified_tree": "t4"}),
+            ("turn", "closeout", "closeout", 5, 1, {"closeout_tree": "t5"}), ("answer", "merge")])
+        self.assertEqual(self.changes(record), {
+            "plan:1:1": {"base": None, "tree": "t1", "turns": ["plan:1:1"]},
+            "build:2:1": {"base": "t1", "tree": "t2", "turns": ["build:2:1"]},
+            "closeout:3:1": {"base": "t2", "tree": "t3", "turns": ["closeout:3:1"]},
+            "build:4:1": {"base": "t2", "tree": "t4", "turns": ["build:4:1"]},
+            "closeout:5:1": {"base": "t4", "tree": "t5", "turns": ["closeout:5:1"]}})
+        self.assertEqual(self.answers(record), [("approve", "assess:1:1", "plan"),
+                                                ("revise", "closeout:3:1", "closeout"),
+                                                ("merge", "closeout:5:1", "closeout")])
+
     def test_a_failed_step_continued_sits_in_its_own_phase_after_the_turn_before_it(self):
         record = self.read([
             ("turn", "plan", "plan", 1, 1, {}), ("turn", "assess", "plan", 1, 1, {"judged_tree": "t1"}),
@@ -786,6 +808,17 @@ class HistoryRead(unittest.TestCase):
         self.assertEqual(self.answers(record), [("approve", "research:1:1", "research"), ("guide", "assess:2:1", "plan"),
                                                 ("approve", "assess:3:1", "plan")])
 
+    def test_a_tree_less_blocker_answered_with_guidance_joins_the_plans_of_two_episodes_once(self):
+        """The same stage and round in two episodes, a review that recorded no tree between them: their change is one,
+        on the later, and the earlier points to that one by its own key — never to itself."""
+        record = self.read([
+            ("turn", "plan", "plan", 2, 1, {}), ("turn", "assess", "plan", 2, 1, {}), ("answer", "guide"),
+            ("turn", "plan", "plan", 3, 1, {}), ("turn", "assess", "plan", 3, 1, {"judged_tree": "t2"})])
+        self.assertEqual(self.changes(record), {
+            "plan:2:1": {"with": "plan:3:1"},
+            "plan:3:1": {"base": None, "tree": "t2", "turns": ["plan:2:1", "plan:3:1"]}})
+        self.assertEqual(self.answers(record), [("guide", "assess:2:1", "plan")])
+
     def test_an_answer_before_any_turn_follows_none(self):
         record = self.read([("answer", "continue"), ("turn", "plan", "plan", 1, 1, {})])
         self.assertEqual(self.answers(record), [("continue", None, None)])
@@ -813,14 +846,20 @@ def turn_path(run_id, entry):
 
 
 class Moving(FakeWorktrees):
-    """A worktree whose tree moves on with each engineer turn that finishes, as the engineer's work moves it."""
+    """A worktree whose tree moves on with each engineer turn that finishes, as the engineer's work moves it,
+    and is the one the architect verified again once a closed-out change is reopened."""
 
     def __init__(self):
         super().__init__()
         self.changes = 0
+        self.reopened = None
 
     def work_tree(self, path):
-        return "tree-%d" % self.changes
+        return self.reopened or "tree-%d" % self.changes
+
+    def reopen(self, worktree, closeout_tree, verified_tree):
+        self.reopened = verified_tree
+        return super().reopen(worktree, closeout_tree, verified_tree)
 
 
 def moving(git, agent, typed_during=()):
@@ -830,8 +869,9 @@ def moving(git, agent, typed_during=()):
 
     def turn(worktree, argv, run_dir, name, prompt, timeout_seconds, env, *, kind):
         rc, out = run(worktree, argv, run_dir, name, prompt, timeout_seconds, env, kind=kind)
-        if (rc == 0 and name.split("-")[0] in ("plan", "build")) or name in typed_during:
+        if (rc == 0 and name.split("-")[0] in ("plan", "build", "closeout")) or name in typed_during:
             git.changes += 1
+            git.reopened = None
         return rc, out
     return turn
 
@@ -1199,7 +1239,8 @@ class Runs(Scenario):
             ("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, patch),
             ("plan-e1-2", 0, "revised\n"), ("assess-e1-2", 0, configured_review_resumed("PASS")),
             ("plan-e2-1", 0, "split\n"), ("assess-e2-1", 0, configured_review_resumed("PASS")),
-            ("build-e3-1", 1, ""), ("build-e3-1", 0, "built\n"), ("verify-e3-1", 0, configured_review_resumed("PASS"))],
+            ("build-e3-1", 1, ""), ("build-e3-1", 0, "built\n"), ("verify-e3-1", 0, configured_review_resumed("PASS")),
+            ("closeout-e4-1", 0, "closed out\n")],
             git=git)
         self.host.runner = moving(git, self.agent)
         run_id = self.start("a run with every answer")
@@ -1227,8 +1268,9 @@ class Runs(Scenario):
         self.assertEqual([(turn["stage"], turn["episode"], turn["round"], turn.get("tree")) for turn in history["turns"]],
                          [("plan", 1, 1, None), ("assess", 1, 1, "tree-1"), ("plan", 1, 2, None),
                           ("assess", 1, 2, "tree-2"), ("plan", 2, 1, None), ("assess", 2, 1, "tree-3"),
-                          ("build", 3, 1, None), ("verify", 3, 1, "tree-4")],
-                         "every completed turn once — the failed build is no turn — and every review's tree")
+                          ("build", 3, 1, None), ("verify", 3, 1, "tree-4"), ("closeout", 4, 1, "tree-5")],
+                         "every completed turn once — the failed build is no turn — every review's tree, and the "
+                         "one the closeout left")
         for turn in history["turns"]:
             self.assertLessEqual(turn["started"], turn["ended"])
         self.assertEqual({"%s:%d:%d" % (turn["stage"], turn["episode"], turn["round"]): turn["change"]
@@ -1236,14 +1278,15 @@ class Runs(Scenario):
                          {"plan:1:1": {"base": None, "tree": "tree-1", "turns": ["plan:1:1"]},
                           "plan:1:2": {"base": "tree-1", "tree": "tree-2", "turns": ["plan:1:2"]},
                           "plan:2:1": {"base": "tree-2", "tree": "tree-3", "turns": ["plan:2:1"]},
-                          "build:3:1": {"base": "tree-3", "tree": "tree-4", "turns": ["build:3:1"]}},
+                          "build:3:1": {"base": "tree-3", "tree": "tree-4", "turns": ["build:3:1"]},
+                          "closeout:4:1": {"base": "tree-4", "tree": "tree-5", "turns": ["closeout:4:1"]}},
                          "each engineer turn's own change, the failed build's attempt none")
         self.assertEqual([(each["stop"], each["action"], each.get("text"), each["after"], each["phase"])
                           for each in history["answers"]],
                          [(answered[0], "revise", "split it in two", "assess:1:2", "plan"),
                           (answered[1], "approve", None, "assess:2:1", "plan"),
                           (answered[2], "continue", None, "assess:2:1", "build"),
-                          (answered[3], "discard", None, "verify:3:1", "build")],
+                          (answered[3], "discard", None, "closeout:4:1", "closeout")],
                          "each accepted answer in the phase of the step it answered — the Continue the failed "
                          "build's, which is no turn — the refused merge none of them, the discard no turn followed")
         times = [each["at"] for each in history["answers"]]
@@ -1256,7 +1299,9 @@ class Runs(Scenario):
         a1, _ = configured_review_first("PASS", "Direction: A.")
         git = FakeWorktrees()
         self.host, self.agent = E.host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1),
-                                        ("build-e2-1", 0, "built\n"), ("verify-e2-1", 0, configured_review_resumed("PASS"))],
+                                        ("build-e2-1", 0, "built\n"),
+                                        ("verify-e2-1", 0, configured_review_resumed("PASS")),
+                                        ("closeout-e3-1", 0, "closed out\n")],
                                        git=git)
         self.assertEqual(request("POST", "/api/runs", {"task": ""})[0], 400)
         status, started = request("POST", "/api/runs", {"task": "a workbench run", "repo": self.repo})
@@ -1690,7 +1735,8 @@ class Runs(Scenario):
         a1, _ = configured_review_first("PASS", "Direction: A.")
         git = FakeWorktrees()
         self.host, self.agent = E.host([("plan-e1-1", 0, "p\n"), ("assess-e1-1", 0, a1), ("build-e2-1", 0, "b\n"),
-                                        ("verify-e2-1", 0, configured_review_resumed("PASS"))], git=git)
+                                        ("verify-e2-1", 0, configured_review_resumed("PASS")),
+                                        ("closeout-e3-1", 0, "c\n")], git=git)
         run_id = self.start("a run that merges")
         stop = self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "approval")["stop"]
         request("POST", "/api/runs/%s/answer" % run_id, {"stop": stop["id"], "action": "approve"})
@@ -1775,9 +1821,9 @@ class Transcript(Scenario):
             ("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, configured_review_first("PATCH", "name the test")[0]),
             ("plan-e1-2", 0, "named\n"), ("assess-e1-2", 0, review("PASS")),
             ("build-e2-1", 0, "built\n"), ("verify-e2-1", 0, review("PATCH", "cover the edge")),
-            ("build-e2-2", 0, "covered\n"), ("verify-e2-2", 0, review("PASS")),
-            ("build-e3-1", 0, "fixed\n"), ("verify-e3-1", 0, review("PASS")),
-            ("verify-e4-1", 0, review("PASS"))],
+            ("build-e2-2", 0, "covered\n"), ("verify-e2-2", 0, review("PASS")), ("closeout-e3-1", 0, "closed out\n"),
+            ("build-e4-1", 0, "fixed\n"), ("verify-e4-1", 0, review("PASS")), ("closeout-e5-1", 0, "closed out\n"),
+            ("verify-e6-1", 0, review("PASS")), ("closeout-e7-1", 0, "closed out\n")],
             [("approval", "approve", None), ("final", "revise:engineer", "rename it"),
              ("final", "revise:architect", "check the rename"), ("final", "merge", None)])
         self.assertEqual(changes, {
@@ -1785,10 +1831,16 @@ class Transcript(Scenario):
             "plan:1:2": {"base": "tree-1", "tree": "tree-2", "turns": ["plan:1:2"]},
             "build:2:1": {"base": "tree-2", "tree": "tree-3", "turns": ["build:2:1"]},
             "build:2:2": {"base": "tree-3", "tree": "tree-4", "turns": ["build:2:2"]},
-            "build:3:1": {"base": "tree-4", "tree": "tree-5", "turns": ["build:3:1"]}},
-            "after each PATCH, only what the engineer changed in answer to it")
-        self.assertEqual(answers, [("approve", "assess:1:2", "plan"), ("revise", "verify:2:2", "build"),
-                                   ("revise", "verify:3:1", "build"), ("merge", "verify:4:1", "build")])
+            "closeout:3:1": {"base": "tree-4", "tree": "tree-5", "turns": ["closeout:3:1"]},
+            # Sent back, the change is reopened: the engineer's next change starts from the tree the architect
+            # verified, not from the closeout's.
+            "build:4:1": {"base": "tree-4", "tree": "tree-6", "turns": ["build:4:1"]},
+            "closeout:5:1": {"base": "tree-6", "tree": "tree-7", "turns": ["closeout:5:1"]},
+            "closeout:7:1": {"base": "tree-6", "tree": "tree-8", "turns": ["closeout:7:1"]}},
+            "after each PATCH, only what the engineer changed in answer to it; each closeout, what it changed "
+            "since the architect's verification")
+        self.assertEqual(answers, [("approve", "assess:1:2", "plan"), ("revise", "closeout:3:1", "closeout"),
+                                   ("revise", "closeout:5:1", "closeout"), ("merge", "closeout:7:1", "closeout")])
 
     def test_research_first_then_a_blocker_answered_with_guidance_then_a_discard(self):
         brief, _ = configured_first_message("Brief: the scheduler.")
@@ -1797,16 +1849,17 @@ class Transcript(Scenario):
             ("research-e1-1", 0, brief),
             ("plan-e2-1", 0, "planned\n"), ("assess-e2-1", 0, review("BLOCKER", "the premise is wrong")),
             ("plan-e3-1", 0, "replanned\n"), ("assess-e3-1", 0, review("PASS")),
-            ("build-e4-1", 0, "built\n"), ("verify-e4-1", 0, review("PASS"))],
+            ("build-e4-1", 0, "built\n"), ("verify-e4-1", 0, review("PASS")), ("closeout-e5-1", 0, "closed out\n")],
             [("approval", "approve", None), ("blocker", "guide", "keep one queue"), ("approval", "approve", None),
              ("final", "discard", None)], flow="architect-research")
         self.assertEqual(changes, {
             "plan:2:1": {"base": None, "tree": "tree-1", "turns": ["plan:2:1"]},
             "plan:3:1": {"base": "tree-1", "tree": "tree-2", "turns": ["plan:3:1"]},
-            "build:4:1": {"base": "tree-2", "tree": "tree-3", "turns": ["build:4:1"]}},
+            "build:4:1": {"base": "tree-2", "tree": "tree-3", "turns": ["build:4:1"]},
+            "closeout:5:1": {"base": "tree-3", "tree": "tree-4", "turns": ["closeout:5:1"]}},
             "research owns no change; the blocker's tree is the replanned plan's base")
         self.assertEqual(answers, [("approve", "research:1:1", "research"), ("guide", "assess:2:1", "plan"),
-                                   ("approve", "assess:3:1", "plan"), ("discard", "verify:4:1", "build")])
+                                   ("approve", "assess:3:1", "plan"), ("discard", "closeout:5:1", "closeout")])
 
     def test_a_plan_changed_after_its_pass_is_assessed_again_and_its_change_is_no_turns(self):
         git = Moving()
@@ -1814,7 +1867,8 @@ class Transcript(Scenario):
         self.host, self.agent = E.host([
             ("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, configured_review_first("PASS", "Direction: A.")[0]),
             ("assess-e2-1", 0, review("PASS")),
-            ("build-e3-1", 0, "built\n"), ("verify-e3-1", 0, review("PASS"))], git=git)
+            ("build-e3-1", 0, "built\n"), ("verify-e3-1", 0, review("PASS")), ("closeout-e4-1", 0, "closed out\n")],
+            git=git)
         self.host.runner = moving(git, self.agent)
         run_id = self.start("a plan edited before its approval")
         first = self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "approval")["stop"]
@@ -1833,11 +1887,12 @@ class Transcript(Scenario):
         changes = {"%s:%d:%d" % (turn["stage"], turn["episode"], turn["round"]): turn["change"]
                    for turn in history["turns"] if "change" in turn}
         self.assertEqual(changes, {"plan:1:1": {"base": None, "tree": "tree-1", "turns": ["plan:1:1"]},
-                                   "build:3:1": {"base": "tree-2", "tree": "tree-3", "turns": ["build:3:1"]}},
-                         "the edit after the pass is in neither turn's change")
+                                   "build:3:1": {"base": "tree-2", "tree": "tree-3", "turns": ["build:3:1"]},
+                                   "closeout:4:1": {"base": "tree-3", "tree": "tree-4", "turns": ["closeout:4:1"]}},
+                         "the edit after the pass is in no turn's change")
         self.assertEqual([(answer["action"], answer["after"], answer["phase"]) for answer in history["answers"]],
                          [("approve", "assess:1:1", "plan"), ("approve", "assess:2:1", "plan"),
-                          ("discard", "verify:3:1", "build")])
+                          ("discard", "closeout:4:1", "closeout")])
 
     def test_a_review_typed_under_records_no_tree_and_the_turns_around_it_are_shown_once(self):
         review = configured_review_resumed

@@ -54,6 +54,12 @@ class GitViolation(RuntimeError):
     error_type = "git_violation"
 
 
+class CloseoutViolation(RuntimeError):
+    """A closeout that is not one: it changed what the architect's `PASS` accepted, or no tree the architect
+    verified is there to close out."""
+    error_type = "closeout_violation"
+
+
 def run_dir(run_id):
     return os.path.join(paths.RUNTIME_ROOT, run_id)
 
@@ -164,7 +170,7 @@ class Activities:
 
     def all(self):
         return [self.prepare, self.create_worktree, self.open_run, self.open_phase, self.run_role,
-                self.record_stop, self.record_answer, self.finish_trace, self.merge, self.discard,
+                self.record_stop, self.record_answer, self.finish_trace, self.reopen, self.merge, self.discard,
                 self.worktree_view, self.review_diff, self.work_tree]
 
     def client(self):
@@ -279,6 +285,12 @@ class Activities:
         private = T.Private()
         context = T.trace_context(client, span, state, stage, role_name)
         try:
+            verified = state.get("verified_tree")
+            if stage == "closeout" and not verified:
+                # Unknown is not unchanged: with no tree the architect verified, nothing says what this
+                # turn may not touch.
+                raise CloseoutViolation("the run holds no tree the architect verified, so there is nothing "
+                                        "to close out")
             if "persona" not in role:
                 # A run started before agent profiles: its persona file as this host sees it, from the one
                 # resolver. A policy this host cannot map fails the step before an agent starts.
@@ -323,6 +335,20 @@ class Activities:
             if stage in stages.ANSWERS:
                 # Its answer is its product, returned to the run — never read back from a log.
                 result["output"] = N.final_message(role, out)
+            if stage == "closeout":
+                # No review follows this turn, so what it may change is checked here: the architect's `PASS`
+                # stands for everything else, and the tree it left is the one the final gate holds — the
+                # operator's to judge, and the only one a merge may commit.
+                left = self.git.work_tree(worktree)
+                folders = (state.get("todo_dir"), state.get("todo_done_dir"))
+                outside = sorted(path for _, path in self.git.changed(worktree, verified, left)
+                                 if not stages.closeout_may_change(path, folders))
+                if outside:
+                    raise CloseoutViolation(
+                        "the closeout changed what the architect verified: %s. A closeout changes only the "
+                        "todo and documentation; put these back as they were — in the engineer's terminal or "
+                        "by hand — then continue to close out again" % ", ".join(outside))
+                result["closeout_tree"] = left
             if is_review:
                 verdict, feedback = N.parse_review(role, rc, out)
                 result.update(verdict=verdict, feedback=feedback)
@@ -407,17 +433,33 @@ class Activities:
         return {"trace_url": T.trace_url(client, state.get("trace_id"))}
 
     @activity.defn
+    def reopen(self, args):
+        """Undo the closeout of a change the operator sent back, before any role reads it again."""
+        state = args["state"]
+        with self._git_step(state["run_id"], "reopening"):
+            try:
+                return {"kept": self.git.reopen(state["worktree_path"], state["closeout_tree"],
+                                                state["verified_tree"])}
+            except Exception as exc:
+                raise _failure(exc) from exc
+
+    @activity.defn
     def merge(self, args):
         state = args["state"]
         stem = os.path.splitext(os.path.basename(state["plan"]))[0]
         words = " ".join(state["task"].encode("ascii", "ignore").decode().split()[:8])
-        # No agent may change the worktree between the check of the verified tree and the commit,
+        # The tree the run holds for its merge: what its engineer's closeout left, the plan closed out in it
+        # already — or, for a run whose flow has no closeout, what the architect verified, its plan the
+        # controller's to finish.
+        closed = state.get("closeout_tree")
+        # No agent may change the worktree between the check of that tree and the commit,
         # nor hold it open while it is removed; a conflict's next turn opens the terminals again.
         terminal.close_run(state["run_id"])
         with self._git_step(state["run_id"], "merge"):
             try:
                 return self.git.merge(state["repo_path"], state["worktree_path"], state["run_id"],
-                                      state["base_branch"], state.get("verified_tree"), state["plan"],
+                                      state["base_branch"], closed or state.get("verified_tree"),
+                                      None if closed else state["plan"],
                                       state["todo_done_dir"], ("%s: %s" % (stem, words))[:100],
                                       "Merge %s" % stem)
             except W.MergeRefused as exc:

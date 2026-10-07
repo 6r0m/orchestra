@@ -90,7 +90,11 @@ it, with that worker's Start beside it. A run whose worker is down is still show
 
 When a run waits for you, its decision comes first, with what to judge it by: the brief at a research's
 approval, the architect's assessment and the plan at a plan's, the architect's verification and the
-change at the final gate, the blocker or the last finding, or the failure, whole, to copy. Its
+change at the final gate, the blocker or the last finding, or the failure, whole, to copy. At the
+final gate the change is the one the engineer's closeout left — the todo cut to its record and in the
+repository's done folder — and it is exactly what Merge commits. The architect did not judge the
+closeout, which may touch only the todo and documentation: its turn in the history opens what it
+changed since the architect's verification. A revise undoes it before its role's turn. Its
 answers are the stop's own, as buttons. The note is labelled with the answers it is sent with, and a
 note typed for a stop stays while you look at other runs; an answer the workflow refuses is said
 beside what it concerns, and a merge or a discard asks first.
@@ -193,8 +197,8 @@ Each stop prints what it asks and the answers it takes: `yes` or `revise <feedba
 the plan's, with its summary, or the research's, with its brief; your guidance at a blocker or an
 exhausted budget; `continue` after a failed stage. `--auto-proceed` skips the approvals, as the page's
 *skip approvals* does. A run whose flow has no build ends `DONE`, keeping its worktree. At
-`READY_FOR_HUMAN` the run waits for `merge`, `revise engineer <feedback>`, `revise architect
-<feedback>`, or `discard` with `--confirm`. `--stop` ends a run at any of them. Nothing is committed,
+`READY_FOR_HUMAN` — after the engineer's closeout, in a flow that has one — the run waits for `merge`,
+`revise engineer <feedback>`, `revise architect <feedback>`, or `discard` with `--confirm`. `--stop` ends a run at any of them. Nothing is committed,
 merged or removed before your `merge` or `discard`. A run waiting at a stop waits indefinitely, and
 any process may answer it.
 
