@@ -43,7 +43,7 @@ the queue; what the activity does is the other side's.
 
 ## Invariants
 
-- **The workflow is deterministic (D25).** A change to what it commands goes behind `workflow.patched(...)`, or the recorded histories in `tests/histories/` stop replaying — `tests/orchestration/test_replay.py` is the guard, with a control.
+- **The workflow is deterministic (D25).** A change to what it commands keeps the recorded histories in `tests/histories/` replaying — behind `workflow.patched(...)`, or behind what those histories themselves record — and `tests/orchestration/test_replay.py` is the guard, with a control.
 - **A stop waits here and nowhere else (D6).** Each stop publishes the actions it takes, a revise at the final gate named per role, and its answer arrives as an Update carrying one of them, with the stable id `answer:<stop-id>`, so an answer sent twice is applied once. No activity ever waits for a human.
 - **A Stop is Temporal's cancellation, heard wherever the run waits (D31).** It ends the run `STOPPED` and runs no git; a git side effect already running lands first and decides how the run ends, and one no worker has taken fails within the policy's heartbeat interval, never having run; the cleanup waits a bounded time, so a host whose worker is gone never holds it.
 - **Only architect verdicts route (D4).** An engineer's blocker reaches a human only through the architect. A closeout routes nothing: it goes on to the final gate, where the operator judges it (D24).

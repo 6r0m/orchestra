@@ -1,8 +1,9 @@
 """Recorded histories of full runs replay on the current workflow.
 
 A change to the workflow that alters what it commands must go behind
-`workflow.patched`, or these histories stop replaying. Recorded by
-`record_histories.py`; the control is the same workflow with one unpatched change.
+`workflow.patched`, or behind what these histories themselves record, or they stop
+replaying. Recorded by `record_histories.py`; the control is the same workflow with
+one unpatched change.
 """
 import asyncio
 import glob

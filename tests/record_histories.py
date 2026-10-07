@@ -1,7 +1,8 @@
 """Record the event histories the replay guard replays.
 
-Rerun only when the workflow changes on purpose, and then behind `workflow.patched`,
-so the histories recorded before the change still replay:
+Rerun only when the workflow changes on purpose, and then behind `workflow.patched`
+or behind what the histories themselves record, so the ones recorded before the change
+still replay:
 `python tests/record_histories.py [name ...]` — the named histories only, every one when none is
 named. A new history is recorded by its name alone, so the ones older code wrote stay as they were:
 `approval_abort` and `failed_abort` are runs ended by an `abort` answer, which no stop offers now, so

@@ -565,9 +565,14 @@ still lands on a checkout.
   not role initialization or workflow code.
 - **D25** **The workflow is deterministic.** No clock, randomness, file,
   network or process call happens in workflow code outside Temporal's own APIs;
-  every effect is an activity. A change to what the workflow commands goes
-  behind `workflow.patched`, and the recorded histories under `tests/histories/`
-  must keep replaying.
+  every effect is an activity. A change to what the workflow commands leaves
+  every recorded history under `tests/histories/` replaying as it was written,
+  and no history is recorded over. Such a change goes behind `workflow.patched`;
+  or, where every history already records what tells a run from before the
+  change from one after it — a field of its start, the name a step's result gave
+  a value — behind that, as the conflict over a tree the first closeouts left is
+  (D24). Only what a history itself holds may tell them apart, never anything
+  read when it replays.
 - **D26** **One authority per repository fact, refusing when there is none.** A
   run's repository, base branch, execution target, worktree root and todo
   convention come from its `repos.json` entry when configured, and are detected

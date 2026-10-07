@@ -40,7 +40,8 @@ the flow does not schedule, or one *skip approvals* skips, going straight on; an
 ending `DONE`, its worktree kept, where this one reaches the final gate. A change that goes back from
 the final gate — a revise, or a merge in conflict — is reopened before its role's turn, and the build
 closes out again once it passes; a run started before closeouts goes from the verify's `PASS` straight
-to the final gate ([structure D24](../structure.md)).
+to the final gate, and a run of the first closeouts resolves a merge's conflict with nothing reopened
+([structure D24](../structure.md)).
 
 Any stage, the worktree's creation, a merge or a discard that fails stops at a `failed` stop, whose
 `continue` runs that step once more — a git step no worker of its host took within the policy's

@@ -1,14 +1,14 @@
 # The engineer closes the todo out after the architect's PASS; the merge commits exactly what the gate showed
 
-**Status:** IMPLEMENTED, the external reviewer's second PATCH applied — awaiting its re-review (D3). The full
-suite on both hosts, the restart acceptance and a run with real agents are not run yet.
+**Status:** IMPLEMENTED, the external reviewer's third PATCH applied, documents only — awaiting its re-review
+(D3). The full suite on both hosts, the restart acceptance and a run with real agents are not run yet.
 **Scope:** the run's finalisation: a `closeout` stage ([stages.py](../app/foundation/stages.py)), its flow rules
 ([flows.py](../app/foundation/flows.py), [flows/](../flows/README.md)), the workflow's path through it
 ([workflow.py](../app/orchestration/workflow.py)), its checks and the reopening of a change that goes back
 ([activities.py](../app/application/activities.py), [worktrees.py](../app/workspace/worktrees.py)), the
 repository's own closeout documents ([repos.py](../app/workspace/repos.py)), what the history shows of it
 ([client.py](../app/application/client.py)) and the trace's names for it.
-**Stable documentation owner:** architecture D24, with D2, D4 and D13, in
+**Stable documentation owner:** architecture D24, with D2, D4, D13 and D25, in
 [structure.md](../docs/architecture/structure.md); the stops in
 [stops.md](../docs/architecture/diagrams/stops.md); the trace's rows in
 [trace-contract.md](../docs/architecture/trace-contract.md).
@@ -52,7 +52,7 @@ repository keeps finished todos — and Merge commits exactly that tree.
   that names none, or no entry, leaves a closeout the todo alone: no code calls a file a document.
 - **A3 [ACTIVE]** A change that goes back from the final gate — a revise, or a merge in conflict — is reopened
   before its role's turn: each path changed since the verified tree is again as the architect verified it, bar
-  one changed again since. The build closes out anew once it passes.
+  one changed again since. The build closes out anew once it passes. The one exception is A6.
 - **A4 [ACTIVE]** The descriptor's `todo_done_dir` is the repository's stated convention: the closeout's ask
   names it, the controller moves nothing for a run that closes out, and the turn is checked against it.
 - **A5 [ACTIVE]** The closeout's ask says what must be left and what may be touched; how a todo is finished is
@@ -118,6 +118,7 @@ repository keeps finished todos — and Merge commits exactly that tree.
   would break the rule it serves. F10: the second recording reopens at its conflict with no marker, and a
   history without a patch's marker replays that patch as absent — so the second published recording would stop
   replaying, as the first had. The recorded name decides instead (A6), and both replay as they were written.
+  The reviewer accepted it, and D25 now says both ways.
 
 ## Decision
 
@@ -144,8 +145,9 @@ before closeouts are gone, two ways a plan is finished, by the steps a run recor
    tree.
 2. The merge commits exactly the tree the run holds — its final tree, or for a run started before closeouts the
    verified tree with the controller's move — and refuses a worktree that is no longer it, changing nothing.
-3. A change that goes back from the final gate is reopened before any role's turn; a reopening that fails stops
-   the run there.
+3. A change that goes back from the final gate after a closeout is reopened before any role's turn, and a
+   reopening that fails stops the run there. One exception, as recorded: a conflict over a tree the first
+   closeouts left reopens nothing (A6).
 4. Every recorded history replays as it was written, none recorded over; a run started before closeouts takes
    no new step. No flow file starts another run like them.
 5. The architect stays read-only and writes nothing (D2).
@@ -188,7 +190,8 @@ a live run's to show.
 
 ## Documentation plan
 
-- **Owner:** D24 for the lifecycle; D2 the stages, D4 what an architect judges, D13 the flow's rules.
+- **Owner:** D24 for the lifecycle; D2 the stages, D4 what an architect judges, D13 the flow's rules, D25 how
+  a change to the workflow keeps every recording replaying.
 - **Updated:** [stops.md](../docs/architecture/diagrams/stops.md), [trace-contract.md](../docs/architecture/trace-contract.md),
   [decisions.md](../docs/history/decisions.md), [using.md](../docs/using.md), the [README](../README.md),
   [flows/README.md](../flows/README.md), [todo/README.md](README.md), [tests/README.md](../tests/README.md), each
@@ -256,3 +259,15 @@ a live run's to show.
   merge. **`make public-check`:** passed; the second recording, not yet tracked under its new name, is the blob
   the round before published.
 - **Not run:** the full suite; `tests/acceptance_restart.py`; a run with real agents.
+
+### 2026-10-07 — the external reviewer's third PATCH, documents only
+
+- **Trigger:** the code accepted, the recorded name as what decides included. Two statements said more than
+  the code does: D25, that every change to the workflow's commands goes behind `workflow.patched`; and
+  invariant 3 here, that every change sent back is reopened.
+- **Applied:** D25 states what it protects — every recorded history replaying as it was written, none recorded
+  over — and the two ways that is kept, a patch marker or what the histories themselves record; each place
+  that repeats the rule says the same. Invariant 3, A3 and the stops' view name A6's exception. No code.
+- **Verification:** the checks that read these files — the architecture's routing and links, the replay and
+  the public check's own tests: WSL 9 classes, 47 tests, OK; Windows, replay and architecture, 8 classes, 41
+  tests, OK. `make public-check`: passed.
