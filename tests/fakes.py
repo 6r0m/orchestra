@@ -80,8 +80,9 @@ class FakeWorktrees:
         # whether a run records the commit it began from at all: one started before runs did records none.
         self.came = list(came or [])
         self.based = based
-        # The base tip and the remote each merge was handed to land on.
+        # The base tip and the remote each merge was handed to land on, and where that remote was to lead.
         self.landed = []
+        self.pinned = []
         # What a read of the change is refused with, as its host's git would refuse it; None reads it.
         self.diff_refusal = None
         # What each merge was handed to finish itself: the run's plan, or None when its closeout already had.
@@ -91,14 +92,17 @@ class FakeWorktrees:
         self.outside = []
         self.unclosed = False
 
-    def create(self, repo, base, root, run_id, target, lfs_pointers=False, remote=None):
+    def remote_id(self, repo, remote):
+        return "where-%s-leads" % remote
+
+    def create(self, repo, base, root, run_id, target, lfs_pointers=False, remote=None, pinned=None):
         self.calls.append(("create", run_id, target))
         return "/fake/worktree/%s" % run_id
 
     def started_from(self, path):
         return "base-tip-0" if self.based else None
 
-    def reconcile(self, repo, worktree, base, tip, remote=None):
+    def reconcile(self, repo, worktree, base, tip, remote=None, pinned=None):
         self.calls.append(("reconcile", tip))
         return self.came.pop(0) if self.came else {"moved": False}
 
@@ -120,16 +124,17 @@ class FakeWorktrees:
         return []
 
     def merge(self, repo, worktree, run_id, base, verified_tree, plan, done_dir, message, merge_message, tip=None,
-              remote=None):
+              remote=None, pinned=None):
         self.calls.append(("merge", run_id, verified_tree, message, merge_message))
         self.finished.append(plan)
         self.landed.append((tip, remote))
+        self.pinned.append(pinned)
         return self.merge_results.pop(0)
 
     def discard(self, repo, worktree, run_id):
         self.calls.append(("discard", run_id))
 
-    def view(self, repo, base):
+    def view(self, repo, base, remote=None):
         return [{"path": "/fake/worktrees/one", "branch": "one", "state": "unmerged"},
                 {"path": "/fake/worktrees/two", "branch": "two", "state": "merged"}]
 

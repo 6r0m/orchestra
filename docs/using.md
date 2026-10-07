@@ -99,7 +99,8 @@ turn in the history opens what it changed since the architect's verification. A 
 before its role's turn. If the base branch moved while the run built, it was brought into the worktree
 and judged before this gate, so what you read is the change on the base as it is. Merge lands it on
 that base: the repository's own branch, or — where its entry names the `remote` its base lives on —
-that remote's, by a push that forces nothing, which the confirmation says. Should the base have moved
+that remote's, by a push it takes only while its branch is still the commit the change was judged on,
+which the confirmation says. Should the base have moved
 again since, Merge lands nothing; the run brings it in, has it judged, and comes back to you. Its
 answers are the stop's own, as buttons. The note is labelled with the answers it is sent with, and a
 note typed for a stop stays while you look at other runs; an answer the workflow refuses is said

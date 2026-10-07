@@ -1499,7 +1499,7 @@ class Runs(Scenario):
         class Kept(FakeWorktrees):
             rows = []
 
-            def view(self, repo, base):
+            def view(self, repo, base, remote=None):
                 return self.rows
         git = Kept()
         self.host, self.agent = E.host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)], git=git)

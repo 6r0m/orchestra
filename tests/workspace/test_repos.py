@@ -124,9 +124,21 @@ class Refusals(Layout):
         git(self.repo, "remote", "add", "upstream", os.path.join(self.tmp, "upstream.git"))
         self.assertIsNone(self.resolve()["remote"],
                           "the repository has a remote, and no entry names it: nothing leaves the machine")
-        self.assertEqual(self.resolve(dict(self.selected, remote="upstream"))["remote"], "upstream")
+        named = dict(self.selected, remote="upstream", base_branch="develop")
+        self.assertEqual(self.resolve(named)["remote"], "upstream")
         with self.assertRaisesRegex(repos.Refused, "has no remote 'origin'"):
-            self.resolve(dict(self.selected, remote="origin"))
+            self.resolve(dict(named, remote="origin"))
+
+    def test_a_remotes_base_is_named_never_found_and_needs_no_branch_of_this_repositorys_own(self):
+        self.branch("develop")
+        git(self.repo, "remote", "add", "origin", os.path.join(self.tmp, "origin.git"))
+        with self.assertRaisesRegex(repos.Refused, "base_branch"):
+            self.resolve(dict(self.selected, remote="origin"))      # the branch a run is pushed to is never guessed
+        resolved = self.resolve(dict(self.selected, remote="origin", base_branch="release"))
+        self.assertEqual((resolved["base_branch"], resolved["remote"]), ("release", "origin"),
+                         "the remote's branch is the base: this repository has no branch of that name")
+        with self.assertRaisesRegex(repos.Refused, "no local branch 'release'"):
+            self.resolve(dict(self.selected, base_branch="release"))  # control: a local base must be there
 
     def test_the_documents_a_closeout_may_change_are_the_ones_an_entry_names_and_no_others(self):
         self.branch("develop")

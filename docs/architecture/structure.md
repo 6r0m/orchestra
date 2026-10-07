@@ -392,7 +392,11 @@ still lands on a checkout.
   tip its worktree was made at, recorded then, and after it each tip brought in. Where
   the repository's entry names the `remote` its base lives on, that is the remote's
   branch, fetched before every look, and this repository's own branch of that name is
-  no destination; unnamed, the base is the local branch and nothing leaves the machine.
+  no destination, nor needed: the entry names the `base_branch` with it, never left to
+  be found. That remote is reached only where it led when the run was set up — a
+  fingerprint of the URLs its configuration resolved to then, taken before any role ran:
+  one turned elsewhere since is neither fetched from nor pushed to. Unnamed, the base is
+  the local branch and nothing leaves the machine.
   Once a build has passed, and before it is made final, the base is looked at. One that
   moved is merged into the run's worktree, uncommitted, the base itself untouched:
   where git merged it without a conflict the architect verifies the two together, and
@@ -406,7 +410,9 @@ still lands on a checkout.
   of the task; then a merge commit named for the plan, its first parent that commit and
   its tree the final tree — the same two commits for every run, the base's own history
   its first-parent line, and nothing kept of the base's coming in. The base takes it
-  only as a fast-forward: a remote by the controller's push, which forces nothing; a
+  only while it is exactly at that commit, and so only as a fast-forward: a remote by
+  the controller's push, leased on that commit — a compare-and-swap, never a rewrite,
+  which a branch rewound to an ancestor refuses as one that moved on does; a
   local branch in its checkout when it is checked out, which keeps its files in step
   and refuses staged changes and any edit of the operator's it would write over; one
   checked out nowhere by a compare-and-swap of its ref. A base that moved again takes

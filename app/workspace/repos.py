@@ -33,8 +33,9 @@ TARGETS = ("wsl", "windows")
 ENTRY_KEYS = {"path", "target", "base_branch", "remote", "worktree_root", "todo_dir", "todo_done_dir", "todo_name",
               "closeout_docs", "lfs_pointers"}
 # `remote` names where a repository's base branch lives when that is a remote: a run begins from what that
-# remote holds and lands there, by the controller's push, on the operator's Merge. Unnamed, the base is the
-# repository's own branch and nothing leaves the machine — reaching a remote is never a default.
+# remote holds and lands there, by the controller's push, on the operator's Merge — its `base_branch` named
+# with it, and no branch of this repository's own needed. Unnamed, the base is the repository's own branch
+# and nothing leaves the machine: reaching a remote is never a default.
 # True keeps Git LFS files in a run's worktree as pointers instead of copying every asset
 # out of the repository's LFS store, for a repository whose assets a run does not need.
 FLAGS = {"lfs_pointers"}
@@ -235,15 +236,20 @@ def resolve(selected, target_root, which=shutil.which):
         raise Refused("git is not installed on the %s host" % target)
     if _git(path, "rev-parse", "--show-toplevel").returncode != 0:
         raise Refused("%s is not a git repository" % path)
-    base = selected.get("base_branch")
-    if base:
+    base, remote = selected.get("base_branch"), selected.get("remote")
+    if remote:
+        if _git(path, "remote", "get-url", remote).returncode != 0:
+            raise Refused("%s has no remote %r, where its entry says its base branch lives" % (path, remote))
+        # The remote's branch is the base, so this repository needs no branch of that name — and the
+        # branch a run is pushed to is named, never found.
+        if not base:
+            raise Refused("%s names the remote %r as where its base lives: name that base_branch too, in "
+                          ".orchestra/repos.json" % (path, remote))
+    elif base:
         if _git(path, "show-ref", "--verify", "--quiet", "refs/heads/" + base).returncode != 0:
             raise Refused("%s has no local branch %r, the configured base branch" % (path, base))
     else:
         base = detect_base(path)
-    remote = selected.get("remote")
-    if remote and _git(path, "remote", "get-url", remote).returncode != 0:
-        raise Refused("%s has no remote %r, where its entry says its base branch lives" % (path, remote))
     root = selected.get("worktree_root") or detect_worktree_root(path, target_root)
     if target == "windows" and not ntpath.splitdrive(root)[0]:
         raise Refused("the worktree root %s is not on a Windows drive: %s" % (root, UNC_REASON))

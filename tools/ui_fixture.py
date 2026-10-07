@@ -83,7 +83,7 @@ class FixtureWorktrees(FakeWorktrees):
         super().__init__()
         self.base_dir = base_dir
 
-    def create(self, repo, base, root, run_id, target, lfs_pointers=False):
+    def create(self, repo, base, root, run_id, target, lfs_pointers=False, remote=None, pinned=None):
         path = os.path.join(self.base_dir, run_id)
         os.makedirs(path, exist_ok=True)
 

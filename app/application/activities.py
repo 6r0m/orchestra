@@ -199,6 +199,13 @@ class Activities:
             resolved = self.repositories.resolve(selected, policy["targets"][selected["target"]]["worktree_root"])
         except repos.Refused as exc:
             raise ApplicationError(str(exc), type="Refused", non_retryable=True)
+        if resolved.get("remote"):
+            # Where that remote leads, taken now, before any role has run in the repository: the run fetches
+            # from and pushes to nowhere else, whatever its configuration is made to say meanwhile.
+            try:
+                resolved["remote_id"] = self.git.remote_id(resolved["repo_path"], resolved["remote"])
+            except Exception as exc:
+                raise _failure(exc) from exc
         # Neither CLI fails a turn whose skill no folder holds — one drops it without a word, the other waits
         # at its prompt until the turn's timeout (measured) — so every skill the run's stages invoke is looked
         # for where its kind finds skills. The run was handed only its flow's stages' skills.
@@ -223,7 +230,7 @@ class Activities:
             try:
                 path = self.git.create(state["repo_path"], state["base_branch"], state["worktree_root"],
                                        state["run_id"], state["target"], state.get("lfs_pointers", False),
-                                       state.get("remote"))
+                                       state.get("remote"), state.get("remote_id"))
                 # The commit of its base the run stands on: recorded here, and each time the base is brought
                 # in (`reconcile`), so the workflow knows it from what git answered and never asks git itself.
                 tip = self.git.started_from(path)
@@ -457,7 +464,7 @@ class Activities:
         with self._git_step(state["run_id"], "reconciling with %s" % state["base_branch"]):
             try:
                 return self.git.reconcile(state["repo_path"], state["worktree_path"], state["base_branch"],
-                                          state["base_tip"], state.get("remote"))
+                                          state["base_tip"], state.get("remote"), state.get("remote_id"))
             except Exception as exc:
                 raise _failure(exc) from exc
 
@@ -491,7 +498,8 @@ class Activities:
                                       state["base_branch"], final or state.get("verified_tree"),
                                       None if final else state["plan"],
                                       state["todo_done_dir"], ("%s: %s" % (stem, words))[:100],
-                                      "Merge %s" % stem, state.get("base_tip"), state.get("remote"))
+                                      "Merge %s" % stem, state.get("base_tip"), state.get("remote"),
+                                      state.get("remote_id"))
             except W.MergeRefused as exc:
                 return {"result": "refused", "reason": str(exc)}
             except Exception as exc:
@@ -539,6 +547,6 @@ class Activities:
         try:
             resolved = self.repositories.resolve(args["repository"], args["worktree_root"])
             return {"base_branch": resolved["base_branch"],
-                    "rows": self.git.view(resolved["repo_path"], resolved["base_branch"])}
+                    "rows": self.git.view(resolved["repo_path"], resolved["base_branch"], resolved.get("remote"))}
         except repos.Refused as exc:
             raise ApplicationError(str(exc), type="Refused", non_retryable=True)

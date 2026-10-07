@@ -1,7 +1,8 @@
 # A Merge at the final gate lands what the gate showed, on the base as it is — or lands nothing
 
-**Status:** IMPLEMENTED — awaiting the external reviewer (D1). The full suite on both hosts, a restart and a
-run with real agents are not done; the live stack still runs the code from before this.
+**Status:** IMPLEMENTED, the external reviewer's three findings on the remote landing applied — awaiting its
+re-review (D1). The full suite on both hosts, a restart and a run with real agents are not done; the live
+stack still runs the code from before this.
 **Scope:** how a run meets a base that moved, and where it lands: the look at the base, its coming into the
 worktree and the landing ([worktrees.py](../app/workspace/worktrees.py)); the remote a base may live on
 ([repos.py](../app/workspace/repos.py)); the workflow's path around the final gate
@@ -28,7 +29,7 @@ and says so.
   - Date/source: 2026-10-07, operator, on the flow as it was put to him: *"yes seems very cool flow"*.
 - **D3** Where a repository's base lives on a remote, a run merges there: the remote is the repository's
   source of truth, and the local branch no destination. Agents still reach no remote; the controller alone
-  fetches and pushes, the base branch only, on the operator's Merge, forcing nothing.
+  fetches and pushes, the base branch only, on the operator's Merge, rewriting nothing there.
   - Date/source: 2026-10-07, operator: *"also need proper remote merge"*, with the reviewer's rules for it.
   - Effect: replaces what D24 held until now, that nothing a run does leaves the machine.
 - **D4** Questions of mechanism are settled by the direction above and by what the industry does, not put
@@ -60,7 +61,8 @@ and says so.
 ## Non-goals
 
 - Pull requests, a merge queue of its own, an integration service; pushing anything but the base branch; a
-  forced push in any form.
+  push that rewrites anything on the remote.
+- A sandbox for the roles: the remote's destination is pinned (F12), and a role still runs as the operator.
 - Moving the operator's local branch after a remote landing: it is theirs to pull.
 - Putting the todo of a run started before closeouts back at its path during a conflict (F9): those runs end.
 - A row in the history for the base's coming in; the run's lines say it.
@@ -93,6 +95,14 @@ and says so.
 - **F9** Every role's ask names the todo by its first path; the controller's finish of a run started before
   closeouts moves it at the first Merge, so in the conflict's turns it is not there — seen live.
 - **F10** This repository's rule is `make public-check` before a push, run by hand; it has no pre-push hook.
+- **F11** A plain push lands on a remote's branch that was rewound to an ancestor of the commit pushed from:
+  tried against a bare repository, git 2.55 and 2.54. The same push leased on that commit is refused there,
+  as on a branch that moved on, and taken on one that stands.
+- **F12** The role guard watches HEAD, the run's branch and what is staged. `git config remote.origin.url`,
+  its `pushurl`, and a `url.<x>.insteadOf` or `pushInsteadOf` change none of them, and each turns where
+  `origin` leads; `git remote get-url --all`, with and without `--push`, answers what they resolve to.
+- **F13** `resolve` asked for a local branch of the base before it read `remote`, and found an unnamed base
+  among the local ones.
 
 ### Refuted
 
@@ -111,9 +121,11 @@ A run stands on one commit of its base — its remote's, where its entry names o
 before the build is made final the base is looked at; one that moved is merged into the worktree,
 uncommitted, and judged — by the architect alone where git merged it cleanly, by the engineer first where it
 did not — until a `PASS` meets a base that stood still. The gate reads the change against that commit. Merge
-lands the final tree on it as two commits, and the base takes them only as a fast-forward: a remote by a
-push that forces nothing, a checked-out branch by `--ff-only`, a branch checked out nowhere by a
-compare-and-swap. A base that moved again takes nothing; the change is reopened and reconciled again.
+lands the final tree on it as two commits, and the base takes them only while it is exactly at that commit:
+a remote by a push leased on it (F11), a checked-out branch by `--ff-only`, a branch checked out nowhere by a
+compare-and-swap. A base that moved again takes nothing; the change is reopened and reconciled again. A
+remote is reached only where it led at the run's setup (F12), and its base branch is named, never found, and
+needs no local branch (F13).
 
 ### Premise / KISS gate
 
@@ -131,8 +143,9 @@ watched between the two looks, so a Merge can still be answered with "it moved" 
    meanwhile, and nothing kept of the base's coming in is reachable from it.
 4. A conflict never resolves on the base, in the controller or at the operator's Merge.
 5. Every recorded history replays as it was written (D25); a run that recorded no base tip takes no new step.
-6. Agents reach no remote. The controller reaches one only where the repository's entry names it: it fetches
-   the base branch, and pushes it only on the operator's Merge, never forced.
+6. Agents reach no remote. The controller reaches one only where the repository's entry names it, and only
+   where that remote led when the run was set up: it fetches the base branch, and pushes it only on the
+   operator's Merge, as a compare-and-swap on the commit the change was judged on — never a rewrite.
 7. A retried merge adopts the one it made; the operator's staged content and their edits in a checked-out
    base are never written over; a look at the base that could not be made is no answer.
 
@@ -154,7 +167,9 @@ watched between the two looks, so a Merge can still be answered with "it moved" 
 | a Merge after the base moved again: nothing committed, merged or pushed; back through | `test_worktrees.Landing`, `Remote`; `test_stops.Reconciling` |
 | the base's tree after a landing is the final tree; its first-parent line its own | `test_worktrees.Landing`, `Remote` |
 | a retried merge adopted; the operator's staged content and edits kept; a hook-refused commit continued | `test_worktrees.Landing` |
-| a remote's base: begun from it, landed by a push, the local branch untouched, a refusal landing nothing, an unreachable remote no answer | `test_worktrees.Remote`; `test_repos` for the entry's key |
+| a remote's base: begun from it, landed by a push, the local branch untouched and not needed, a refusal landing nothing, an unreachable remote no answer | `test_worktrees.Remote`; `test_repos` for the entry's keys |
+| a remote rewound between the look and the push takes nothing | `test_worktrees.Remote`, red first: a plain push landed on it |
+| a remote turned elsewhere since the run began is neither fetched from nor pushed to | `test_worktrees.Remote`, four ways of turning it; `test_stops.Reconciling`: the fingerprint taken at setup and handed to every step |
 | the gate's change is the run's files | `test_worktrees.Merge`, `Landing`; `test_workbench.Runs` |
 | the history's rows | `test_workbench.HistoryRead` |
 | a run recorded before this replays, and takes no new step | `test_replay`; `test_stops.Reconciling`'s control |
@@ -207,3 +222,25 @@ a bare repository on disk. That is a live run's to show.
 - **To settle before a repository names its remote:** one whose pushes must pass a check first needs that
   check as its pre-push hook, which the controller's push runs. This repository has none (F10): until it has,
   its own entry should name no remote.
+
+### 2026-10-07 — the reviewer's three findings on the remote landing
+
+- **Reviewer:** `PASS` on the reconciliation and the history; a blocker on turning the remote landing on.
+- **Applied, each red first:** the push is leased on the commit the change was judged on (F11) — the wording
+  "forces nothing" is gone with it: the lease is a compare-and-swap, and the commit pushed is that commit's
+  own descendant, asserted before the push; the remote's destination is fingerprinted at setup and held to at
+  every fetch and push (F12); a remote's base is named with it and needs no local branch, the worktree view
+  reading against it too (F13).
+- **Refuted:** nothing.
+- **Verification, the modules the change touches, one host after the other:** Windows — worktrees, repos,
+  workflow, stops, replay, trace parity, activities, flows, architecture and the history's reading: 53 classes,
+  299 tests, OK. WSL — those and round boundaries, settings, workbench, settings delivery, cli, observability
+  and the public check's own tests: 96 classes, 488 tests, OK — after a test's own stand-in for the worktree
+  view, and the fixture tool's for the worktree's creation, took the arguments those steps now take.
+- **Controls, one guard out at a time, each put back and the tree byte for byte as before:** the push
+  unleased — the rewound remote takes it; where the remote leads unchecked — the redirected one is reached;
+  a remote's base looked for among the local branches. Each failed the tests named for it.
+- **`make demo`** and **`make public-check`:** passed on this code.
+- **Not run:** the full suite; a restart; a run with real agents; a push to a real remote.
+- **Still to do before this repository names its remote**, as the reviewer and the agent both hold: its
+  public check as a pre-push hook.

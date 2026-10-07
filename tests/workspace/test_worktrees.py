@@ -1174,13 +1174,19 @@ class Remote(Repo):
         return git(clone, "rev-parse", "HEAD").strip()
 
     def stand(self, run_id):
-        path = W.create(self.repo, "develop", self.root, run_id, TARGET, remote="origin")
+        # Where the remote leads, taken before any role runs: the run fetches from and pushes to nowhere else.
+        self.pinned = W.remote_id(self.repo, "origin")
+        path = W.create(self.repo, "develop", self.root, run_id, TARGET, remote="origin", pinned=self.pinned)
         write(os.path.join(path, "app.txt"), "one\n%s\n" % run_id)
         return path, W.started_from(path)
 
     def land(self, run_id, path, tip, tree=None):
         return W.merge(self.repo, path, run_id, "develop", tree or W.work_tree(path), None,
-                       os.path.join("todo", "done"), "%s: the change" % run_id, "Merge %s" % run_id, tip, "origin")
+                       os.path.join("todo", "done"), "%s: the change" % run_id, "Merge %s" % run_id, tip, "origin",
+                       self.pinned)
+
+    def reconcile(self, path, tip):
+        return W.reconcile(self.repo, path, "develop", tip, "origin", self.pinned)
 
     def remote_tip(self):
         return git(self.origin, "rev-parse", "develop").strip()
@@ -1209,12 +1215,12 @@ class Remote(Repo):
 
     def test_a_remote_that_moved_takes_nothing_and_its_base_is_brought_in(self):
         path, tip = self.stand("run1")
-        self.assertEqual(W.reconcile(self.repo, path, "develop", tip, "origin"), {"moved": False})
+        self.assertEqual(self.reconcile(path, tip), {"moved": False})
         ahead = self.elsewhere({"elsewhere.txt": "pushed by another\n"})
         self.assertEqual(self.land("run1", path, tip), {"result": "moved"})
         self.assertEqual((self.remote_tip(), git(self.repo, "rev-parse", "run1").strip()), (ahead, tip),
                          "nothing pushed, nothing committed")
-        came = W.reconcile(self.repo, path, "develop", tip, "origin")
+        came = self.reconcile(path, tip)
         self.assertEqual((came["moved"], came["base_tip"], came["files"]), (True, ahead, []))
         final = W.work_tree(path)
         self.assertEqual(self.land("run1", path, ahead)["result"], "merged")
@@ -1239,11 +1245,65 @@ class Remote(Repo):
     def test_a_remote_that_cannot_be_reached_is_no_answer(self):
         path, tip = self.stand("run1")
         git(self.repo, "remote", "set-url", "origin", os.path.join(self.tmp, "gone.git"))
-        for step in (lambda: W.reconcile(self.repo, path, "develop", tip, "origin"), lambda: self.land("run1", path, tip)):
+        self.pinned = W.remote_id(self.repo, "origin")      # the operator's own change of it, taken as given
+        for step in (lambda: self.reconcile(path, tip), lambda: self.land("run1", path, tip)):
             with self.assertRaises(W.GitError):
                 step()
         self.assertEqual((git(self.repo, "rev-parse", "run1").strip(), os.path.isdir(path)), (tip, True),
                          "unknown is not unchanged: nothing is committed, nothing is taken for merged")
+
+    def test_a_remote_rewound_since_it_was_looked_at_takes_nothing(self):
+        """The push lands only while the remote's branch is exactly the commit the change was judged on: one
+        rewound to an ancestor of it would take a plain push without a word."""
+        ahead = self.elsewhere({"elsewhere.txt": "pushed by another\n"})
+        path, tip = self.stand("run1")
+        self.assertEqual(tip, ahead)
+        # Between the look at the remote and the push: the repository's own commit hook, as the change is committed.
+        hooks = git(self.repo, "config", "core.hooksPath").strip()
+        write(os.path.join(hooks, "pre-commit"), "#!/bin/sh\ngit --git-dir='%s' update-ref refs/heads/develop %s\n"
+              % (self.origin.replace("\\", "/"), self.local))
+        os.chmod(os.path.join(hooks, "pre-commit"), 0o755)
+        self.addCleanup(lambda: os.path.exists(os.path.join(hooks, "pre-commit"))
+                        and os.remove(os.path.join(hooks, "pre-commit")))
+        self.assertEqual(self.land("run1", path, tip), {"result": "moved"})
+        self.assertEqual(self.remote_tip(), self.local, "the remote holds what it was rewound to, and nothing of the run")
+
+    def test_a_remote_that_no_longer_leads_where_it_did_is_neither_fetched_from_nor_pushed_to(self):
+        """A role can rewrite the repository's configuration without touching what the controller guards. The
+        destination a run began with is the only one it reaches."""
+        path, tip = self.stand("run1")
+        other = os.path.join(self.tmp, "other.git")
+        git(self.tmp, "init", "-q", "--bare", "-b", "develop", other)
+        git(self.repo, "push", "-q", other, "develop")
+        url = git(self.repo, "remote", "get-url", "origin").strip()
+        redirections = (
+            (("remote", "set-url", "origin", other), ("remote", "set-url", "origin", url)),
+            (("remote", "set-url", "--push", "origin", other), ("config", "--unset", "remote.origin.pushurl")),
+            (("config", "url.%s.insteadOf" % other, url), ("config", "--unset", "url.%s.insteadOf" % other)),
+            (("config", "url.%s.pushInsteadOf" % other, url), ("config", "--unset", "url.%s.pushInsteadOf" % other)))
+        for redirect, restore in redirections:
+            with self.subTest(redirect=redirect[:3]):
+                git(self.repo, *redirect)
+                for step in (lambda: self.reconcile(path, tip), lambda: self.land("run1", path, tip)):
+                    with self.assertRaisesRegex(W.GitError, "no longer leads where it did"):
+                        step()
+                git(self.repo, *restore)
+        self.assertEqual((git(other, "rev-parse", "develop").strip(), self.remote_tip(),
+                          git(self.repo, "rev-parse", "run1").strip()), (tip, tip, tip),
+                         "nothing reached the other destination, nothing was pushed, nothing committed")
+        self.assertEqual(self.land("run1", path, tip)["result"], "merged", "where it led again, it lands")
+
+    def test_a_repository_with_no_branch_of_its_own_for_the_base_begins_and_lands_on_the_remotes(self):
+        git(self.repo, "switch", "-q", "-c", "work")
+        git(self.repo, "branch", "-q", "-D", "develop")
+        path, tip = self.stand("run1")
+        self.assertEqual(self.reconcile(path, tip), {"moved": False})
+        self.assertEqual([row["state"] for row in W.view(self.repo, "develop", "origin") if row["branch"] == "run1"],
+                         ["uncommitted"], "its worktree is read against the remote's base too")
+        final = W.work_tree(path)
+        self.assertEqual(self.land("run1", path, tip)["result"], "merged")
+        self.assertEqual(git(self.origin, "rev-parse", "develop^{tree}").strip(), final)
+        self.assertFalse(W.branch_exists(self.repo, "develop"), "and no local branch of that name was made")
 
 
 if __name__ == "__main__":

@@ -69,10 +69,29 @@ def _unattended():
     return dict(os.environ, GIT_TERMINAL_PROMPT="0")
 
 
-def base_tip(repo, base, remote=None):
+def remote_id(repo, remote):
+    """A fingerprint of where `remote` leads now: every URL git would fetch from and push to, as the
+    repository's configuration resolves them, rewrites included. The URLs themselves are never kept — one
+    may carry a credential."""
+    urls = [git(repo, "remote", "get-url", *flags, remote).stdout for flags in (("--all",), ("--push", "--all"))]
+    return hashlib.sha256("\0".join(urls).encode("utf-8")).hexdigest()
+
+
+def _led(repo, remote, pinned):
+    """Refuse a remote that no longer leads where it did when its run began (`pinned`, its `remote_id` then).
+    A role's turn can rewrite the repository's configuration without touching anything the controller
+    guards, and what is fetched from or pushed to another place is nothing the operator agreed to."""
+    if pinned and remote_id(repo, remote) != pinned:
+        raise GitError("%s no longer leads where it did when this run began: its URL, or a rewrite of it, changed "
+                       "in the repository's configuration. Nothing is fetched from it or pushed to it" % remote)
+
+
+def base_tip(repo, base, remote=None, pinned=None):
     """The commit the base is at now. A remote's is fetched first — that branch alone, into its own
-    remote-tracking ref: where a remote stands is the remote's to say, and a fetch that failed is no answer."""
+    remote-tracking ref, and only from where the remote led when the run began (`pinned`): where a remote
+    stands is the remote's to say, and a fetch that failed is no answer."""
     if remote:
+        _led(repo, remote, pinned)
         git(repo, "fetch", "--quiet", "--no-tags", remote,
             "+refs/heads/%s:%s" % (base, _ref(base, remote)), env=_unattended())
     return git(repo, "rev-parse", "--verify", _ref(base, remote) + "^{commit}").stdout.strip()
@@ -122,7 +141,7 @@ def plan_path(todo_dir, todo_name, created, task):
     return os.path.join(todo_dir, stamp.strftime(todo_name).replace("{slug}", slug(task)) + ".md")
 
 
-def create(repo, base, root, run_id, target, lfs_pointers=False, remote=None):
+def create(repo, base, root, run_id, target, lfs_pointers=False, remote=None, pinned=None):
     """The run's worktree at `<root>/<run-id>` on branch `<run-id>`, from `base` — as `remote` holds it now,
     when the repository's base is a remote's, and as this repository's own branch otherwise.
 
@@ -140,7 +159,7 @@ def create(repo, base, root, run_id, target, lfs_pointers=False, remote=None):
     if os.path.exists(path):
         raise GitError("%s exists but is not a worktree of %s" % (path, repo))
     # A remote's base by its commit: the run's branch follows no upstream, and is never pushed.
-    start = base_tip(repo, base, remote) if remote else base
+    start = base_tip(repo, base, remote, pinned) if remote else base
     if target == "windows":
         _check_windows_paths(repo, start, path)
     os.makedirs(root, exist_ok=True)
@@ -260,7 +279,7 @@ def reopen(worktree, final_tree, verified_tree):
     return sorted(kept)
 
 
-def reconcile(repo, worktree, base, tip, remote=None):
+def reconcile(repo, worktree, base, tip, remote=None, pinned=None):
     """Bring the base into the run's worktree when it has moved past `tip`, the commit the run stands on.
 
     `{"moved": False}` while the base is still at that commit. Otherwise the worktree's files as they are
@@ -270,7 +289,7 @@ def reconcile(repo, worktree, base, tip, remote=None):
     earlier attempt's, and is adopted; one of an older tip is committed with the files, then the newer
     brought in. The base itself is never written.
     """
-    now = base_tip(repo, base, remote)
+    now = base_tip(repo, base, remote, pinned)
     held = git(worktree, "rev-parse", "--verify", "--quiet", "MERGE_HEAD", check=False).stdout.strip()
     if now == tip and held in ("", now):
         return {"moved": False}
@@ -375,7 +394,7 @@ def _unfinish_plan(worktree, verified_tree, plan, done_dir):
 
 
 def merge(repo, worktree, run_id, base, verified_tree, plan, done_dir, message, merge_message, tip=None,
-          remote=None):
+          remote=None, pinned=None):
     """Land the run's change on the base: the local branch, or `remote`'s where the base is a remote's.
 
     `verified_tree` is the tree the run holds for its merge, and the worktree must still be it. A run
@@ -392,7 +411,7 @@ def merge(repo, worktree, run_id, base, verified_tree, plan, done_dir, message, 
     """
     landing = bool(tip) and not plan
     remote = remote if landing else None
-    now = base_tip(repo, base, remote) if landing else None
+    now = base_tip(repo, base, remote, pinned) if landing else None
     merged = _adopted_merge(repo, base, run_id, merge_message, remote)
     if merged:
         cleanup(repo, worktree, run_id, base, remote)
@@ -400,7 +419,8 @@ def merge(repo, worktree, run_id, base, verified_tree, plan, done_dir, message, 
     if not branch_exists(repo, run_id) or not os.path.isdir(worktree):
         raise MergeRefused("the run's branch or worktree is gone and %s holds no merge of it" % base)
     if landing:
-        return _land(repo, worktree, run_id, base, verified_tree, message, merge_message, tip, now, remote)
+        return _land(repo, worktree, run_id, base, verified_tree, message, merge_message, tip, now, remote,
+                     pinned)
     merging = _merging(worktree)
     if not merging and verified_tree and not _clean(worktree):
         # Only while the work is uncommitted: a written work commit is merged, never undone. An attempt
@@ -460,16 +480,17 @@ def _tree(path, commit):
     return git(path, "rev-parse", "--verify", commit + "^{tree}").stdout.strip()
 
 
-def _land(repo, worktree, run_id, base, final_tree, message, merge_message, tip, now, remote):
+def _land(repo, worktree, run_id, base, final_tree, message, merge_message, tip, now, remote, pinned=None):
     """Land `final_tree` on the base while the base is still at `tip`, the commit the run was judged on.
 
     The change is one commit on that tip, made in the worktree so the repository's own commit hooks judge
     it; then the merge commit named for the run, its first parent the tip and its tree the final tree
     exactly, so the base's own history stays its first-parent line and nothing the worktree's branch held
     before — the files kept as the base came in (`reconcile`) — is reachable from it. The base takes that
-    commit only as a fast-forward from `tip`: a remote by a push that forces nothing, a checked-out branch
-    by `--ff-only`, which keeps its files in step and refuses to write over the operator's own edits, a
-    branch checked out nowhere by a compare-and-swap of its ref. A base that moved takes nothing.
+    commit only while it is exactly at `tip`, and so only as a fast-forward: a remote by a push leased on
+    that commit, a checked-out branch by `--ff-only`, which keeps its files in step and refuses to write over
+    the operator's own edits, a branch checked out nowhere by a compare-and-swap of its ref. A base that
+    moved — forward, or back to an ancestor — takes nothing.
     """
     if now != tip:
         return {"result": "moved"}
@@ -492,8 +513,13 @@ def _land(repo, worktree, run_id, base, final_tree, message, merge_message, tip,
                                "that was offered for this merge")
     commit = git(repo, "commit-tree", final_tree, "-p", tip, "-p", head, "-m", merge_message).stdout.strip()
     if remote:
-        done = git(repo, "push", "--porcelain", remote, "%s:refs/heads/%s" % (commit, base), check=False,
-                   env=_unattended())
+        _led(repo, remote, pinned)
+        # A compare-and-swap, not a rewrite: the remote takes the commit only while its branch is exactly
+        # `tip` — a plain push would also land on a branch rewound to an ancestor of it — and the commit is
+        # `tip`'s own descendant, so the update is a fast-forward or it is nothing.
+        git(repo, "merge-base", "--is-ancestor", tip, commit)
+        done = git(repo, "push", "--porcelain", "--force-with-lease=refs/heads/%s:%s" % (base, tip), remote,
+                   "%s:refs/heads/%s" % (commit, base), check=False, env=_unattended())
         refused = "%s refused the push to its %s" % (remote, base)
     else:
         checkout = next((entry["path"] for entry in worktrees(repo) if entry["branch"] == base), None)
@@ -503,7 +529,7 @@ def _land(repo, worktree, run_id, base, final_tree, message, merge_message, tip,
                 git(repo, "update-ref", "-m", merge_message, "refs/heads/" + base, commit, tip, check=False))
         refused = "git refused the merge into %s" % base
     if done.returncode != 0:
-        if base_tip(repo, base, remote) != tip:
+        if base_tip(repo, base, remote, pinned) != tip:
             return {"result": "moved"}
         raise MergeRefused("%s: %s" % (refused, (done.stderr or done.stdout).strip()[:500]))
     cleanup(repo, worktree, run_id, base, remote)
@@ -702,8 +728,9 @@ def review_diff(path, offset=0, base=None, tree=None, file=None, files_from=None
     return read
 
 
-def view(repo, base):
-    """Every worktree git reports, and whether its work is merged into the local base branch.
+def view(repo, base, remote=None):
+    """Every worktree git reports, and whether its work is merged into the base — `remote`'s branch as this
+    repository last fetched it, where the base is a remote's, and the local branch otherwise.
 
     A run's work stays uncommitted until its merge, so a branch with nothing the base lacks
     is merged only when its worktree holds nothing uncommitted either.
@@ -715,7 +742,7 @@ def view(repo, base):
             state = "detached"
         elif branch == base:
             state = "base"
-        elif git(repo, "rev-list", "--count", "refs/heads/%s..refs/heads/%s" % (base, branch)).stdout.strip() != "0":
+        elif git(repo, "rev-list", "--count", "%s..refs/heads/%s" % (_ref(base, remote), branch)).stdout.strip() != "0":
             state = "unmerged"
         elif os.path.isdir(entry["path"]) and not _clean(entry["path"]):
             state = "uncommitted"

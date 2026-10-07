@@ -495,13 +495,15 @@ class Based(Closing):
         super().__init__(**kwargs)
         self.reconcile_failures = reconcile_failures
         self.looked = []
+        self.led = []
 
-    def reconcile(self, repo, worktree, base, tip, remote=None):
+    def reconcile(self, repo, worktree, base, tip, remote=None, pinned=None):
         if self.reconcile_failures:
             self.reconcile_failures -= 1
             raise RuntimeError("the remote does not answer")
         self.looked.append((tip, remote, len(self.turns)))
-        return super().reconcile(repo, worktree, base, tip, remote)
+        self.led.append(pinned)
+        return super().reconcile(repo, worktree, base, tip, remote, pinned)
 
 
 class Reconciling(Scenario):
@@ -594,8 +596,10 @@ class Reconciling(Scenario):
                 return dict(super().resolve(selected, worktree_root), remote="origin")
         run = self.based([("closeout-e3-1", 0, "closed out\n")], repositories=Remote())
         self.assertEqual((run.state["remote"], self.git.looked), ("origin", [("base-tip-0", "origin", 4)]))
+        self.assertEqual((run.state["remote_id"], self.git.led), ("where-origin-leads", ["where-origin-leads"]),
+                         "where the remote led at the run's setup, before any role ran: every look is held to it")
         run.answer("merge")
-        self.assertEqual(self.git.landed, [("base-tip-0", "origin")])
+        self.assertEqual((self.git.landed, self.git.pinned), ([("base-tip-0", "origin")], ["where-origin-leads"]))
 
     def test_control_a_run_that_recorded_no_base_is_never_reconciled(self):
         run = self.based([("closeout-e3-1", 0, "closed out\n")], based=False)
