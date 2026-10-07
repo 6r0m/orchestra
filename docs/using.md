@@ -101,8 +101,9 @@ answers are the stop's own, as buttons. The note is labelled with the answers it
 note typed for a stop stays while you look at other runs; an answer the workflow refuses is said
 beside what it concerns, and a merge or a discard asks first.
 
-The change is read as one snapshot of the worktree — its last commit and the tree its files make — and
-listed file by file, each by its whole path: a rename as its old path and its new one, a binary file
+The change is read as one snapshot of the worktree — its last commit and the tree its files make; once a
+merge in conflict has come back, the base brought into it and that tree, so that only what the run adds
+shows — and listed file by file, each by its whole path: a rename as its old path and its new one, a binary file
 said so; a very long list comes a part at a time, *List more files* reading the rest of the same snapshot. Open a file to see its diff as an editor shows one: both line numbers, added lines green,
 removed red, long unchanged runs folded a click away. A file too large to show whole shows its changes
 alone, and says so. The patch sits below in a small box; *Copy patch* copies all of it, however large,

@@ -1,7 +1,8 @@
 # The engineer closes the todo out after the architect's PASS; the merge commits exactly what the gate showed
 
-**Status:** IMPLEMENTED, the external reviewer's third PATCH applied, documents only — awaiting its re-review
-(D3). The full suite on both hosts, the restart acceptance and a run with real agents are not run yet.
+**Status:** IMPLEMENTED and deployed: the external reviewer's PASS (D3), the full suite on both hosts and the
+restart acceptance are in, and the live stack runs this code. Left, with the operator: a run with real agents
+that closes out and merges.
 **Scope:** the run's finalisation: a `closeout` stage ([stages.py](../app/foundation/stages.py)), its flow rules
 ([flows.py](../app/foundation/flows.py), [flows/](../flows/README.md)), the workflow's path through it
 ([workflow.py](../app/orchestration/workflow.py)), its checks and the reopening of a change that goes back
@@ -271,3 +272,34 @@ a live run's to show.
 - **Verification:** the checks that read these files — the architecture's routing and links, the replay and
   the public check's own tests: WSL 9 classes, 47 tests, OK; Windows, replay and architecture, 8 classes, 41
   tests, OK. `make public-check`: passed.
+
+### 2026-10-07 — the external reviewer's PASS, and the full suite
+
+- **PASS** on the round before, with no further change asked.
+- **The full suite, first:** WSL — 131 classes, 627 tests, OK. Windows — 87 classes, 427 tests, one failing,
+  twice of two runs: `test_stack.RealWorker`, whose sweep of its stand-in worker's settings found nothing to
+  take.
+- **Its cause, older than this change:** `test_activities.TracedKeys` swept the machine's own temporary folder,
+  where a sweep takes every ended process's settings — the stand-in's too, between its stop and the sweep
+  meant for it. The two classes ended side by side in both runs. Shown apart from the suite: given a temporary
+  folder holding another ended process's settings, the class took them, twice of two; `RealWorker` alone passed
+  three times of three.
+- **Fixed in the test, after the PASS and so unreviewed:** `TracedKeys` has a temporary folder of its own, as
+  the stale-settings tests have. The same probe then leaves the other process's settings, twice of two.
+- **The full suite on that tree:** Windows — 87 classes, 427 tests, OK, the two classes side by side again.
+  WSL — 131 classes, 627 tests, OK. `make public-check`: passed.
+- **Not run:** `tests/acceptance_restart.py`, which restarts the live stack; this repository's documents named
+  in the operator's descriptor; a run with real agents.
+
+### 2026-10-07 — deployed, on the operator's word
+
+- **Before the restart:** every run the live Temporal held — one open at its final gate, one closed — replayed
+  on this code, read from the server and replayed in a process of its own.
+- **The deploy:** the Workbench's service restarted onto this checkout, then `tests/acceptance_restart.py`:
+  passed, every check — the stack stopped and started through the Workbench, the service restarted and killed,
+  a merge with its plan in the done folder inside it. Both workers and the service have run this code since.
+- **After it:** both shipped flows hold; the run that waited across the restart answers its status from the new
+  worker — at its final gate, on the steps it recorded, holding its verified tree and no final one; this
+  repository's entry in the operator's descriptor names its documents, and the running code reads the file.
+- **Left:** the waiting run's merge, which meets a conflict in `tests/README.md` with the base as it is now —
+  previewed, its agents' to resolve; and a run with real agents through a closeout to its merge.

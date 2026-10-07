@@ -199,6 +199,12 @@ class TracedKeys(unittest.TestCase):
         patched = mock.patch.dict(os.environ, {"LANGFUSE_PUBLIC_KEY": "pk-test", "LANGFUSE_SECRET_KEY": "sk-test"})
         patched.start()
         self.addCleanup(patched.stop)
+        # A temporary folder of this class's own: the sweep these tests make takes every ended process's
+        # folder it finds, and the machine's own holds the ones other classes' workers left for their checks.
+        own = tempfile.mkdtemp(prefix="orchestra-keys-")
+        self.addCleanup(shutil.rmtree, own, True)
+        self.addCleanup(setattr, tempfile, "tempdir", tempfile.tempdir)
+        tempfile.tempdir = own
 
     def turn(self, kind, during, rc=0):
         """Run one traced plan step of `kind`, calling `during(keys)` while its agent works."""

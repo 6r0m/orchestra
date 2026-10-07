@@ -1,6 +1,7 @@
 // A run's change as its target host's git reads it: one snapshot — the worktree's last commit and the tree its
-// files make — listed file by file, each opening into its diff, and its whole patch to copy. Read again, it is a
-// new snapshot; nothing of the last one is mixed into it.
+// files make, or, while its base is merged into it after a conflict, that base and the tree — listed file by
+// file, each opening into its diff, and its whole patch to copy. Read again, it is a new snapshot; nothing of the
+// last one is mixed into it.
 
 import { api } from "./api.js";
 import { $, report } from "./ui.js";
@@ -51,7 +52,8 @@ async function loadDiff(asked) {
     if (reading !== runId) return;
     shown = read;
     const counted = read.files_total === 1 ? "1 file changed" : read.files_total + " files changed";
-    $("change-said").textContent = "Against " + read.base.slice(0, 10) + ", the worktree's last commit: "
+    $("change-said").textContent = "Against " + read.base.slice(0, 10)
+      + (read.merging ? ", the base merged into this worktree: " : ", the worktree's last commit: ")
       + (read.files_total ? counted + "." : "the worktree holds no change.");
     $("diff-files").replaceChildren(...(read.files_total ? [fileList(reading, read, read.files, read.files_total)] : []));
     $("diff-raw").hidden = !read.total;

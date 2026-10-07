@@ -397,7 +397,9 @@ still lands on a checkout.
   resolves in the controller: the base is merged into the run's worktree with its
   conflict markers and the change is reopened as a revise reopens it; the engineer
   resolves the files, the architect verifies, the engineer closes out again, the operator
-  merges again, and the run branch gains one reconciliation merge commit. A run started
+  merges again, and the run branch gains one reconciliation merge commit. Until then
+  the change read at the gate is what the run adds to the base brought in, never that
+  base's own commits. A run started
   before closeouts recorded a flow with none: it holds the tree the architect's last
   `PASS` verified, and the controller finishes its plan at the merge — moved to the done
   folder with a finished status line, or deleted. A run of the first closeouts recorded

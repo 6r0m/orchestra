@@ -498,7 +498,10 @@ def review_diff(path, offset=0, base=None, tree=None, file=None, files_from=None
 
     Without `tree`, the change now: the worktree's HEAD and the tree `git add -A` would commit, made on a
     private copy of the index (`work_tree`), so reading a change for review changes nothing anyone staged, and
-    a new file arrives with its contents. With `tree`, the change from `base` — the worktree's HEAD when not
+    a new file arrives with its contents. While the base is merged into the worktree and not yet committed — a
+    conflict handed back — HEAD already holds the run's change, and against it only the base's own commits
+    would show: the change now is then read against the base brought in, and says so (`merging`). With `tree`,
+    the change from `base` — the worktree's HEAD when not
     given — to that tree: a snapshot read before, or the trees two reviews judged. Either is read with `DIFF`,
     so every read of one snapshot is the same bytes whatever the live worktree does meanwhile.
 
@@ -531,8 +534,10 @@ def review_diff(path, offset=0, base=None, tree=None, file=None, files_from=None
             raise ChangeRefused("git no longer holds %s: it prunes what nothing refers to after a while" % name)
         return name
 
+    merging = False
     if tree is None:
-        base, tree = git(["rev-parse", "HEAD"]).strip(), work_tree(path)
+        merging = _merging(path)
+        base, tree = git(["rev-parse", "MERGE_HEAD" if merging else "HEAD"]).strip(), work_tree(path)
     else:
         base = held(base) if base is not None else git(["rev-parse", "HEAD"]).strip()
         tree = held(tree)
@@ -567,7 +572,7 @@ def review_diff(path, offset=0, base=None, tree=None, file=None, files_from=None
         files = listed()
         return {"base": base, "tree": tree, "files": files[files_from:files_from + FILES_LIMIT],
                 "files_total": len(files), "files_from": files_from}
-    read = {"base": base, "tree": tree}
+    read = {"base": base, "tree": tree, "merging": merging}
     if not offset:
         files = listed()
         summary, _, summary_total = _chunk(git(["diff"] + DIFF + ["--stat"] + pair), 0, SUMMARY_LIMIT)

@@ -630,6 +630,31 @@ class Merge(Repo):
         history = git(self.repo, "log", "--format=%s", "develop").splitlines()
         self.assertIn("Merge develop into run1", history, "one reconciliation merge commit, no rebase")
 
+    def test_a_conflict_handed_back_is_read_against_the_base_brought_in_never_its_own_commit(self):
+        """A conflict leaves the run's change committed and the moved base merged into its worktree. What the
+        operator then judges is what the run adds to that base — not the base's own commits arriving."""
+        path = self.worktree("run1")
+        write(os.path.join(self.repo, "app.txt"), "one\nthe base moved\n")
+        for name in ("elsewhere.txt", "more.txt"):
+            write(os.path.join(self.repo, name), "the base's own\n")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "base moved")
+        moved = git(self.repo, "rev-parse", "develop").strip()
+        before = W.review_diff(path)
+        self.assertEqual((before["base"], before["merging"]), (git(path, "rev-parse", "HEAD").strip(), False),
+                         "no base brought in: against the worktree's own commit, as ever")
+        self.assertEqual(self.merge("run1", path)["result"], "conflict")
+        write(os.path.join(path, "app.txt"), "one\nthe base moved\nrun1\n")
+        read = W.review_diff(path)
+        self.assertEqual((read["base"], read["merging"]), (moved, True), "against the base as it was brought in")
+        self.assertEqual(sorted(each["path"] for each in read["files"]),
+                         ["app.txt", "todo/done/2026-09-15_1200-run1.md"], "the run's own change, and no more")
+        self.assertEqual(W.review_diff(path, base=read["base"], tree=read["tree"], file="app.txt")["file"]["added"], 1,
+                         "its resolved file adds the run's one line to the base's")
+        # Control: against the run's own commit — what was read before — the base's files are the change.
+        own = W.review_diff(path, base=git(path, "rev-parse", "HEAD").strip(), tree=read["tree"])
+        self.assertEqual(sorted(each["path"] for each in own["files"]), ["app.txt", "elsewhere.txt", "more.txt"])
+
 
 class Closeout(Repo):
     """A run whose engineer closed it out: what that closeout changed is read path by path, the tree it left is
