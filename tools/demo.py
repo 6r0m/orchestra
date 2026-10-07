@@ -7,8 +7,9 @@ one: its own Workbench, and its own worker — the real worker, started and stop
 through the stack's one owner — on queues of its own, sharing only the live Temporal.
 
 One run goes the whole way: the engineer plans, the architect sends the plan back once and passes it,
-the plan is approved, the engineer builds, the architect verifies, its changed file is read in the page's
-viewer — in the change, and in the build's turn — and the change is merged. One is
+the plan is approved, the engineer builds, the architect verifies, the engineer closes the todo out, its
+changed file is read in the page's viewer — in the change, and in the build's turn — and the change is
+merged, the todo in the done folder inside the merge. One is
 stopped while its engineer works, and one while it waits for approval — sent back first with a note
 typed into the page, which reaches the engineer's next plan; each ends stopped with its worktree and
 branch as they were. One is force-terminated when its Stop cannot finish, because its
@@ -106,8 +107,8 @@ FAKE = textwrap.dedent("""\
         message = json.dumps({"verdict": verdict[0], "feedback": verdict[1]})
     else:
         todo = re.search(r"write the reviewable todo to exactly: (\\S+)", prompt)
-        closing = re.search(r"Close out its todo at (\\S+?), and change", prompt)
-        done = re.search(r"keeps a finished todo in (\\S+?): move it there", prompt)
+        closing = re.search(r"Close out its todo at (\\S+)\\. (?:Move|Delete) it", prompt)
+        done = re.search(r"Move it to (\\S+) under its own name", prompt)
         if closing:
             say("closing out the todo...", "moving it to the done folder...")
             # A closeout run again finds its own work done.
@@ -390,7 +391,9 @@ class Demo:
         check(self.press(merged, "Approve", "answered: approve"), "the page sent the answer, and the workflow took it")
         self.until(merged, lambda view: view["state"] == "waiting" and view["stop"]["reason"] == "final", 300,
                    "the final gate")
-        check(True, "the engineer built and the architect verified")
+        turns = [entry["stage"] for entry in self.api("/api/runs/%s" % merged)["timeline"]]
+        check(turns[-3:] == ["build", "verify", "closeout"],
+              "the engineer built, the architect verified, and the engineer closed the todo out: %s" % turns[-3:])
 
         step("the change read file by file, and the history as turns with your answers between")
         check(self.press(merged, "file:greeting.txt", "hello"),
@@ -418,6 +421,11 @@ class Demo:
         check(view["status"] == "MERGED", "the run ended merged")
         check("greeting.txt" in git(self.repo, "ls-tree", "--name-only", "develop"),
               "the base branch holds the change")
+        landed = git(self.repo, "ls-tree", "-r", "--name-only", "develop").split()
+        done = "todo/done/" + os.path.basename(plan)
+        check(plan not in landed and done in landed
+              and git(self.repo, "show", "develop:" + done).startswith("**Status:** PASS"),
+              "and the todo as the engineer's closeout left it, in the merge itself: %s" % done)
         check(self.press(merged, "absent:Stop run,Force terminate", "absent"),
               "the page offers the closed run neither Stop run nor Force terminate")
         check(self.press(merged, "turn:verify", "The change is the approved plan.") and "PASS" in self.said,

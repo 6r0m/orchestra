@@ -117,7 +117,8 @@ worker that dies between spawn and assignment cannot leave an agent behind.
 - **Only what a stage judged can proceed.** A plan changed after the architect passed it goes back
   for assessment before a build starts; a change made while the architect verifies fails that step;
   the engineer's closeout of the todo may touch nothing the architect verified but the todo and
-  documentation; and a merge commits exactly the tree the final gate showed you, or refuses.
+  the documents the repository names; and a merge commits exactly the tree the final gate showed
+  you, or refuses.
 - **Vendor trust dialogs are recorded, not bypassed.** Orchestra records a repository you start a
   run on with the CLIs' own trust stores, so an unattended turn does not sit at a dialog — and it
   never overrides an explicit `untrusted` decision of yours.

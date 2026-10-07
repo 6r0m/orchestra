@@ -171,27 +171,43 @@ def work_tree(path):
         return git(path, "write-tree", env=env).stdout.strip()
 
 
-def changed(path, base, tree):
+def changed(path, base, tree, folders=(), patterns=()):
     """What differs from the tree `base` to `tree`, each as `(status, path)`: `A` a file added, `D` one
-    removed, `M` or `T` one changed — a move its removal and its addition, each path as git names it."""
-    tokens = git(path, "diff", "--no-renames", "--name-status", "-z", base, tree).stdout.split("\0")
+    removed, `M` or `T` one changed — a move its removal and its addition, each path as git names it.
+
+    Left out: every path under one of `folders`, each taken literally, and every path one of `patterns`
+    matches as git globs it — `docs/` that folder, `**/README.md` that file wherever it is. The matching
+    is git's own, so what is left is what git itself says lies outside them.
+    """
+    but = [":(exclude,literal)" + folder.replace("\\", "/").strip("/") for folder in folders if folder]
+    but += [":(exclude,glob)" + pattern for pattern in patterns]
+    tokens = git(path, "diff", "--no-renames", "--name-status", "-z", base, tree,
+                 *(["--"] + but if but else [])).stdout.split("\0")
     return list(zip(tokens[0::2], tokens[1::2]))
 
 
-def reopen(worktree, closeout_tree, verified_tree):
-    """Undo a closeout: each path it changed is again as the architect verified it, so the run's todo is
-    where its roles are asked to read it. Returns the paths left alone because they changed again after the
-    closeout — someone's later work, which the next review judges.
+def holds(path, tree, names):
+    """Which of `names` — each a file's path as git names it, never a pattern — the tree holds."""
+    found = git(path, "ls-tree", "-r", "-z", "--name-only", tree, "--", *names,
+                env=dict(os.environ, GIT_LITERAL_PATHSPECS="1")).stdout.split("\0")
+    return [name for name in names if name in found]
 
-    Files are written and removed, as the closeout made them; nothing is staged. Every file is read from
-    git before any is touched, so a tree git cannot read changes nothing — and run again it finds its own
-    work done.
+
+def reopen(worktree, final_tree, verified_tree):
+    """Take a worktree offered for its merge back to what the architect verified: each path changed from
+    `verified_tree` to `final_tree` is again as it was verified, so the run's todo is where its roles are
+    asked to read it. Returns the paths left alone because they changed again after `final_tree` — a later
+    hand's work, or a base merged in — which the next review judges.
+
+    Files are written and removed, as they were made; nothing is staged, and a merge under way stays under
+    way. Every file is read from git before any is touched, so a tree git cannot read changes nothing — and
+    run again it finds its own work done.
     """
     now = work_tree(worktree)
-    since = {name for _, name in changed(worktree, closeout_tree, now)}
+    since = {name for _, name in changed(worktree, final_tree, now)}
     apart = {name for _, name in changed(worktree, verified_tree, now)}
     kept, restored, removed = [], [], []
-    for status, name in changed(worktree, verified_tree, closeout_tree):
+    for status, name in changed(worktree, verified_tree, final_tree):
         target = os.path.join(worktree, *name.split("/"))
         if name in since:
             if name in apart:
@@ -307,9 +323,9 @@ def merge(repo, worktree, run_id, base, verified_tree, plan, done_dir, message, 
     """Commit the run's change on the run branch and merge it into the local base branch.
 
     `verified_tree` is the tree the run holds for its merge, and the worktree must still be it. A run
-    whose engineer closed it out hands the tree that closeout left and no `plan`, and exactly that tree is
-    committed. A run with no closeout hands the tree the architect verified and its `plan`, which is
-    finished here: moved to `done_dir`, or deleted where the repository has none.
+    hands its final tree and no `plan`, and exactly that tree is committed. A run started before a flow
+    made its build final hands the tree the architect verified and its `plan`, which is finished here:
+    moved to `done_dir`, or deleted where the repository has none.
 
     Returns `{"result": "merged", "commit": ...}` once the base holds the merge and the
     worktree, branch and environment are gone, or `{"result": "conflict", "files": [...]}`
@@ -334,8 +350,7 @@ def merge(repo, worktree, run_id, base, verified_tree, plan, done_dir, message, 
         # Only the tree the run holds for its merge is committed.
         if work_tree(worktree) != verified_tree:
             raise MergeRefused("the worktree no longer matches the change the architect verified" if plan else
-                               "the worktree changed after its closeout, so it is no longer the change that "
-                               "was offered for this merge")
+                               "the worktree is no longer the change that was offered for this merge")
         if merging:
             git(worktree, "add", "-A")
             git(worktree, "commit", "--no-edit", "-m", "Merge %s into %s" % (base, run_id))

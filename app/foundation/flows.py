@@ -44,7 +44,11 @@ def split(step):
 
 
 def check(steps):
-    """`steps`, when they keep every rule; InvalidFlow naming the first one broken."""
+    """`steps`, when they keep every rule a run's steps keep; InvalidFlow naming the first one broken.
+
+    The rules a run is held to whenever it began: the workflow checks its recorded steps again on every
+    replay, so nothing here may refuse what an earlier run was started on. What only a flow read to start
+    a run must keep is `closes_out`."""
     if not isinstance(steps, list) or not all(isinstance(step, str) for step in steps):
         raise InvalidFlow("a flow is a list of steps, each `role:action`")
     if not 1 <= len(steps) <= MAX_FLOW_STEPS:
@@ -63,7 +67,7 @@ def check(steps):
                                   % (where, ", ".join("%s:%s" % (OPERATOR, gate) for gate in GATES)))
             if action == "approve" and before not in tuple(stages.REVIEWS) + stages.ANSWERS:
                 raise InvalidFlow("%s: an approval follows a review or a research" % where)
-            if action == "merge" and (before not in ("verify", "closeout") or after is not None):
+            if action == "merge" and (before not in ("verify",) + stages.FINAL or after is not None):
                 raise InvalidFlow("%s: the merge is the last step, right after a verify or its closeout" % where)
             continue
         if action not in stages.STAGE_ROLE:
@@ -76,10 +80,8 @@ def check(steps):
             raise InvalidFlow("%s: %s judges a %s right before it" % (where, action, stages.REVIEWS[action]))
         if action == "build" and not planned:
             raise InvalidFlow("%s: a build implements a plan, and no plan comes before it" % where)
-        # A flow may leave it out: the controller then finishes the plan at the merge, as it did for every
-        # run started before closeouts — whose recorded steps must go on holding here, or they stop replaying.
-        if action == "closeout" and (before != "verify" or after != "merge"):
-            raise InvalidFlow("%s: a closeout comes between a verify and the merge" % where)
+        if action in stages.FINAL and (before != "verify" or after != "merge"):
+            raise InvalidFlow("%s: a %s comes between a verify and the merge" % (where, action))
         if action in stages.ANSWERS and planned:
             raise InvalidFlow("%s: research comes before any plan, which starts from its brief" % where)
         planned = planned or action == "plan"
@@ -98,8 +100,20 @@ def steps_of(flow):
     return check(flow["steps"])
 
 
+def closes_out(steps):
+    """`steps`, when a flow that builds makes that build final before its merge; InvalidFlow when it does not.
+
+    The rule of a flow read to start a run. A run started before closeouts keeps the steps it recorded,
+    with none, and its plan is the controller's to finish at the merge (`check`)."""
+    actions = [split(step)[1] for step in steps]
+    if "build" in actions and not any(action in stages.FINAL for action in actions):
+        raise InvalidFlow("a flow that builds closes out before the merge: `%s:%s`"
+                          % (stages.STAGE_ROLE[stages.FINAL[0]], stages.FINAL[0]))
+    return steps
+
+
 def load(name):
-    """The steps of the flow `name` in `flows/`, checked."""
+    """The steps of the flow `name` in `flows/`, checked as a flow a run may start on."""
     path = os.path.join(FLOWS_DIR, "%s.json" % name) if is_name(name) else None
     if path is None or not os.path.isfile(path):
         raise InvalidFlow("no flow %r in %s" % (name, FLOWS_DIR))
@@ -111,7 +125,7 @@ def load(name):
     except ValueError as exc:
         raise InvalidFlow("flow %r is not JSON: %s" % (name, exc)) from exc
     try:
-        return check(steps)
+        return closes_out(check(steps))
     except InvalidFlow as exc:
         raise InvalidFlow("flow %r: %s" % (name, exc)) from exc
 

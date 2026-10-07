@@ -686,7 +686,7 @@ class Closeout(Repo):
     def test_a_change_made_after_the_closeout_is_refused_and_nothing_is_committed_or_merged(self):
         path, _, closeout = self.closed()
         write(self.at(path, "app.txt"), "edited after the closeout\n")
-        with self.assertRaisesRegex(W.MergeRefused, "changed after its closeout"):
+        with self.assertRaisesRegex(W.MergeRefused, "no longer the change that was offered"):
             self.merge_closed(path, closeout)
         self.assertEqual(self.merges_on_develop(), [])
         self.assertEqual(git(self.repo, "rev-list", "--count", "develop..run1").strip(), "0", "no work commit either")
@@ -715,17 +715,74 @@ class Closeout(Repo):
         self.assertEqual(self.merge_closed(path, closeout)["result"], "merged")
         self.assertEqual(git(self.repo, "rev-parse", "develop^2^{tree}").strip(), closeout)
 
-    def test_a_conflict_after_a_closeout_merges_once_resolved_with_nothing_moved_again(self):
-        path, _, closeout = self.closed()
+    def test_a_conflict_is_reopened_with_its_todo_where_the_resolving_roles_are_asked_to_read_it(self):
+        path, verified, closeout = self.closed()
         write(os.path.join(self.repo, "app.txt"), "one\nthe base moved\n")
         git(self.repo, "commit", "-q", "-am", "base moved")
         result = self.merge_closed(path, closeout)
         self.assertEqual((result["result"], result["files"]), ("conflict", ["app.txt"]))
+        self.assertFalse(os.path.exists(self.at(path, self.PLAN)),
+                         "the precondition: the todo is closed out in the run's commit, gone from its path")
+        # Before the engineer's turn on the conflict.
+        self.assertEqual(W.reopen(path, closeout, verified), [])
+        with open(self.at(path, self.PLAN), encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "**Status:** DRAFT\nplan\n", "the todo as the architect verified it")
+        self.assertFalse(os.path.exists(self.at(path, self.DONE)))
+        with open(self.at(path, "app.txt"), encoding="utf-8") as fh:
+            self.assertIn("<<<<<<<", fh.read(), "the conflict is still the engineer's to resolve")
+        self.assertTrue(git(path, "rev-parse", "--verify", "MERGE_HEAD").strip(), "and the merge is still under way")
+        # Resolved, verified, closed out again and merged: one todo, where its repository keeps it finished.
         write(self.at(path, "app.txt"), "one\nthe base moved\nrun1\n")
-        self.assertEqual(self.merge_closed(path, W.work_tree(path))["result"], "merged")
+        resolved = W.work_tree(path)
+        os.remove(self.at(path, self.PLAN))
+        write(self.at(path, self.DONE), "**Status:** PASS 2026-09-15\nthe record\n")
+        final = W.work_tree(path)
+        self.assertEqual(sorted(W.changed(path, resolved, final)), [("A", self.DONE), ("D", self.PLAN)])
+        self.assertEqual(self.merge_closed(path, final)["result"], "merged")
         tree = git(self.repo, "ls-tree", "-r", "--name-only", "develop").split()
         self.assertIn(self.DONE, tree)
         self.assertNotIn(self.PLAN, tree)
+        self.assertIn("Merge develop into run1", git(self.repo, "log", "--format=%s", "develop").splitlines())
+
+    def test_a_todo_its_repository_deletes_comes_back_from_the_verified_tree_when_reopened(self):
+        """Deleted by its closeout, it is in no folder and no commit: the tree the architect verified holds it."""
+        path = self.worktree("run1")
+        verified = W.work_tree(path)
+        os.remove(self.at(path, self.PLAN))
+        final = W.work_tree(path)
+        self.assertEqual(W.holds(path, final, [self.PLAN]), [])
+        self.assertEqual(W.reopen(path, final, verified), [])
+        with open(self.at(path, self.PLAN), encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "**Status:** DRAFT\nplan\n")
+        self.assertEqual(W.work_tree(path), verified)
+
+    def test_which_paths_lie_outside_the_todo_folders_and_a_repositorys_documents_is_gits_own_matching(self):
+        path = self.worktree("run1")
+        names = ("README.md", "app/part/README.md", "docs/guide.md", "app/part/docs/structure.md", "roles/engineer.md",
+                 "skills/review/SKILL.md", "AGENTS.md", "app/part/main.py", "docs.md", "todo[1]/note.md")
+        for name in names:
+            write(self.at(path, name), "one\n")
+        before = W.work_tree(path)
+        for name in names:
+            write(self.at(path, name), "two\n")
+        os.remove(self.at(path, self.PLAN))
+        write(self.at(path, self.DONE), "moved\n")
+        after = W.work_tree(path)
+
+        def outside(folders, patterns):
+            return sorted(name for _, name in W.changed(path, before, after, folders, patterns))
+        behaviour = ["AGENTS.md", "app/part/main.py", "docs.md", "roles/engineer.md", "skills/review/SKILL.md",
+                     "todo[1]/note.md"]
+        self.assertEqual(outside(("todo", "todo\\done"), ("**/README.md", "**/docs/**")), behaviour,
+                         "a README and a docs folder wherever they are; a persona, a skill and code are neither")
+        self.assertEqual(outside(("todo",), ("README.md", "docs/")),
+                         sorted(behaviour + ["app/part/README.md", "app/part/docs/structure.md"]),
+                         "a file and a folder named plainly are that file and that folder")
+        self.assertEqual(outside(("todo[1]", None), ()),
+                         sorted(set(names) - {"todo[1]/note.md"} | {self.PLAN, self.DONE}),
+                         "a folder is taken literally, never as a pattern, and one a repository has not is none")
+        self.assertEqual(W.holds(path, after, [self.PLAN, self.DONE, "todo[1]/note.md", "docs"]),
+                         [self.DONE, "todo[1]/note.md"], "a file a tree holds, by its exact name")
 
     def test_a_reopened_change_is_the_tree_the_architect_verified_and_nothing_is_staged(self):
         path, verified, closeout = self.closed()

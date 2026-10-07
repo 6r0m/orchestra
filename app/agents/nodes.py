@@ -320,12 +320,14 @@ def compose_parts(stage, stage_cfg, is_review, state, session_first,
 
 def _ask(stage, state, todo, logs):
     """The stage's ask, its placeholders filled; a closeout's says where its run's repository keeps a finished
-    todo, as that repository's descriptor names it."""
+    todo and which documents it may bring up to date, as that repository's descriptor names them."""
     ask = stages.STAGE_ASK[stage].replace("{{TODO_PATH}}", todo).replace("{{LOGS}}", logs)
-    if "{{TODO_DONE}}" in ask:
-        done = state.get("todo_done_dir")
+    if stage in stages.FINAL:
+        done, documents = state.get("todo_done_dir"), state.get("closeout_docs")
         ask = ask.replace("{{TODO_DONE}}", stages.CLOSEOUT_KEEPS.replace(
             "{{TODO_DONE_DIR}}", os.path.join(state["worktree_path"], done)) if done else stages.CLOSEOUT_DELETES)
+        ask = ask.replace("{{CLOSEOUT_DOCS}}", stages.CLOSEOUT_DOCS % ", ".join(documents) if documents
+                          else stages.CLOSEOUT_NO_DOCS)
     return ask
 
 

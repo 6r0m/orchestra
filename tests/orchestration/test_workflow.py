@@ -688,7 +688,8 @@ PROMPT_CASES = {
     # (`test_stops.Closeout`), which no fixture read on both hosts can hold.
     "closeout, the first turn after the architect's pass": dict(
         stage="closeout", stage_cfg=ENGINEER, is_review=False,
-        state=dict(TURN, phase="closeout", episode=4, todo_done_dir=None),
+        state=dict(TURN, phase="closeout", episode=4, todo_done_dir=None,
+                   closeout_docs=["**/README.md", "**/docs/**"]),
         session_first=False, stage_first=True, review_rounds=ROUNDS),
 }
 
@@ -986,25 +987,46 @@ class Flows(Scenario):
         self.addCleanup(setattr, flows, "FLOWS_DIR", flows.FLOWS_DIR)
         flows.FLOWS_DIR = folder
         mine = os.path.join(folder, "mine.json")
+        # A flow a run may start on: one that builds closes out before its merge.
+        steps = self.CODE[:5] + ["engineer:closeout", "you:merge"]
         with open(mine, "w", encoding="utf-8") as fh:
-            json.dump(self.CODE, fh)
+            json.dump(steps, fh)
         repo = tempfile.mkdtemp(prefix="orchestra-flow-repo-")
         self.addCleanup(shutil.rmtree, repo, True)
         settings = S.load()
         self.host, self.agent = host([("plan-e1-1", 0, "planned\n"),
                                       ("assess-e1-1", 0, review_first_for(settings, "architect", "PASS")[0]),
                                       ("build-e2-1", 0, "built\n"),
-                                      ("verify-e2-1", 0, review_resumed_for(settings, "architect", "PASS"))])
+                                      ("verify-e2-1", 0, review_resumed_for(settings, "architect", "PASS")),
+                                      ("closeout-e3-1", 0, "closed out\n")])
         run = Run(handle=temporal_env.run(runs.start(client(), "a flow of my own", repo=repo, flow="mine",
                                                      check=False)))
         self.addCleanup(run.cleanup)
-        self.assertEqual((run.state["flow"], run.stop["reason"]), ({"name": "mine", "steps": self.CODE}, "approval"))
+        self.assertEqual((run.state["flow"], run.stop["reason"]), ({"name": "mine", "steps": steps}, "approval"))
         # The file now plans again after the approval; the run goes on with the steps it was handed.
         with open(mine, "w", encoding="utf-8") as fh:
             json.dump(self.CODE[:3] + ["engineer:plan", "architect:assess"], fh)
         code, out = run.answer("yes")
         self.assertEqual((code, run.stop["reason"]), (0, "final"), out)
-        self.assertEqual(self.names(), ["plan-e1-1", "assess-e1-1", "build-e2-1", "verify-e2-1"])
+        self.assertEqual(self.names(), ["plan-e1-1", "assess-e1-1", "build-e2-1", "verify-e2-1", "closeout-e3-1"])
+
+    def test_a_flow_file_that_builds_without_closing_out_starts_no_run(self):
+        """What runs started before closeouts recorded still replays (`test_replay`); no file starts another."""
+        import shutil
+        import tempfile
+        from app.foundation import flows
+        folder = tempfile.mkdtemp(prefix="orchestra-flows-")
+        self.addCleanup(shutil.rmtree, folder, True)
+        self.addCleanup(setattr, flows, "FLOWS_DIR", flows.FLOWS_DIR)
+        flows.FLOWS_DIR = folder
+        with open(os.path.join(folder, "before.json"), "w", encoding="utf-8") as fh:
+            json.dump(self.CODE, fh)
+        repo = tempfile.mkdtemp(prefix="orchestra-flow-repo-")
+        self.addCleanup(shutil.rmtree, repo, True)
+        self.host, self.agent = host([])
+        with self.assertRaisesRegex(flows.InvalidFlow, "flow 'before': a flow that builds closes out before the merge"):
+            temporal_env.run(runs.start(client(), "a flow from before", repo=repo, flow="before", check=False))
+        self.assertEqual(self.agent.calls, [], "refused before any workflow was started")
 
 
 if __name__ == "__main__":

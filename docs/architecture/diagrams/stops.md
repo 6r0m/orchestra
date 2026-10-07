@@ -36,11 +36,11 @@ graph TD
 
 This is the default flow, `engineer-code`, with the stops a run's flow may add or leave out
 ([structure D13](../structure.md)): research first, whose brief waits at an approval; an approval
-the flow does not schedule, or one *skip approvals* skips, going straight on; a flow with no closeout
-going from the verify's `PASS` straight to the final gate; and a flow with no build
-ending `DONE`, its worktree kept, where this one reaches the final gate. A revise at the final gate
-undoes the closeout before its role's turn, and the build closes out again once it passes
-([structure D24](../structure.md)).
+the flow does not schedule, or one *skip approvals* skips, going straight on; and a flow with no build
+ending `DONE`, its worktree kept, where this one reaches the final gate. A change that goes back from
+the final gate — a revise, or a merge in conflict — is reopened before its role's turn, and the build
+closes out again once it passes; a run started before closeouts goes from the verify's `PASS` straight
+to the final gate ([structure D24](../structure.md)).
 
 Any stage, the worktree's creation, a merge or a discard that fails stops at a `failed` stop, whose
 `continue` runs that step once more — a git step no worker of its host took within the policy's

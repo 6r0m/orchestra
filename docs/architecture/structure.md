@@ -151,7 +151,10 @@ Do not re-derive a `states/` layer here.
   or a `research`; a `research` only before any `plan`, which starts from its
   brief; a `build` only after a `plan`; a `closeout` only between a `verify` and
   the merge; and a flow that builds ends with the merge, right after a `verify`
-  or its `closeout` (D24). A run is handed its flow as `{name, steps}`
+  or its `closeout` (D24). A flow read from `flows/` to start a run keeps one more:
+  one that builds closes out before its merge. A run's recorded steps need not —
+  the workflow checks them again on every replay, and the runs started before
+  closeouts recorded none. A run is handed its flow as `{name, steps}`
   and takes it as given: one of another shape, or that breaks a rule, ends the
   run `REFUSED` before any step. A flow's name is its file's, by one grammar
   (`flows.is_name`) wherever a name is taken — a file, the policy's
@@ -200,7 +203,8 @@ still lands on a checkout.
   UNVERIFIED`. A plan and a build always go to the architect; an engineer-side
   blocker or open question reaches the human only through the architect. The
   one engineer turn no architect judges is the closeout: it may change only
-  the todo and documentation, and the operator judges it at the final gate (D24).
+  the todo and the documents its repository names, and the operator judges it
+  at the final gate (D24).
 - **D7** **Sessions:** one persistent CLI session per `(run_id, role)`;
   resume by exact stored id (Claude `--session-id` minted by us, Codex the
   thread its first turn completed in), never `--last`. Session = disposable
@@ -367,32 +371,35 @@ still lands on a checkout.
   Windows worktree whose deepest file or folder would pass those limits, measured
   on that repository's base branch, is refused before it exists; and an existing
   branch of the run's name is adopted only while it still points at the base.
-  Once the architect has passed the build, a flow that closes out — `engineer:closeout`,
-  as both shipped flows do — has the engineer close the todo out: what it says that
-  stays true is with the stable document that owns it, the todo is cut to its record,
-  its status says it passed, and it is moved to the repository's done folder — or
-  deleted, where the repository deletes a finished task (a null `todo_done_dir`). No
-  review follows that turn, so it may change only the repository's todo folders and its
-  documentation (`stages.closeout_may_change`) and anything else fails the step: the
+  Once the architect has passed the build, the engineer closes the todo out
+  (`engineer:closeout`): the todo, finished, moved to the repository's done folder — or
+  deleted, where the repository deletes a finished task (a null `todo_done_dir`). How a
+  todo is finished is the engineer's persona's, or a skill's the host binds to the stage.
+  No review follows that turn, so two facts are checked instead, by the repository's own
+  descriptor: it changed nothing but the todo folders and the documents the repository
+  names (`closeout_docs`, as git globs them — never a file's type, since a persona or a
+  skill is Markdown and is behaviour), and the todo is gone from where it was and, where
+  the repository keeps it, in the done folder. Either one failing fails the step. The
   architect's `PASS` accepts the implementation, and the operator judges the closeout.
-  The tree it left is the one the final gate holds. At `READY_FOR_HUMAN` the run waits at
-  its final gate for `merge`, `revise engineer|architect <feedback>` or a confirmed
-  `discard`; a defect goes back into the run, to the role the operator names — its
-  closeout undone first, each path it changed again as the architect verified it, bar one
-  changed again since, which the next review judges — and the build closes out anew
-  once it passes. `merge` commits exactly the tree the gate holds, and refuses when the
-  worktree is no longer that tree: the change lands as one commit whose
+  The tree it left is the run's final tree, the one the final gate holds. At
+  `READY_FOR_HUMAN` the run waits at its final gate for `merge`,
+  `revise engineer|architect <feedback>` or a confirmed `discard`; a defect goes back into
+  the run, to the role the operator names — reopened first: each path changed since the
+  verified tree is again as the architect verified it, bar one changed again since, which
+  the next review judges, so the todo is where the roles are asked to read it — and the
+  build closes out anew once it passes. `merge` commits exactly the final tree, and
+  refuses when the worktree is no longer that tree: the change lands as one commit whose
   message is the plan's name and a few words of the task, and the base branch
   gains an explicit `--no-ff` merge commit named for the plan — in the base's
   checkout when it is checked out there, which refuses staged changes that are
-  the operator's, and otherwise without touching any checkout. A run whose flow has no
-  closeout — every run started before closeouts — holds the tree the architect's last
-  `PASS` verified, and the controller finishes its plan at the merge: moved to the done
-  folder with a finished status line, or deleted. A conflict never
+  the operator's, and otherwise without touching any checkout. A conflict never
   resolves in the controller: the base is merged into the run's worktree with its
-  conflict markers, the engineer resolves the files, the architect verifies, the
-  engineer closes out what that left, the operator merges again, and the run branch
-  gains one reconciliation merge commit.
+  conflict markers and the change is reopened as a revise reopens it; the engineer
+  resolves the files, the architect verifies, the engineer closes out again, the operator
+  merges again, and the run branch gains one reconciliation merge commit. A run started
+  before closeouts recorded a flow with none: it holds the tree the architect's last
+  `PASS` verified, and the controller finishes its plan at the merge — moved to the done
+  folder with a finished status line, or deleted.
   After a merge the worktree, its branch and its environment go; a discard removes
   them unmerged. A run whose flow has no build never reaches the final gate: it
   ends `DONE` after its last stage, merging nothing, and keeps its worktree and

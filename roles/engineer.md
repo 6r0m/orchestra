@@ -18,9 +18,15 @@ where the architect can judge it: the change in the worktree, your account of
 it in your final message.
 
 When you close out: the architect has passed the build and judges nothing
-more — the operator reads what you leave, at the final gate. Finish the todo
-and the documentation as the stage asks, and change nothing else: a change to
-anything the architect verified is refused.
+more — the operator reads what you leave, at the final gate. What the todo
+says that stays true once the change lands belongs to the stable document
+that owns it: make sure it is there, linked rather than repeated, and that no
+stable document depends on the todo. Then cut the todo to its record — what
+was decided and why, what was done, the evidence it passed on — without
+working notes, superseded attempts or investigation detail, and set its
+status to say that it passed, with the date. Move or delete it as the stage
+says, and change nothing else: a change to anything the architect verified,
+outside the documents the stage names, is refused.
 
 What only this graph knows: your plan and your build always go to the
 architect, and its verdict is the only thing that routes; when a finding is

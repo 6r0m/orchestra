@@ -55,8 +55,8 @@ class GitViolation(RuntimeError):
 
 
 class CloseoutViolation(RuntimeError):
-    """A closeout that is not one: it changed what the architect's `PASS` accepted, or no tree the architect
-    verified is there to close out."""
+    """A closeout that is not one: it changed what the architect's `PASS` accepted, it left the todo
+    unclosed, or no tree the architect verified is there to close out."""
     error_type = "closeout_violation"
 
 
@@ -286,7 +286,7 @@ class Activities:
         context = T.trace_context(client, span, state, stage, role_name)
         try:
             verified = state.get("verified_tree")
-            if stage == "closeout" and not verified:
+            if stage in stages.FINAL and not verified:
                 # Unknown is not unchanged: with no tree the architect verified, nothing says what this
                 # turn may not touch.
                 raise CloseoutViolation("the run holds no tree the architect verified, so there is nothing "
@@ -335,20 +335,31 @@ class Activities:
             if stage in stages.ANSWERS:
                 # Its answer is its product, returned to the run — never read back from a log.
                 result["output"] = N.final_message(role, out)
-            if stage == "closeout":
-                # No review follows this turn, so what it may change is checked here: the architect's `PASS`
-                # stands for everything else, and the tree it left is the one the final gate holds — the
-                # operator's to judge, and the only one a merge may commit.
+            if stage in stages.FINAL:
+                # No review follows this turn, so what it may change is checked here, by its repository's
+                # own convention (`repos`): the todo folders and the documents it names. The architect's
+                # `PASS` stands for everything else.
                 left = self.git.work_tree(worktree)
-                folders = (state.get("todo_dir"), state.get("todo_done_dir"))
-                outside = sorted(path for _, path in self.git.changed(worktree, verified, left)
-                                 if not stages.closeout_may_change(path, folders))
+                outside = sorted(path for _, path in self.git.changed(
+                    worktree, verified, left, (state.get("todo_dir"), state.get("todo_done_dir")),
+                    state.get("closeout_docs") or ()))
                 if outside:
                     raise CloseoutViolation(
                         "the closeout changed what the architect verified: %s. A closeout changes only the "
-                        "todo and documentation; put these back as they were — in the engineer's terminal or "
-                        "by hand — then continue to close out again" % ", ".join(outside))
-                result["closeout_tree"] = left
+                        "todo and the repository's documents; put these back as they were — in the engineer's "
+                        "terminal or by hand — then continue to close out again" % ", ".join(outside))
+                # Whether the todo was closed at all is a fact, checked; how well is the operator's to judge.
+                plan = state["plan"].replace("\\", "/")
+                done = state.get("todo_done_dir") and "%s/%s" % (
+                    state["todo_done_dir"].replace("\\", "/").strip("/"), plan.rsplit("/", 1)[-1])
+                held = self.git.holds(worktree, left, [plan] + ([done] if done else []))
+                if plan in held or (done and done not in held):
+                    raise CloseoutViolation(
+                        "the closeout left the todo unclosed: %s. Continue to close out again" % (
+                            "it is still at %s" % plan if plan in held else "it is not at %s" % done))
+                # The tree the final gate holds from here on: the operator's to judge, and the only one a
+                # merge may commit.
+                result["final_tree"] = left
             if is_review:
                 verdict, feedback = N.parse_review(role, rc, out)
                 result.update(verdict=verdict, feedback=feedback)
@@ -434,11 +445,12 @@ class Activities:
 
     @activity.defn
     def reopen(self, args):
-        """Undo the closeout of a change the operator sent back, before any role reads it again."""
+        """Take a change that goes back into its run — sent back, or in conflict — from the tree it was
+        offered in to the one the architect verified, before any role reads it again."""
         state = args["state"]
         with self._git_step(state["run_id"], "reopening"):
             try:
-                return {"kept": self.git.reopen(state["worktree_path"], state["closeout_tree"],
+                return {"kept": self.git.reopen(state["worktree_path"], state["final_tree"],
                                                 state["verified_tree"])}
             except Exception as exc:
                 raise _failure(exc) from exc
@@ -448,18 +460,18 @@ class Activities:
         state = args["state"]
         stem = os.path.splitext(os.path.basename(state["plan"]))[0]
         words = " ".join(state["task"].encode("ascii", "ignore").decode().split()[:8])
-        # The tree the run holds for its merge: what its engineer's closeout left, the plan closed out in it
-        # already — or, for a run whose flow has no closeout, what the architect verified, its plan the
+        # The tree the run holds for its merge: its final tree, the todo closed in it already — or, for a
+        # run started before a flow made its build final, the tree the architect verified, its plan the
         # controller's to finish.
-        closed = state.get("closeout_tree")
+        final = state.get("final_tree")
         # No agent may change the worktree between the check of that tree and the commit,
         # nor hold it open while it is removed; a conflict's next turn opens the terminals again.
         terminal.close_run(state["run_id"])
         with self._git_step(state["run_id"], "merge"):
             try:
                 return self.git.merge(state["repo_path"], state["worktree_path"], state["run_id"],
-                                      state["base_branch"], closed or state.get("verified_tree"),
-                                      None if closed else state["plan"],
+                                      state["base_branch"], final or state.get("verified_tree"),
+                                      None if final else state["plan"],
                                       state["todo_done_dir"], ("%s: %s" % (stem, words))[:100],
                                       "Merge %s" % stem)
             except W.MergeRefused as exc:

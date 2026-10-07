@@ -80,8 +80,10 @@ class FakeWorktrees:
         self.diff_refusal = None
         # What each merge was handed to finish itself: the run's plan, or None when its closeout already had.
         self.finished = []
-        # What a closeout changed since the architect's verification, as `changed` names it.
-        self.closeout_changes = []
+        # What a closeout changed outside its todo folders and its repository's documents, as `changed`
+        # names it, and whether it left the todo where it found it.
+        self.outside = []
+        self.unclosed = False
 
     def create(self, repo, base, root, run_id, target, lfs_pointers=False):
         self.calls.append(("create", run_id, target))
@@ -93,11 +95,15 @@ class FakeWorktrees:
     def work_tree(self, path):
         return "verified-tree"
 
-    def changed(self, path, base, tree):
-        return list(self.closeout_changes)
+    def changed(self, path, base, tree, folders=(), patterns=()):
+        return list(self.outside)
 
-    def reopen(self, worktree, closeout_tree, verified_tree):
-        self.calls.append(("reopen", closeout_tree, verified_tree))
+    def holds(self, path, tree, names):
+        # The todo's own path first, then where its repository keeps it finished, when it keeps it.
+        return names[:1] if self.unclosed else names[1:]
+
+    def reopen(self, worktree, final_tree, verified_tree):
+        self.calls.append(("reopen", final_tree, verified_tree))
         return []
 
     def merge(self, repo, worktree, run_id, base, verified_tree, plan, done_dir, message, merge_message):
@@ -140,7 +146,8 @@ class FakeRepos:
             from app.workspace import repos
             raise repos.Refused(self.refusal)
         return {"repo_path": "/fake/repo", "base_branch": "develop", "worktree_root": "/fake/worktrees",
-                "todo_dir": "todo", "todo_done_dir": "todo/done", "todo_name": "%Y-%m-%d_%H%M-{slug}"}
+                "todo_dir": "todo", "todo_done_dir": "todo/done", "todo_name": "%Y-%m-%d_%H%M-{slug}",
+                "closeout_docs": ["**/README.md", "**/docs/**"]}
 
 
 def installed(program):

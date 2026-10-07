@@ -24,7 +24,6 @@ from temporalio.exceptions import ApplicationError  # noqa: E402
 from app.agents import adapters, terminal  # noqa: E402
 from app.agents.adapters import claude_code, codex  # noqa: E402
 from app.application import activities  # noqa: E402
-from app.foundation import stages  # noqa: E402
 from app.observability import telemetry as T  # noqa: E402
 from app.workspace import worktrees  # noqa: E402
 from fakes import FakeRepos, FakeWorktrees, Recorder, every_skill, installed  # noqa: E402
@@ -255,9 +254,10 @@ class TracedKeys(unittest.TestCase):
 
 class Closeout(unittest.TestCase):
     """The engineer's closeout turn against a real repository: the tree it left is the one its run holds for
-    the merge, and a turn that changed what the architect verified fails, naming the files."""
+    the merge, and a turn that changed what the architect verified, or left the todo unclosed, fails."""
 
     PLAN = "todo/2026-09-15_1200-task.md"
+    DONE = "todo/done/2026-09-15_1200-task.md"
 
     def setUp(self):
         import subprocess
@@ -268,6 +268,7 @@ class Closeout(unittest.TestCase):
                      ["config", "core.autocrlf", "false"]):
             subprocess.run(["git", "-C", self.repo] + args, check=True)
         self.write("app.txt", "one\n")
+        self.write("roles/engineer.md", "You are the engineer.\n")
         subprocess.run(["git", "-C", self.repo, "add", "-A"], check=True)
         subprocess.run(["git", "-C", self.repo, "commit", "-q", "-m", "base"], check=True)
         # The change the architect verified, uncommitted as a run's is.
@@ -278,10 +279,12 @@ class Closeout(unittest.TestCase):
         self.addCleanup(shutil.rmtree, activities.run_dir(self.run_id), True)
         self.addCleanup(terminal.close_run, self.run_id)
         self.verified = worktrees.work_tree(self.repo)
+        # As the run's repository resolves: its todo folders, and the documents a closeout may bring up to date.
         self.state = {"run_id": self.run_id, "task": "t", "phase": "closeout", "round": 0, "episode": 3,
                       "worktree_path": self.repo, "todo_path": os.path.join(self.repo, *self.PLAN.split("/")),
-                      "plan": self.PLAN, "todo_dir": "todo", "todo_done_dir": "todo/done",
-                      "agent_sessions": {"engineer": "s-1"}, "verified_tree": self.verified}
+                      "plan": os.path.join(*self.PLAN.split("/")), "todo_dir": "todo", "todo_done_dir": "todo/done",
+                      "closeout_docs": ["**/README.md", "docs/"], "agent_sessions": {"engineer": "s-1"},
+                      "verified_tree": self.verified}
 
     def write(self, name, text):
         path = os.path.join(self.repo, *name.split("/"))
@@ -292,57 +295,70 @@ class Closeout(unittest.TestCase):
     def closes_out(self):
         """What a closeout does: the todo cut and moved to the done folder, a document brought up to date."""
         os.remove(self.state["todo_path"])
-        self.write("todo/done/2026-09-15_1200-task.md", "**Status:** PASS 2026-09-15\nthe record\n")
+        self.write(self.DONE, "**Status:** PASS 2026-09-15\nthe record\n")
         self.write("docs/guide.md", "the guide\nwhat stays true\n")
 
-    def turn(self, edit, state=None):
+    def turn(self, edit, **state):
         def runner(worktree, argv, rdir, name, prompt, timeout, env, *, kind):
             edit()
             return 0, "closed out\n"
         host = activities.Activities(runner=runner, git=worktrees, telemetry=None)
-        return host.run_role({"stage": "closeout", "state": state or self.state, "policy": policy("claude-code")})
+        return host.run_role({"stage": "closeout", "state": dict(self.state, **state),
+                              "policy": policy("claude-code")})
+
+    def refused(self, edit, **state):
+        with self.assertRaises(ApplicationError) as failed:
+            self.turn(edit, **state)
+        return str(failed.exception)
 
     def test_the_tree_a_closeout_left_is_the_one_the_run_holds_for_its_merge(self):
         result = self.turn(self.closes_out)
-        self.assertEqual(result["closeout_tree"], worktrees.work_tree(self.repo))
-        self.assertNotEqual(result["closeout_tree"], self.verified)
+        self.assertEqual(result["final_tree"], worktrees.work_tree(self.repo))
+        self.assertNotEqual(result["final_tree"], self.verified)
         self.assertNotIn("verdict", result, "a closeout is work: it judges nothing and routes nothing")
 
-    def test_a_closeout_that_changed_the_implementation_fails_naming_the_files_and_holds_no_tree(self):
+    def test_a_closeout_that_changed_what_its_repository_does_not_call_a_document_fails_naming_the_files(self):
         def also_code():
             self.closes_out()
             self.write("app.txt", "one\nbuilt\nand a fix nobody verified\n")
             self.write("tests/test_app.py", "assert True\n")
-        with self.assertRaises(ApplicationError) as failed:
-            self.turn(also_code)
-        said = str(failed.exception)
+            # Markdown, and behaviour: no document of this repository's.
+            self.write("roles/engineer.md", "You are the engineer, and you may merge.\n")
+            self.write("docs/README.md", "a document twice over\n")
+        said = self.refused(also_code)
         self.assertIn("closeout_violation: the closeout changed what the architect verified", said)
-        for named in ("app.txt", "tests/test_app.py"):
+        for named in ("app.txt", "tests/test_app.py", "roles/engineer.md"):
             self.assertIn(named, said)
-        for allowed in ("docs/guide.md", "todo/done"):
+        for allowed in ("docs/guide.md", "docs/README.md", "todo/done"):
             self.assertNotIn(allowed, said)
+
+    def test_a_repository_that_names_no_document_leaves_a_closeout_the_todo_alone(self):
+        said = self.refused(self.closes_out, closeout_docs=[])
+        self.assertIn("docs/guide.md", said)
+        self.assertNotIn("todo/", said)
+        # The document put back as the refusal asks, the closeout runs again and finds its todo closed already.
+        self.write("docs/guide.md", "the guide\n")
+        self.assertIn("final_tree", self.turn(lambda: None, closeout_docs=[]), "the todo alone is its to close")
+
+    def test_a_closeout_that_left_the_todo_unclosed_fails_and_holds_no_tree(self):
+        said = self.refused(lambda: self.write("docs/guide.md", "the guide\nwhat stays true\n"))
+        self.assertIn("closeout_violation: the closeout left the todo unclosed: it is still at " + self.PLAN, said)
+        # Gone from where it was, and not where this repository keeps a finished todo.
+        os.remove(self.state["todo_path"])
+        said = self.refused(lambda: self.write("todo/finished/2026-09-15_1200-task.md", "elsewhere\n"))
+        self.assertIn("the closeout left the todo unclosed: it is not at " + self.DONE, said)
+
+    def test_a_repository_that_deletes_a_finished_todo_has_it_deleted(self):
+        said = self.refused(lambda: None, todo_done_dir=None)
+        self.assertIn("it is still at " + self.PLAN, said)
+        result = self.turn(lambda: os.remove(self.state["todo_path"]), todo_done_dir=None)
+        self.assertEqual(result["final_tree"], worktrees.work_tree(self.repo))
 
     def test_a_closeout_with_no_verified_tree_to_stand_on_fails_before_its_agent_starts(self):
         ran = []
-        state = {key: value for key, value in self.state.items() if key != "verified_tree"}
-        with self.assertRaises(ApplicationError) as failed:
-            self.turn(lambda: ran.append(True), state)
-        self.assertIn("closeout_violation", str(failed.exception))
+        said = self.refused(lambda: ran.append(True), verified_tree=None)
+        self.assertIn("closeout_violation", said)
         self.assertEqual(ran, [], "unknown is not unchanged: nothing is closed out against a tree nobody verified")
-
-    def test_a_closeout_may_change_the_todo_folders_and_documentation_and_nothing_else(self):
-        for folders_, allowed, refused in (
-                (("todo", "todo/done"),
-                 ("todo/2026-09-15_1200-task.md", "todo/done/2026-09-15_1200-task.md", "todo/done/shot.png",
-                  "README.md", "docs/architecture/STRUCTURE.MD", "docs/guide.rst", "docs/guide.adoc", "site/page.mdx"),
-                 ("app/main.py", "tests/test_main.py", "settings.json", "Makefile", "docs/diagram.png",
-                  "requirements.txt", "todos/other.py", "todo.py", "app/todo/x.py")),
-                # A repository that deletes a finished todo, its folder spelled as Windows spells it.
-                (("work\\todo", None), ("work/todo/x.yaml", "README.md"), ("work/x.yaml", "todo/x.yaml"))):
-            for name in allowed:
-                self.assertTrue(stages.closeout_may_change(name, folders_), name)
-            for name in refused:
-                self.assertFalse(stages.closeout_may_change(name, folders_), name)
 
 
 def stand_in_output():

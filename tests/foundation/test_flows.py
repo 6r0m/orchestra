@@ -80,9 +80,22 @@ class Rules(unittest.TestCase):
         self.refused(CODE[:3] + ["you:merge"], "the merge is the last step, right after a verify")
         self.refused(CODE + ["architect:research"], "the merge is the last step")
 
+    def test_a_flow_read_to_start_a_run_closes_out_and_a_runs_recorded_steps_need_not(self):
+        """Every run started before closeouts recorded steps with none, and the workflow checks them again on
+        each replay: they go on holding, while no flow in `flows/` may start another run like them."""
+        self.assertEqual(flows.closes_out(CLOSED), CLOSED)
+        for steps in (["architect:research", "you:approve"], ["engineer:plan", "architect:assess", "you:approve"]):
+            self.assertEqual(flows.closes_out(steps), steps, "a flow that builds nothing has nothing to close out")
+        for steps in (CODE, ["architect:research", "you:approve"] + CODE,
+                      CODE[:5] + ["you:approve", "engineer:build", "architect:verify", "you:merge"]):
+            with self.assertRaisesRegex(flows.InvalidFlow, "a flow that builds closes out before the merge: "
+                                                           "`engineer:closeout`"):
+                flows.closes_out(steps)
+            self.assertEqual(flows.check(steps), steps, "control: as a run's recorded steps it holds")
+            self.assertEqual(flows.steps_of({"name": "recorded", "steps": steps}), steps)
+
     def test_a_closeout_comes_between_a_verify_and_the_merge(self):
         self.assertEqual(flows.check(CLOSED), CLOSED)
-        self.assertEqual(flows.check(CODE), CODE, "a flow with none holds, as every run started before closeouts")
         between = "a closeout comes between a verify and the merge"
         self.refused(CODE[:3] + ["engineer:closeout", "you:merge"], "step 4, 'engineer:closeout': " + between)
         self.refused(CODE[:5] + ["engineer:closeout"], between)
@@ -141,10 +154,19 @@ class Files(unittest.TestCase):
             flows.load("broken")
         with self.assertRaisesRegex(flows.InvalidFlow, "flow 'garbled' is not JSON"):
             flows.load("garbled")
+        # A flow as runs took them before closeouts: its steps hold for a run that recorded them, and its
+        # file starts none.
+        self.write("before.json", CODE)
+        self.write("closing.json", CLOSED)
+        self.assertEqual(flows.load("closing"), CLOSED)
+        with self.assertRaisesRegex(flows.InvalidFlow, "flow 'before': a flow that builds closes out before the merge"):
+            flows.load("before")
         listed = {found["name"]: found for found in flows.available()}
-        self.assertEqual(sorted(listed), ["broken", "garbled", "quick"], "only its .json files are flows")
+        self.assertEqual(sorted(listed), ["before", "broken", "closing", "garbled", "quick"],
+                         "only its .json files are flows")
         self.assertEqual(listed["quick"]["steps"], ["engineer:plan", "architect:assess"])
         self.assertIn("goes to its review", listed["broken"]["error"])
+        self.assertIn("closes out before the merge", listed["before"]["error"])
 
     def test_a_flow_that_cannot_be_read_is_refused_and_listed_so(self):
         self.write("quick.json", ["engineer:plan", "architect:assess"])

@@ -7,10 +7,10 @@ through that repository's own git — create the worktree, guard it, merge it or
 
 ## Owns
 
-- `repos` — which repository, target host, base branch, worktree root and todo convention a run uses:
+- `repos` — which repository, target host, base branch, worktree root and todo convention a run uses, and which of its files are the documents a closeout may bring up to date:
   configured in `.orchestra/repos.json` (or the file named by `ORCHESTRA_REPOS`), detected otherwise,
   and refused when neither.
-- `worktrees` — the run's worktree through the target's own git: create, guard, what changed between two trees, the reopening of a closed-out change, merge, discard, the view the page lists, and the change as a person reviews it.
+- `worktrees` — the run's worktree through the target's own git: create, guard, what changed between two trees outside given folders and patterns, which files a tree holds, the reopening of a change offered for its merge, merge, discard, the view the page lists, and the change as a person reviews it.
 
 ## Does not own
 
@@ -25,7 +25,7 @@ here. What an agent does inside the worktree, which is
 
 | part | responsibility |
 |---|---|
-| `repos.py` | the run's repository, target, base branch, worktree root and todo convention |
+| `repos.py` | the run's repository, target, base branch, worktree root, todo convention and closeout documents |
 | `worktrees.py` | the run's worktree through the target host's own git |
 
 ## Relationships

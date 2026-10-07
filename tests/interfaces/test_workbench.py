@@ -759,10 +759,10 @@ class HistoryRead(unittest.TestCase):
             ("answer", "approve"),
             ("turn", "build", "build", 2, 1, {}),
             ("turn", "verify", "build", 2, 1, {"judged_tree": "t2", "verified_tree": "t2"}),
-            ("turn", "closeout", "closeout", 3, 1, {"closeout_tree": "t3"}), ("answer", "revise"),
+            ("turn", "closeout", "closeout", 3, 1, {"final_tree": "t3"}), ("answer", "revise"),
             ("turn", "build", "build", 4, 1, {}),
             ("turn", "verify", "build", 4, 1, {"judged_tree": "t4", "verified_tree": "t4"}),
-            ("turn", "closeout", "closeout", 5, 1, {"closeout_tree": "t5"}), ("answer", "merge")])
+            ("turn", "closeout", "closeout", 5, 1, {"final_tree": "t5"}), ("answer", "merge")])
         self.assertEqual(self.changes(record), {
             "plan:1:1": {"base": None, "tree": "t1", "turns": ["plan:1:1"]},
             "build:2:1": {"base": "t1", "tree": "t2", "turns": ["build:2:1"]},
@@ -857,9 +857,9 @@ class Moving(FakeWorktrees):
     def work_tree(self, path):
         return self.reopened or "tree-%d" % self.changes
 
-    def reopen(self, worktree, closeout_tree, verified_tree):
+    def reopen(self, worktree, final_tree, verified_tree):
         self.reopened = verified_tree
-        return super().reopen(worktree, closeout_tree, verified_tree)
+        return super().reopen(worktree, final_tree, verified_tree)
 
 
 def moving(git, agent, typed_during=()):

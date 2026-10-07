@@ -70,8 +70,8 @@ FAKE = textwrap.dedent("""\
         message = json.dumps({"verdict": "PASS", "feedback": "Direction: the acceptance change."})
     else:
         todo = re.search(r"write the reviewable todo to exactly: (\\S+)", prompt)
-        closing = re.search(r"Close out its todo at (\\S+?), and change", prompt)
-        done = re.search(r"keeps a finished todo in (\\S+?): move it there", prompt)
+        closing = re.search(r"Close out its todo at (\\S+)\\. (?:Move|Delete) it", prompt)
+        done = re.search(r"Move it to (\\S+) under its own name", prompt)
         if closing:
             # A closeout run again finds its own work done.
             if os.path.exists(closing.group(1)):

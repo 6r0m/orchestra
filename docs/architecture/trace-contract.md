@@ -61,7 +61,7 @@ A failed stage's `error_type` is one of:
 | `malformed_output` | the agent answered, but not in the shape its stage requires | read the role's `.out` log |
 | `executor` | the agent could not be launched on its host | install or repair that agent on the run's target host, then `--continue` |
 | `git_violation` | the role changed the worktree's HEAD, its branch or what is staged, which only the controller may | inspect the worktree, then `--continue`, or stop the run |
-| `closeout_violation` | the engineer's closeout changed a file the architect verified — anything but the todo and documentation — or the run holds no verified tree to close out | put the named files back as they were, in the engineer's terminal or by hand, then `--continue` |
+| `closeout_violation` | the engineer's closeout changed a file the architect verified — anything but the todo and the documents its repository names — or left the todo unclosed, or the run holds no verified tree to close out | put the named files back as they were, in the engineer's terminal or by hand, then `--continue`, which closes out again |
 | `lost` | the step was cut short from outside, not by a Stop: its worker stopped under it, or Temporal no longer knew it — its run force-terminated, or the step unheard past its heartbeat timeout | whether the run was force-terminated, in Temporal; if not, its failed stage says which, and Continue runs it again |
 | `internal` | anything unclassified: a defect in this component | the status message and the traceback |
 
