@@ -8,7 +8,9 @@ named. A new history is recorded by its name alone, so the ones older code wrote
 `approval_abort` and `failed_abort` are runs ended by an `abort` answer, which no stop offers now, so
 they cannot be recorded again — they prove that runs which took one still replay. Nor can
 `closeout_revise_conflict_merge`, the run of the first closeouts: its closeout named the tree it left
-`closeout_tree`, and its merge's conflict was resolved with the change not reopened.
+`closeout_tree`, and its merge's conflict was resolved with the change not reopened. And none of the runs
+recorded before runs recorded the tip of their base — every one but `base_moved_judged_again_then_at_the_merge`
+— can be: a run records that tip now, and is reconciled with its base.
 """
 import base64
 import json
@@ -243,9 +245,32 @@ def closeout_revise_conflict_reopen_merge():
     return run
 
 
+def base_moved_judged_again_then_at_the_merge():
+    """A run that stands on a recorded tip of its base: the base moved while it built and came in without a
+    conflict, judged again by the architect alone; closed out and offered; its merge found the base moved once
+    more and landed nothing — reopened, the base brought in with a conflict, resolved, verified, closed out
+    again and merged."""
+    a1, _ = codex_review_first("PASS")
+    came = {"moved": True, "base_tip": "base-tip-1", "files": [], "tree": "with-the-base"}
+    E.host([("plan-e1-1", 0, "p\n"), ("assess-e1-1", 0, a1),
+            ("build-e2-1", 0, "b\n"), ("verify-e2-1", 0, codex_review_resumed("PASS")),
+            ("verify-e3-1", 0, codex_review_resumed("PASS")),
+            ("closeout-e4-1", 0, "c\n"),
+            ("build-e5-1", 0, "resolved\n"), ("verify-e5-1", 0, codex_review_resumed("PASS")),
+            ("closeout-e6-1", 0, "c\n")],
+           git=FakeWorktrees([{"result": "moved"}, {"result": "merged", "commit": "c1"}],
+                             came=[came, {"moved": False},
+                                   dict(came, base_tip="base-tip-2", files=["app.txt"], tree="in-conflict")]))
+    run = E.Run(auto=True, flow=["engineer:plan", "architect:assess", "you:approve", "engineer:build",
+                                 "architect:verify", "engineer:closeout", "you:merge"])
+    run.answer("merge")
+    run.answer("merge")
+    return run
+
+
 RECORDINGS = (patch_loop_approval_merge, blocker_guidance_failure_continue_discard, final_revise_conflict_merge,
               approval_stop, final_merge_stop_lands, final_merge_no_worker_continue, research_revise_plan_merge,
-              plan_only_done, closeout_revise_conflict_reopen_merge)
+              plan_only_done, closeout_revise_conflict_reopen_merge, base_moved_judged_again_then_at_the_merge)
 
 
 def main(names):

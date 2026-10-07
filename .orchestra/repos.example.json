@@ -7,6 +7,7 @@
     "path": "/home/you/projects/service",
     "target": "wsl",
     "base_branch": "main",
+    "remote": "origin",
     "worktree_root": "/home/you/worktrees",
     "todo_dir": "todo",
     "todo_done_dir": "todo/done",

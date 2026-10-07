@@ -25,11 +25,14 @@ graph TD
     verify -. PATCH / UNVERIFIED .-> build
     verify -. "blocker · exhausted" .-> stop2{{stop}}
     stop2 -. guide .-> build
-    verify -. PASS .-> closeout
+    verify -. "PASS · the base stands" .-> closeout
+    verify -. "PASS · the base moved, merged in cleanly" .-> verify
+    verify -. "PASS · the base moved, in conflict" .-> build
     closeout --> final{{final gate · READY_FOR_HUMAN}}
     final -. "revise engineer" .-> build
     final -. "revise architect" .-> verify
-    final -. "merge: conflict" .-> build
+    final -. "merge · the base moved again, cleanly" .-> verify
+    final -. "merge · the base moved again, in conflict" .-> build
     final -. "merge" .-> merged([MERGED])
     final -. "discard, confirmed" .-> discarded([DISCARDED])
 ```
@@ -37,11 +40,14 @@ graph TD
 This is the default flow, `engineer-code`, with the stops a run's flow may add or leave out
 ([structure D13](../structure.md)): research first, whose brief waits at an approval; an approval
 the flow does not schedule, or one *skip approvals* skips, going straight on; and a flow with no build
-ending `DONE`, its worktree kept, where this one reaches the final gate. A change that goes back from
-the final gate — a revise, or a merge in conflict — is reopened before its role's turn, and the build
-closes out again once it passes; a run started before closeouts goes from the verify's `PASS` straight
-to the final gate, and a run of the first closeouts resolves a merge's conflict with nothing reopened
-([structure D24](../structure.md)).
+ending `DONE`, its worktree kept, where this one reaches the final gate. After the verify's `PASS` the
+run's base is looked at: one that moved is brought into the worktree and judged — by the architect alone
+where git merged it cleanly, by the engineer first where it left conflicts — before the closeout. A change
+that goes back from the final gate — a revise, or a merge that found the base moved again and landed
+nothing — is reopened before its role's turn, and the build closes out again once it passes. A run that
+recorded no commit of its base meets a conflict at its merge instead; one started before closeouts goes
+from the verify's `PASS` straight to the final gate, and one of the first closeouts resolves a merge's
+conflict with nothing reopened ([structure D24](../structure.md)).
 
 Any stage, the worktree's creation, a merge or a discard that fails stops at a `failed` stop, whose
 `continue` runs that step once more — a git step no worker of its host took within the policy's

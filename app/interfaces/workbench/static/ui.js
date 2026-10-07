@@ -158,7 +158,8 @@ export function confirmAction({ title, body, confirm, danger, returnTo }) {
 const DOING = { research: "researching", plan: "planning", assess: "assessing the plan", build: "building",
   verify: "verifying the build", closeout: "closing out the todo" };
 // What the run does in a step no role takes.
-const HOLDING = { setup: "Setting up its worktree", reopen: "Reopening the change", merge: "Merging",
+const HOLDING = { setup: "Setting up its worktree", reconcile: "Checking its base for changes",
+  reopen: "Reopening the change", merge: "Merging",
   discard: "Discarding", cleanup: "Cleaning up" };
 
 export function doing(stage) {

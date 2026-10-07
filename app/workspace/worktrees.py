@@ -1,6 +1,6 @@
-"""A run's worktree, through the target host's own git: create, guard, reopen, merge, discard, list.
+"""A run's worktree, through the target host's own git: create, guard, reconcile, reopen, merge, discard, list.
 
-Only this module stages, commits or merges, and only for the run it is given.
+Only this module stages, commits, merges or reaches a remote, and only for the run it is given.
 Every side effect reads what git already holds before acting, so an attempt whose
 worker died after git wrote but before it reported is adopted when it runs again,
 never applied twice.
@@ -57,6 +57,32 @@ def branch_exists(repo, branch):
                check=False).returncode == 0
 
 
+def _ref(base, remote=None):
+    """Where a repository's base lives: its own branch, or — when the base is a remote's — that remote's
+    branch as this repository last fetched it."""
+    return "refs/remotes/%s/%s" % (remote, base) if remote else "refs/heads/" + base
+
+
+def _unattended():
+    """Git's environment for a step no person watches: a remote that would ask for a credential fails
+    instead of waiting for an answer nobody gives."""
+    return dict(os.environ, GIT_TERMINAL_PROMPT="0")
+
+
+def base_tip(repo, base, remote=None):
+    """The commit the base is at now. A remote's is fetched first — that branch alone, into its own
+    remote-tracking ref: where a remote stands is the remote's to say, and a fetch that failed is no answer."""
+    if remote:
+        git(repo, "fetch", "--quiet", "--no-tags", remote,
+            "+refs/heads/%s:%s" % (base, _ref(base, remote)), env=_unattended())
+    return git(repo, "rev-parse", "--verify", _ref(base, remote) + "^{commit}").stdout.strip()
+
+
+def started_from(path):
+    """The commit a worktree's branch is at: for a run's worktree just made, the base's tip it began from."""
+    return git(path, "rev-parse", "HEAD").stdout.strip()
+
+
 # A run id names the Windows worktree folder, which with a repository's deepest file must stay
 # under Windows' path limit; `create` checks that per repository. 16 characters of words and 8
 # random ones keep the id at 25: readable, and a collision is a refused start that draws again.
@@ -96,8 +122,9 @@ def plan_path(todo_dir, todo_name, created, task):
     return os.path.join(todo_dir, stamp.strftime(todo_name).replace("{slug}", slug(task)) + ".md")
 
 
-def create(repo, base, root, run_id, target, lfs_pointers=False):
-    """The run's worktree at `<root>/<run-id>` on branch `<run-id>`, from `base`.
+def create(repo, base, root, run_id, target, lfs_pointers=False, remote=None):
+    """The run's worktree at `<root>/<run-id>` on branch `<run-id>`, from `base` — as `remote` holds it now,
+    when the repository's base is a remote's, and as this repository's own branch otherwise.
 
     With `lfs_pointers`, Git LFS files stay pointers rather than copies of their content.
     A branch of that name without its worktree is adopted only while it still points at
@@ -112,18 +139,20 @@ def create(repo, base, root, run_id, target, lfs_pointers=False):
             return path
     if os.path.exists(path):
         raise GitError("%s exists but is not a worktree of %s" % (path, repo))
+    # A remote's base by its commit: the run's branch follows no upstream, and is never pushed.
+    start = base_tip(repo, base, remote) if remote else base
     if target == "windows":
-        _check_windows_paths(repo, base, path)
+        _check_windows_paths(repo, start, path)
     os.makedirs(root, exist_ok=True)
     args = ["worktree", "add"]
     if branch_exists(repo, run_id):
         tip = git(repo, "rev-parse", "refs/heads/" + run_id).stdout.strip()
-        if tip != git(repo, "rev-parse", base).stdout.strip():
+        if tip != git(repo, "rev-parse", start).stdout.strip():
             raise GitError("branch %s exists without its worktree and does not point at %s: it is "
                            "not this run's, and nothing is created" % (run_id, base))
         args += [path, run_id]
     else:
-        args += ["-b", run_id, path, base]
+        args += (["--no-track"] if remote else []) + ["-b", run_id, path, start]
     git(repo, *args, env=dict(os.environ, GIT_LFS_SKIP_SMUDGE="1") if lfs_pointers else None)
     return path
 
@@ -231,6 +260,32 @@ def reopen(worktree, final_tree, verified_tree):
     return sorted(kept)
 
 
+def reconcile(repo, worktree, base, tip, remote=None):
+    """Bring the base into the run's worktree when it has moved past `tip`, the commit the run stands on.
+
+    `{"moved": False}` while the base is still at that commit. Otherwise the worktree's files as they are
+    are kept in a commit of the run's own branch, which never lands (`merge`), and the base is merged into
+    the worktree, uncommitted, for the run's roles: `{"moved": True, "base_tip": <the base's tip>, "files":
+    <those in conflict>, "tree": <what the worktree then holds>}`. A merge of that tip already under way is an
+    earlier attempt's, and is adopted; one of an older tip is committed with the files, then the newer
+    brought in. The base itself is never written.
+    """
+    now = base_tip(repo, base, remote)
+    held = git(worktree, "rev-parse", "--verify", "--quiet", "MERGE_HEAD", check=False).stdout.strip()
+    if now == tip and held in ("", now):
+        return {"moved": False}
+    if held != now:
+        if held or not _clean(worktree):
+            git(worktree, "add", "-A")
+            # No hook judges a commit that never lands: the one that does is made by `merge`, hooks and all.
+            git(worktree, "commit", "-q", "--no-verify", "-m", "As it stood when %s moved" % base)
+        done = git(worktree, "merge", "--no-ff", "--no-commit", now, check=False)
+        if done.returncode != 0 and not _merging(worktree):
+            raise GitError("could not bring %s into %s: %s"
+                           % (base, worktree, (done.stderr or done.stdout).strip()[:500]))
+    return {"moved": True, "base_tip": now, "files": sorted(_unmerged(worktree)), "tree": work_tree(worktree)}
+
+
 def _merging(path):
     return git(path, "rev-parse", "--verify", "--quiet", "MERGE_HEAD", check=False).returncode == 0
 
@@ -243,7 +298,7 @@ def _clean(path):
     return not git(path, "status", "--porcelain", "--untracked-files=all").stdout.strip()
 
 
-def _adopted_merge(repo, base, run_id, merge_message):
+def _adopted_merge(repo, base, run_id, merge_message, remote=None):
     """A merge of *this* run already on the base branch, or None.
 
     Identified by the run's own tip as the merged side of a merge commit — its second
@@ -256,7 +311,7 @@ def _adopted_merge(repo, base, run_id, merge_message):
     """
     tip = git(repo, "rev-parse", "--verify", "--quiet", "refs/heads/" + run_id,
               check=False).stdout.strip()
-    log = git(repo, "log", "--first-parent", "-n", "500", "--format=%H %P%x09%s", "refs/heads/" + base)
+    log = git(repo, "log", "--first-parent", "-n", "500", "--format=%H %P%x09%s", _ref(base, remote))
     for line in log.stdout.splitlines():
         shas, _, subject = line.partition("\t")
         parts = shas.split()
@@ -319,25 +374,33 @@ def _unfinish_plan(worktree, verified_tree, plan, done_dir):
     git(worktree, "reset", "-q")
 
 
-def merge(repo, worktree, run_id, base, verified_tree, plan, done_dir, message, merge_message):
-    """Commit the run's change on the run branch and merge it into the local base branch.
+def merge(repo, worktree, run_id, base, verified_tree, plan, done_dir, message, merge_message, tip=None,
+          remote=None):
+    """Land the run's change on the base: the local branch, or `remote`'s where the base is a remote's.
 
     `verified_tree` is the tree the run holds for its merge, and the worktree must still be it. A run
-    hands its final tree and no `plan`, and exactly that tree is committed. A run started before a flow
-    made its build final hands the tree the architect verified and its `plan`, which is finished here:
-    moved to `done_dir`, or deleted where the repository has none.
+    that stands on a recorded base `tip` hands its final tree and no `plan`: exactly that tree lands, and
+    only while the base is still at that tip (`_land`). A run started before a flow made its build final
+    hands the tree the architect verified and its `plan`, which is finished here — moved to `done_dir`, or
+    deleted where the repository has none — and is merged into the local base as git merges it.
 
-    Returns `{"result": "merged", "commit": ...}` once the base holds the merge and the
-    worktree, branch and environment are gone, or `{"result": "conflict", "files": [...]}`
-    with the base brought into the run's worktree for its agents to resolve.
+    Returns `{"result": "merged", "commit": ...}` once the base holds the merge and the worktree, branch
+    and environment are gone; `{"result": "moved"}`, nothing committed or merged, when the base is no
+    longer at `tip`; or, for a run that recorded none, `{"result": "conflict", "files": [...]}` with the
+    base brought into the run's worktree for its agents to resolve.
     Raises MergeRefused, merging nothing, when a guard or git refuses.
     """
-    merged = _adopted_merge(repo, base, run_id, merge_message)
+    landing = bool(tip) and not plan
+    remote = remote if landing else None
+    now = base_tip(repo, base, remote) if landing else None
+    merged = _adopted_merge(repo, base, run_id, merge_message, remote)
     if merged:
-        cleanup(repo, worktree, run_id, base)
+        cleanup(repo, worktree, run_id, base, remote)
         return {"result": "merged", "commit": merged}
     if not branch_exists(repo, run_id) or not os.path.isdir(worktree):
         raise MergeRefused("the run's branch or worktree is gone and %s holds no merge of it" % base)
+    if landing:
+        return _land(repo, worktree, run_id, base, verified_tree, message, merge_message, tip, now, remote)
     merging = _merging(worktree)
     if not merging and verified_tree and not _clean(worktree):
         # Only while the work is uncommitted: a written work commit is merged, never undone. An attempt
@@ -378,18 +441,72 @@ def merge(repo, worktree, run_id, base, verified_tree, plan, done_dir, message, 
                                % (base, (done.stderr or done.stdout).strip()[:500]))
         commit = git(checkout, "rev-parse", "HEAD").stdout.strip()
     else:
-        base_tip = git(repo, "rev-parse", "refs/heads/" + base).stdout.strip()
+        base_head = git(repo, "rev-parse", "refs/heads/" + base).stdout.strip()
         done = git(repo, "merge-tree", "--write-tree", "--name-only", "--no-messages",
-                   base_tip, run_tip, check=False)
+                   base_head, run_tip, check=False)
         lines = done.stdout.splitlines()
         if done.returncode == 1:
             return _hand_back(worktree, base, lines[1:])
         if done.returncode != 0 or not lines:
             raise GitError("git merge-tree rc=%d %s" % (done.returncode, done.stderr.strip()[:500]))
-        commit = git(repo, "commit-tree", lines[0], "-p", base_tip, "-p", run_tip,
+        commit = git(repo, "commit-tree", lines[0], "-p", base_head, "-p", run_tip,
                      "-m", merge_message).stdout.strip()
-        git(repo, "update-ref", "-m", merge_message, "refs/heads/" + base, commit, base_tip)
+        git(repo, "update-ref", "-m", merge_message, "refs/heads/" + base, commit, base_head)
     cleanup(repo, worktree, run_id, base)
+    return {"result": "merged", "commit": commit}
+
+
+def _tree(path, commit):
+    return git(path, "rev-parse", "--verify", commit + "^{tree}").stdout.strip()
+
+
+def _land(repo, worktree, run_id, base, final_tree, message, merge_message, tip, now, remote):
+    """Land `final_tree` on the base while the base is still at `tip`, the commit the run was judged on.
+
+    The change is one commit on that tip, made in the worktree so the repository's own commit hooks judge
+    it; then the merge commit named for the run, its first parent the tip and its tree the final tree
+    exactly, so the base's own history stays its first-parent line and nothing the worktree's branch held
+    before — the files kept as the base came in (`reconcile`) — is reachable from it. The base takes that
+    commit only as a fast-forward from `tip`: a remote by a push that forces nothing, a checked-out branch
+    by `--ff-only`, which keeps its files in step and refuses to write over the operator's own edits, a
+    branch checked out nowhere by a compare-and-swap of its ref. A base that moved takes nothing.
+    """
+    if now != tip:
+        return {"result": "moved"}
+    head = git(repo, "rev-parse", "refs/heads/" + run_id).stdout.strip()
+    parents = git(repo, "rev-list", "--parents", "-n", "1", head).stdout.split()[1:]
+    if not (parents == [tip] and _tree(repo, head) == final_tree and _clean(worktree)):
+        # Not yet committed — or an attempt's commit was refused, its change left staged on the tip.
+        if work_tree(worktree) != final_tree:
+            raise MergeRefused("the worktree is no longer the change that was offered for this merge")
+        if final_tree == _tree(repo, tip):
+            raise MergeRefused("the run holds no change that %s lacks" % base)
+        git(worktree, "add", "-A")
+        if _merging(worktree):
+            git(worktree, "merge", "--quit")
+        git(worktree, "reset", "-q", "--soft", tip)
+        git(worktree, "commit", "-q", "-m", message)
+        head = git(worktree, "rev-parse", "HEAD").stdout.strip()
+        if _tree(repo, head) != final_tree:
+            raise MergeRefused("a commit hook changed what was committed: it is no longer the change "
+                               "that was offered for this merge")
+    commit = git(repo, "commit-tree", final_tree, "-p", tip, "-p", head, "-m", merge_message).stdout.strip()
+    if remote:
+        done = git(repo, "push", "--porcelain", remote, "%s:refs/heads/%s" % (commit, base), check=False,
+                   env=_unattended())
+        refused = "%s refused the push to its %s" % (remote, base)
+    else:
+        checkout = next((entry["path"] for entry in worktrees(repo) if entry["branch"] == base), None)
+        if checkout and git(checkout, "diff", "--cached", "--quiet", check=False).returncode != 0:
+            raise MergeRefused("%s has staged changes on %s, which are the operator's" % (checkout, base))
+        done = (git(checkout, "merge", "--ff-only", commit, check=False) if checkout else
+                git(repo, "update-ref", "-m", merge_message, "refs/heads/" + base, commit, tip, check=False))
+        refused = "git refused the merge into %s" % base
+    if done.returncode != 0:
+        if base_tip(repo, base, remote) != tip:
+            return {"result": "moved"}
+        raise MergeRefused("%s: %s" % (refused, (done.stderr or done.stdout).strip()[:500]))
+    cleanup(repo, worktree, run_id, base, remote)
     return {"result": "merged", "commit": commit}
 
 
@@ -402,14 +519,14 @@ def _hand_back(worktree, base, files):
     return {"result": "conflict", "files": sorted(set(files) | set(_unmerged(worktree)))}
 
 
-def cleanup(repo, worktree, run_id, base):
+def cleanup(repo, worktree, run_id, base, remote=None):
     """After a merge: the worktree, the run branch and the worktree's environment go.
 
-    The base is proven to hold the run's work before anything is removed, so a run
-    whose work it lacks keeps both its branch and its worktree.
+    The base — `remote`'s, where it is a remote's — is proven to hold the run's work before anything is
+    removed, so a run whose work it lacks keeps both its branch and its worktree.
     """
     if branch_exists(repo, run_id):
-        if git(repo, "merge-base", "--is-ancestor", "refs/heads/" + run_id, "refs/heads/" + base,
+        if git(repo, "merge-base", "--is-ancestor", "refs/heads/" + run_id, _ref(base, remote),
                check=False).returncode != 0:
             raise GitError("refusing to clean up %s: it is not merged into %s" % (run_id, base))
     if any(_same(entry["path"], worktree) for entry in worktrees(repo)):
@@ -498,9 +615,10 @@ def review_diff(path, offset=0, base=None, tree=None, file=None, files_from=None
 
     Without `tree`, the change now: the worktree's HEAD and the tree `git add -A` would commit, made on a
     private copy of the index (`work_tree`), so reading a change for review changes nothing anyone staged, and
-    a new file arrives with its contents. While the base is merged into the worktree and not yet committed — a
-    conflict handed back — HEAD already holds the run's change, and against it only the base's own commits
-    would show: the change now is then read against the base brought in, and says so (`merging`). With `tree`,
+    a new file arrives with its contents. The change now is read against the commit the caller names — the
+    base's tip a run stands on (`against` "tip"); else, while the base is merged into the worktree and not yet
+    committed, against that base ("merged"), since HEAD then holds the run's files already and only the
+    base's own commits would show; else against HEAD ("commit"). With `tree`,
     the change from `base` — the worktree's HEAD when not
     given — to that tree: a snapshot read before, or the trees two reviews judged. Either is read with `DIFF`,
     so every read of one snapshot is the same bytes whatever the live worktree does meanwhile.
@@ -534,11 +652,13 @@ def review_diff(path, offset=0, base=None, tree=None, file=None, files_from=None
             raise ChangeRefused("git no longer holds %s: it prunes what nothing refers to after a while" % name)
         return name
 
-    merging = False
-    if tree is None:
-        merging = _merging(path)
-        base, tree = git(["rev-parse", "MERGE_HEAD" if merging else "HEAD"]).strip(), work_tree(path)
+    if tree is None and base is not None:
+        base, tree, against = held(base), work_tree(path), "tip"
+    elif tree is None:
+        against = "merged" if _merging(path) else "commit"
+        base, tree = git(["rev-parse", "MERGE_HEAD" if against == "merged" else "HEAD"]).strip(), work_tree(path)
     else:
+        against = None
         base = held(base) if base is not None else git(["rev-parse", "HEAD"]).strip()
         tree = held(tree)
     pair = [base, tree]
@@ -572,7 +692,7 @@ def review_diff(path, offset=0, base=None, tree=None, file=None, files_from=None
         files = listed()
         return {"base": base, "tree": tree, "files": files[files_from:files_from + FILES_LIMIT],
                 "files_total": len(files), "files_from": files_from}
-    read = {"base": base, "tree": tree, "merging": merging}
+    read = {"base": base, "tree": tree, "against": against}
     if not offset:
         files = listed()
         summary, _, summary_total = _chunk(git(["diff"] + DIFF + ["--stat"] + pair), 0, SUMMARY_LIMIT)

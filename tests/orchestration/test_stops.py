@@ -315,8 +315,8 @@ class Closing(FakeWorktrees):
     """A worktree that holds what the architect verified until the engineer's closeout has run, the tree that
     closeout left from then on, and what the architect verified again once the change is reopened."""
 
-    def __init__(self, merge_results=None, reopen_failures=0):
-        super().__init__(merge_results)
+    def __init__(self, merge_results=None, reopen_failures=0, **kwargs):
+        super().__init__(merge_results, **kwargs)
         self.turns = []
         self.reopened_after = None
         self.reopen_failures = reopen_failures
@@ -453,10 +453,10 @@ class Closeout(Scenario):
                          ("final", ["build-e4-1", "verify-e4-1", "closeout-e5-1"]))
 
     def test_a_conflict_reopens_the_change_before_the_engineer_resolves_it(self):
-        """The todo is closed out in the run's commit by then, and the roles that resolve and verify are asked to
-        read it where it was."""
+        """A run that recorded no tip of its base meets a conflict at its merge. The todo is closed out in the
+        run's commit by then, and the roles that resolve and verify are asked to read it where it was."""
         run = self.ready([("build-e4-1", 0, "resolved\n"), ("verify-e4-1", 0, codex_review_resumed("PASS")),
-                          ("closeout-e5-1", 0, "closed out again\n")],
+                          ("closeout-e5-1", 0, "closed out again\n")], based=False,
                          merge_results=[{"result": "conflict", "files": ["app.txt"]},
                                         {"result": "merged", "commit": "abc123"}])
         run.answer("merge")
@@ -486,6 +486,122 @@ class Closeout(Scenario):
         self.assertNotIn("todo/done", bare)
         for prompt in (kept, bare):
             self.assertNotIn("{{", prompt, "every placeholder of the ask is filled")
+
+
+class Based(Closing):
+    """A worktree whose looks at its base are counted against the turns that had run by then, and may fail."""
+
+    def __init__(self, reconcile_failures=0, **kwargs):
+        super().__init__(**kwargs)
+        self.reconcile_failures = reconcile_failures
+        self.looked = []
+
+    def reconcile(self, repo, worktree, base, tip, remote=None):
+        if self.reconcile_failures:
+            self.reconcile_failures -= 1
+            raise RuntimeError("the remote does not answer")
+        self.looked.append((tip, remote, len(self.turns)))
+        return super().reconcile(repo, worktree, base, tip, remote)
+
+
+class Reconciling(Scenario):
+    """A run stands on a recorded tip of its base. Before its build is made final the base is looked at: where
+    it moved it is brought in and judged — by the architect alone when git merged it cleanly, by the engineer
+    first when it did not — and a Merge lands only on the tip the change was judged on."""
+
+    CAME = {"moved": True, "base_tip": "base-tip-1", "files": [], "tree": "with-the-base"}
+
+    def based(self, after, repositories=None, **git):
+        self.git = Based(**git)
+        self.host, self.agent = E.host(to_ready() + list(after), git=self.git, repositories=repositories)
+        self.git.turns = self.agent.calls
+        run = E.Run(auto=True, flow=CLOSED)
+        self.addCleanup(run.cleanup)
+        return run
+
+    def prompt(self, name):
+        return {call["name"]: call for call in self.agent.calls}[name]["prompt"]
+
+    def test_the_base_is_looked_at_once_the_build_passed_and_the_merge_lands_on_the_tip_it_stood_on(self):
+        run = self.based([("closeout-e3-1", 0, "closed out\n")])
+        self.assertEqual((run.stop["reason"], run.state["base_tip"]), ("final", "base-tip-0"),
+                         "the tip its worktree's creation recorded")
+        self.assertEqual(self.git.looked, [("base-tip-0", None, 4)], "once, after the verify and before the closeout")
+        run.answer("merge")
+        self.assertEqual((run.state["status"], self.git.landed), ("MERGED", [("base-tip-0", None)]))
+
+    def test_a_base_that_moved_without_a_conflict_is_judged_again_by_the_architect_alone(self):
+        run = self.based([("verify-e3-1", 0, codex_review_resumed("PASS")), ("closeout-e4-1", 0, "closed out\n")],
+                         came=[self.CAME])
+        self.assertEqual(run.stop["reason"], "final")
+        self.assertEqual(self.names()[-3:], ["verify-e2-1", "verify-e3-1", "closeout-e4-1"],
+                         "no engineer's turn: git merged the base in, and the architect judges the two together")
+        for said in ("develop moved while this change was made", "without a conflict"):
+            self.assertIn(said, self.prompt("verify-e3-1"))
+        self.assertEqual(self.git.looked, [("base-tip-0", None, 4), ("base-tip-1", None, 5)],
+                         "looked at again once the two were judged: it stands on the tip that came in")
+        self.assertIn("develop moved: merged into the worktree without a conflict", run.status["lines"])
+        run.answer("merge")
+        self.assertEqual((run.state["status"], self.git.landed), ("MERGED", [("base-tip-1", None)]),
+                         "landed on the tip it was judged on")
+
+    def test_a_base_that_moved_into_conflict_goes_to_the_engineer_before_any_gate(self):
+        run = self.based([("build-e3-1", 0, "resolved\n"), ("verify-e3-1", 0, codex_review_resumed("PASS")),
+                          ("closeout-e4-1", 0, "closed out\n")],
+                         came=[dict(self.CAME, files=["app.txt", "docs/guide.md"])])
+        self.assertEqual((run.stop["reason"], run.stop["id"]), ("final", "%s:1" % run.run_id),
+                         "the first thing asked of the operator is the merge of the resolved change")
+        self.assertEqual(self.names()[-4:], ["verify-e2-1", "build-e3-1", "verify-e3-1", "closeout-e4-1"])
+        for said in ("develop moved while this change was made", "conflict markers in: app.txt, docs/guide.md",
+                     "do not stage or commit"):
+            self.assertIn(said, self.prompt("build-e3-1"))
+        self.assertEqual(self.git.merge_results, [{"result": "merged", "commit": "c0ffee"}], "no merge was tried")
+
+    def test_a_merge_on_a_base_that_moved_lands_nothing_and_the_change_is_judged_on_it_again(self):
+        run = self.based([("closeout-e3-1", 0, "closed out\n"), ("verify-e4-1", 0, codex_review_resumed("PASS")),
+                          ("closeout-e5-1", 0, "closed out again\n")],
+                         merge_results=[{"result": "moved"}, {"result": "merged", "commit": "abc123"}],
+                         came=[{"moved": False}, self.CAME])
+        self.assertEqual(run.stop["reason"], "final")
+        run.answer("merge")
+        run.status = E.run(E.cli.follow(run.handle))
+        self.assertEqual((run.stop["reason"], run.state["status"]), ("final", "READY_FOR_HUMAN"),
+                         "nothing merged: reopened, the base brought in, judged, closed out and offered again")
+        self.assertNotIn("merge_commit", run.state)
+        self.assertIn("develop moved since this change was judged on it: nothing merged", run.status["lines"])
+        self.assertEqual(self.names()[-3:], ["closeout-e3-1", "verify-e4-1", "closeout-e5-1"])
+        self.assertEqual([call for call in self.git.calls if call[0] in ("reopen", "reconcile")][-3:],
+                         [("reopen", "final-tree", "verified-tree", 5), ("reconcile", "base-tip-0"),
+                          ("reconcile", "base-tip-1")], "its closeout undone before the base came in")
+        code, _ = run.answer("merge")
+        self.assertEqual((code, run.state["status"], run.state["merge_commit"]), (0, "MERGED", "abc123"))
+        self.assertEqual(self.git.landed, [("base-tip-0", None), ("base-tip-1", None)])
+
+    def test_a_look_at_the_base_that_fails_stops_for_the_operator_and_is_no_answer(self):
+        run = self.based([("closeout-e3-1", 0, "closed out\n")], reconcile_failures=1)
+        self.assertEqual((run.stop["reason"], self.names()[-1]), ("failed", "verify-e2-1"),
+                         "unknown is not unchanged: the build is not made final on a base nobody could read")
+        self.assertIn("the remote does not answer", run.stop["feedback"])
+        run.answer("continue")
+        run.status = E.run(E.cli.follow(run.handle))
+        self.assertEqual((run.stop["reason"], self.names()[-1]), ("final", "closeout-e3-1"))
+
+    def test_a_repository_whose_base_is_a_remotes_is_looked_at_and_landed_on_there(self):
+        from fakes import FakeRepos
+
+        class Remote(FakeRepos):
+            def resolve(self, selected, worktree_root):
+                return dict(super().resolve(selected, worktree_root), remote="origin")
+        run = self.based([("closeout-e3-1", 0, "closed out\n")], repositories=Remote())
+        self.assertEqual((run.state["remote"], self.git.looked), ("origin", [("base-tip-0", "origin", 4)]))
+        run.answer("merge")
+        self.assertEqual(self.git.landed, [("base-tip-0", "origin")])
+
+    def test_control_a_run_that_recorded_no_base_is_never_reconciled(self):
+        run = self.based([("closeout-e3-1", 0, "closed out\n")], based=False)
+        self.assertEqual((run.stop["reason"], run.state["base_tip"], self.git.looked), ("final", None, []))
+        run.answer("merge")
+        self.assertEqual((run.state["status"], self.git.landed), ("MERGED", [(None, None)]))
 
 
 class Lifecycle(Scenario):

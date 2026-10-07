@@ -73,9 +73,15 @@ class FakeAgent:
 class FakeWorktrees:
     """Stands in for `worktrees`: no git, every call recorded, results chosen by the test."""
 
-    def __init__(self, merge_results=None):
+    def __init__(self, merge_results=None, came=None, based=True):
         self.calls = []
         self.merge_results = list(merge_results or [{"result": "merged", "commit": "c0ffee"}])
+        # What each look at the base finds, in turn — it stands where the run does once these are spent — and
+        # whether a run records the commit it began from at all: one started before runs did records none.
+        self.came = list(came or [])
+        self.based = based
+        # The base tip and the remote each merge was handed to land on.
+        self.landed = []
         # What a read of the change is refused with, as its host's git would refuse it; None reads it.
         self.diff_refusal = None
         # What each merge was handed to finish itself: the run's plan, or None when its closeout already had.
@@ -85,9 +91,16 @@ class FakeWorktrees:
         self.outside = []
         self.unclosed = False
 
-    def create(self, repo, base, root, run_id, target, lfs_pointers=False):
+    def create(self, repo, base, root, run_id, target, lfs_pointers=False, remote=None):
         self.calls.append(("create", run_id, target))
         return "/fake/worktree/%s" % run_id
+
+    def started_from(self, path):
+        return "base-tip-0" if self.based else None
+
+    def reconcile(self, repo, worktree, base, tip, remote=None):
+        self.calls.append(("reconcile", tip))
+        return self.came.pop(0) if self.came else {"moved": False}
 
     def guard(self, path, run_id):
         return "unchanged"
@@ -106,9 +119,11 @@ class FakeWorktrees:
         self.calls.append(("reopen", final_tree, verified_tree))
         return []
 
-    def merge(self, repo, worktree, run_id, base, verified_tree, plan, done_dir, message, merge_message):
+    def merge(self, repo, worktree, run_id, base, verified_tree, plan, done_dir, message, merge_message, tip=None,
+              remote=None):
         self.calls.append(("merge", run_id, verified_tree, message, merge_message))
         self.finished.append(plan)
+        self.landed.append((tip, remote))
         return self.merge_results.pop(0)
 
     def discard(self, repo, worktree, run_id):
@@ -124,11 +139,12 @@ class FakeWorktrees:
             from app.workspace import worktrees
             raise worktrees.ChangeRefused(self.diff_refusal)
         patch = "diff --git a/x b/x\n"
+        against = None if tree else "tip" if base else "commit"
         base, tree = base or "b" * 40, tree or "c" * 40
         if file is not None:
             return {"base": base, "tree": tree, "patch": patch, "whole": True,
                     "file": {"path": file, "old": None, "status": "M", "added": 1, "removed": 0, "binary": False}}
-        return {"base": base, "tree": tree, "summary": " 1 file changed", "summary_total": 15,
+        return {"base": base, "tree": tree, "against": against, "summary": " 1 file changed", "summary_total": 15,
                 "files": [{"path": "x", "old": None, "status": "M", "added": 1, "removed": 0, "binary": False}],
                 "files_total": 1, "patch": patch[offset:], "offset": offset, "next": len(patch), "total": len(patch)}
 

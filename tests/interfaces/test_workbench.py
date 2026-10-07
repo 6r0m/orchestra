@@ -623,7 +623,8 @@ class HistoryRead(unittest.TestCase):
     def read(self, script):
         """The history of a run whose events are `script`'s, each step as Temporal writes it:
         ("turn", stage, phase, episode, round, result) a role turn queued, taken and completed; ("failed", stage, phase,
-        episode, round) one that failed; ("answer", action) an accepted answer; ("wait", minutes) time passing."""
+        episode, round) one that failed; ("step", name, result) a step no role takes, completed; ("answer", action) an
+        accepted answer; ("wait", minutes) time passing."""
         from google.protobuf.timestamp_pb2 import Timestamp
         from temporalio.api.common.v1 import ActivityType, Payloads
         from temporalio.api.history.v1 import (ActivityTaskCompletedEventAttributes, ActivityTaskFailedEventAttributes,
@@ -658,6 +659,11 @@ class HistoryRead(unittest.TestCase):
             elif step[0] == "failed":
                 of = scheduled(*step[1:5])
                 event(activity_task_failed_event_attributes=ActivityTaskFailedEventAttributes(scheduled_event_id=of))
+            elif step[0] == "step":
+                of = event(activity_task_scheduled_event_attributes=ActivityTaskScheduledEventAttributes(
+                    activity_type=ActivityType(name=step[1]), input=payloads({"state": {}})))
+                event(activity_task_completed_event_attributes=ActivityTaskCompletedEventAttributes(
+                    scheduled_event_id=of, result=payloads(step[2])))
             elif step[0] == "answer":
                 stops[0] += 1
                 stop = "r1:%d" % stops[0]
@@ -781,6 +787,41 @@ class HistoryRead(unittest.TestCase):
             ("turn", "verify", "build", 2, 1, {"judged_tree": "t2", "verified_tree": "t2"}),
             ("turn", "closeout", "closeout", 3, 1, {"closeout_tree": "t3"}), ("answer", "merge")])
         self.assertEqual(self.changes(record)["closeout:3:1"], {"base": "t2", "tree": "t3", "turns": ["closeout:3:1"]})
+
+    def test_a_runs_first_change_is_read_from_the_commit_its_worktree_was_made_at(self):
+        """Not from whatever its worktree's last commit is when the row is opened: the controller commits there."""
+        record = self.read([
+            ("step", "create_worktree", {"worktree_path": "/w", "base_tip": "c0"}),
+            ("turn", "plan", "plan", 1, 1, {}), ("turn", "assess", "plan", 1, 1, {"judged_tree": "t1"})])
+        self.assertEqual(self.changes(record), {"plan:1:1": {"base": "c0", "tree": "t1", "turns": ["plan:1:1"]}})
+
+    def test_a_base_brought_into_the_worktree_is_no_turns_change(self):
+        """The base came in with a conflict, then again without one: the engineer's change is what it did to the
+        tree that left, and the commits the base brought are in no row."""
+        record = self.read([
+            ("step", "create_worktree", {"worktree_path": "/w", "base_tip": "c0"}),
+            ("turn", "plan", "plan", 1, 1, {}),
+            ("turn", "assess", "plan", 1, 1, {"judged_tree": "t1", "assessed_tree": "t1"}), ("answer", "approve"),
+            ("turn", "build", "build", 2, 1, {}),
+            ("turn", "verify", "build", 2, 1, {"judged_tree": "t2", "verified_tree": "t2"}),
+            ("step", "reconcile", {"moved": True, "base_tip": "c1", "files": ["app.txt"], "tree": "t2-and-c1"}),
+            ("turn", "build", "build", 3, 1, {}),
+            ("turn", "verify", "build", 3, 1, {"judged_tree": "t3", "verified_tree": "t3"}),
+            ("step", "reconcile", {"moved": True, "base_tip": "c2", "files": [], "tree": "t3-and-c2"}),
+            ("turn", "verify", "build", 4, 1, {"judged_tree": "t3-and-c2", "verified_tree": "t3-and-c2"}),
+            ("step", "reconcile", {"moved": False}),
+            ("turn", "closeout", "closeout", 5, 1, {"final_tree": "t4"}), ("answer", "merge")])
+        self.assertEqual(self.changes(record), {
+            "plan:1:1": {"base": "c0", "tree": "t1", "turns": ["plan:1:1"]},
+            "build:2:1": {"base": "t1", "tree": "t2", "turns": ["build:2:1"]},
+            "build:3:1": {"base": "t2-and-c1", "tree": "t3", "turns": ["build:3:1"]},
+            "closeout:5:1": {"base": "t3-and-c2", "tree": "t4", "turns": ["closeout:5:1"]}},
+            "the resolving build from the tree the base left, never from the tree judged before it came")
+
+    def test_control_a_run_that_recorded_no_commit_reads_its_first_change_from_its_worktrees_last(self):
+        record = self.read([("step", "create_worktree", {"worktree_path": "/w"}),
+                            ("turn", "plan", "plan", 1, 1, {}), ("turn", "assess", "plan", 1, 1, {"judged_tree": "t1"})])
+        self.assertEqual(self.changes(record), {"plan:1:1": {"base": None, "tree": "t1", "turns": ["plan:1:1"]}})
 
     def test_a_failed_step_continued_sits_in_its_own_phase_after_the_turn_before_it(self):
         record = self.read([
@@ -1284,7 +1325,7 @@ class Runs(Scenario):
             self.assertLessEqual(turn["started"], turn["ended"])
         self.assertEqual({"%s:%d:%d" % (turn["stage"], turn["episode"], turn["round"]): turn["change"]
                           for turn in history["turns"] if "change" in turn},
-                         {"plan:1:1": {"base": None, "tree": "tree-1", "turns": ["plan:1:1"]},
+                         {"plan:1:1": {"base": "base-tip-0", "tree": "tree-1", "turns": ["plan:1:1"]},
                           "plan:1:2": {"base": "tree-1", "tree": "tree-2", "turns": ["plan:1:2"]},
                           "plan:2:1": {"base": "tree-2", "tree": "tree-3", "turns": ["plan:2:1"]},
                           "build:3:1": {"base": "tree-3", "tree": "tree-4", "turns": ["build:3:1"]},
@@ -1348,11 +1389,12 @@ class Runs(Scenario):
 
         worktree = "/fake/worktree/%s" % run_id
         status, diff = request("GET", "/api/runs/%s/diff" % run_id)
-        self.assertEqual((status, diff["base"], diff["tree"], diff["offset"]), (200, "b" * 40, "c" * 40, 0))
+        self.assertEqual((status, diff["base"], diff["against"], diff["tree"], diff["offset"]),
+                         (200, "base-tip-0", "tip", "c" * 40, 0), "read against the tip the run stands on")
         self.assertEqual((diff["total"], diff["next"]), (len(diff["patch"]), len(diff["patch"])),
                          "a change read whole says so")
-        self.assertIn(("review_diff", worktree, 0, None, None, None, None), git.calls,
-                      "the change now: a new snapshot")
+        self.assertIn(("review_diff", worktree, 0, "base-tip-0", None, None, None), git.calls,
+                      "the change now, a new snapshot: what the worktree holds against the base the run stands on")
         snapshot = {"base": diff["base"], "tree": diff["tree"]}
         status, part = request("GET", "/api/runs/%s/diff?%s" % (run_id, urllib.parse.urlencode(dict(snapshot, offset=5))))
         self.assertEqual((status, part["offset"]), (200, 5), "the rest of a change too large for one payload")
@@ -1836,7 +1878,7 @@ class Transcript(Scenario):
             [("approval", "approve", None), ("final", "revise:engineer", "rename it"),
              ("final", "revise:architect", "check the rename"), ("final", "merge", None)])
         self.assertEqual(changes, {
-            "plan:1:1": {"base": None, "tree": "tree-1", "turns": ["plan:1:1"]},
+            "plan:1:1": {"base": "base-tip-0", "tree": "tree-1", "turns": ["plan:1:1"]},
             "plan:1:2": {"base": "tree-1", "tree": "tree-2", "turns": ["plan:1:2"]},
             "build:2:1": {"base": "tree-2", "tree": "tree-3", "turns": ["build:2:1"]},
             "build:2:2": {"base": "tree-3", "tree": "tree-4", "turns": ["build:2:2"]},
@@ -1862,7 +1904,7 @@ class Transcript(Scenario):
             [("approval", "approve", None), ("blocker", "guide", "keep one queue"), ("approval", "approve", None),
              ("final", "discard", None)], flow="architect-research")
         self.assertEqual(changes, {
-            "plan:2:1": {"base": None, "tree": "tree-1", "turns": ["plan:2:1"]},
+            "plan:2:1": {"base": "base-tip-0", "tree": "tree-1", "turns": ["plan:2:1"]},
             "plan:3:1": {"base": "tree-1", "tree": "tree-2", "turns": ["plan:3:1"]},
             "build:4:1": {"base": "tree-2", "tree": "tree-3", "turns": ["build:4:1"]},
             "closeout:5:1": {"base": "tree-3", "tree": "tree-4", "turns": ["closeout:5:1"]}},
@@ -1895,7 +1937,7 @@ class Transcript(Scenario):
         history = request("GET", "/api/runs/%s/history" % run_id)[1]
         changes = {"%s:%d:%d" % (turn["stage"], turn["episode"], turn["round"]): turn["change"]
                    for turn in history["turns"] if "change" in turn}
-        self.assertEqual(changes, {"plan:1:1": {"base": None, "tree": "tree-1", "turns": ["plan:1:1"]},
+        self.assertEqual(changes, {"plan:1:1": {"base": "base-tip-0", "tree": "tree-1", "turns": ["plan:1:1"]},
                                    "build:3:1": {"base": "tree-2", "tree": "tree-3", "turns": ["build:3:1"]},
                                    "closeout:4:1": {"base": "tree-3", "tree": "tree-4", "turns": ["closeout:4:1"]}},
                          "the edit after the pass is in no turn's change")
@@ -1911,6 +1953,6 @@ class Transcript(Scenario):
             [], typed_during=("assess-e1-1",), closes=False)
         self.assertEqual(changes, {
             "plan:1:1": {"with": "plan:1:2"},
-            "plan:1:2": {"base": None, "tree": "tree-3", "turns": ["plan:1:1", "plan:1:2"]}},
+            "plan:1:2": {"base": "base-tip-0", "tree": "tree-3", "turns": ["plan:1:1", "plan:1:2"]}},
             "a PATCH review the worktree moved under judged no one tree: the two plans' change, once, on the later")
         self.assertEqual(answers, [])

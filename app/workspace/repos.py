@@ -30,8 +30,11 @@ from app.foundation import paths
 VARIABLE = "ORCHESTRA_REPOS"
 DESCRIPTORS = os.path.join(paths.REPO, ".orchestra", "repos.json")
 TARGETS = ("wsl", "windows")
-ENTRY_KEYS = {"path", "target", "base_branch", "worktree_root", "todo_dir", "todo_done_dir", "todo_name",
+ENTRY_KEYS = {"path", "target", "base_branch", "remote", "worktree_root", "todo_dir", "todo_done_dir", "todo_name",
               "closeout_docs", "lfs_pointers"}
+# `remote` names where a repository's base branch lives when that is a remote: a run begins from what that
+# remote holds and lands there, by the controller's push, on the operator's Merge. Unnamed, the base is the
+# repository's own branch and nothing leaves the machine — reaching a remote is never a default.
 # True keeps Git LFS files in a run's worktree as pointers instead of copying every asset
 # out of the repository's LFS store, for a repository whose assets a run does not need.
 FLAGS = {"lfs_pointers"}
@@ -238,10 +241,13 @@ def resolve(selected, target_root, which=shutil.which):
             raise Refused("%s has no local branch %r, the configured base branch" % (path, base))
     else:
         base = detect_base(path)
+    remote = selected.get("remote")
+    if remote and _git(path, "remote", "get-url", remote).returncode != 0:
+        raise Refused("%s has no remote %r, where its entry says its base branch lives" % (path, remote))
     root = selected.get("worktree_root") or detect_worktree_root(path, target_root)
     if target == "windows" and not ntpath.splitdrive(root)[0]:
         raise Refused("the worktree root %s is not on a Windows drive: %s" % (root, UNC_REASON))
-    resolved = {"repo_path": path, "base_branch": base, "worktree_root": root}
+    resolved = {"repo_path": path, "base_branch": base, "remote": remote, "worktree_root": root}
     resolved.update({key: selected.get(key, value) for key, value in TODO_DEFAULTS.items()})
     resolved["closeout_docs"] = list(selected.get("closeout_docs", ()))
     resolved["lfs_pointers"] = selected.get("lfs_pointers", False)

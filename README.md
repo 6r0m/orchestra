@@ -113,12 +113,15 @@ worker that dies between spawn and assignment cannot leave an agent behind.
   use, from the page's own origin, and the terminal sockets take it in the handshake's header rather
   than in a URL.
 - **Agents cannot reach a remote.** A role's git environment refuses every transport, so a push
-  fails even if an agent tries; the controller alone commits and merges, after your answer.
+  fails even if an agent tries; the controller alone commits and merges, after your answer. It
+  pushes only where a repository's entry names the remote its base branch lives on: that one
+  branch, on your Merge, forcing nothing.
 - **Only what a stage judged can proceed.** A plan changed after the architect passed it goes back
   for assessment before a build starts; a change made while the architect verifies fails that step;
+  a base branch that moved while a run built is brought into it and judged before the final gate;
   the engineer's closeout of the todo may touch nothing the architect verified but the todo and
-  the documents the repository names; and a merge commits exactly the tree the final gate showed
-  you, or refuses.
+  the documents the repository names; and a merge lands exactly the tree the final gate showed
+  you, on the base as it was judged — or, the base having moved again, lands nothing.
 - **Vendor trust dialogs are recorded, not bypassed.** Orchestra records a repository you start a
   run on with the CLIs' own trust stores, so an unattended turn does not sit at a dialog — and it
   never overrides an explicit `untrusted` decision of yours.

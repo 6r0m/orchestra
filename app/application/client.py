@@ -355,7 +355,9 @@ async def runs(client, limit=200, cursor=None):
 async def review_diff(client, run_id, offset=0, base=None, tree=None, file=None, files_from=None):
     """The run's change as its target host's git reads it (`worktrees.review_diff`): the change now, or the
     snapshot `base` and `tree` name, from `offset` bytes into its patch — or its file list from `files_from`, or
-    its one `file`. A read naming what that git cannot read is refused, saying why."""
+    its one `file`. The change now is read against the commit of its base the run stands on, where it recorded
+    one: what the run adds to that base, whatever git holds in its worktree meanwhile. A read naming what that
+    git cannot read is refused, saying why."""
     current = await readable_status(client, run_id)
     if current is None:
         raise NotWaiting("no run %r" % run_id)
@@ -363,6 +365,8 @@ async def review_diff(client, run_id, offset=0, base=None, tree=None, file=None,
     if not path:
         raise Refusal("run %s has no worktree yet" % run_id)
     await preflight(client, queues(current["workflow_queue"], current["queue"]))
+    if base is None and tree is None:
+        base = current["state"].get("base_tip")
     named = {key: value for key, value in (("base", base), ("tree", tree), ("file", file), ("files_from", files_from))
              if value is not None}
     try:
@@ -392,7 +396,9 @@ async def history(client, run_id):
     accepted, as its accepted event recorded the request; one its validator refused never entered the history.
     Its phase is the one of the last role turn begun before it, failed or not, and it comes `after` the last turn
     completed before it, by its key `stage:episode:round` — the transcript's order is the history's own, never one
-    read from clocks. Each engineer turn carries its `change` (`_changes`)."""
+    read from clocks. Each engineer turn carries its `change` (`_changes`), which begins from the commit the
+    run's worktree was made at and, each time its base was brought into that worktree, from the tree that left
+    there — both as those steps recorded them."""
     def at(event):
         return event.event_time.ToDatetime(tzinfo=datetime.timezone.utc).isoformat()
 
@@ -400,6 +406,7 @@ async def history(client, run_id):
         return (await client.data_converter.decode(payloads))[0]
 
     turns, answers, scheduled, started, phase = [], [], {}, {}, None
+    steps, began, came = {}, None, []
     try:
         async for event in client.get_workflow_handle(run_id).fetch_history_events():
             if event.HasField("activity_task_scheduled_event_attributes"):
@@ -408,6 +415,8 @@ async def history(client, run_id):
                     args = await decoded(attributes.input.payloads)
                     scheduled[event.event_id] = (args, at(event))
                     phase = args["state"].get("phase") or phase
+                elif attributes.activity_type.name in ("create_worktree", "reconcile"):
+                    steps[event.event_id] = attributes.activity_type.name
             elif event.HasField("activity_task_started_event_attributes"):
                 started[event.activity_task_started_event_attributes.scheduled_event_id] = at(event)
             elif event.HasField("activity_task_completed_event_attributes"):
@@ -423,6 +432,12 @@ async def history(client, run_id):
                     if tree:
                         turn["tree"] = tree
                     turns.append(turn)
+                elif attributes.scheduled_event_id in steps:
+                    result = await decoded(attributes.result.payloads)
+                    if steps.pop(attributes.scheduled_event_id) == "create_worktree":
+                        began = result.get("base_tip")
+                    elif result.get("moved") and result.get("tree"):
+                        came.append((len(turns), result["tree"]))
             elif event.HasField("workflow_execution_update_accepted_event_attributes"):
                 request = event.workflow_execution_update_accepted_event_attributes.accepted_request
                 if request.meta.update_id.startswith("answer:"):
@@ -434,7 +449,7 @@ async def history(client, run_id):
         if error.status == RPCStatusCode.NOT_FOUND:
             return None
         raise
-    _changes(turns)
+    _changes(turns, began, came)
     return {"turns": turns, "answers": answers}
 
 
@@ -442,17 +457,25 @@ def _turn_key(turn):
     return "%s:%d:%d" % (turn["stage"], turn["episode"], turn["round"])
 
 
-def _changes(turns):
+def _changes(turns, began=None, came=()):
     """Give each engineer turn the change the reviews around it judged: from the tree the last review before it
-    recorded — the worktree's last commit (`base` None) before any — to the tree the first review after it recorded,
-    with the turns it holds. Engineer turns with a review between them that recorded no tree cannot be told apart, so
+    recorded — before any, the commit the run began from (`began`; `base` None for a run that recorded none, read
+    then as its worktree's last commit) — to the tree the first review after it recorded, with the turns it holds.
+    Where the run's base was brought into its worktree (`came`: after how many turns, and the tree that left), the
+    next change starts from that tree: the base's own commits are no turn's change.
+    Engineer turns with a review between them that recorded no tree cannot be told apart, so
     their change is one, given to the last of them, which the others point to (`with`); never the same change twice.
     A turn no review has judged since is `pending`; one only reviews that recorded no tree have judged, `unrecorded`.
     The turn that makes a build final has no review after it and records the tree it left itself: its change is
     from the tree the last review recorded to that one — what the operator alone judges — and it moves no later
     turn's start, since a change sent back is reopened to the tree that review judged."""
-    base, waiting, judged = None, [], set()
-    for turn in turns:
+    base, waiting, judged, came = began, [], set(), list(came)
+    for at, turn in enumerate(turns):
+        while came and came[0][0] <= at:
+            # Turns no review's tree had judged before the base came in cannot be told from it.
+            for each in waiting:
+                each["change"] = {"unrecorded": True}
+            waiting, judged, base = [], set(), came.pop(0)[1]
         if stages.STAGE_ROLE.get(turn["stage"]) == "engineer" and turn.get("tree"):
             turn["change"] = {"base": base, "tree": turn["tree"], "turns": [_turn_key(turn)]}
         elif stages.STAGE_ROLE.get(turn["stage"]) == "engineer":

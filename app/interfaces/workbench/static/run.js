@@ -46,6 +46,8 @@ const STAGE_ROLES = { research: "architect", plan: "engineer", assess: "architec
 
 let selected = null;
 let shownStop = null;
+// Where the shown run's merge lands when its base is a remote's — `origin/main` — which its confirmation says.
+let landsOn = null;
 // What the operator has typed for each stop and not yet sent: another run opened and this one again, the
 // note is still there.
 const drafts = new Map();
@@ -96,6 +98,7 @@ export async function refreshRun() {
   if (runId !== selected) return;
   const view = status.view;
   const state = status.state;
+  landsOn = state && state.remote ? state.remote + "/" + state.base_branch : null;
   // With its worker down the run is shown from its listing alone: what it last said stays on the page.
   if (!status.unreadable || !$("run-task").textContent) $("run-task").textContent = view.goal || runId;
   if (!status.unreadable || !$("run-facts").children.length) {
@@ -338,7 +341,12 @@ async function answer(stop, action, button) {
   // Only words you wrote: an empty note must reach the workflow empty, for it to refuse.
   if (text) body.text = text;
   if (ASK[action]) {
-    if (!(await confirmAction({ ...ASK[action], returnTo: button })) || runId !== selected) return;
+    // A merge that leaves the machine says where it goes before it is asked for.
+    const asked = action === "merge" && landsOn
+      ? { ...ASK.merge, title: "Merge the verified change into " + landsOn + "?",
+        body: "It is pushed to the remote, forcing nothing: a remote that has moved takes nothing." }
+      : ASK[action];
+    if (!(await confirmAction({ ...asked, returnTo: button })) || runId !== selected) return;
     body.confirm = true;
   }
   for (const id of ["stop-note-alert", "stop-alert"]) $(id).textContent = "";

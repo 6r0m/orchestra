@@ -219,6 +219,15 @@ class FeatureRun:
             if stands:
                 if last:
                     return await self._end("DONE")
+                if self.segments[at + 1]["work"][1] in stages.FINAL:
+                    # Before a build is made final it stands on the base as it is: a base that moved is
+                    # brought in, and what it makes of the build is judged before anything goes on.
+                    based = await self._reconcile()
+                    if based is None:
+                        return await self._end("ABORTED")
+                    if based != "stands":
+                        review_next = based == "review"
+                        continue
                 at += 1
                 await self._next(self.segments[at]["work"][1])
             review_next = not stands
@@ -390,6 +399,18 @@ class FeatureRun:
                 s.update(status="MERGED", merge_commit=merged["commit"])
                 self._line("MERGED %s" % merged["commit"])
                 return "done"
+            if merged["result"] == "moved":
+                # The base is no longer where this change was judged: nothing was committed or merged. The
+                # change goes back as one sent back does, the base is brought in, and the two are judged.
+                self._line("%s moved since this change was judged on it: nothing merged" % s["base_branch"])
+                if not await self._reopened():
+                    continue
+                based = await self._reconcile()
+                if based is None:
+                    continue
+                if based == "stands":
+                    s.update(status="RUNNING", round=0, gate_reason="", guidance="", episode=s["episode"] + 1)
+                return "build" if based == "build" else "review"
             if merged["result"] == "conflict":
                 self._line("merge conflict: %s" % ", ".join(merged["files"]))
                 # The conflict goes back to the run's agents, never resolved here — reopened first, as a
@@ -410,6 +431,36 @@ class FeatureRun:
                 return "build"
             s["merge_refusal"] = merged["reason"]
             self._line("merge refused: %s" % merged["reason"])
+
+    async def _reconcile(self):
+        """Is the base still where this run stands on it? "stands" when it is — and for a run that recorded
+        no tip, which began before runs did. When it moved it is brought into the worktree: "review" where
+        git merged it without a conflict, for the architect to judge the two together; "build" where it left
+        conflicts, for the engineer. None when the step was aborted."""
+        s = self.state
+        if not s.get("base_tip"):
+            return "stands"
+        self._doing("reconcile")
+        came = await self._until_done("reconcile", lambda: self._git("reconcile", {"state": s}))
+        if came is None:
+            return None
+        if not came["moved"]:
+            return "stands"
+        s["base_tip"] = came["base_tip"]
+        if came["files"]:
+            self._line("%s moved: merged into the worktree with conflicts in %s"
+                       % (s["base_branch"], ", ".join(came["files"])))
+            guidance = ("%s moved while this change was made. It is merged into this worktree with conflict "
+                        "markers in: %s. Resolve every conflict in the files; do not stage or commit."
+                        % (s["base_branch"], ", ".join(came["files"])))
+        else:
+            self._line("%s moved: merged into the worktree without a conflict" % s["base_branch"])
+            guidance = ("%s moved while this change was made, and is merged into this worktree without a "
+                        "conflict. Judge the change as it now stands on it." % s["base_branch"])
+        s.update(status="RUNNING", round=0, gate_reason="", episode=s["episode"] + 1, guidance=guidance)
+        if self.review_rounds:
+            s.update(convergence=None, convergence_seen=[])
+        return "build" if came["files"] else "review"
 
     async def _reopened(self):
         """Before a change the final gate held goes back into its run: the worktree taken from the tree it

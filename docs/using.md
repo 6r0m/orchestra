@@ -96,14 +96,18 @@ repository's done folder — and it is exactly what Merge commits. The architect
 closeout, which may touch only the todo and the documents the repository names (`closeout_docs` in
 its entry in `.orchestra/repos.json`; the todo alone when it names none): its
 turn in the history opens what it changed since the architect's verification. A revise undoes it
-before its role's turn. Its
+before its role's turn. If the base branch moved while the run built, it was brought into the worktree
+and judged before this gate, so what you read is the change on the base as it is. Merge lands it on
+that base: the repository's own branch, or — where its entry names the `remote` its base lives on —
+that remote's, by a push that forces nothing, which the confirmation says. Should the base have moved
+again since, Merge lands nothing; the run brings it in, has it judged, and comes back to you. Its
 answers are the stop's own, as buttons. The note is labelled with the answers it is sent with, and a
 note typed for a stop stays while you look at other runs; an answer the workflow refuses is said
 beside what it concerns, and a merge or a discard asks first.
 
-The change is read as one snapshot of the worktree — its last commit and the tree its files make; once a
-merge in conflict has come back, the base brought into it and that tree, so that only what the run adds
-shows — and listed file by file, each by its whole path: a rename as its old path and its new one, a binary file
+The change is read as one snapshot: the commit of its base the run stands on and the tree the
+worktree's files make, so that it shows what the run adds to that base and nothing the base brought in —
+and listed file by file, each by its whole path: a rename as its old path and its new one, a binary file
 said so; a very long list comes a part at a time, *List more files* reading the rest of the same snapshot. Open a file to see its diff as an editor shows one: both line numbers, added lines green,
 removed red, long unchanged runs folded a click away. A file too large to show whole shows its changes
 alone, and says so. The patch sits below in a small box; *Copy patch* copies all of it, however large,

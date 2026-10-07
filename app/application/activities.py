@@ -170,7 +170,8 @@ class Activities:
 
     def all(self):
         return [self.prepare, self.create_worktree, self.open_run, self.open_phase, self.run_role,
-                self.record_stop, self.record_answer, self.finish_trace, self.reopen, self.merge, self.discard,
+                self.record_stop, self.record_answer, self.finish_trace, self.reconcile, self.reopen, self.merge,
+                self.discard,
                 self.worktree_view, self.review_diff, self.work_tree]
 
     def client(self):
@@ -221,11 +222,16 @@ class Activities:
         with self._git_step(state["run_id"], "worktree's creation"):
             try:
                 path = self.git.create(state["repo_path"], state["base_branch"], state["worktree_root"],
-                                       state["run_id"], state["target"], state.get("lfs_pointers", False))
+                                       state["run_id"], state["target"], state.get("lfs_pointers", False),
+                                       state.get("remote"))
+                # The commit of its base the run stands on: recorded here, and each time the base is brought
+                # in (`reconcile`), so the workflow knows it from what git answered and never asks git itself.
+                tip = self.git.started_from(path)
             except Exception as exc:
                 raise _failure(exc) from exc
         plan = W.plan_path(state["todo_dir"], state["todo_name"], state["created"], state["task"])
-        return {"worktree_path": path, "worktree": path, "plan": plan, "todo_path": os.path.join(path, plan)}
+        return {"worktree_path": path, "worktree": path, "plan": plan, "todo_path": os.path.join(path, plan),
+                "base_tip": tip}
 
     @activity.defn
     def open_run(self, args):
@@ -444,6 +450,18 @@ class Activities:
         return {"trace_url": T.trace_url(client, state.get("trace_id"))}
 
     @activity.defn
+    def reconcile(self, args):
+        """Is the base still at the commit the run stands on? When it moved, it is brought into the run's
+        worktree — the base itself untouched — and what came in is returned for the run's roles to judge."""
+        state = args["state"]
+        with self._git_step(state["run_id"], "reconciling with %s" % state["base_branch"]):
+            try:
+                return self.git.reconcile(state["repo_path"], state["worktree_path"], state["base_branch"],
+                                          state["base_tip"], state.get("remote"))
+            except Exception as exc:
+                raise _failure(exc) from exc
+
+    @activity.defn
     def reopen(self, args):
         """Take a change that goes back into its run — sent back, or in conflict — from the tree it was
         offered in to the one the architect verified, before any role reads it again."""
@@ -473,7 +491,7 @@ class Activities:
                                       state["base_branch"], final or state.get("verified_tree"),
                                       None if final else state["plan"],
                                       state["todo_done_dir"], ("%s: %s" % (stem, words))[:100],
-                                      "Merge %s" % stem)
+                                      "Merge %s" % stem, state.get("base_tip"), state.get("remote"))
             except W.MergeRefused as exc:
                 return {"result": "refused", "reason": str(exc)}
             except Exception as exc:

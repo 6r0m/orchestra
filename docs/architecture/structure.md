@@ -388,18 +388,37 @@ still lands on a checkout.
   the run, to the role the operator names — reopened first: each path changed since the
   verified tree is again as the architect verified it, bar one changed again since, which
   the next review judges, so the todo is where the roles are asked to read it — and the
-  build closes out anew once it passes. `merge` commits exactly the final tree, and
-  refuses when the worktree is no longer that tree: the change lands as one commit whose
-  message is the plan's name and a few words of the task, and the base branch
-  gains an explicit `--no-ff` merge commit named for the plan — in the base's
-  checkout when it is checked out there, which refuses staged changes that are
-  the operator's, and otherwise without touching any checkout. A conflict never
-  resolves in the controller: the base is merged into the run's worktree with its
-  conflict markers and the change is reopened as a revise reopens it; the engineer
-  resolves the files, the architect verifies, the engineer closes out again, the operator
-  merges again, and the run branch gains one reconciliation merge commit. Until then
-  the change read at the gate is what the run adds to the base brought in, never that
-  base's own commits. A run started
+  build closes out anew once it passes. A run stands on one commit of its base: the
+  tip its worktree was made at, recorded then, and after it each tip brought in. Where
+  the repository's entry names the `remote` its base lives on, that is the remote's
+  branch, fetched before every look, and this repository's own branch of that name is
+  no destination; unnamed, the base is the local branch and nothing leaves the machine.
+  Once a build has passed, and before it is made final, the base is looked at. One that
+  moved is merged into the run's worktree, uncommitted, the base itself untouched:
+  where git merged it without a conflict the architect verifies the two together, and
+  where it left conflicts the engineer resolves them first. The run goes on only from a
+  `PASS` on a base that stood still, so nothing is made final, and nothing reaches the
+  gate, that no stage judged on the base as it is; a look that could not be made is no
+  answer, and stops the run. The change read at the gate is what the worktree holds
+  against that commit. `merge` lands exactly the final tree, and only while the base is
+  still at that commit: the change as one commit on it, made in the worktree so the
+  repository's own commit hooks judge it, its message the plan's name and a few words
+  of the task; then a merge commit named for the plan, its first parent that commit and
+  its tree the final tree — the same two commits for every run, the base's own history
+  its first-parent line, and nothing kept of the base's coming in. The base takes it
+  only as a fast-forward: a remote by the controller's push, which forces nothing; a
+  local branch in its checkout when it is checked out, which keeps its files in step
+  and refuses staged changes and any edit of the operator's it would write over; one
+  checked out nowhere by a compare-and-swap of its ref. A base that moved again takes
+  nothing — nothing is committed, merged or pushed; the change is reopened and the base
+  brought in and judged as before — and a worktree that is no longer the final tree is
+  refused. So a conflict never resolves in the controller, on the base or at the
+  operator's Merge. A run that recorded no commit of its base began before runs did
+  and keeps the path it recorded (D25): its merge is git's own into the local base, and
+  a conflict found there is handed back — the base merged into its worktree with its
+  conflict markers, the change reopened as a revise reopens it, resolved, verified,
+  closed out and merged again, the run branch gaining one reconciliation merge commit,
+  the change read meanwhile against the base brought in. A run started
   before closeouts recorded a flow with none: it holds the tree the architect's last
   `PASS` verified, and the controller finishes its plan at the merge — moved to the done
   folder with a finished status line, or deleted. A run of the first closeouts recorded

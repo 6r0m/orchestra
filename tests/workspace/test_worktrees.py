@@ -641,12 +641,12 @@ class Merge(Repo):
         git(self.repo, "commit", "-q", "-m", "base moved")
         moved = git(self.repo, "rev-parse", "develop").strip()
         before = W.review_diff(path)
-        self.assertEqual((before["base"], before["merging"]), (git(path, "rev-parse", "HEAD").strip(), False),
+        self.assertEqual((before["base"], before["against"]), (git(path, "rev-parse", "HEAD").strip(), "commit"),
                          "no base brought in: against the worktree's own commit, as ever")
         self.assertEqual(self.merge("run1", path)["result"], "conflict")
         write(os.path.join(path, "app.txt"), "one\nthe base moved\nrun1\n")
         read = W.review_diff(path)
-        self.assertEqual((read["base"], read["merging"]), (moved, True), "against the base as it was brought in")
+        self.assertEqual((read["base"], read["against"]), (moved, "merged"), "against the base as it was brought in")
         self.assertEqual(sorted(each["path"] for each in read["files"]),
                          ["app.txt", "todo/done/2026-09-15_1200-run1.md"], "the run's own change, and no more")
         self.assertEqual(W.review_diff(path, base=read["base"], tree=read["tree"], file="app.txt")["file"]["added"], 1,
@@ -975,6 +975,275 @@ class EnvironmentRemoval(Repo):
         with self.assertRaises(envpath.UnsafeRemoval):
             envpath.remove_environment(path)
         self.assertTrue(os.path.exists(os.path.join(env, "pyvenv.cfg")))
+
+
+class Landing(Repo):
+    """A run that stands on a recorded tip of its base: the base brought into its worktree when it moved, and
+    its final tree landed only while the base is still where the run was judged."""
+
+    def stand(self, run_id):
+        path = self.worktree(run_id)
+        return path, W.started_from(path)
+
+    def land(self, run_id, path, tip, tree=None):
+        return W.merge(self.repo, path, run_id, "develop", tree or W.work_tree(path), None,
+                       os.path.join("todo", "done"), "%s: the change" % run_id, "Merge %s" % run_id, tip)
+
+    def move_base(self, files):
+        for name, text in files.items():
+            write(os.path.join(self.repo, name), text)
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "base moved")
+        return git(self.repo, "rev-parse", "develop").strip()
+
+    def subjects(self, *args):
+        # A commit before its parents, whatever second each was made in.
+        return git(self.repo, "log", "--topo-order", "--format=%s", *args).splitlines()
+
+    def test_a_base_that_stands_takes_the_final_tree_as_one_commit_and_the_merge_named_for_the_run(self):
+        path, tip = self.stand("run1")
+        self.assertEqual(tip, git(self.repo, "rev-parse", "develop").strip(), "it began from the base's tip")
+        self.assertEqual(W.reconcile(self.repo, path, "develop", tip), {"moved": False})
+        final = W.work_tree(path)
+        result = self.land("run1", path, tip)
+        self.assertEqual(result["result"], "merged")
+        self.assertEqual(git(self.repo, "rev-parse", "develop^{tree}").strip(), final, "the base holds the final tree")
+        self.assertEqual(self.subjects("--first-parent", "develop"), ["Merge run1", "base"])
+        merge, landing = git(self.repo, "rev-list", "--parents", "-n", "1", "develop").split()[1:]
+        self.assertEqual((merge, git(self.repo, "rev-list", "--parents", "-n", "1", landing).split()[1:]),
+                         (tip, [tip]), "the merge's first parent is the base's tip, and the change one commit on it")
+        self.assertEqual(git(self.repo, "show", "develop:app.txt"), "one\nrun1\n")
+        self.assertFalse(os.path.exists(path), "the worktree is gone")
+        self.assertFalse(W.branch_exists(self.repo, "run1"))
+        self.assertEqual(self.land("run1", path, tip, final), result, "tried again, the merge it made is adopted")
+
+    def test_a_base_that_moved_without_a_conflict_takes_nothing_until_it_is_brought_in(self):
+        """Git would merge the two without a word, into a tree no stage judged and no gate showed."""
+        path, tip = self.stand("run1")
+        moved = self.move_base({"elsewhere.txt": "the base's own\n"})
+        offered = W.work_tree(path)
+        self.assertEqual(self.land("run1", path, tip), {"result": "moved"})
+        self.assertEqual((git(self.repo, "rev-parse", "develop").strip(), git(self.repo, "rev-parse", "run1").strip(),
+                          W.work_tree(path), git(self.repo, "status", "--porcelain").strip()),
+                         (moved, tip, offered, ""), "nothing committed, nothing merged, no checkout touched")
+        came = W.reconcile(self.repo, path, "develop", tip)
+        self.assertEqual((came["moved"], came["base_tip"], came["files"]), (True, moved, []))
+        self.assertEqual(came["tree"], W.work_tree(path), "the tree the worktree holds with the base in it")
+        self.assertTrue(os.path.isfile(os.path.join(path, "elsewhere.txt")), "the base's file is in the worktree")
+        self.assertEqual(W.reconcile(self.repo, path, "develop", moved), {"moved": False}, "it stands on that tip now")
+        read = W.review_diff(path, base=moved)
+        self.assertEqual((read["against"], sorted(each["path"] for each in read["files"])),
+                         ("tip", ["app.txt", "todo/2026-09-15_1200-run1.md"]), "the change is the run's own")
+        final = W.work_tree(path)
+        self.assertEqual(self.land("run1", path, moved)["result"], "merged")
+        self.assertEqual(git(self.repo, "rev-parse", "develop^{tree}").strip(), final)
+        self.assertEqual(self.subjects("--first-parent", "develop"), ["Merge run1", "base moved", "base"],
+                         "the base's own history is its first-parent line")
+        self.assertEqual([each for each in self.subjects("develop") if "stood" in each or "into" in each], [],
+                         "nothing the run's branch held as the base came in is reachable from the base")
+
+    def test_a_conflict_is_met_in_the_worktree_and_its_resolution_lands_as_the_same_two_commits(self):
+        path, tip = self.stand("run1")
+        moved = self.move_base({"app.txt": "one\nthe base moved\n"})
+        came = W.reconcile(self.repo, path, "develop", tip)
+        self.assertEqual((came["moved"], came["base_tip"], came["files"]), (True, moved, ["app.txt"]))
+        self.assertIn("<<<<<<<", open(os.path.join(path, "app.txt"), encoding="utf-8").read())
+        self.assertEqual((git(self.repo, "rev-parse", "develop").strip(), git(self.repo, "status", "--porcelain").strip()),
+                         (moved, ""), "the base and its checkout are untouched")
+        # The engineer resolves in the files, staging nothing; the architect judges the whole.
+        write(os.path.join(path, "app.txt"), "one\nthe base moved\nrun1\n")
+        final = W.work_tree(path)
+        self.assertEqual(self.land("run1", path, moved)["result"], "merged")
+        self.assertEqual((git(self.repo, "rev-parse", "develop^{tree}").strip(), git(self.repo, "show", "develop:app.txt")),
+                         (final, "one\nthe base moved\nrun1\n"))
+        self.assertEqual(self.subjects("develop"), ["Merge run1", "run1: the change", "base moved", "base"],
+                         "the change and its merge — no merge of the base into the run, nothing kept as it came in")
+
+    def test_a_base_that_moves_again_is_brought_in_again_and_an_answer_that_was_lost_is_adopted(self):
+        path, tip = self.stand("run1")
+        first = self.move_base({"elsewhere.txt": "the base's own\n"})
+        came = W.reconcile(self.repo, path, "develop", tip)
+        self.assertEqual(W.reconcile(self.repo, path, "develop", tip), came,
+                         "asked again with the tip it began from — its answer lost — the merge under way is adopted")
+        self.assertEqual(self.subjects("run1").count("As it stood when develop moved"), 1, "its files kept once")
+        second = self.move_base({"more.txt": "the base's own, later\n"})
+        again = W.reconcile(self.repo, path, "develop", first)
+        self.assertEqual((again["moved"], again["base_tip"], again["files"]), (True, second, []))
+        self.assertTrue(all(os.path.isfile(os.path.join(path, name)) for name in ("elsewhere.txt", "more.txt")))
+        self.assertEqual(self.land("run1", path, first), {"result": "moved"}, "judged on the first, it lands on neither")
+        final = W.work_tree(path)
+        self.assertEqual(self.land("run1", path, second)["result"], "merged")
+        self.assertEqual(git(self.repo, "rev-parse", "develop^{tree}").strip(), final)
+        self.assertEqual(self.subjects("--first-parent", "develop"), ["Merge run1", "base moved", "base moved", "base"])
+
+    def test_the_operators_own_edits_in_the_base_checkout_are_never_written_over(self):
+        path, tip = self.stand("run1")
+        write(os.path.join(self.repo, "app.txt"), "one\nthe operator's, not committed\n")
+        with self.assertRaises(W.MergeRefused):
+            self.land("run1", path, tip)
+        self.assertEqual((git(self.repo, "rev-parse", "develop").strip(),
+                          open(os.path.join(self.repo, "app.txt"), encoding="utf-8").read()),
+                         (tip, "one\nthe operator's, not committed\n"), "a file the landing changes: refused, kept")
+        git(self.repo, "checkout", "-q", "--", "app.txt")
+        write(os.path.join(self.repo, "todo", "README.md"), "todos\nthe operator's, elsewhere\n")
+        write(os.path.join(self.repo, "operator.txt"), "mine\n")
+        git(self.repo, "add", "operator.txt")
+        with self.assertRaises(W.MergeRefused):
+            self.land("run1", path, tip)
+        self.assertEqual(git(self.repo, "diff", "--cached", "--name-only").split(), ["operator.txt"],
+                         "staged content is the operator's: refused, exactly as it was")
+        git(self.repo, "restore", "--staged", "operator.txt")
+        os.remove(os.path.join(self.repo, "operator.txt"))
+        self.assertEqual(self.land("run1", path, tip)["result"], "merged", "the commit it had written is merged")
+        self.assertEqual(open(os.path.join(self.repo, "todo", "README.md"), encoding="utf-8").read(),
+                         "todos\nthe operator's, elsewhere\n", "an edit the landing does not touch stays")
+        self.assertEqual(self.subjects("develop").count("run1: the change"), 1, "and written once")
+
+    def test_a_landing_whose_commit_a_hook_refused_lands_when_continued(self):
+        path, tip = self.stand("run1")
+        moved = self.move_base({"app.txt": "one\nthe base moved\n"})
+        W.reconcile(self.repo, path, "develop", tip)
+        write(os.path.join(path, "app.txt"), "one\nthe base moved\nrun1\n")
+        final = W.work_tree(path)
+        hooks = git(self.repo, "config", "core.hooksPath").strip()
+        marker = os.path.join(self.tmp, "failed-once").replace("\\", "/")
+        write(os.path.join(hooks, "pre-commit"), "#!/bin/sh\n[ -e '%s' ] && exit 0\ntouch '%s'\nexit 1\n" % (marker, marker))
+        os.chmod(os.path.join(hooks, "pre-commit"), 0o755)
+        self.addCleanup(lambda: os.path.exists(os.path.join(hooks, "pre-commit"))
+                        and os.remove(os.path.join(hooks, "pre-commit")))
+        with self.assertRaises(W.GitError):
+            self.land("run1", path, moved)
+        self.assertEqual((git(self.repo, "rev-parse", "develop").strip(), W.work_tree(path)), (moved, final),
+                         "the repository's own hook judged the commit that lands; refused, the base has nothing")
+        self.assertEqual(self.land("run1", path, moved)["result"], "merged")
+        self.assertEqual(git(self.repo, "rev-parse", "develop^{tree}").strip(), final)
+
+    def test_a_base_checked_out_nowhere_lands_by_its_ref_or_not_at_all(self):
+        git(self.repo, "switch", "-q", "-c", "elsewhere")
+        path, tip = self.stand("run1")
+        other, other_tip = self.stand("run2")
+        final = W.work_tree(path)
+        self.assertEqual(self.land("run1", path, tip)["result"], "merged")
+        self.assertEqual((git(self.repo, "rev-parse", "develop^{tree}").strip(), git(self.repo, "status", "--porcelain").strip()),
+                         (final, ""), "landed, and no checkout touched")
+        landed = git(self.repo, "rev-parse", "develop").strip()
+        self.assertEqual(self.land("run2", other, other_tip), {"result": "moved"}, "the second stood on the old tip")
+        self.assertEqual(git(self.repo, "rev-parse", "develop").strip(), landed)
+
+    def test_a_run_with_nothing_the_base_lacks_is_refused(self):
+        path = self.worktree("run1", change=False)
+        tip = W.started_from(path)
+        with self.assertRaises(W.MergeRefused):
+            self.land("run1", path, tip)
+        self.assertEqual(git(self.repo, "rev-parse", "develop").strip(), tip)
+
+    def test_a_worktree_changed_after_it_was_offered_is_refused(self):
+        path, tip = self.stand("run1")
+        offered = W.work_tree(path)
+        write(os.path.join(path, "app.txt"), "edited after the gate showed it\n")
+        with self.assertRaises(W.MergeRefused):
+            W.merge(self.repo, path, "run1", "develop", offered, None, os.path.join("todo", "done"), "m", "Merge m", tip)
+        self.assertEqual((git(self.repo, "rev-parse", "develop").strip(), git(self.repo, "rev-parse", "run1").strip()),
+                         (tip, tip))
+
+
+class Remote(Repo):
+    """A repository whose base is a remote's: a run begins from what the remote holds, and lands there by a
+    push that forces nothing. This repository's own branch of that name is no destination."""
+
+    def setUp(self):
+        super().setUp()
+        self.origin = os.path.join(self.tmp, "origin.git")
+        git(self.tmp, "init", "-q", "--bare", "-b", "develop", self.origin)
+        git(self.repo, "remote", "add", "origin", self.origin)
+        git(self.repo, "push", "-q", "origin", "develop")
+        self.local = git(self.repo, "rev-parse", "develop").strip()
+
+    def elsewhere(self, files):
+        """A commit pushed to the remote from another clone: the remote moves, this repository's branch does not."""
+        clone = os.path.join(self.tmp, "clone-%d" % len(os.listdir(self.tmp)))
+        git(self.tmp, "clone", "-q", "-c", "core.autocrlf=false", "-b", "develop", self.origin, clone)
+        for key, value in (("user.name", "o"), ("user.email", "o@o"), ("commit.gpgsign", "false"),
+                           ("core.autocrlf", "false")):
+            git(clone, "config", key, value)
+        for name, text in files.items():
+            write(os.path.join(clone, name), text)
+        git(clone, "add", "-A")
+        git(clone, "commit", "-q", "-m", "pushed from elsewhere")
+        git(clone, "push", "-q", "origin", "develop")
+        return git(clone, "rev-parse", "HEAD").strip()
+
+    def stand(self, run_id):
+        path = W.create(self.repo, "develop", self.root, run_id, TARGET, remote="origin")
+        write(os.path.join(path, "app.txt"), "one\n%s\n" % run_id)
+        return path, W.started_from(path)
+
+    def land(self, run_id, path, tip, tree=None):
+        return W.merge(self.repo, path, run_id, "develop", tree or W.work_tree(path), None,
+                       os.path.join("todo", "done"), "%s: the change" % run_id, "Merge %s" % run_id, tip, "origin")
+
+    def remote_tip(self):
+        return git(self.origin, "rev-parse", "develop").strip()
+
+    def test_a_run_begins_from_what_the_remote_holds_and_lands_there_by_a_push(self):
+        ahead = self.elsewhere({"elsewhere.txt": "pushed by another\n"})
+        path, tip = self.stand("run1")
+        self.assertEqual((tip, os.path.isfile(os.path.join(path, "elsewhere.txt"))), (ahead, True),
+                         "from the remote's tip, which this repository's own branch is behind")
+        self.assertNotEqual(subprocess.run(["git", "-C", self.repo, "config", "--get", "branch.run1.remote"],
+                                           capture_output=True).returncode, 0, "its branch follows no upstream")
+        final = W.work_tree(path)
+        result = self.land("run1", path, tip)
+        self.assertEqual((result["result"], self.remote_tip()), ("merged", result["commit"]), "the remote took it")
+        self.assertEqual(git(self.origin, "rev-parse", "develop^{tree}").strip(), final)
+        self.assertEqual(git(self.origin, "log", "--first-parent", "--format=%s", "develop").splitlines(),
+                         ["Merge run1", "pushed from elsewhere", "base"])
+        self.assertEqual((git(self.repo, "rev-parse", "develop").strip(), git(self.repo, "status", "--porcelain").strip()),
+                         (self.local, ""), "this repository's branch and checkout are as they were")
+        self.assertEqual(git(self.origin, "for-each-ref", "--format=%(refname)").split(), ["refs/heads/develop"],
+                         "the run's branch never reached the remote")
+        self.assertFalse(os.path.exists(path))
+        self.assertFalse(W.branch_exists(self.repo, "run1"))
+        self.assertEqual(self.land("run1", path, tip, final), result,
+                         "tried again, the merge the remote holds is adopted")
+
+    def test_a_remote_that_moved_takes_nothing_and_its_base_is_brought_in(self):
+        path, tip = self.stand("run1")
+        self.assertEqual(W.reconcile(self.repo, path, "develop", tip, "origin"), {"moved": False})
+        ahead = self.elsewhere({"elsewhere.txt": "pushed by another\n"})
+        self.assertEqual(self.land("run1", path, tip), {"result": "moved"})
+        self.assertEqual((self.remote_tip(), git(self.repo, "rev-parse", "run1").strip()), (ahead, tip),
+                         "nothing pushed, nothing committed")
+        came = W.reconcile(self.repo, path, "develop", tip, "origin")
+        self.assertEqual((came["moved"], came["base_tip"], came["files"]), (True, ahead, []))
+        final = W.work_tree(path)
+        self.assertEqual(self.land("run1", path, ahead)["result"], "merged")
+        self.assertEqual(git(self.origin, "rev-parse", "develop^{tree}").strip(), final)
+
+    def test_a_push_the_remote_refuses_lands_nothing_and_lands_when_continued(self):
+        path, tip = self.stand("run1")
+        final = W.work_tree(path)
+        hook = os.path.join(self.origin, "hooks", "pre-receive")
+        write(hook, "#!/bin/sh\necho 'this branch takes no push' >&2\nexit 1\n")
+        os.chmod(hook, 0o755)
+        with self.assertRaises(W.MergeRefused) as refused:
+            self.land("run1", path, tip)
+        self.assertIn("origin refused the push", str(refused.exception))
+        self.assertEqual((self.remote_tip(), os.path.isdir(path), W.branch_exists(self.repo, "run1")), (tip, True, True),
+                         "the remote has nothing, and the run keeps its worktree and branch")
+        os.remove(hook)
+        self.assertEqual(self.land("run1", path, tip)["result"], "merged")
+        self.assertEqual(git(self.origin, "rev-parse", "develop^{tree}").strip(), final)
+        self.assertEqual(git(self.origin, "log", "--format=%s", "develop").splitlines().count("run1: the change"), 1)
+
+    def test_a_remote_that_cannot_be_reached_is_no_answer(self):
+        path, tip = self.stand("run1")
+        git(self.repo, "remote", "set-url", "origin", os.path.join(self.tmp, "gone.git"))
+        for step in (lambda: W.reconcile(self.repo, path, "develop", tip, "origin"), lambda: self.land("run1", path, tip)):
+            with self.assertRaises(W.GitError):
+                step()
+        self.assertEqual((git(self.repo, "rev-parse", "run1").strip(), os.path.isdir(path)), (tip, True),
+                         "unknown is not unchanged: nothing is committed, nothing is taken for merged")
 
 
 if __name__ == "__main__":

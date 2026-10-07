@@ -1,20 +1,21 @@
 # A Merge at the final gate lands what the gate showed, on the base as it is — or lands nothing
 
-**Status:** INVESTIGATED. One part is implemented and awaits review — the change the gate reads after a
-conflict (task 1). The reconciliation flow is a plan: it waits for the operator's answers to Q1–Q3. No
-workflow code is changed.
-**Scope:** how a run meets a base that moved: the merge and the hand-back of a conflict
-([worktrees.py](../app/workspace/worktrees.py)), the workflow's path around the final gate
-([workflow.py](../app/orchestration/workflow.py)), the change the gate and the history read
+**Status:** IMPLEMENTED — awaiting the external reviewer (D1). The full suite on both hosts, a restart and a
+run with real agents are not done; the live stack still runs the code from before this.
+**Scope:** how a run meets a base that moved, and where it lands: the look at the base, its coming into the
+worktree and the landing ([worktrees.py](../app/workspace/worktrees.py)); the remote a base may live on
+([repos.py](../app/workspace/repos.py)); the workflow's path around the final gate
+([workflow.py](../app/orchestration/workflow.py)); the change the gate and the history read
 ([client.py](../app/application/client.py), the Workbench's change view).
-**Stable documentation owner:** architecture D24, with D25 for how the change keeps recorded runs replaying,
-in [structure.md](../docs/architecture/structure.md); the stops in
+**Stable documentation owner:** architecture D24, with D25 for how recorded runs keep replaying, in
+[structure.md](../docs/architecture/structure.md); the stops in
 [stops.md](../docs/architecture/diagrams/stops.md).
 
-## Goal (proposed — Q1)
+## Goal
 
 At the final gate the operator reads what the run adds to the base as it is now, judged on that base; Merge
-lands exactly that tree, or — the base having moved since — lands nothing and says so.
+lands exactly that tree where the repository's base lives — or, the base having moved since, lands nothing
+and says so.
 
 ## Authority register
 
@@ -22,149 +23,187 @@ lands exactly that tree, or — the base having moved since — lands nothing an
 
 - **D1** The external reviewer's feedback is evaluated against the code and applied where it holds; a point
   that is wrong is refuted, not applied.
-  - Date/source: 2026-10-07, operator, relaying the review of the merge flow.
-- **D2** Agents and the controller reach no remote; a run merges into the local base branch, and publishing
-  is the operator's.
-  - Date/source: accepted architecture (D24); kept by the reviewer's brief — *"Do not introduce PRs, remote
-    credentials, a new integration service"*.
+  - Date/source: 2026-10-07, operator, relaying each review of the merge flow.
+- **D2** A base that moved is reconciled before the final gate, and a Merge either lands or changes nothing.
+  - Date/source: 2026-10-07, operator, on the flow as it was put to him: *"yes seems very cool flow"*.
+- **D3** Where a repository's base lives on a remote, a run merges there: the remote is the repository's
+  source of truth, and the local branch no destination. Agents still reach no remote; the controller alone
+  fetches and pushes, the base branch only, on the operator's Merge, forcing nothing.
+  - Date/source: 2026-10-07, operator: *"also need proper remote merge"*, with the reviewer's rules for it.
+  - Effect: replaces what D24 held until now, that nothing a run does leaves the machine.
+- **D4** Questions of mechanism are settled by the direction above and by what the industry does, not put
+  to the operator.
+  - Date/source: 2026-10-07, operator: *"we have vector, if not undersatnd check best industrial web way"*.
 
-What prompted this, in the operator's words at a gate after a conflict, 2026-10-07: *"why a lot of stages
-files? we should only 3 files to merge?"*; *"weird after merge a lot of changes and worktree still there"*.
+### Decided under D4 — the reviewer's and the agent's
 
-### Open questions — the operator's
-
-- **Q1** Is the goal above adopted: a base that moved is reconciled before the final gate, and a Merge either
-  lands or changes nothing?
-- **Q2** The base moved and git merges it without a conflict. Who judges the combined tree before the gate?
-  - **(a) the architect alone, again** — one turn; the engineer only on its `PATCH`, or on a conflict.
-    *Recommended:* nothing unjudged lands, at the least cost.
-  - **(b) the engineer, then the architect, always** — the reviewer's diagram. Two turns for every base move.
-  - **(c) nobody** — the gate says the combination is unjudged, and the operator decides. No turn; the
-    unjudged tree can still land.
-- **Q3** What the base's history gains per run.
-  - **(a) the run's change as one commit on the base tip it was judged on, then the merge commit named for
-    the plan** — every run the same two commits, and no "Merge base into run" commit. *Recommended.*
-  - **(b) the base fast-forwarded to the run's reconciliation commit** — the reviewer's. Refuted below.
-  - **(c) as today.**
+- **A base that moved without a conflict is judged by the architect alone**; the engineer takes a turn only
+  on a conflict, or on the architect's `PATCH`. What a merge queue does: it tests the merged result on the
+  latest base before it lands, and again when the base moves (the "not rocket science" rule; bors; GitHub's
+  and GitLab's queues).
+- **Every run lands as the same two commits**: the change, one commit on the base tip it was judged on, and
+  the merge commit named for the plan, its first parent that tip and its tree the final tree.
+- **The base tip a run stands on is what a git step answered**, kept in the run's state; the workflow never
+  asks git. A run that recorded none began before this and keeps its path (D25's second way).
 
 ### Working assumptions
 
 - **A1 [ACTIVE]** Reconciling is the controller's step, not a role's stage: no flow file changes, and a run
-  is told the base came in by the words of its next turn, as a conflict is today.
+  is told the base came in by the words of its next turn.
 - **A2 [ACTIVE]** The base is looked at twice only — after a verify's `PASS` and at the Merge — never watched.
-- **A3 [ACTIVE]** A run started before this keeps the path it recorded: what tells it apart is that it
-  recorded no base tip (D25's second way), so no marker is needed.
+- **A3 [ACTIVE] — the agent's, to confirm:** a remote is the repository entry's to name (`remote`), never
+  assumed from the repository having one. Reaching a remote is outward; a branch its remote protects takes no
+  push; and a local repository must go on working. Unnamed, a run lands on the local branch as before.
+- **A4 [ACTIVE]** The commits a run's branch holds from the base's coming in are the controller's own and
+  never land, so no hook judges them; the one commit that lands is made with the repository's hooks.
 
 ## Non-goals
 
-- Pull requests, a remote, credentials for the controller, a merge queue or an integration service (D2).
-- Rebasing a run's work.
+- Pull requests, a merge queue of its own, an integration service; pushing anything but the base branch; a
+  forced push in any form.
+- Moving the operator's local branch after a remote landing: it is theirs to pull.
 - Putting the todo of a run started before closeouts back at its path during a conflict (F9): those runs end.
+- A row in the history for the base's coming in; the run's lines say it.
 
 ## Verified evidence
 
-- **F1** `merge` commits the run's tree on its branch, then merges that into the base: `git merge --no-ff` in
-  the base's checkout, or `merge-tree`, `commit-tree` and a compare-and-swap of the ref where it is checked
-  out nowhere. When the base moved and git finds no conflict, the base gains a tree no stage judged and no
-  gate showed. "A merge commits exactly the tree the final gate showed" holds for the run's commit only.
-- **F2** A conflict is aborted on the base, and the base is merged into the run's worktree, uncommitted
-  (`_hand_back`); the workflow reopens the change and returns to the build, its review, the closeout and the
-  gate, where a second Merge is asked.
-- **F3** Measured on the live stack, 2026-10-07, a run fourteen base commits behind: its first Merge met one
-  conflicting file. Its worktree then held 70 staged files and 1 unmerged — exactly the 71 the base had
-  changed — and differed from the base by 3 files, +382 lines.
-- **F4** The gate read its change from the worktree's own commit, which by then held the run's change: 71
-  files, none of them the run's. Fixed here (task 1): read against the base brought in, the same worktree
-  shows its 3 files.
-- **F5** The history's rows after that conflict, measured the same day: the plan's row, whose base is "the
-  worktree's last commit" at the time it is read, showed 3 files, +16 −96, where the plan was 1 file, +302;
-  and the row of the build that resolved the conflict showed 72 files, +11255 −537 — the base's commits. A
-  run records no commit it started from.
-- **F6** The reconciliation commit's first parent is the run's commit and its second the base's tip. A base
-  fast-forwarded to it would have its first-parent history run through the run's branch, its own commits on
-  the merged side; and `_adopted_merge`, which keeps a retried merge from landing twice, looks for a merge on
-  the base's first-parent line whose second parent is the run's tip.
-- **F7** Two Merges at one moment are kept apart by git's own lock in a checkout and by the compare-and-swap
-  elsewhere; the loser fails and is pressed again. There is no queue, and none is needed for that.
-- **F8** A run's stages judge only its own base: two runs that pass alone and break together are caught by
-  nothing before the base holds both.
-- **F9** Every role's ask names the todo by its first path. The controller's finish of a run started before
+- **F1** `merge` committed the run's tree on its branch, then merged that into the local base as git merges:
+  where the base had moved and git found no conflict, the base gained a tree no stage judged and no gate
+  showed.
+- **F2** A conflict was met only at the operator's Merge: aborted on the base, the base merged into the run's
+  worktree, and a second Merge asked after the round that resolved it.
+- **F3** Measured on the live stack, 2026-10-07, a run fourteen base commits behind: after its first Merge
+  its worktree held 70 staged files and 1 unmerged — exactly the 71 the base had changed — and differed from
+  the base by 3 files, +382 lines.
+- **F4** The gate read its change from the worktree's own commit: 71 files, none of them the run's.
+- **F5** The history after that conflict: the plan's row showed 3 files, +16 −96, where the plan was 1 file,
+  +302; the row of the build that resolved the conflict, 72 files, +11255 −537 — the base's commits. A run
+  recorded no commit it started from.
+- **F6** A reconciliation commit's first parent is the run's commit and its second the base's tip: a base
+  fast-forwarded to it has its first-parent history run through the run's branch, and `_adopted_merge`,
+  which keeps a retried merge from landing twice, looks for the run's tip as a second parent on that line.
+- **F7** Tried in throwaway repositories with a bare one as the remote, git 2.55: after `git add -A`,
+  `git merge --quit` and `git reset --soft <tip>`, one `git commit` makes a commit whose only parent is the
+  tip and whose tree is the worktree's files, the repository's pre-commit hook having run; `commit-tree` makes
+  the merge on it; a plain push of that commit is taken while the remote is at the tip and refused once it
+  moved, nothing changed; `git merge --ff-only` lands it on a checked-out branch, keeps an edit of the
+  operator's elsewhere, and refuses — nothing changed — when the branch moved or the edit is in its way.
+- **F8** A run's stages judge only its own base: two runs that pass alone and break together were caught by
+  nothing before the base held both.
+- **F9** Every role's ask names the todo by its first path; the controller's finish of a run started before
   closeouts moves it at the first Merge, so in the conflict's turns it is not there — seen live.
+- **F10** This repository's rule is `make public-check` before a push, run by hand; it has no pre-push hook.
 
 ### Refuted
 
-- **"The 71-file change at the gate is cosmetic."** The agent's own earlier reading, and wrong: F4 — the gate
-  is where the operator judges what lands, and it showed everything but that. The reviewer's finding stands.
-- **"Finalize by fast-forwarding the base to the run's reconciliation commit" (Q3b).** F6: it flips the
-  base's first-parent history and breaks the check that makes a retried merge safe; and D24 keeps an explicit
-  merge commit named for the plan, which the proposal drops without arguing it. The aim — no ceremonial
-  second merge around an integration already made — is met by Q3a, which makes no reconciliation commit.
-- **"The gate shows the current base tip → the final tree."** Nearly: the base tip the run was reconciled
-  with. Against a tip that moved again, the change would show that later work undone. The two are the same
-  tip whenever a Merge may land (invariant 2).
+- **"The 71-file change at the gate is cosmetic."** The agent's own earlier reading, and wrong (F4).
+- **"Finalize by fast-forwarding the base to the run's reconciliation commit."** F6. The reviewer withdrew
+  it for the two commits above, which make no reconciliation commit at all.
+- **"The gate shows the current base tip → the final tree."** The tip the run was reconciled with: against
+  one that moved again the change would show that later work undone. They are the same tip whenever a Merge
+  may land.
+- **"The engineer, then the architect, on every base move."** The reviewer's first diagram, withdrawn for the
+  architect alone: with nothing in conflict there is nothing for the engineer to change.
 
-## Proposed design (on Q1–Q3)
+## Decision
 
-1. **A run records the base tip it stands on** — at its worktree's creation, and again each time the base is
-   brought in.
-2. **Reconcile** after a verify's `PASS`, before the work that makes the build final: the base's tip is that
-   one — on; it moved — it is merged into the worktree, uncommitted, as a conflict's is today, and the
-   combined tree is judged (Q2) before the run goes on. Until the base stands still across a `PASS`.
-3. **The gate's change** is from the recorded tip to the final tree.
-4. **Merge**, under one check that the base's tip is still the recorded one: the final tree lands as one
-   commit on that tip and the merge commit named for the plan, whose tree is the final tree exactly. Moved:
-   nothing is committed or merged, the change is reopened and the run reconciles again.
-5. **The history** reads a run's first change from the commit it started from, and a turn after the base
-   came in from the tree reconciled, never across it.
+A run stands on one commit of its base — its remote's, where its entry names one. After a verify's `PASS` and
+before the build is made final the base is looked at; one that moved is merged into the worktree,
+uncommitted, and judged — by the architect alone where git merged it cleanly, by the engineer first where it
+did not — until a `PASS` meets a base that stood still. The gate reads the change against that commit. Merge
+lands the final tree on it as two commits, and the base takes them only as a fast-forward: a remote by a
+push that forces nothing, a checked-out branch by `--ff-only`, a branch checked out nowhere by a
+compare-and-swap. A base that moved again takes nothing; the change is reopened and reconciled again.
+
+### Premise / KISS gate
+
+Git's own primitives throughout, and its own refusal as the lock: a non-fast-forward is what a remote, a
+checkout and a ref each refuse by themselves. One new git step, one new descriptor key, no flow change, no
+service. Knowingly given up: an architect's turn each time the base moved under a run; and the base is not
+watched between the two looks, so a Merge can still be answered with "it moved" — and then lands nothing.
 
 ## Required invariants
 
 1. Nothing lands on the base that a stage did not judge on that base and the gate did not show.
-2. A Merge lands only while the base's tip is the one the run recorded; otherwise it changes nothing,
-   anywhere.
+2. A Merge lands only while the base's tip is the one the run recorded; otherwise nothing is committed,
+   merged or pushed.
 3. The base's first-parent history is its own; a run adds the same two commits whatever the base did
-   meanwhile.
-4. A conflict never resolves on the base or in the controller.
-5. Every recorded history replays as it was written (D25); a run started before this takes no new step.
-6. No remote is reached (D2).
+   meanwhile, and nothing kept of the base's coming in is reachable from it.
+4. A conflict never resolves on the base, in the controller or at the operator's Merge.
+5. Every recorded history replays as it was written (D25); a run that recorded no base tip takes no new step.
+6. Agents reach no remote. The controller reaches one only where the repository's entry names it: it fetches
+   the base branch, and pushes it only on the operator's Merge, never forced.
+7. A retried merge adopts the one it made; the operator's staged content and their edits in a checked-out
+   base are never written over; a look at the base that could not be made is no answer.
 
 ## Implementation tasks
 
-- [x] 1. The gate's change after a conflict is read against the base brought in (F4), and the page says which
-      it read against.
-- [ ] 2. The recorded base tip; the reconcile step and its place in the workflow (Q1, Q2).
-- [ ] 3. The Merge that lands or changes nothing; the landing as Q3 decides.
-- [ ] 4. The history's rows (F5).
-- [ ] 5. D24, the stops' view, `using.md`, the tests' index.
+- [x] 1. The gate's change read against the base, not the worktree's own commit (F4).
+- [x] 2. The recorded base tip; `reconcile`; its place after a `PASS` and at a Merge that found the base moved.
+- [x] 3. The landing: two commits, fast-forward only; local, or the remote's by a push.
+- [x] 4. The descriptor's `remote`; the page's words for the step and for a merge that leaves the machine.
+- [x] 5. The history's rows (F5).
+- [x] 6. A recording of a run that stands on a tip; D24, the stops' view, `using.md`, the tests' index.
 
 ## Test-first and verification plan
 
-| case | wrong behaviour it captures | state |
-|---|---|---|
-| a conflict handed back: the change read is the run's files, against the base brought in | the base's commits shown as the run's change (F4) | done — `test_worktrees.Merge`, with its control: against the run's own commit the base's files are what shows |
-| two runs, the second in conflict with the first once it landed | a conflict met only at the operator's Merge | red first |
-| two runs, the second merging cleanly onto the first | a combined tree landing unjudged (F1, F8) | red first |
-| a Merge after the base moved again | anything committed or merged | red first |
-| the base's tree after a landing | any tree but the final one | red first |
-| the base's first-parent history after a conflict's run landed | a "Merge base into run" commit, or the run's branch on the first-parent line | red first |
-| a run recorded before this, replayed | a new step commanded | the recorded histories |
-| the history's rows after the base came in | the base's commits as a turn's change; a first row read from a later commit (F5) | red first |
+| case | where |
+|---|---|
+| a conflict met before any gate, resolved, landed as the two commits | `test_worktrees.Landing`; `test_stops.Reconciling` |
+| a base that moved cleanly: nothing lands until it is brought in and judged, by the architect alone | `test_worktrees.Landing`; `test_stops.Reconciling` |
+| a Merge after the base moved again: nothing committed, merged or pushed; back through | `test_worktrees.Landing`, `Remote`; `test_stops.Reconciling` |
+| the base's tree after a landing is the final tree; its first-parent line its own | `test_worktrees.Landing`, `Remote` |
+| a retried merge adopted; the operator's staged content and edits kept; a hook-refused commit continued | `test_worktrees.Landing` |
+| a remote's base: begun from it, landed by a push, the local branch untouched, a refusal landing nothing, an unreachable remote no answer | `test_worktrees.Remote`; `test_repos` for the entry's key |
+| the gate's change is the run's files | `test_worktrees.Merge`, `Landing`; `test_workbench.Runs` |
+| the history's rows | `test_workbench.HistoryRead` |
+| a run recorded before this replays, and takes no new step | `test_replay`; `test_stops.Reconciling`'s control |
+
+The results, the controls and what was not run are in the [review record](#review-record).
+
+Not proven here: a push to a real remote, its credentials and its protections — the remote in these tests is
+a bare repository on disk. That is a live run's to show.
+
+## Documentation plan
+
+- **Owner:** D24.
+- **Updated:** [stops.md](../docs/architecture/diagrams/stops.md), [using.md](../docs/using.md), the
+  [README](../README.md), [tests/README.md](../tests/README.md), the workspace's and the application's
+  structure notes, [the example descriptors](../.orchestra/repos.example.json).
+
+## Completion criteria
+
+- The external reviewer's PASS (D1); then the full suite once on both hosts.
+- A restart, and a live run on a repository whose entry names its remote: the base moved under it, brought
+  in, judged, and landed on the remote by one Merge.
 
 ## Review record
 
-### 2026-10-07 — investigation, and the first task
+### 2026-10-07 — investigation, and the gate's change
 
 - **Trigger:** the operator's questions at a gate after a conflict; the external reviewer's `PATCH` on the
   merge flow.
-- **Applied now:** the gate's change after a conflict (F4). Red first; then on the live run's worktree, read
-  with this code and changing nothing there: 3 files against the base brought in, where the running page
-  showed 71.
-- **Planned, not built:** the reconciliation flow — a change to what the workflow commands and to what a
-  Merge means, which waits for Q1–Q3.
-- **Refuted:** see [Refuted](#refuted).
-- **Verification, the modules the first task touches:** Windows — worktrees, activities, architecture: 21
-  classes, 104 tests, OK. WSL — those, the workbench and the public check's own tests: 35 classes, 182 tests,
-  OK. Control: read against the worktree's own commit again, the new test fails on the comparison itself.
-  `make demo`, the page's change view in a real browser on this code: passed. `make public-check`: passed.
-- **Not run:** the full suite; a restart — the live Workbench and workers still run the code from before
-  this, so the running page shows the old comparison until they are restarted.
+- **Applied:** the gate's change after a conflict read against the base brought in (F4): on the live run's
+  worktree, 3 files where the running page showed 71.
+- **Reviewer:** `PASS` on that fix; on the plan, the three decisions above and two requirements — the base
+  tip recorded only from a git step's answer, and the retry and working-copy guards kept (invariant 7).
+
+### 2026-10-07 — the flow built, and the remote landing (D2, D3)
+
+- **Built:** tasks 2–6.
+- **Verification, the modules the change touches, one host after the other:** Windows — worktrees, repos,
+  workflow, stops, replay, trace parity, activities, flows, architecture and the history's reading: 53 classes,
+  295 tests, OK. WSL — those and round boundaries, settings, workbench, settings delivery, cli, observability
+  and the public check's own tests: 96 classes, 484 tests, OK.
+- **Controls, one guard out at a time, each put back and the tree byte for byte as before:** a moved base
+  unnoticed before the landing commit; the base taking git's own merge again; the change committed on the
+  run's own branch, the base's coming in with it; a remote asked where it stands unfetched; the base never
+  looked at by the workflow — the new recording stops replaying too; a base that came in cleanly sent to the
+  engineer; the history blind to the base. Each failed the tests named for it.
+- **`make demo`**, a stack of its own beside the live one: passed on this code — real workflow, worker, git
+  and Workbench, its run looked at against its base and landed by the two commits. The git steps of F7 gave
+  the same answers under git 2.54 on WSL. **`make public-check`:** passed.
+- **Not run:** the full suite; a restart; a run with real agents; a push to a real remote.
+- **To settle before a repository names its remote:** one whose pushes must pass a check first needs that
+  check as its pre-push hook, which the controller's push runs. This repository has none (F10): until it has,
+  its own entry should name no remote.

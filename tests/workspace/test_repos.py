@@ -119,6 +119,15 @@ class Refusals(Layout):
         self.assertEqual((resolved["todo_dir"], resolved["todo_name"], resolved["todo_done_dir"]),
                          ("todo/00_current", "%Y%m%d-%H%M_{slug}", "todo/done"))
 
+    def test_a_base_that_lives_on_a_remote_is_the_entrys_to_name_and_never_assumed(self):
+        self.branch("develop")
+        git(self.repo, "remote", "add", "upstream", os.path.join(self.tmp, "upstream.git"))
+        self.assertIsNone(self.resolve()["remote"],
+                          "the repository has a remote, and no entry names it: nothing leaves the machine")
+        self.assertEqual(self.resolve(dict(self.selected, remote="upstream"))["remote"], "upstream")
+        with self.assertRaisesRegex(repos.Refused, "has no remote 'origin'"):
+            self.resolve(dict(self.selected, remote="origin"))
+
     def test_the_documents_a_closeout_may_change_are_the_ones_an_entry_names_and_no_others(self):
         self.branch("develop")
         self.assertEqual(self.resolve()["closeout_docs"], [],
