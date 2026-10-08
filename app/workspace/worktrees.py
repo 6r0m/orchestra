@@ -98,6 +98,27 @@ def _led(repo, remote, pinned):
                        "in the repository's configuration. Nothing is fetched from it or pushed to it" % remote)
 
 
+def prepush_id(repo):
+    """A fingerprint of what git would run before a push from `repo`: every hook its configuration states,
+    as git resolves it, and the bytes of its pre-push hook's file, wherever git looks for one. Like where a
+    remote leads (`remote_id`), a role's turn can change either without touching anything the controller
+    guards — and a push made past a gate that is gone, or says something else, is one nobody agreed to.
+
+    The file's mode is no part of it: one that is there and not executable is refused as that (`_passed_by`),
+    and made executable it is the same hook.
+    """
+    stated = git(repo, "config", "--null", "--get-regexp", r"^hook\.", check=False)
+    if stated.returncode not in (0, 1):
+        # 1 is git's word for "none stated"; anything else is no answer.
+        raise GitError("git config in %s: rc=%d %s" % (repo, stated.returncode, stated.stderr.strip()[:500]))
+    path = os.path.join(repo, git(repo, "rev-parse", "--git-path", "hooks/pre-push").stdout.strip())
+    held = b""
+    if os.path.isfile(path):
+        with open(path, "rb") as fh:
+            held = fh.read()
+    return hashlib.sha256(stated.stdout.encode("utf-8") + b"\0\0" + held).hexdigest()
+
+
 def base_tip(repo, base, remote=None, pinned=None):
     """The commit the base is at now. A remote's is fetched first — that branch alone, into its own
     remote-tracking ref, and only from where the remote led when the run began (`pinned`): where a remote
@@ -413,7 +434,7 @@ def _unfinish_plan(worktree, verified_tree, plan, done_dir):
 
 
 def merge(repo, worktree, run_id, base, verified_tree, plan, done_dir, message, merge_message, tip=None,
-          remote=None, pinned=None):
+          remote=None, pinned=None, gate=None):
     """Land the run's change on the base: the local branch, or `remote`'s where the base is a remote's.
 
     `verified_tree` is the tree the run holds for its merge, and the worktree must still be it. A run
@@ -439,7 +460,7 @@ def merge(repo, worktree, run_id, base, verified_tree, plan, done_dir, message, 
         raise MergeRefused("the run's branch or worktree is gone and %s holds no merge of it" % base)
     if landing:
         return _land(repo, worktree, run_id, base, verified_tree, message, merge_message, tip, now, remote,
-                     pinned)
+                     pinned, gate)
     merging = _merging(worktree)
     if not merging and verified_tree and not _clean(worktree):
         # Only while the work is uncommitted: a written work commit is merged, never undone. An attempt
@@ -509,7 +530,8 @@ def _passed_by(repo, hook):
     return path if os.path.isfile(path) and not os.access(path, os.X_OK) else None
 
 
-def _land(repo, worktree, run_id, base, final_tree, message, merge_message, tip, now, remote, pinned=None):
+def _land(repo, worktree, run_id, base, final_tree, message, merge_message, tip, now, remote, pinned=None,
+          gate=None):
     """Land `final_tree` on the base while the base is still at `tip`, the commit the run was judged on.
 
     The change is one commit on that tip, made in the worktree so the repository's own commit hooks judge
@@ -522,7 +544,9 @@ def _land(repo, worktree, run_id, base, final_tree, message, merge_message, tip,
     moved — forward, or back to an ancestor — takes nothing.
 
     The push runs the repository's own pre-push hook, which is handed that merge commit and may refuse it;
-    a hook whose file git would pass by unrun (`_passed_by`) refuses the landing before anything is committed.
+    a hook whose file git would pass by unrun (`_passed_by`) refuses the landing before anything is committed,
+    and what git runs before a push must still be what it was when the run began (`gate`, its `prepush_id`
+    then), read again as the last thing before the push.
     """
     if now != tip:
         return {"result": "moved"}
@@ -555,6 +579,11 @@ def _land(repo, worktree, run_id, base, final_tree, message, merge_message, tip,
         # `tip` — a plain push would also land on a branch rewound to an ancestor of it — and the commit is
         # `tip`'s own descendant, so the update is a fast-forward or it is nothing.
         git(repo, "merge-base", "--is-ancestor", tip, commit)
+        if gate and prepush_id(repo) != gate:
+            raise MergeRefused("what git runs before a push from this repository is no longer what it was when "
+                               "this run began: a hook stated in its configuration, or its pre-push hook's file, "
+                               "changed. Nothing is pushed. Put it back as it was, or stop the run — its worktree "
+                               "keeps the work — and begin from the repository as it is")
         done = git(repo, "push", "--porcelain", "--force-with-lease=refs/heads/%s:%s" % (base, tip), remote,
                    "%s:refs/heads/%s" % (commit, base), check=False, env=_unattended())
         # Refused by the remote, or before it by the repository's own pre-push hook: git's words say which.

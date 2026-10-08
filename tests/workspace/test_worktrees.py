@@ -1189,6 +1189,8 @@ class Remote(Repo):
     def stand(self, run_id):
         # Where the remote leads, taken before any role runs: the run fetches from and pushes to nowhere else.
         self.pinned = W.remote_id(self.repo, "origin")
+        # And what git runs before a push from here: the run pushes past nothing else.
+        self.gate = W.prepush_id(self.repo)
         path = W.create(self.repo, "develop", self.root, run_id, TARGET, remote="origin", pinned=self.pinned)
         write(os.path.join(path, "app.txt"), "one\n%s\n" % run_id)
         return path, W.started_from(path)
@@ -1196,7 +1198,7 @@ class Remote(Repo):
     def land(self, run_id, path, tip, tree=None):
         return W.merge(self.repo, path, run_id, "develop", tree or W.work_tree(path), None,
                        os.path.join("todo", "done"), "%s: the change" % run_id, "Merge %s" % run_id, tip, "origin",
-                       self.pinned)
+                       self.pinned, self.gate)
 
     def reconcile(self, path, tip):
         return W.reconcile(self.repo, path, "develop", tip, "origin", self.pinned)
@@ -1259,13 +1261,15 @@ class Remote(Repo):
     def test_the_repositorys_own_pre_push_hook_judges_the_commit_being_landed(self):
         """A repository whose pushes must pass a check has it as its pre-push hook, and the controller's push
         runs it — handed the commit being landed, which this repository's own checkout never held."""
-        path, tip = self.stand("run1")
-        final = W.work_tree(path)
         hooks = git(self.repo, "config", "core.hooksPath").strip()
         hook, handed = os.path.join(hooks, "pre-push"), os.path.join(self.tmp, "handed-to-the-hook")
-        write(hook, "#!/bin/sh\ncat > '%s'\necho 'not fit to publish' >&2\nexit 1\n" % handed.replace("\\", "/"))
+        fit = os.path.join(self.tmp, "fit-to-publish")
+        write(hook, "#!/bin/sh\ncat > '%s'\n[ -e '%s' ] && exit 0\necho 'not fit to publish' >&2\nexit 1\n"
+              % (handed.replace("\\", "/"), fit.replace("\\", "/")))
         os.chmod(hook, 0o755)
         self.addCleanup(lambda: os.path.exists(hook) and os.remove(hook))
+        path, tip = self.stand("run1")
+        final = W.work_tree(path)
         with self.assertRaises(W.MergeRefused) as refused:
             self.land("run1", path, tip)
         self.assertIn("the push to origin's develop was refused: not fit to publish", str(refused.exception),
@@ -1278,29 +1282,74 @@ class Remote(Repo):
                             "which the repository's checkout does not hold")
         self.assertEqual((self.remote_tip(), os.path.isdir(path), W.branch_exists(self.repo, "run1")), (tip, True, True),
                          "the remote has nothing, and the run keeps its worktree and branch")
-        os.remove(hook)
-        self.assertEqual(self.land("run1", path, tip)["result"], "merged")
+        write(fit, "")
+        self.assertEqual(self.land("run1", path, tip)["result"], "merged", "the same hook, letting it through")
         self.assertEqual(git(self.origin, "rev-parse", "develop^{tree}").strip(), final)
         self.assertEqual(git(self.origin, "log", "--format=%s", "develop").splitlines().count("run1: the change"), 1)
+
+    def test_a_pre_push_gate_changed_since_the_run_began_lands_nothing(self):
+        """What git runs before a push is the repository's configuration and a file to say, and a role's turn
+        can change either without touching anything the controller guards — as it can where a remote leads.
+        Four ways of it, each one a push that would have gone past the gate."""
+        hooks = git(self.repo, "config", "core.hooksPath").strip()
+        hook, refusing = os.path.join(hooks, "pre-push"), "#!/bin/sh\necho 'not fit to publish' >&2\nexit 1\n"
+        self.addCleanup(lambda: os.path.exists(hook) and os.remove(hook))
+        stated = (("hook.gate.event", "pre-push"),
+                  ("hook.gate.command", "sh -c 'echo \"not fit to publish\" >&2; exit 1' --"))
+        for key, value in stated:
+            git(self.repo, "config", key, value)
+        path, tip = self.stand("run1")
+
+        def changed(way):
+            with self.assertRaisesRegex(W.MergeRefused, "no longer what it was when this run began", msg=way):
+                self.land("run1", path, tip)
+            self.assertEqual(self.remote_tip(), tip, way)
+
+        # A hook stated in git's configuration: made to say yes, then taken out.
+        git(self.repo, "config", "hook.gate.command", "true")
+        changed("the stated hook's command")
+        git(self.repo, "config", "--remove-section", "hook.gate")
+        changed("the stated hook, gone")
+        # A hook's file, the repository's own when a run begins: its bytes, then where git looks for it.
+        write(hook, refusing)
+        os.chmod(hook, 0o755)
+        self.gate = W.prepush_id(self.repo)
+        write(hook, "#!/bin/sh\nexit 0\n")
+        changed("the file's bytes")
+        write(hook, refusing)
+        elsewhere = os.path.join(self.tmp, "other-hooks")
+        os.makedirs(elsewhere)
+        git(self.repo, "config", "core.hooksPath", elsewhere)
+        changed("where git looks for the file")
+        git(self.repo, "config", "core.hooksPath", hooks)
+        # As it was when it was taken, the gate itself answers; and the operator's own change of it is a new
+        # run's to begin from.
+        with self.assertRaisesRegex(W.MergeRefused, "not fit to publish"):
+            self.land("run1", path, tip)
+        os.remove(hook)
+        self.gate = W.prepush_id(self.repo)
+        self.assertEqual(self.land("run1", path, tip)["result"], "merged")
 
     @unittest.skipIf(WINDOWS, "git for Windows runs a hook's file whatever its mode")
     def test_a_pre_push_hook_git_would_pass_by_lands_nothing(self):
         """Git runs a hook's file only where it is executable, and where it is not says so in a hint and
         pushes: on a drive mounted without file modes no file is executable, and the repository's check
         would be passed by without a word to anyone."""
-        path, tip = self.stand("run1")
         hook = os.path.join(git(self.repo, "config", "core.hooksPath").strip(), "pre-push")
-        write(hook, "#!/bin/sh\necho 'not fit to publish' >&2\nexit 1\n")
+        fit = os.path.join(self.tmp, "fit-to-publish")
+        write(hook, "#!/bin/sh\n[ -e '%s' ] && exit 0\necho 'not fit to publish' >&2\nexit 1\n" % fit)
         os.chmod(hook, 0o644)
         self.addCleanup(lambda: os.path.exists(hook) and os.remove(hook))
+        path, tip = self.stand("run1")
         with self.assertRaisesRegex(W.MergeRefused, "pre-push hook is not executable here"):
             self.land("run1", path, tip)
         self.assertEqual((self.remote_tip(), git(self.repo, "rev-parse", "run1").strip()), (tip, tip),
                          "nothing pushed, nothing committed")
+        # Made executable, as the refusal asks: the same hook, and no change of the gate.
         os.chmod(hook, 0o755)
         with self.assertRaisesRegex(W.MergeRefused, "not fit to publish"):
             self.land("run1", path, tip)
-        os.remove(hook)
+        write(fit, "")
         self.assertEqual(self.land("run1", path, tip)["result"], "merged")
 
     def test_a_remote_that_cannot_be_reached_is_no_answer(self):

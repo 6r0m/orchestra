@@ -53,14 +53,16 @@ if [ "$MODE" = --pushed ]; then set -- --pushed; fi
 
 # Git for Windows runs a hook in its own shell, where the Docker this script needs is as a rule not
 # running: the check is handed whole — its arguments and its stdin — to WSL, where the rest of this
-# repository's tooling runs.
+# repository's tooling runs. It is handed over in this script's own checkout, named outright: git runs a
+# hook at the top of whichever worktree is pushed from, and that worktree's copy of this script judges
+# nothing.
 case "$(uname -s)" in
     MINGW*|MSYS*)
         if ! command -v wsl.exe >/dev/null 2>&1; then
             fail "on Windows the public check runs in WSL, and wsl.exe is not to be found"
             verdict
         fi
-        exec wsl.exe --cd "$(pwd -W)" -e bash tools/public_check.sh "$@" ;;
+        exec wsl.exe --cd "$(cd "$REPO" && pwd -W)" -e bash tools/public_check.sh "$@" ;;
 esac
 
 # ---- the hook, and what it is handed --------------------------------------------------------

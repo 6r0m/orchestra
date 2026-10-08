@@ -578,6 +578,8 @@ class Reconciling(Scenario):
         code, _ = run.answer("merge")
         self.assertEqual((code, run.state["status"], run.state["merge_commit"]), (0, "MERGED", "abc123"))
         self.assertEqual(self.git.landed, [("base-tip-0", None), ("base-tip-1", None)])
+        self.assertEqual((run.state.get("prepush_id"), self.git.gated), (None, [None, None]),
+                         "a base that is the repository's own branch is pushed nowhere, and no gate is taken")
 
     def test_a_look_at_the_base_that_fails_stops_for_the_operator_and_is_no_answer(self):
         run = self.based([("closeout-e3-1", 0, "closed out\n")], reconcile_failures=1)
@@ -600,6 +602,9 @@ class Reconciling(Scenario):
                          "where the remote led at the run's setup, before any role ran: every look is held to it")
         run.answer("merge")
         self.assertEqual((self.git.landed, self.git.pinned), ([("base-tip-0", "origin")], ["where-origin-leads"]))
+        self.assertEqual((run.state["prepush_id"], self.git.gated),
+                         ("what-runs-before-a-push", ["what-runs-before-a-push"]),
+                         "and what git ran before a push then: the merge pushes past nothing else")
 
     def test_control_a_run_that_recorded_no_base_is_never_reconciled(self):
         run = self.based([("closeout-e3-1", 0, "closed out\n")], based=False)

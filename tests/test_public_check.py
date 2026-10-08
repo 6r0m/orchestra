@@ -1,5 +1,5 @@
 """The public gate scans staged and working-tree bytes as separate snapshots, and — as git's pre-push
-hook — each commit a push carries instead of the checkout."""
+hook — each commit a push carries instead of the checkout, by the main checkout's own copy of itself."""
 import os
 from pathlib import Path
 import shutil
@@ -10,6 +10,8 @@ import unittest
 
 SOURCE = Path(__file__).resolve().parent.parent / "tools" / "public_check.sh"
 ZERO = "0" * 40
+# A worktree's own copy of the gate, as a run's change might leave it: it passes whatever it is handed.
+YES = "#!/usr/bin/env bash\necho 'THE COPY IN THE WORKTREE JUDGED' >&2\nexit 0\n"
 
 
 class Gate(unittest.TestCase):
@@ -265,10 +267,12 @@ class InstalledHook(Gate):
         held = self.commit("STAGED_CONTROL")
         worktree = self.scratch / "worktree"
         self.git("worktree", "add", "--quiet", "--detach", str(worktree), held)
-        self.assertFalse((worktree / "tools").exists(), "nothing of the gate is in the worktree to be run")
+        (worktree / "tools").mkdir()
+        (worktree / "tools" / "public_check.sh").write_text(YES, encoding="utf-8", newline="\n")
         refused = self.git("push", "origin", "%s:refs/heads/main" % held, cwd=worktree, check=False)
         self.assertNotEqual(refused.returncode, 0, refused.stdout + refused.stderr)
         self.assertIn("PUBLIC CHECK FAILED for commit %s" % held[:12], refused.stderr)
+        self.assertNotIn("THE COPY IN THE WORKTREE JUDGED", refused.stderr)
         self.assertEqual(self.remote(), "")
 
     def test_installing_again_states_the_hook_once(self):
@@ -283,3 +287,44 @@ class InstalledHook(Gate):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("FAIL this git runs no hook from its configuration", result.stdout)
         self.assertEqual(self.stated(), [[], []])
+
+
+@unittest.skipUnless(os.name == "nt" and shutil.which("wsl.exe"), "Git for Windows hands the gate to WSL")
+class HandedToWsl(unittest.TestCase):
+    """Git for Windows runs the hook in its own shell, and the gate hands itself to WSL: as the main
+    checkout's own copy, in the main checkout, wherever git ran the hook from. No scanner is reached here —
+    the line handed over names no commit, which the gate refuses before it scans anything."""
+
+    def git(self, *args, cwd, **more):
+        return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false",
+                               "-c", "core.autocrlf=false", *args], cwd=cwd, capture_output=True, text=True, **more)
+
+    def test_a_hook_run_from_a_worktree_is_handed_over_in_the_main_checkout(self):
+        scratch = tempfile.TemporaryDirectory(prefix="orchestra-public-check-")
+        self.addCleanup(scratch.cleanup)
+        repo, worktree = Path(scratch.name) / "repo", Path(scratch.name) / "worktree"
+        (repo / "tools").mkdir(parents=True)
+        shutil.copyfile(SOURCE, repo / "tools" / "public_check.sh")
+        self.git("init", "--quiet", "--initial-branch", "main", cwd=repo, check=True)
+        (repo / "safe.txt").write_text("clean", encoding="utf-8")
+        self.git("add", "--", "safe.txt", cwd=repo, check=True)
+        self.git("commit", "--quiet", "--message", "a commit", cwd=repo, check=True)
+        # Installed as `make hooks` installs it, through git's own shell — the one it runs a hook in.
+        installed = self.git("-c", "alias.gate=!bash tools/public_check.sh", "gate", "--install", cwd=repo)
+        self.assertEqual(installed.returncode, 0, installed.stdout + installed.stderr)
+        command = self.git("config", "--local", "--get", "hook.public-check.command", cwd=repo).stdout.strip()
+        self.assertTrue(command.endswith(" --pushed"), command)
+        self.git("worktree", "add", "--quiet", "--detach", str(worktree), "HEAD", cwd=repo, check=True)
+        (worktree / "tools").mkdir()
+        (worktree / "tools" / "public_check.sh").write_text(YES, encoding="utf-8", newline="\n")
+        # The hook's own command, run where git runs a hook for a push from the worktree: at its top.
+        line = "refs/heads/work %s refs/heads/main %s\n" % ("f" * 40, ZERO)
+        judged = self.git("-c", "alias.judged=!" + command, "judged", cwd=worktree, input=line)
+        said = judged.stdout + judged.stderr
+        self.assertEqual(judged.returncode, 1, said)
+        self.assertIn("is no commit this repository can read", said, "the gate itself answered, from WSL")
+        self.assertNotIn("THE COPY IN THE WORKTREE JUDGED", said)
+        # From the main checkout, the same.
+        judged = self.git("-c", "alias.judged=!" + command, "judged", cwd=repo, input=line)
+        self.assertEqual((judged.returncode, "is no commit this repository can read" in judged.stdout + judged.stderr),
+                         (1, True), judged.stdout + judged.stderr)

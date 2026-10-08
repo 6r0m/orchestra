@@ -426,7 +426,10 @@ still lands on a checkout.
   refuses lands nothing and is said at the gate. A hook whose file git would pass by
   unrun refuses the landing instead: git runs a hook's file only where it is
   executable, a drive mounted without file modes holds none that is, and a hook stated
-  in git's configuration runs on either. A base that moved again takes
+  in git's configuration runs on either. What git runs before a push — the hooks its
+  configuration states, and its pre-push hook's file — is fingerprinted at the run's
+  setup beside where the remote leads, and read again as the last thing before the
+  push: changed since, by a role's turn or by anyone, nothing is pushed. A base that moved again takes
   nothing — nothing is committed, merged or pushed; the change is reopened and the base
   brought in and judged as before — and a worktree that is no longer the final tree is
   refused. So a conflict never resolves in the controller, on the base or at the

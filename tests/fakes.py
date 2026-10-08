@@ -83,6 +83,8 @@ class FakeWorktrees:
         # The base tip and the remote each merge was handed to land on, and where that remote was to lead.
         self.landed = []
         self.pinned = []
+        # What each merge was told git ran before a push when its run began.
+        self.gated = []
         # What a read of the change is refused with, as its host's git would refuse it; None reads it.
         self.diff_refusal = None
         # What each merge was handed to finish itself: the run's plan, or None when its closeout already had.
@@ -94,6 +96,9 @@ class FakeWorktrees:
 
     def remote_id(self, repo, remote):
         return "where-%s-leads" % remote
+
+    def prepush_id(self, repo):
+        return "what-runs-before-a-push"
 
     def create(self, repo, base, root, run_id, target, lfs_pointers=False, remote=None, pinned=None):
         self.calls.append(("create", run_id, target))
@@ -124,11 +129,12 @@ class FakeWorktrees:
         return []
 
     def merge(self, repo, worktree, run_id, base, verified_tree, plan, done_dir, message, merge_message, tip=None,
-              remote=None, pinned=None):
+              remote=None, pinned=None, gate=None):
         self.calls.append(("merge", run_id, verified_tree, message, merge_message))
         self.finished.append(plan)
         self.landed.append((tip, remote))
         self.pinned.append(pinned)
+        self.gated.append(gate)
         return self.merge_results.pop(0)
 
     def discard(self, repo, worktree, run_id):

@@ -204,6 +204,8 @@ class Activities:
             # from and pushes to nowhere else, whatever its configuration is made to say meanwhile.
             try:
                 resolved["remote_id"] = self.git.remote_id(resolved["repo_path"], resolved["remote"])
+                # And what git runs before a push from it — the repository's own gate on what leaves it.
+                resolved["prepush_id"] = self.git.prepush_id(resolved["repo_path"])
             except Exception as exc:
                 raise _failure(exc) from exc
         # Neither CLI fails a turn whose skill no folder holds — one drops it without a word, the other waits
@@ -499,7 +501,7 @@ class Activities:
                                       None if final else state["plan"],
                                       state["todo_done_dir"], ("%s: %s" % (stem, words))[:100],
                                       "Merge %s" % stem, state.get("base_tip"), state.get("remote"),
-                                      state.get("remote_id"))
+                                      state.get("remote_id"), state.get("prepush_id"))
             except W.MergeRefused as exc:
                 return {"result": "refused", "reason": str(exc)}
             except Exception as exc:
