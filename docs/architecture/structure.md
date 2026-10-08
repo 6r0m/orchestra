@@ -437,10 +437,14 @@ still lands on a checkout.
   was made onto, and so only as a fast-forward: a remote by the controller's push,
   leased on that commit — a compare-and-swap, never a rewrite, which a branch rewound
   to an ancestor refuses as one that moved on does, and one that moved under the push
-  takes nothing, the next Merge making its own; a local branch in its checkout when it
-  is checked out, which keeps its files in step and refuses staged changes and any edit
-  of the operator's it would write over; one checked out nowhere by a compare-and-swap
-  of its ref. The push runs the repository's
+  takes nothing, the next Merge making its own; a local branch checked out nowhere by a
+  compare-and-swap of its ref; one that is checked out by git's own fast-forward in its
+  checkout, which keeps its files in step and refuses staged changes and any edit of
+  the operator's it would write over — and, asking only that the commit descend from
+  where the branch is, would put back what a branch taken back since had dropped, so it
+  is asked only once the branch is seen to be at that commit still: a look and then a
+  step, the one of the three that is no compare-and-swap, git having none for a branch
+  together with its checkout. The push runs the repository's
   own pre-push hook, handed that merge commit — one the repository's checkout never
   held, so a check of what is checked out says nothing of it — and what the hook
   refuses lands nothing and is said at the gate. A hook whose file git would pass by

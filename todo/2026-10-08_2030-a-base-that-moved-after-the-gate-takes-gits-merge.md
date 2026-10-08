@@ -1,7 +1,9 @@
 # A base that moved after the gate takes the change as git merges it
 
-**Status:** IMPLEMENTED — awaiting the external reviewer. The touched tests pass on both hosts. It takes
-effect once the stack is restarted on this code, which is the operator's to do.
+**Status:** IMPLEMENTED; the design is accepted by the external reviewer (PATCH, 2026-10-08: one gap in the
+landing on a checked-out local base, closed here) — awaiting the reviewer's PASS. The touched tests pass on
+both hosts. It takes effect once the stack is restarted on this code, which is the operator's to do; until
+then the page's Merge confirmation already reads the new way while the workers still land the old way.
 **Scope:** what a Merge does when the base moved on after the final gate
 ([worktrees.py](../app/workspace/worktrees.py), `_land`), and the line the run says for it
 ([workflow.py](../app/orchestration/workflow.py)). Nothing before the gate changes: a base that moved while
@@ -43,14 +45,16 @@ A Merge the operator has given lands, unless git itself cannot merge the change 
 
 - The tree that lands on a base that moved is one no stage read whole and no gate showed — the hazard the
   merge flow's record named as its F1. The change in it is the one the gate showed. What stood against that
-  hazard until now was a second reading by the architect, whose verify is told to run no tests: nothing
-  tested the merged tree then either.
+  hazard until now was a second judgement by the architect: its own verify runs no tests, but it can send
+  the change back for the engineer to run them on the merged tree — as it did on the run below.
 
 ## Verified evidence (2026-10-08, run `find-one-small-6625194f`)
 
 - Its base moved after its gate by one commit that shared no file with the run's seven. Merge landed
-  nothing; the base came into the worktree without a conflict; the architect judged again, the closeout ran
-  again, and a second gate asked for a second Merge.
+  nothing; the base came into the worktree without a conflict; the architect judged again and sent the
+  change back once — its recorded test results were the old base's — the engineer ran the suites again on
+  the merged tree, which found no defect, the closeout ran again, and a second gate asked for a second
+  Merge.
 - The verify's prompt ends "Do not run tests or builds" ([stages.py](../app/foundation/stages.py)).
 
 ## What changed
@@ -61,6 +65,9 @@ A Merge the operator has given lands, unless git itself cannot merge the change 
   judged on, its tree the one the gate showed. A conflict, or a base that no longer holds that tip, answers
   `moved` as before, with nothing committed. A base that already holds the change is refused as holding
   nothing new, and one that moves under the push is refused in words.
+- A checked-out local base is fast-forwarded only once it is seen to be at the commit the merge was made
+  onto: git's fast-forward asks only that the commit descend from where the branch is, and gave a branch
+  taken back since the look what it had dropped — on the path as it was before this change, too.
 - A landing's answer names the commit it was merged onto where the base had moved; an adopted one's too.
 - The workflow says so in the run's lines. The path a `moved` answer takes is as it was.
 - D24, the stops diagram, the using guide, the root README's trust list and the page's confirmation say it.
@@ -79,16 +86,30 @@ A Merge the operator has given lands, unless git itself cannot merge the change 
   the run's line and no role's turn; one git could not make goes to the engineer; a `moved` answer on a
   base git then merges is still judged by the architect.
 - **Control:** a controller that answers a conflict with git's conflicted tree fails three of those tests.
+- **The checked-out base taken back, red first:** with the branch reset in its checkout between the look and
+  the landing, the fast-forward landed and the dropped commit was back. Now that Merge is refused, the base
+  is where it was put, and the next Merge lands the final tree on it.
 - **The touched modules, one host after the other** — the worktrees', the stops', the replay of the
   recorded histories, the workflow's, the activities', the trace's and the architecture's; on WSL the
   Workbench's and the round boundaries' too: WSL: 60 classes, 339 tests, OK; Windows: 46 classes, 263
-  tests, OK.
+  tests, OK. After the reviewer's PATCH, the worktrees' and the architecture's: 20 classes, 122 tests, OK
+  on each.
+
+## Review
+
+- **External reviewer, 2026-10-08 — PATCH.** The design stands, the tree nobody read whole an accepted
+  price. One gap, older than this change: a checked-out local base was fast-forwarded from wherever it
+  stood. Reproduced and closed as the reviewer set out — a look as the last thing before the
+  fast-forward; a look and a step, not a compare-and-swap, which git has none of for a branch together
+  with its checkout.
 
 ## Completion criteria
 
 - The external reviewer's PASS.
 - The whole suite once on both hosts, after it.
-- The stack restarted on this code by the operator, and a real Merge onto a base that moved landing at once.
+- The stack restarted on this code by the operator, and a real Merge onto a base that moved landing at
+  once: the run `find-one-small-6625194f` waits at its gate on a base that has moved since, and its Merge
+  on the restarted stack is that proof.
 
 ## Not done here
 

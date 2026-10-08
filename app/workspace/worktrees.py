@@ -579,10 +579,11 @@ def _land(repo, worktree, run_id, base, final_tree, message, merge_message, tip,
     for the run's roles to meet it in the worktree (`reconcile`) — the controller resolves nothing.
 
     The base takes the merge commit only while it is exactly at the commit that merge was made onto, and so
-    only as a fast-forward: a remote by a push leased on that commit, a checked-out branch by `--ff-only`,
-    which keeps its files in step and refuses to write over the operator's own edits, a branch checked out
-    nowhere by a compare-and-swap of its ref. One that moved under that is refused in words, and the next
-    Merge takes it from where it is then.
+    only as a fast-forward: a remote by a push leased on that commit; a branch checked out nowhere by a
+    compare-and-swap of its ref; a checked-out branch by `--ff-only`, which keeps its files in step and
+    refuses to write over the operator's own edits, asked only once the branch is seen to be at that commit
+    still — the one of the three that is a look and then a step, not a compare-and-swap. One that moved
+    under that is refused in words, and the next Merge takes it from where it is then.
 
     The push runs the repository's own pre-push hook, which is handed that merge commit and may refuse it;
     a hook whose file git would pass by unrun (`_passed_by`) refuses the landing before anything is committed,
@@ -634,12 +635,20 @@ def _land(repo, worktree, run_id, base, final_tree, message, merge_message, tip,
         checkout = next((entry["path"] for entry in worktrees(repo) if entry["branch"] == base), None)
         if checkout and git(checkout, "diff", "--cached", "--quiet", check=False).returncode != 0:
             raise MergeRefused("%s has staged changes on %s, which are the operator's" % (checkout, base))
-        done = (git(checkout, "merge", "--ff-only", commit, check=False) if checkout else
-                git(repo, "update-ref", "-m", merge_message, "refs/heads/" + base, commit, now, check=False))
+        if not checkout:
+            done = git(repo, "update-ref", "-m", merge_message, "refs/heads/" + base, commit, now, check=False)
+        elif base_tip(repo, base) == now:
+            done = git(checkout, "merge", "--ff-only", commit, check=False)
+        else:
+            # `merge --ff-only` asks only that the commit descend from where the branch is, so a branch
+            # taken back since the look would take what it had dropped: it is asked only while the branch
+            # is still at `now`. A look and then a merge, not one step — git has no compare-and-swap for a
+            # branch together with its checkout — with nothing between the two.
+            done = None
         refused = "git refused the merge into %s" % base
-    if done.returncode != 0:
+    if done is None or done.returncode != 0:
         latest = base_tip(repo, base, remote, pinned)
-        if latest == now:
+        if done is not None and latest == now:
             raise MergeRefused("%s: %s" % (refused, (done.stderr or done.stdout).strip()[:500]))
         if _merged_onto(repo, tip, latest, final_tree) is None:
             return {"result": "moved"}

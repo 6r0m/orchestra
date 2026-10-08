@@ -1275,6 +1275,36 @@ class Landing(Repo):
         self.assertEqual(self.land("run1", path, moved)["result"], "merged")
         self.assertEqual(git(self.repo, "rev-parse", "develop^{tree}").strip(), final)
 
+    def test_a_checked_out_base_rewound_since_it_was_looked_at_is_not_put_back(self):
+        """`merge --ff-only` asks only that the commit descend from where the branch is: a branch taken back
+        between the look and the landing would take the merge made onto what it had dropped, and hold that
+        again."""
+        path, tip = self.stand("run1")
+        self.move_base({"dropped.txt": "what the base will drop\n"})
+        final = W.work_tree(path)
+        # Between the look at the base and its fast-forward: the repository's own commit hook, as the change
+        # is committed — the operator taking the base back, in its checkout.
+        hooks = git(self.repo, "config", "core.hooksPath").strip()
+        write(os.path.join(hooks, "pre-commit"),
+              "#!/bin/sh\nunset $(git rev-parse --local-env-vars)\ngit -C '%s' reset -q --hard %s\n"
+              % (self.repo.replace("\\", "/"), tip))
+        os.chmod(os.path.join(hooks, "pre-commit"), 0o755)
+        self.addCleanup(lambda: os.path.exists(os.path.join(hooks, "pre-commit"))
+                        and os.remove(os.path.join(hooks, "pre-commit")))
+        with self.assertRaisesRegex(W.MergeRefused, "moved while this change was being landed"):
+            self.land("run1", path, tip)
+        self.assertEqual((git(self.repo, "rev-parse", "develop").strip(),
+                          os.path.exists(os.path.join(self.repo, "dropped.txt")),
+                          git(self.repo, "status", "--porcelain").strip()), (tip, False, ""),
+                         "the base is where it was taken back to, and what it dropped is not back")
+        os.remove(os.path.join(hooks, "pre-commit"))
+        self.assertEqual(self.land("run1", path, tip, final), {"result": "merged",
+                                                               "commit": git(self.repo, "rev-parse", "develop").strip()},
+                         "the next Merge lands on the base as it is")
+        self.assertEqual((git(self.repo, "rev-parse", "develop^{tree}").strip(),
+                          self.subjects("--first-parent", "develop")), (final, ["Merge run1", "base"]),
+                         "the final tree, on a base that holds nothing of what it dropped")
+
     def test_a_base_rewound_under_a_run_is_brought_into_nothing(self):
         """A base that no longer holds the commit a run stands on dropped something on purpose. Git would call
         the rewound tip already merged, and the run would land what the base dropped."""
