@@ -172,6 +172,9 @@ Do not re-derive a `states/` layer here.
   package into every environment as hard links to one cached copy, and Windows
   deletes no name of a file a process has loaded, so a worker's own libraries
   would hold every worktree's environment for as long as the worker ran.
+  The shell scripts are pinned to LF (`.gitattributes`): WSL's bash runs them
+  from a checkout either host's git made, and Git for Windows would write a
+  run worktree's with CRLF, which bash refuses.
   A run worktree's environment is removed with the worktree, on its target host,
   only when the derived path lies under that host's environment root, crosses
   no link or reparse point, and holds `pyvenv.cfg` — removed last, so a removal

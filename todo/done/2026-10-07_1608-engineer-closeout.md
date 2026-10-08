@@ -194,7 +194,7 @@ a live run's to show.
   a change to the workflow keeps every recording replaying.
 - **Updated:** [stops.md](../../docs/architecture/diagrams/stops.md), [trace-contract.md](../../docs/architecture/trace-contract.md),
   [decisions.md](../../docs/history/decisions.md), [using.md](../../docs/using.md), the [README](../../README.md),
-  [flows/README.md](../../flows/README.md), [todo/README.md](README.md), [tests/README.md](../../tests/README.md), each
+  [flows/README.md](../../flows/README.md), [todo/README.md](../README.md), [tests/README.md](../../tests/README.md), each
   concern's own structure note, [the example descriptors](../../.orchestra/repos.example.json) and
   [the engineer's persona](../../roles/engineer.md).
 

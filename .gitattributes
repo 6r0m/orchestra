@@ -1,0 +1,4 @@
+# WSL's bash runs these from a checkout that either host's git made — the one the two hosts share, or a
+# run's worktree on Windows. Left to its own setting, Git for Windows checks them out with CRLF, which
+# bash refuses.
+*.sh text eol=lf

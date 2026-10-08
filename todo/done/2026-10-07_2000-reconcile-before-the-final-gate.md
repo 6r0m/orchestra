@@ -506,8 +506,29 @@ behind it, it is proven by the real pushes in the review record.
   against the times Temporal holds for the step; and git, in a process made as the worker is made, asked to
   run its pre-push hooks, ran the check through WSL — this checkout's head passed, a line naming no commit
   refused.
-- **Seen in the run, not changed:** this repository pins no line endings, and Git for Windows checks a fresh
-  worktree's shell scripts out with CRLF, which WSL's bash refuses — in the run's worktree `run-tests.sh`
-  could not run and the hand-over's test failed, as the run's own record says. The main checkout's scripts
-  are LF and run. A pull that rewrites `tools/public_check.sh` there would stop the hook, every push refused
-  until the file is LF again; a `.gitattributes` is the usual answer, and a change of its own.
+- **Seen in the run, changed in the next record:** this repository pinned no line endings, and Git for
+  Windows checks a fresh worktree's shell scripts out with CRLF, which WSL's bash refuses — in the run's
+  worktree `run-tests.sh` could not run and the hand-over's test failed, as the run's own record says.
+
+### 2026-10-08 — after the acceptance: the scripts' line endings, and why that run passed
+
+- **Reviewer:** `PATCH` — the remote Merge accepted; three things left: the line endings, why the architect
+  passed a build with a failed test, and the two finished todos published with one link corrected.
+- **The line endings, red first:** `.gitattributes` pins `*.sh` to LF, and the suite's own rules gain one —
+  every shell script git tracks is checked out with LF and holds no carriage return — red on both hosts
+  before the file, with its controls. In a fresh worktree made by Git for Windows, of a throwaway clone:
+  before, 471 carriage returns in the four scripts and the hand-over's test failing as the run met it; with
+  the file committed there, none, and that worktree's own runner passing the public check's tests and the
+  rule. A Makefile with CRLF still runs under WSL's make, so nothing else is pinned.
+- **Why the run passed, read from its own records, nothing of the workflow changed:** the check was the
+  plan's own — its completion criteria named the architecture's and the public check's tests passing on WSL.
+  Neither ran on WSL, the worktree's runner being CRLF; on Windows the first passed and one class of the
+  second failed. The engineer reported both with the cause and the evidence that the change could not have
+  made it; the architect's `PASS` names the failure and calls it unrelated. So it was seen and judged, not
+  missed, and judged rightly — but the plan's criterion was neither met nor amended, and nothing says who
+  may set one aside. The agent, answering the final gate for the operator, read the same and merged.
+- **The todos:** committed and published by the operator before this round; the link to `todo/README.md`
+  in the closeout's, which the move left pointing at the done folder's own, corrected.
+- **Verification, both hosts:** the architecture's and the public check's tests — 12 classes, 59 tests, OK
+  on each.
+- **Not run:** the full suite — one attributes file, one rule in the suite, documents.

@@ -1,11 +1,12 @@
 """The rules this repository keeps about its own source, made enforceable.
 
-Five of them: the package boundaries its imports already respect, that the checkout root
+Six of them: the package boundaries its imports already respect, that the checkout root
 the whole tree derives from still lands on a checkout, that no `app/` module escapes a
-package, that what differs between kinds of agent stays in their adapters, and the one
+package, that what differs between kinds of agent stays in their adapters, the one
 incident this suite has actually caused — a unit run that wrote a fake repository into the
-operator's real CLI configuration. Every check carries a control, because a checker that
-looks at nothing passes every suite.
+operator's real CLI configuration — and that the shell scripts WSL runs are checked out with
+LF by either host's git. Every check carries a control, because a checker that looks at
+nothing passes every suite.
 
 The boundaries:
 
@@ -24,6 +25,7 @@ The determinism boundary is Temporal's to enforce at runtime; this owns the rest
 import ast
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -224,6 +226,31 @@ def under(root, path):
     return relative != os.curdir and relative.split(os.sep)[0] != os.pardir
 
 
+def scripts_not_lf(repo):
+    """Every shell script git tracks in `repo` that it would not check out with LF, or that holds a
+    carriage return as it stands. WSL's bash runs them from a checkout either host's git made — a
+    run's worktree on Windows among them — and refuses the CRLF that Git for Windows writes unless
+    `.gitattributes` tells it otherwise."""
+    def git(*args):
+        return subprocess.run(["git", "-C", repo] + list(args), capture_output=True, text=True,
+                              encoding="utf-8", check=True).stdout
+    names = [name for name in git("ls-files", "-z", "--", "*.sh").split("\0") if name]
+    if not names:
+        return []
+    # One record a path with -z: the path, the attribute's name, its value.
+    told = git("check-attr", "-z", "eol", "--", *names).split("\0")
+    pinned = {told[at]: told[at + 2] for at in range(0, len(told) - 2, 3)}
+    found = []
+    for name in names:
+        path = os.path.join(repo, *name.split("/"))
+        if not os.path.isfile(path):
+            continue
+        with open(path, "rb") as fh:
+            if pinned.get(name) != "lf" or b"\r" in fh.read():
+                found.append(name)
+    return sorted(found)
+
+
 class PackageBoundaries(unittest.TestCase):
     def test_no_import_crosses_a_boundary_the_table_does_not_allow(self):
         found = crossing_imports(SOURCE, ALLOWED)
@@ -268,6 +295,14 @@ class EveryConcernIsReachable(unittest.TestCase):
     def test_every_package_is_linked_from_its_parents_router(self):
         self.assertEqual(unrouted(os.path.join(REPO, "README.md"), [PACKAGE]), [])
         self.assertEqual(unrouted(os.path.join(SOURCE, "README.md"), ALLOWED), [])
+
+
+@unittest.skipUnless(os.path.exists(os.path.join(REPO, ".git")), "what git checks out is asked of a checkout")
+class ShellScriptsStayLf(unittest.TestCase):
+    """The two hosts share one checkout, and a run's worktree is made by its own host's git."""
+
+    def test_every_tracked_script_is_checked_out_with_lf_and_holds_no_carriage_return(self):
+        self.assertEqual(scripts_not_lf(REPO), [])
 
 
 class TheCheckoutRootIsStillTheCheckout(unittest.TestCase):
@@ -417,10 +452,36 @@ def _tree(root, files):
     return root
 
 
+def _scripts(root, files):
+    """A repository at `root` tracking `files`, each written byte for byte."""
+    for relative, body in files.items():
+        path = os.path.join(root, *relative.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as fh:
+            fh.write(body)
+    for command in (["init", "--quiet"], ["add", "--all"]):
+        subprocess.run(["git", "-C", root] + command, check=True, capture_output=True)
+    return root
+
+
 class TheCheckersCanFail(unittest.TestCase):
     """Without these, a checker that never looks at anything would pass the suite."""
 
     LAYERS = {"low": frozenset(), "high": frozenset({"low"})}
+
+    def test_it_sees_a_script_nothing_tells_git_to_check_out_with_lf(self):
+        with tempfile.TemporaryDirectory() as root:
+            _scripts(root, {"run.sh": b"#!/bin/sh\n", "deep/also.sh": b"#!/bin/sh\n", "notes.txt": b"x\n"})
+            self.assertEqual(scripts_not_lf(root), ["deep/also.sh", "run.sh"])
+            _scripts(root, {".gitattributes": b"*.sh text eol=lf\n"})
+            self.assertEqual(scripts_not_lf(root), [], "pinned, wherever in the tree they are")
+
+    def test_it_sees_a_pinned_script_that_holds_a_carriage_return_as_it_stands(self):
+        """A checkout made before the rule keeps what its git wrote then."""
+        with tempfile.TemporaryDirectory() as root:
+            _scripts(root, {".gitattributes": b"*.sh text eol=lf\n", "run.sh": b"#!/bin/sh\r\necho\r\n",
+                            "fine.sh": b"#!/bin/sh\n"})
+            self.assertEqual(scripts_not_lf(root), ["run.sh"])
 
     def test_it_sees_an_import_that_crosses_upward(self):
         with tempfile.TemporaryDirectory() as root:
