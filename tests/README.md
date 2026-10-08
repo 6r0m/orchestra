@@ -25,6 +25,13 @@ host at a time.
 
 The two hosts' suites share one localhost and its test ports, so run them one after the other.
 
+Inside a run's own worktree three classes fail for the environment, not the code — they fail at an
+unmodified checkout too — so take each suite's baseline first. On WSL, a worktree made by Windows git
+names its gitdir by a drive path WSL's git cannot resolve, which fails `test_worktrees`' `Create`; one
+WSL made reads fine. On Windows, a role's git environment refuses every transport
+([the root README](../README.md#security-and-trust)) and the suite's own processes inherit it, which
+fails `test_worktrees`' `Remote` and `Guard` — cleared from the environment, both pass.
+
 ## Choose the test by the claim
 
 | What needs proving | Use |
@@ -85,6 +92,7 @@ the concerns that use it, and `test_architecture.py` owns what is true of the pa
 | `__main__.py` · `runner.py` | the runner both scripts use, `python -m tests`: `python -m unittest` in one process, or with `--parallel` each class in a process of its own; either way, when the interpreter has not exited a minute after the tests, every thread's stack written out; on Windows each class born into a job of its own, the agents' launcher's, whose end — taken by every class leaving the run, finished, hung or interrupted — returns once every process it holds has ended, and fails the class when that is not proved |
 | `fakes.py`, `temporal_env.py` | the fake seams, and one test server with its workers per test process, stopped as the interpreter begins to shut down, before it joins the thread pools their activities run on; and a host of a test's own, whose worker the test can take away |
 | `folders.py` | a test's temporary folder taken back whole — the repositories it made included, whose read-only objects Windows deletes only once they are writable |
+| `ports.py` | choosing a port for a process the suite is about to start — free at that moment, never one the caller has already taken, and let go again for that process to bind: the stack's tests, the stale-settings sweep and the acceptance |
 | `fake_cli.py` | a stand-in for the interactive `claude` and `codex` CLIs: their completion hooks, Esc, typing and a detached descendant |
 | `empty_workflow.py`, `control_workflows.py`, `control_trace_sink.py` | the controls: workflows that each lack one guarantee |
 | `trace_rows.py` | a trace reduced to what the contract promises, for the row-by-row comparison |

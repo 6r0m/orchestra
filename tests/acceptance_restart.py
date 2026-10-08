@@ -24,7 +24,6 @@ import os
 import re
 import shutil
 import signal
-import socket
 import subprocess
 import sys
 import tempfile
@@ -47,6 +46,7 @@ from app.foundation import policy as P  # noqa: E402
 from app.agents import adapters, terminal, trust  # noqa: E402
 from app.observability import telemetry  # noqa: E402
 from app.orchestration import workflow as WF  # noqa: E402
+from ports import port_for_another_process  # noqa: E402
 import temporal_cleanup  # noqa: E402
 
 RUNTIME = os.path.join(REPO, "tmp", "orchestration")
@@ -110,20 +110,6 @@ def check(condition, text):
 
 def git(path, *args):
     return subprocess.run(["git", "-C", path] + list(args), capture_output=True, text=True, check=True).stdout
-
-
-def port_for_another_process(used):
-    """A port another process will bind, told its number through a policy: free now, then let go, so
-    something else may take it first. Never one in `used`, the policy's ports so far, which it then joins.
-    A socket this process holds binds port 0 instead."""
-    for _ in range(10):
-        with socket.socket() as probe:
-            probe.bind(("127.0.0.1", 0))
-            port = probe.getsockname()[1]
-        if port not in used:
-            used.add(port)
-            return port
-    raise OSError("no free port apart from %s" % sorted(used))
 
 
 def alive(pid):

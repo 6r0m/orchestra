@@ -28,6 +28,8 @@ from temporalio.service import RPCError, RPCStatusCode  # noqa: E402
 from app.application import client as runs  # noqa: E402
 from app.application import stack  # noqa: E402
 from app.foundation import policy as P  # noqa: E402
+from ports import port_for_another_process  # noqa: E402
+import ports  # noqa: E402
 
 WINDOWS = sys.platform.startswith("win")
 
@@ -44,20 +46,6 @@ def lock_of_its_own(test):
     test.addCleanup(shutil.rmtree, folder, True)
     test.addCleanup(setattr, stack, "LOCK", stack.LOCK)
     stack.LOCK = os.path.join(folder, "stack.lock")
-
-
-def port_for_another_process(used):
-    """A port another process will bind, told its number through a policy: free now, then let go, so
-    something else may take it first. Never one in `used`, the policy's ports so far, which it then joins.
-    A socket this process holds binds port 0 instead."""
-    for _ in range(10):
-        with socket.socket() as probe:
-            probe.bind(("127.0.0.1", 0))
-            port = probe.getsockname()[1]
-        if port not in used:
-            used.add(port)
-            return port
-    raise OSError("no free port apart from %s" % sorted(used))
 
 
 def other_policy(test, held=None):
@@ -323,7 +311,7 @@ class Ports(unittest.TestCase):
         system = mock.MagicMock()
         system.socket.return_value.__enter__.return_value.getsockname.side_effect = [
             ("127.0.0.1", port) for port in (40001, 40002, 40002, 40003)]
-        with mock.patch.dict(globals(), socket=system):
+        with mock.patch.object(ports, "socket", system):
             policy, _ = other_policy(self, {"wsl": 40001})
         self.assertEqual(policy["targets"]["wsl"]["terminal_port"], 40001, "the port the test holds")
         self.assertEqual(policy["targets"]["windows"]["terminal_port"], 40002, "picked again, past the held one")
