@@ -422,18 +422,25 @@ still lands on a checkout.
   `PASS` on a base that stood still, so nothing is made final, and nothing reaches the
   gate, that no stage judged on the base as it is; a look that could not be made is no
   answer, and stops the run. The change read at the gate is what the worktree holds
-  against that commit. `merge` lands exactly the final tree, and only while the base is
-  still at that commit: the change as one commit on it, made in the worktree so the
-  repository's own commit hooks judge it, its message the plan's name and a few words
-  of the task; then a merge commit named for the plan, its first parent that commit and
-  its tree the final tree — the same two commits for every run, the base's own history
-  its first-parent line, and nothing kept of the base's coming in. The base takes it
-  only while it is exactly at that commit, and so only as a fast-forward: a remote by
-  the controller's push, leased on that commit — a compare-and-swap, never a rewrite,
-  which a branch rewound to an ancestor refuses as one that moved on does; a
-  local branch in its checkout when it is checked out, which keeps its files in step
-  and refuses staged changes and any edit of the operator's it would write over; one
-  checked out nowhere by a compare-and-swap of its ref. The push runs the repository's
+  against that commit. `merge` lands the change the gate showed: the final tree as one
+  commit on that commit, made in the worktree so the repository's own commit hooks
+  judge it, its message the plan's name and a few words of the task; then a merge
+  commit named for the plan, its first parent the base's own tip — the same two commits
+  for every run, the base's own history its first-parent line, and nothing kept of the
+  base's coming in. While the base is still at the commit the change was judged on,
+  that merge commit's tree is the final tree exactly. Where the base moved on after the
+  gate, the merge is git's own of the two, and one git makes without a conflict lands:
+  the same change on the base as it is, with no role's turn spent on it — the
+  operator's decision, and the price of it is that the tree which lands is one no stage
+  read whole, as with any merge git makes by itself; the run's history says it landed
+  so. The base takes the merge commit only while it is exactly at the commit that merge
+  was made onto, and so only as a fast-forward: a remote by the controller's push,
+  leased on that commit — a compare-and-swap, never a rewrite, which a branch rewound
+  to an ancestor refuses as one that moved on does, and one that moved under the push
+  takes nothing, the next Merge making its own; a local branch in its checkout when it
+  is checked out, which keeps its files in step and refuses staged changes and any edit
+  of the operator's it would write over; one checked out nowhere by a compare-and-swap
+  of its ref. The push runs the repository's
   own pre-push hook, handed that merge commit — one the repository's checkout never
   held, so a check of what is checked out says nothing of it — and what the hook
   refuses lands nothing and is said at the gate. A hook whose file git would pass by
@@ -442,9 +449,10 @@ still lands on a checkout.
   in git's configuration runs on either. What git runs before a push — the hooks its
   configuration states, and its pre-push hook's file — is fingerprinted at the run's
   setup beside where the remote leads, and read again as the last thing before the
-  push: changed since, by a role's turn or by anyone, nothing is pushed. A base that moved again takes
-  nothing — nothing is committed, merged or pushed; the change is reopened and the base
-  brought in and judged as before — and a worktree that is no longer the final tree is
+  push: changed since, by a role's turn or by anyone, nothing is pushed. A base that
+  moved on into a conflict with the change takes nothing — nothing is committed, merged
+  or pushed; the change is reopened, the base brought in, and the conflict resolved and
+  judged as before the gate — and a worktree that is no longer the final tree is
   refused. So a conflict never resolves in the controller, on the base or at the
   operator's Merge. A run that recorded no commit of its base began before runs did
   and keeps the path it recorded (D25): its merge is git's own into the local base, and

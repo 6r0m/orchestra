@@ -509,7 +509,8 @@ class Based(Closing):
 class Reconciling(Scenario):
     """A run stands on a recorded tip of its base. Before its build is made final the base is looked at: where
     it moved it is brought in and judged — by the architect alone when git merged it cleanly, by the engineer
-    first when it did not — and a Merge lands only on the tip the change was judged on."""
+    first when it did not. At the Merge a base that moved on since is git's to merge: its landing says so, and
+    only a merge git could not make comes back into the run."""
 
     CAME = {"moved": True, "base_tip": "base-tip-1", "files": [], "tree": "with-the-base"}
 
@@ -559,7 +560,37 @@ class Reconciling(Scenario):
             self.assertIn(said, self.prompt("build-e3-1"))
         self.assertEqual(self.git.merge_results, [{"result": "merged", "commit": "c0ffee"}], "no merge was tried")
 
-    def test_a_merge_on_a_base_that_moved_lands_nothing_and_the_change_is_judged_on_it_again(self):
+    def test_a_merge_made_onto_a_base_that_moved_lands_at_once_and_the_run_says_so(self):
+        run = self.based([("closeout-e3-1", 0, "closed out\n")],
+                         merge_results=[{"result": "merged", "commit": "abc123", "onto": "base-tip-9"}])
+        self.assertEqual(run.stop["reason"], "final")
+        code, _ = run.answer("merge")
+        self.assertEqual((code, run.state["status"], run.state["merge_commit"]), (0, "MERGED", "abc123"))
+        self.assertIn("develop had moved since this change was judged on it: git merged the two without a conflict",
+                      run.status["lines"])
+        self.assertEqual((self.names()[-1], [call for call in self.git.calls if call[0] == "reconcile"]),
+                         ("closeout-e3-1", [("reconcile", "base-tip-0")]),
+                         "no role's turn and no second look: the merge was git's, and the controller's to land")
+
+    def test_a_merge_git_could_not_make_lands_nothing_and_its_conflict_goes_to_the_engineer(self):
+        run = self.based([("closeout-e3-1", 0, "closed out\n"), ("build-e4-1", 0, "resolved\n"),
+                          ("verify-e4-1", 0, codex_review_resumed("PASS")), ("closeout-e5-1", 0, "closed out again\n")],
+                         merge_results=[{"result": "moved"}, {"result": "merged", "commit": "abc123"}],
+                         came=[{"moved": False}, dict(self.CAME, files=["app.txt"])])
+        self.assertEqual(run.stop["reason"], "final")
+        run.answer("merge")
+        run.status = E.run(E.cli.follow(run.handle))
+        self.assertEqual((run.stop["reason"], run.state["status"]), ("final", "READY_FOR_HUMAN"),
+                         "nothing merged: reopened, the base brought in, resolved, judged, closed out and offered again")
+        self.assertIn("develop moved since this change was judged on it: nothing merged", run.status["lines"])
+        self.assertEqual(self.names()[-4:], ["closeout-e3-1", "build-e4-1", "verify-e4-1", "closeout-e5-1"])
+        self.assertIn("conflict markers in: app.txt", self.prompt("build-e4-1"))
+        code, _ = run.answer("merge")
+        self.assertEqual((code, run.state["status"], run.state["merge_commit"]), (0, "MERGED", "abc123"))
+
+    def test_a_merge_that_answered_moved_on_a_base_git_then_merges_is_judged_by_the_architect(self):
+        """What a run recorded before a clean merge was the controller's to land still replays, and a base
+        whose conflict was gone by the time it was brought in is judged, never landed unlooked at."""
         run = self.based([("closeout-e3-1", 0, "closed out\n"), ("verify-e4-1", 0, codex_review_resumed("PASS")),
                           ("closeout-e5-1", 0, "closed out again\n")],
                          merge_results=[{"result": "moved"}, {"result": "merged", "commit": "abc123"}],

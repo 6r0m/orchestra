@@ -42,8 +42,9 @@ This is the default flow, `engineer-code`, with the stops a run's flow may add o
 the flow does not schedule, or one *skip approvals* skips, going straight on; and a flow with no build
 ending `DONE`, its worktree kept, where this one reaches the final gate. After the verify's `PASS` the
 run's base is looked at: one that moved is brought into the worktree and judged — by the architect alone
-where git merged it cleanly, by the engineer first where it left conflicts — before the closeout. A change
-that goes back from the final gate — a revise, or a merge that found the base moved again and landed
+where git merged it cleanly, by the engineer first where it left conflicts — before the closeout. At the
+merge a base that moved on since is merged by git and lands, with no stop and no turn; a change that goes
+back from the final gate — a revise, or a merge git could not make without a conflict, which landed
 nothing — is reopened before its role's turn, and the build closes out again once it passes. A run that
 recorded no commit of its base meets a conflict at its merge instead; one started before closeouts goes
 from the verify's `PASS` straight to the final gate, and one of the first closeouts resolves a merge's

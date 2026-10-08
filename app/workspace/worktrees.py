@@ -438,15 +438,18 @@ def merge(repo, worktree, run_id, base, verified_tree, plan, done_dir, message, 
     """Land the run's change on the base: the local branch, or `remote`'s where the base is a remote's.
 
     `verified_tree` is the tree the run holds for its merge, and the worktree must still be it. A run
-    that stands on a recorded base `tip` hands its final tree and no `plan`: exactly that tree lands, and
-    only while the base is still at that tip (`_land`). A run started before a flow made its build final
-    hands the tree the architect verified and its `plan`, which is finished here — moved to `done_dir`, or
-    deleted where the repository has none — and is merged into the local base as git merges it.
+    that stands on a recorded base `tip` hands its final tree and no `plan`: that tree lands as it is while
+    the base is still at that tip, and merged by git onto a base that moved on since (`_land`). A run
+    started before a flow made its build final hands the tree the architect verified and its `plan`, which
+    is finished here — moved to `done_dir`, or deleted where the repository has none — and is merged into
+    the local base as git merges it.
 
     Returns `{"result": "merged", "commit": ...}` once the base holds the merge and the worktree, branch
-    and environment are gone; `{"result": "moved"}`, nothing committed or merged, when the base is no
-    longer at `tip`; or, for a run that recorded none, `{"result": "conflict", "files": [...]}` with the
-    base brought into the run's worktree for its agents to resolve.
+    and environment are gone, with `"onto"`, the commit it was merged onto, where the base had moved on
+    from `tip`; `{"result": "moved"}`, nothing merged, when git cannot merge the change onto the base as it
+    is — a conflict, or a base that no longer holds `tip`; or, for a run that recorded none,
+    `{"result": "conflict", "files": [...]}` with the base brought into the run's worktree for its agents
+    to resolve.
     Raises MergeRefused, merging nothing, when a guard or git refuses.
     """
     landing = bool(tip) and not plan
@@ -455,7 +458,7 @@ def merge(repo, worktree, run_id, base, verified_tree, plan, done_dir, message, 
     merged = _adopted_merge(repo, base, run_id, merge_message, remote)
     if merged:
         cleanup(repo, worktree, run_id, base, remote)
-        return {"result": "merged", "commit": merged}
+        return _merged(repo, merged, tip if landing else None)
     if not branch_exists(repo, run_id) or not os.path.isdir(worktree):
         raise MergeRefused("the run's branch or worktree is gone and %s holds no merge of it" % base)
     if landing:
@@ -530,26 +533,67 @@ def _passed_by(repo, hook):
     return path if os.path.isfile(path) and not os.access(path, os.X_OK) else None
 
 
+def _merged_onto(repo, tip, now, final_tree):
+    """The tree the run's change makes on the base as it is: `final_tree` itself while the base is still at
+    `tip`, the commit the change was judged on; what git merges the two into where the base moved on from
+    it. None where git finds a conflict — and where the base no longer holds `tip`, rewound or rewritten,
+    which git would call merged already."""
+    if now == tip:
+        return final_tree
+    if git(repo, "merge-base", "--is-ancestor", tip, now, check=False).returncode != 0:
+        return None
+    # Git merges commits: the change as one no ref holds, so a look that finds a conflict has written
+    # nothing of the run's.
+    change = git(repo, "commit-tree", final_tree, "-p", tip, "-m", "the change, as it would land").stdout.strip()
+    done = git(repo, "merge-tree", "--write-tree", "--name-only", "--no-messages", now, change, check=False)
+    lines = done.stdout.splitlines()
+    if done.returncode == 1:
+        return None
+    if done.returncode != 0 or not lines:
+        raise GitError("git merge-tree rc=%d %s" % (done.returncode, done.stderr.strip()[:500]))
+    return lines[0]
+
+
+def _merged(repo, commit, tip=None):
+    """What a landing answers: its merge commit — and, where the base had moved on from `tip`, the commit the
+    change was judged on, the commit it was merged onto."""
+    result = {"result": "merged", "commit": commit}
+    if tip:
+        onto = git(repo, "rev-parse", "--verify", commit + "^1").stdout.strip()
+        if onto != tip:
+            result["onto"] = onto
+    return result
+
+
 def _land(repo, worktree, run_id, base, final_tree, message, merge_message, tip, now, remote, pinned=None,
           gate=None):
-    """Land `final_tree` on the base while the base is still at `tip`, the commit the run was judged on.
+    """Land the change — `final_tree` on `tip`, the commit the run was judged on — on the base as it is.
 
     The change is one commit on that tip, made in the worktree so the repository's own commit hooks judge
-    it; then the merge commit named for the run, its first parent the tip and its tree the final tree
-    exactly, so the base's own history stays its first-parent line and nothing the worktree's branch held
-    before — the files kept as the base came in (`reconcile`) — is reachable from it. The base takes that
-    commit only while it is exactly at `tip`, and so only as a fast-forward: a remote by a push leased on
-    that commit, a checked-out branch by `--ff-only`, which keeps its files in step and refuses to write over
-    the operator's own edits, a branch checked out nowhere by a compare-and-swap of its ref. A base that
-    moved — forward, or back to an ancestor — takes nothing.
+    it; then the merge commit named for the run, its first parent the base's own tip, so the base's history
+    stays its first-parent line and nothing the worktree's branch held before — the files kept as the base
+    came in (`reconcile`) — is reachable from it. While the base is still at `tip` that commit's tree is the
+    final tree exactly. Where the base moved on since, it is what git merges the two into (`_merged_onto`):
+    the same change on the base as it is, and no role's turn for a merge git makes by itself. Where git finds
+    a conflict, or the base no longer holds `tip`, nothing is committed and the base takes nothing: `moved`,
+    for the run's roles to meet it in the worktree (`reconcile`) — the controller resolves nothing.
+
+    The base takes the merge commit only while it is exactly at the commit that merge was made onto, and so
+    only as a fast-forward: a remote by a push leased on that commit, a checked-out branch by `--ff-only`,
+    which keeps its files in step and refuses to write over the operator's own edits, a branch checked out
+    nowhere by a compare-and-swap of its ref. One that moved under that is refused in words, and the next
+    Merge takes it from where it is then.
 
     The push runs the repository's own pre-push hook, which is handed that merge commit and may refuse it;
     a hook whose file git would pass by unrun (`_passed_by`) refuses the landing before anything is committed,
     and what git runs before a push must still be what it was when the run began (`gate`, its `prepush_id`
     then), read again as the last thing before the push.
     """
-    if now != tip:
+    tree = _merged_onto(repo, tip, now, final_tree)
+    if tree is None:
         return {"result": "moved"}
+    if tree == _tree(repo, now):
+        raise MergeRefused("the run holds no change that %s lacks" % base)
     skipped = _passed_by(repo, "pre-push") if remote else None
     if skipped:
         raise MergeRefused("the repository's pre-push hook is not executable here, and git would push past it "
@@ -561,8 +605,6 @@ def _land(repo, worktree, run_id, base, final_tree, message, merge_message, tip,
         # Not yet committed — or an attempt's commit was refused, its change left staged on the tip.
         if work_tree(worktree) != final_tree:
             raise MergeRefused("the worktree is no longer the change that was offered for this merge")
-        if final_tree == _tree(repo, tip):
-            raise MergeRefused("the run holds no change that %s lacks" % base)
         git(worktree, "add", "-A")
         if _merging(worktree):
             git(worktree, "merge", "--quit")
@@ -572,19 +614,19 @@ def _land(repo, worktree, run_id, base, final_tree, message, merge_message, tip,
         if _tree(repo, head) != final_tree:
             raise MergeRefused("a commit hook changed what was committed: it is no longer the change "
                                "that was offered for this merge")
-    commit = git(repo, "commit-tree", final_tree, "-p", tip, "-p", head, "-m", merge_message).stdout.strip()
+    commit = git(repo, "commit-tree", tree, "-p", now, "-p", head, "-m", merge_message).stdout.strip()
     if remote:
         _led(repo, remote, pinned)
         # A compare-and-swap, not a rewrite: the remote takes the commit only while its branch is exactly
-        # `tip` — a plain push would also land on a branch rewound to an ancestor of it — and the commit is
-        # `tip`'s own descendant, so the update is a fast-forward or it is nothing.
-        git(repo, "merge-base", "--is-ancestor", tip, commit)
+        # `now` — a plain push would also land on a branch rewound to an ancestor of it — and the commit is
+        # `now`'s own descendant, so the update is a fast-forward or it is nothing.
+        git(repo, "merge-base", "--is-ancestor", now, commit)
         if gate and prepush_id(repo) != gate:
             raise MergeRefused("what git runs before a push from this repository is no longer what it was when "
                                "this run began: a hook stated in its configuration, or its pre-push hook's file, "
                                "changed. Nothing is pushed. Put it back as it was, or stop the run — its worktree "
                                "keeps the work — and begin from the repository as it is")
-        done = git(repo, "push", "--porcelain", "--force-with-lease=refs/heads/%s:%s" % (base, tip), remote,
+        done = git(repo, "push", "--porcelain", "--force-with-lease=refs/heads/%s:%s" % (base, now), remote,
                    "%s:refs/heads/%s" % (commit, base), check=False, env=_unattended())
         # Refused by the remote, or before it by the repository's own pre-push hook: git's words say which.
         refused = "the push to %s's %s was refused" % (remote, base)
@@ -593,14 +635,19 @@ def _land(repo, worktree, run_id, base, final_tree, message, merge_message, tip,
         if checkout and git(checkout, "diff", "--cached", "--quiet", check=False).returncode != 0:
             raise MergeRefused("%s has staged changes on %s, which are the operator's" % (checkout, base))
         done = (git(checkout, "merge", "--ff-only", commit, check=False) if checkout else
-                git(repo, "update-ref", "-m", merge_message, "refs/heads/" + base, commit, tip, check=False))
+                git(repo, "update-ref", "-m", merge_message, "refs/heads/" + base, commit, now, check=False))
         refused = "git refused the merge into %s" % base
     if done.returncode != 0:
-        if base_tip(repo, base, remote, pinned) != tip:
+        latest = base_tip(repo, base, remote, pinned)
+        if latest == now:
+            raise MergeRefused("%s: %s" % (refused, (done.stderr or done.stdout).strip()[:500]))
+        if _merged_onto(repo, tip, latest, final_tree) is None:
             return {"result": "moved"}
-        raise MergeRefused("%s: %s" % (refused, (done.stderr or done.stdout).strip()[:500]))
+        # The merge made for where the base was is never put over where it is: the next Merge makes its own.
+        raise MergeRefused("%s moved while this change was being landed on it, and took nothing. Merge again: "
+                           "git merges the two without a conflict, and the change lands on the base as it is" % base)
     cleanup(repo, worktree, run_id, base, remote)
-    return {"result": "merged", "commit": commit}
+    return _merged(repo, commit, tip)
 
 
 def _hand_back(worktree, base, files):

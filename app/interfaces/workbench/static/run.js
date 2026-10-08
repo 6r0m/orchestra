@@ -344,8 +344,9 @@ async function answer(stop, action, button) {
     // A merge that leaves the machine says where it goes before it is asked for.
     const asked = action === "merge" && landsOn
       ? { ...ASK.merge, title: "Merge the verified change into " + landsOn + "?",
-        body: "It is pushed to the remote, which takes it only while that branch is still where this change " +
-          "was judged: one that has moved takes nothing." }
+        body: "It is pushed to the remote, forcing nothing. If that branch has moved since this change was " +
+          "judged, git merges the two and the merge is pushed; a conflict lands nothing and goes back " +
+          "to the run." }
       : ASK[action];
     if (!(await confirmAction({ ...asked, returnTo: button })) || runId !== selected) return;
     body.confirm = true;

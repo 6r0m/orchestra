@@ -396,12 +396,17 @@ class FeatureRun:
             if merged is None:
                 continue
             if merged["result"] == "merged":
+                if merged.get("onto"):
+                    # No role's turn for a merge git makes by itself: the run says what was landed.
+                    self._line("%s had moved since this change was judged on it: git merged the two without a "
+                               "conflict" % s["base_branch"])
                 s.update(status="MERGED", merge_commit=merged["commit"])
                 self._line("MERGED %s" % merged["commit"])
                 return "done"
             if merged["result"] == "moved":
-                # The base is no longer where this change was judged: nothing was committed or merged. The
-                # change goes back as one sent back does, the base is brought in, and the two are judged.
+                # The base is no longer where this change was judged, and git cannot merge the two — a
+                # conflict, or a base that dropped the commit: nothing was merged. The change goes back as
+                # one sent back does, the base is brought in, and the two are resolved and judged.
                 self._line("%s moved since this change was judged on it: nothing merged" % s["base_branch"])
                 if not await self._reopened():
                     continue
