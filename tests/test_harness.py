@@ -403,6 +403,8 @@ class TheRunnersEnvironment(unittest.TestCase):
                         os.path.join(self.checkout, "app", "foundation", "envpath.py"))
         # A stand-in for uv: it answers where the environment lives as the real one does — by running
         # envpath.py — builds one by making its folder, and "runs the tests" by saying which it was given.
+        # Told to end while they run, they take a moment to, and say so only if that environment was still
+        # there once they had.
         tools = os.path.join(self.tmp, "bin")
         os.makedirs(tools)
         self.said = os.path.join(self.tmp, "said")
@@ -415,9 +417,14 @@ class TheRunnersEnvironment(unittest.TestCase):
                 case " $* " in
                     *" sync "*) mkdir -p "$UV_PROJECT_ENVIRONMENT" && : > "$UV_PROJECT_ENVIRONMENT/pyvenv.cfg" ;;
                     *" run "*)
+                        ended() {
+                            sleep 0.5
+                            [ -f "$UV_PROJECT_ENVIRONMENT/pyvenv.cfg" ] && echo ended-in-their-environment >> "%s"
+                            exit 143
+                        }
+                        trap ended TERM
                         echo "$UV_PROJECT_ENVIRONMENT" > "%s"
                         if [ -n "${CONTROL_TESTS_WAIT:-}" ]; then
-                            trap 'echo ended-by-a-signal >> "%s"; exit 143' TERM
                             sleep 60 & wait
                         fi
                         exit "${CONTROL_TESTS_EXIT:-0}" ;;
@@ -456,22 +463,24 @@ class TheRunnersEnvironment(unittest.TestCase):
 
     def test_ended_from_outside_it_hands_the_end_on_and_still_takes_its_environment_back(self):
         with open(os.path.join(self.checkout, ".git"), "w", encoding="utf-8") as fh:
-            fh.write("gitdir: Q:/no/such/repository/.git/worktrees/run" + chr(10))
+            fh.write("gitdir: Q:/no/such/repository/.git/worktrees/run\n")
         runner_script = subprocess.Popen(["bash", os.path.join(self.checkout, "run-tests.sh"), "tests.some"],
                                          env=dict(self.environment, CONTROL_TESTS_WAIT="1"),
                                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.addCleanup(lambda: runner_script.poll() is None and runner_script.kill())
+        # The tests say which environment they were given only once a signal can reach them.
         deadline = time.monotonic() + 30
-        while not os.path.exists(self.said) and time.monotonic() < deadline:
+        while not (os.path.exists(self.said) and os.path.getsize(self.said)) and time.monotonic() < deadline:
             time.sleep(0.05)
         with open(self.said, encoding="utf-8") as fh:
-            used = fh.read().split()[0]
+            used = fh.read().strip()
         self.assertTrue(os.path.isdir(used), "the tests are running in it")
         runner_script.send_signal(signal.SIGTERM)
         self.assertNotEqual(runner_script.wait(timeout=30), 0)
         with open(self.said, encoding="utf-8") as fh:
-            self.assertIn("ended-by-a-signal", fh.read(), "the tests were told, not left running")
-        self.assertFalse(os.path.exists(used))
+            self.assertIn("ended-in-their-environment", fh.read(),
+                          "the tests were told, and waited for: their environment was theirs until they had ended")
+        self.assertFalse(os.path.exists(used), "and gone only then")
 
 
 if __name__ == "__main__":
