@@ -101,7 +101,9 @@ and judged before this gate, so what you read is the change on the base as it is
 that base: the repository's own branch, or — where its entry names the `remote` its base lives on —
 that remote's, by a push it takes only while its branch is still the commit the change was judged on,
 which the confirmation says. Should the base have moved
-again since, Merge lands nothing; the run brings it in, has it judged, and comes back to you. Its
+again since, Merge lands nothing; the run brings it in, has it judged, and comes back to you. A base
+that was rewound or rewritten under the run is never brought in: the run stops there and says so,
+for you to continue once the base is as it was, or to stop the run and begin from the base as it is. Its
 answers are the stop's own, as buttons. The note is labelled with the answers it is sent with, and a
 note typed for a stop stays while you look at other runs; an answer the workflow refuses is said
 beside what it concerns, and a merge or a discard asks first.

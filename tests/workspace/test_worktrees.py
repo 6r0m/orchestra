@@ -1118,6 +1118,19 @@ class Landing(Repo):
         self.assertEqual(self.land("run1", path, moved)["result"], "merged")
         self.assertEqual(git(self.repo, "rev-parse", "develop^{tree}").strip(), final)
 
+    def test_a_base_rewound_under_a_run_is_brought_into_nothing(self):
+        """A base that no longer holds the commit a run stands on dropped something on purpose. Git would call
+        the rewound tip already merged, and the run would land what the base dropped."""
+        began = git(self.repo, "rev-parse", "develop").strip()
+        self.move_base({"dropped.txt": "what the base will drop\n"})
+        path, tip = self.stand("run1")
+        git(self.repo, "reset", "-q", "--hard", began)
+        self.assertEqual(self.land("run1", path, tip), {"result": "moved"})
+        with self.assertRaisesRegex(W.GitError, "rewound or rewritten"):
+            W.reconcile(self.repo, path, "develop", tip)
+        self.assertEqual((git(self.repo, "rev-parse", "develop").strip(), git(self.repo, "rev-parse", "run1").strip(),
+                          W._merging(path)), (began, tip, False), "nothing kept, nothing brought in, the base untouched")
+
     def test_a_base_checked_out_nowhere_lands_by_its_ref_or_not_at_all(self):
         git(self.repo, "switch", "-q", "-c", "elsewhere")
         path, tip = self.stand("run1")
@@ -1267,6 +1280,50 @@ class Remote(Repo):
                         and os.remove(os.path.join(hooks, "pre-commit")))
         self.assertEqual(self.land("run1", path, tip), {"result": "moved"})
         self.assertEqual(self.remote_tip(), self.local, "the remote holds what it was rewound to, and nothing of the run")
+        os.remove(os.path.join(hooks, "pre-commit"))
+        # And the run does not go on by itself: what the remote dropped is still in its worktree.
+        before = git(self.repo, "rev-parse", "run1").strip()
+        with self.assertRaisesRegex(W.GitError, "rewound or rewritten"):
+            self.reconcile(path, tip)
+        self.assertEqual((git(self.repo, "rev-parse", "run1").strip(), W._merging(path), self.remote_tip(),
+                          os.path.isfile(os.path.join(path, "elsewhere.txt"))), (before, False, self.local, True),
+                         "nothing is brought in, kept or pushed: the operator decides what a rewound base means")
+
+    def test_a_remote_rewritten_to_a_history_without_the_runs_commit_is_brought_into_nothing(self):
+        """Not rewound to an ancestor but replaced: the commit the run stands on is in the base's history no more."""
+        ahead = self.elsewhere({"elsewhere.txt": "pushed by another\n"})
+        path, tip = self.stand("run1")
+        clone = os.path.join(self.tmp, "rewriter")
+        git(self.tmp, "clone", "-q", "-c", "core.autocrlf=false", "-b", "develop", self.origin, clone)
+        git(clone, "-c", "user.name=o", "-c", "user.email=o@o", "-c", "commit.gpgsign=false", "commit", "-q",
+            "--amend", "-m", "the same change, written again")
+        git(clone, "push", "-q", "--force", "origin", "develop")
+        rewritten = self.remote_tip()
+        self.assertNotEqual(rewritten, ahead)
+        self.assertEqual(self.land("run1", path, tip), {"result": "moved"})
+        with self.assertRaisesRegex(W.GitError, "rewound or rewritten"):
+            self.reconcile(path, tip)
+        self.assertEqual((git(self.repo, "rev-parse", "run1").strip(), W._merging(path), self.remote_tip()),
+                         (tip, False, rewritten))
+
+    def test_a_remote_with_more_than_one_place_to_fetch_from_or_to_push_to_is_refused(self):
+        """One `git push origin` writes to every push URL in turn, and one may take it while another refuses."""
+        other = os.path.join(self.tmp, "other.git")
+        git(self.tmp, "init", "-q", "--bare", "-b", "develop", other)
+        url = git(self.repo, "remote", "get-url", "origin").strip()
+        git(self.repo, "remote", "set-url", "--push", "origin", other)
+        self.assertRegex(W.remote_id(self.repo, "origin"), "^[0-9a-f]{64}$",
+                         "one place to fetch from and another to push to is one destination")
+        git(self.repo, "remote", "set-url", "--add", "--push", "origin", url)
+        with self.assertRaisesRegex(W.GitError, "2 push URLs"):
+            W.remote_id(self.repo, "origin")
+        git(self.repo, "config", "--unset-all", "remote.origin.pushurl")
+        git(self.repo, "remote", "set-url", "--add", "origin", other)
+        with self.assertRaisesRegex(W.GitError, "2 fetch URLs"):
+            W.remote_id(self.repo, "origin")
+        with self.assertRaisesRegex(W.GitError, "2 fetch URLs"):
+            W.create(self.repo, "develop", self.root, "run1", TARGET, remote="origin", pinned="taken-before")
+        self.assertFalse(W.branch_exists(self.repo, "run1"), "no run begins on a remote that leads to two places")
 
     def test_a_remote_that_no_longer_leads_where_it_did_is_neither_fetched_from_nor_pushed_to(self):
         """A role can rewrite the repository's configuration without touching what the controller guards. The

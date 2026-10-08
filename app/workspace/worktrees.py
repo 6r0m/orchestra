@@ -70,10 +70,20 @@ def _unattended():
 
 
 def remote_id(repo, remote):
-    """A fingerprint of where `remote` leads now: every URL git would fetch from and push to, as the
-    repository's configuration resolves them, rewrites included. The URLs themselves are never kept — one
-    may carry a credential."""
-    urls = [git(repo, "remote", "get-url", *flags, remote).stdout for flags in (("--all",), ("--push", "--all"))]
+    """A fingerprint of where `remote` leads now: the one URL git would fetch from and the one it would push
+    to, as the repository's configuration resolves them, rewrites included. The URLs themselves are never
+    kept — one may carry a credential.
+
+    A remote with more than one of either is refused: one push writes to every push URL in turn, and one
+    may take a merge that another refuses — which is no landing on the repository's one source of truth.
+    """
+    urls = []
+    for what, flags in (("fetch", ("--all",)), ("push", ("--push", "--all"))):
+        found = [line for line in git(repo, "remote", "get-url", *flags, remote).stdout.splitlines() if line]
+        if len(found) != 1:
+            raise GitError("%s has %d %s URLs in this repository's configuration: a run begins from one place "
+                           "and lands on one" % (remote, len(found), what))
+        urls += found
     return hashlib.sha256("\0".join(urls).encode("utf-8")).hexdigest()
 
 
@@ -81,7 +91,9 @@ def _led(repo, remote, pinned):
     """Refuse a remote that no longer leads where it did when its run began (`pinned`, its `remote_id` then).
     A role's turn can rewrite the repository's configuration without touching anything the controller
     guards, and what is fetched from or pushed to another place is nothing the operator agreed to."""
-    if pinned and remote_id(repo, remote) != pinned:
+    # Read whether or not a fingerprint was taken: a remote that leads to two places is refused by the read.
+    led = remote_id(repo, remote)
+    if pinned and led != pinned:
         raise GitError("%s no longer leads where it did when this run began: its URL, or a rewrite of it, changed "
                        "in the repository's configuration. Nothing is fetched from it or pushed to it" % remote)
 
@@ -287,12 +299,19 @@ def reconcile(repo, worktree, base, tip, remote=None, pinned=None):
     the worktree, uncommitted, for the run's roles: `{"moved": True, "base_tip": <the base's tip>, "files":
     <those in conflict>, "tree": <what the worktree then holds>}`. A merge of that tip already under way is an
     earlier attempt's, and is adopted; one of an older tip is committed with the files, then the newer
-    brought in. The base itself is never written.
+    brought in. The base itself is never written. A base that no longer holds `tip` at all — rewound to an
+    ancestor, or rewritten — is brought into nothing and refused: what that means is the operator's to say.
     """
     now = base_tip(repo, base, remote, pinned)
     held = git(worktree, "rev-parse", "--verify", "--quiet", "MERGE_HEAD", check=False).stdout.strip()
     if now == tip and held in ("", now):
         return {"moved": False}
+    if git(repo, "merge-base", "--is-ancestor", tip, now, check=False).returncode != 0:
+        # Git would call a rewound tip merged already, and the run would land again what the base dropped.
+        raise GitError("%s no longer holds %s, the commit this run stands on: it was rewound or rewritten. "
+                       "Nothing is brought into the worktree, which still holds what the base dropped. "
+                       "Continue once %s holds that commit again, or stop the run — its worktree keeps the "
+                       "work — and begin from the base as it is" % (base, tip[:10], base))
     if held != now:
         if held or not _clean(worktree):
             git(worktree, "add", "-A")

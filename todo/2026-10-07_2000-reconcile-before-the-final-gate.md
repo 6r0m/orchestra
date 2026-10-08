@@ -1,7 +1,7 @@
 # A Merge at the final gate lands what the gate showed, on the base as it is — or lands nothing
 
-**Status:** IMPLEMENTED, the external reviewer's three findings on the remote landing applied — awaiting its
-re-review (D1). The full suite on both hosts, a restart and a run with real agents are not done; the live
+**Status:** IMPLEMENTED, the external reviewer's findings on the remote landing applied, two rounds of them —
+awaiting its re-review (D1). The full suite on both hosts, a restart and a run with real agents are not done; the live
 stack still runs the code from before this.
 **Scope:** how a run meets a base that moved, and where it lands: the look at the base, its coming into the
 worktree and the landing ([worktrees.py](../app/workspace/worktrees.py)); the remote a base may live on
@@ -103,6 +103,10 @@ and says so.
   `origin` leads; `git remote get-url --all`, with and without `--push`, answers what they resolve to.
 - **F13** `resolve` asked for a local branch of the base before it read `remote`, and found an unnamed base
   among the local ones.
+- **F14** A base rewound to an ancestor of the commit a run stands on is, to git, merged into that run's
+  worktree already: `reconcile` answered that it had come in, with nothing in conflict, and the run would have
+  landed again what the base had dropped. One rewritten to another history was merged in beside the old.
+- **F15** A remote may hold several push URLs, and one `git push` to it writes to each in turn.
 
 ### Refuted
 
@@ -140,11 +144,13 @@ watched between the two looks, so a Merge can still be answered with "it moved" 
 2. A Merge lands only while the base's tip is the one the run recorded; otherwise nothing is committed,
    merged or pushed.
 3. The base's first-parent history is its own; a run adds the same two commits whatever the base did
-   meanwhile, and nothing kept of the base's coming in is reachable from it.
+   meanwhile, and nothing kept of the base's coming in is reachable from it. A base that no longer holds the
+   commit a run stands on is brought into nothing: the run stops for the operator.
 4. A conflict never resolves on the base, in the controller or at the operator's Merge.
 5. Every recorded history replays as it was written (D25); a run that recorded no base tip takes no new step.
-6. Agents reach no remote. The controller reaches one only where the repository's entry names it, and only
-   where that remote led when the run was set up: it fetches the base branch, and pushes it only on the
+6. Agents reach no remote. The controller reaches one only where the repository's entry names it, only where
+   that remote led when the run was set up, and only while it leads to one place to fetch from and one to
+   push to: it fetches the base branch, and pushes it only on the
    operator's Merge, as a compare-and-swap on the commit the change was judged on — never a rewrite.
 7. A retried merge adopts the one it made; the operator's staged content and their edits in a checked-out
    base are never written over; a look at the base that could not be made is no answer.
@@ -170,6 +176,8 @@ watched between the two looks, so a Merge can still be answered with "it moved" 
 | a remote's base: begun from it, landed by a push, the local branch untouched and not needed, a refusal landing nothing, an unreachable remote no answer | `test_worktrees.Remote`; `test_repos` for the entry's keys |
 | a remote rewound between the look and the push takes nothing | `test_worktrees.Remote`, red first: a plain push landed on it |
 | a remote turned elsewhere since the run began is neither fetched from nor pushed to | `test_worktrees.Remote`, four ways of turning it; `test_stops.Reconciling`: the fingerprint taken at setup and handed to every step |
+| a base rewound or rewritten under a run is brought into nothing, the run not going on | `test_worktrees.Landing`, `Remote` — past the refused push, into the look that follows it |
+| a remote with more than one URL either way is refused before a run begins | `test_worktrees.Remote` |
 | the gate's change is the run's files | `test_worktrees.Merge`, `Landing`; `test_workbench.Runs` |
 | the history's rows | `test_workbench.HistoryRead` |
 | a run recorded before this replays, and takes no new step | `test_replay`; `test_stops.Reconciling`'s control |
@@ -244,3 +252,23 @@ a bare repository on disk. That is a live run's to show.
 - **Not run:** the full suite; a restart; a run with real agents; a push to a real remote.
 - **Still to do before this repository names its remote**, as the reviewer and the agent both hold: its
   public check as a pre-push hook.
+
+### 2026-10-07 — the reviewer's two edge cases of the remote
+
+- **Reviewer:** `PASS` on the three fixes; a blocker still on turning the remote landing on.
+- **Applied, each red first:** a base that no longer holds the commit the run stands on is refused by the
+  look that would bring it in (F14) — after the refused push, not only at it; a remote with more than one URL
+  to fetch from or to push to is refused, at setup and at every fetch and push (F15).
+- **Refuted:** nothing. The agent had held the first to be enough said at the gate, where the dropped content
+  would have shown as the run's own change; a base rewritten on purpose is the operator's to answer, not a
+  diff's to reveal.
+- **Verification, the modules the change touches, one host after the other:** Windows — 53 classes, 302
+  tests, OK. WSL — 96 classes, 491 tests, OK.
+- **Controls, one guard out at a time, each put back and the tree byte for byte as before:** a base that
+  no longer holds the run's commit brought in like any other; a remote taken with any number of URLs. Each
+  failed the tests named for it.
+- **`make demo`** and **`make public-check`:** passed on this code.
+- **Not run:** the full suite; a restart; a run with real agents; a push to a real remote.
+- **For the pre-push hook this repository needs before it names its remote** (the reviewer's note): it must
+  judge the commit being pushed, not the checkout — a remote landing leaves the local branch and its files as
+  they were, and today's public check reads the index and the working tree.

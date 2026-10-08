@@ -394,13 +394,18 @@ still lands on a checkout.
   branch, fetched before every look, and this repository's own branch of that name is
   no destination, nor needed: the entry names the `base_branch` with it, never left to
   be found. That remote is reached only where it led when the run was set up — a
-  fingerprint of the URLs its configuration resolved to then, taken before any role ran:
-  one turned elsewhere since is neither fetched from nor pushed to. Unnamed, the base is
+  fingerprint of the one URL its configuration resolved to for fetching and the one for
+  pushing, taken before any role ran: one turned elsewhere since is neither fetched from
+  nor pushed to, and one that leads to more than one place either way is refused, since a
+  push to several is no landing on one source of truth. Unnamed, the base is
   the local branch and nothing leaves the machine.
   Once a build has passed, and before it is made final, the base is looked at. One that
   moved is merged into the run's worktree, uncommitted, the base itself untouched:
   where git merged it without a conflict the architect verifies the two together, and
-  where it left conflicts the engineer resolves them first. The run goes on only from a
+  where it left conflicts the engineer resolves them first. A base that no longer holds
+  the commit the run stands on — rewound to an ancestor, or rewritten — is brought into
+  nothing: git would call it merged already and the run would land again what the base
+  dropped, so the step stops and the operator decides. The run goes on only from a
   `PASS` on a base that stood still, so nothing is made final, and nothing reaches the
   gate, that no stage judged on the base as it is; a look that could not be made is no
   answer, and stops the run. The change read at the gate is what the worktree holds
