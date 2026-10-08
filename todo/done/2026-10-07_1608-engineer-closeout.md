@@ -1,18 +1,17 @@
 # The engineer closes the todo out after the architect's PASS; the merge commits exactly what the gate showed
 
-**Status:** IMPLEMENTED and deployed: the external reviewer's PASS (D3), the full suite on both hosts and the
-restart acceptance are in, and the live stack runs this code. Left, with the operator: a run with real agents
-that closes out and merges.
-**Scope:** the run's finalisation: a `closeout` stage ([stages.py](../app/foundation/stages.py)), its flow rules
-([flows.py](../app/foundation/flows.py), [flows/](../flows/README.md)), the workflow's path through it
-([workflow.py](../app/orchestration/workflow.py)), its checks and the reopening of a change that goes back
-([activities.py](../app/application/activities.py), [worktrees.py](../app/workspace/worktrees.py)), the
-repository's own closeout documents ([repos.py](../app/workspace/repos.py)), what the history shows of it
-([client.py](../app/application/client.py)) and the trace's names for it.
+**Status:** PASS 2026-10-08 — the external reviewer's PASS (D3); a run with real agents closed its todo out
+and merged the tree its gate showed.
+**Scope:** the run's finalisation: a `closeout` stage ([stages.py](../../app/foundation/stages.py)), its flow rules
+([flows.py](../../app/foundation/flows.py), [flows/](../../flows/README.md)), the workflow's path through it
+([workflow.py](../../app/orchestration/workflow.py)), its checks and the reopening of a change that goes back
+([activities.py](../../app/application/activities.py), [worktrees.py](../../app/workspace/worktrees.py)), the
+repository's own closeout documents ([repos.py](../../app/workspace/repos.py)), what the history shows of it
+([client.py](../../app/application/client.py)) and the trace's names for it.
 **Stable documentation owner:** architecture D24, with D2, D4, D13 and D25, in
-[structure.md](../docs/architecture/structure.md); the stops in
-[stops.md](../docs/architecture/diagrams/stops.md); the trace's rows in
-[trace-contract.md](../docs/architecture/trace-contract.md).
+[structure.md](../../docs/architecture/structure.md); the stops in
+[stops.md](../../docs/architecture/diagrams/stops.md); the trace's rows in
+[trace-contract.md](../../docs/architecture/trace-contract.md).
 
 ## Goal
 
@@ -83,7 +82,7 @@ repository keeps finished todos — and Merge commits exactly that tree.
   the verified tree was refused by the merge. A writing turn after `PASS` therefore needs a new stage and a
   different tree for the merge to hold.
 - **F4** Where a repository keeps a finished todo is its descriptor's: `todo_dir`, `todo_done_dir` (null
-  deletes), `todo_name` ([repos.py](../app/workspace/repos.py)).
+  deletes), `todo_name` ([repos.py](../../app/workspace/repos.py)).
 - **F5** `flows.steps_of` runs in the workflow on each replay, and the status query of a closed run replays it.
 - **F6** Found on the way, and fixed here because the merge's exactness rests on it: `work_tree` computed the
   tree on a copy of the index stamped when the copy was made, so git trusted the stat of a file rewritten to the
@@ -193,16 +192,16 @@ a live run's to show.
 
 - **Owner:** D24 for the lifecycle; D2 the stages, D4 what an architect judges, D13 the flow's rules, D25 how
   a change to the workflow keeps every recording replaying.
-- **Updated:** [stops.md](../docs/architecture/diagrams/stops.md), [trace-contract.md](../docs/architecture/trace-contract.md),
-  [decisions.md](../docs/history/decisions.md), [using.md](../docs/using.md), the [README](../README.md),
-  [flows/README.md](../flows/README.md), [todo/README.md](README.md), [tests/README.md](../tests/README.md), each
-  concern's own structure note, [the example descriptors](../.orchestra/repos.example.json) and
-  [the engineer's persona](../roles/engineer.md).
+- **Updated:** [stops.md](../../docs/architecture/diagrams/stops.md), [trace-contract.md](../../docs/architecture/trace-contract.md),
+  [decisions.md](../../docs/history/decisions.md), [using.md](../../docs/using.md), the [README](../../README.md),
+  [flows/README.md](../../flows/README.md), [todo/README.md](README.md), [tests/README.md](../../tests/README.md), each
+  concern's own structure note, [the example descriptors](../../.orchestra/repos.example.json) and
+  [the engineer's persona](../../roles/engineer.md).
 
 ## Completion criteria
 
 - The external reviewer's PASS (D3); then the full suite once on both hosts, then the restart acceptance.
-- A run with real agents closes its todo out and merges the tree its gate showed.
+- A run with real agents closes its todo out and merges the tree its gate showed — had, in the last record.
 
 ## Review record
 
@@ -303,3 +302,12 @@ a live run's to show.
   repository's entry in the operator's descriptor names its documents, and the running code reads the file.
 - **Left:** the waiting run's merge, which meets a conflict in `tests/README.md` with the base as it is now —
   previewed, its agents' to resolve; and a run with real agents through a closeout to its merge.
+
+### 2026-10-08 — a run with real agents, closed out and merged
+
+- **The run** that closed [the merge's own todo](2026-10-07_2000-reconcile-before-the-final-gate.md): after
+  the architect's `PASS` on the build its engineer closed the todo out — cut to its record, its status the
+  pass, moved to the done folder — and the final gate showed exactly that: the one changed document and the
+  finished todo. The Merge landed that tree and no other; the proof is in that todo's last record.
+- **The run that had waited across the deploy** was merged by the operator the same day, on the path it had
+  recorded: its plan already in the done folder, the base's coming in resolved by its agents.

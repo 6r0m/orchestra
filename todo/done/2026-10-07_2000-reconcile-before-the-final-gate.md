@@ -1,21 +1,15 @@
 # A Merge at the final gate lands what the gate showed, on the base as it is — or lands nothing
 
-**Status:** IMPLEMENTED and passed by the external reviewer, the pre-push hook with it (D1); the full suite
-passed on both hosts; released on this machine — the hook installed in this clone, this repository's entry
-naming its remote, the live stack restarted on this code and its restart acceptance passed. The first Merge
-after it, of a run from before this, landed and then failed at its cleanup on Windows (F22): that fix is
-deployed on this machine and accepted by the reviewer, and the run, continued, closed as merged. The removal
-is made resumable on the reviewer's finding (F24) — awaiting its re-review, the live workers not yet on it.
-Still open after that: the full suite once on the final tree, and one run with real agents, merged by the
-operator and shown to have landed on the remote.
+**Status:** PASS 2026-10-08 — the external reviewer's PASS, and the release acceptance: a run with real
+agents landed on the remote by one Merge, its tree the gate's, the local checkout as it was.
 **Scope:** how a run meets a base that moved, and where it lands: the look at the base, its coming into the
-worktree and the landing ([worktrees.py](../app/workspace/worktrees.py)); the remote a base may live on
-([repos.py](../app/workspace/repos.py)); the workflow's path around the final gate
-([workflow.py](../app/orchestration/workflow.py)); the change the gate and the history read
-([client.py](../app/application/client.py), the Workbench's change view).
+worktree and the landing ([worktrees.py](../../app/workspace/worktrees.py)); the remote a base may live on
+([repos.py](../../app/workspace/repos.py)); the workflow's path around the final gate
+([workflow.py](../../app/orchestration/workflow.py)); the change the gate and the history read
+([client.py](../../app/application/client.py), the Workbench's change view).
 **Stable documentation owner:** architecture D24, with D25 for how recorded runs keep replaying, in
-[structure.md](../docs/architecture/structure.md); the stops in
-[stops.md](../docs/architecture/diagrams/stops.md).
+[structure.md](../../docs/architecture/structure.md); the stops in
+[stops.md](../../docs/architecture/diagrams/stops.md).
 
 ## Goal
 
@@ -253,16 +247,16 @@ behind it, it is proven by the real pushes in the review record.
 ## Documentation plan
 
 - **Owner:** D24.
-- **Updated:** [stops.md](../docs/architecture/diagrams/stops.md), [using.md](../docs/using.md), the
-  [README](../README.md), [tests/README.md](../tests/README.md), the workspace's and the application's
-  structure notes, [the example descriptors](../.orchestra/repos.example.json).
+- **Updated:** [stops.md](../../docs/architecture/diagrams/stops.md), [using.md](../../docs/using.md), the
+  [README](../../README.md), [tests/README.md](../../tests/README.md), the workspace's and the application's
+  structure notes, [the example descriptors](../../.orchestra/repos.example.json).
 
 ## Completion criteria
 
 - The external reviewer's PASS on the hook (D1); then the full suite once on both hosts — both had, in the
   review record.
 - `make hooks` in this clone, its entry naming `remote` and `base_branch`, a restart, and a live run: landed
-  on the remote by one Merge, the remote's branch shown to hold it.
+  on the remote by one Merge, the remote's branch shown to hold it — had, in the last record.
 
 ## Review record
 
@@ -480,3 +474,40 @@ behind it, it is proven by the real pushes in the review record.
   passed on this code.
 - **Not done:** the workers restarted on this code — on the operator's word, after the review.
 - **Not run:** the full suite, due once on the final tree; a run with real agents; a push to a real remote.
+
+### 2026-10-08 — the reviewer's PASS on the removal, and the full suite on the final tree
+
+- **Reviewer:** `PASS`, no more changes of code; the empty folder accepted — a folder with content and
+  `pyvenv.cfg` is removed, one with content and none refused, an empty one at the derived path removed.
+- **The full suite, once on each host, one after the other, on the final tree (`bacd134`):** WSL — 139
+  classes, 681 tests, OK. Windows — 95 classes, 482 tests, OK.
+- **Read before the restart, nothing written:** the live stack holds no open run, and the runs Temporal
+  keeps replay on this code; `origin`'s `main` is that same commit, pushed by the operator through the
+  installed hook; the entry names its remote, and git lists the hook.
+- **Still to do:** the workers restarted onto this tree and the restart acceptance, on the operator's word;
+  one run with real agents, merged by the operator; then the remote's branch shown to hold exactly the tree
+  the gate showed, the local checkout as it was, and the run's worktree, branch and environment gone.
+
+### 2026-10-08 — the release acceptance: a run with real agents, landed on the remote
+
+- **Operator:** *"do fully please without my go"* — the restart, the run and its answers left to the agent.
+- **Restarted onto the final tree; `tests/acceptance_restart.py`:** passed, 45 checks.
+- **The run:** on this repository, the `engineer-code` flow, real agents on the Windows host — one row for the
+  public check in `tools/README.md`. Set up from the remote's `main`, the Windows worker reaching `origin`
+  unattended, both fingerprints taken; its plan sent back twice by the architect, passed and approved; built
+  and verified; the base looked at and found standing; closed out by its engineer. At the final gate the
+  change was read: that row, and the run's todo in the done folder, holding nothing a public todo may not.
+- **Merge, answered by the agent on that instruction:** landed in nineteen seconds. Asked of the remote,
+  `origin`'s `main` is the merge commit; its tree is the tree the gate showed; its first parent is what
+  `origin`'s `main` was, its second one commit on that with the same tree — two files, 58 lines. The local
+  checkout is as it was: `HEAD`, `main`, its reflog and its status unchanged, the merge commit not on it. The
+  run's worktree, its branch and its environment are gone.
+- **The hook in that push:** three scanner containers ended inside the merge step, by the host's journal
+  against the times Temporal holds for the step; and git, in a process made as the worker is made, asked to
+  run its pre-push hooks, ran the check through WSL — this checkout's head passed, a line naming no commit
+  refused.
+- **Seen in the run, not changed:** this repository pins no line endings, and Git for Windows checks a fresh
+  worktree's shell scripts out with CRLF, which WSL's bash refuses — in the run's worktree `run-tests.sh`
+  could not run and the hand-over's test failed, as the run's own record says. The main checkout's scripts
+  are LF and run. A pull that rewrites `tools/public_check.sh` there would stop the hook, every push refused
+  until the file is LF again; a `.gitattributes` is the usual answer, and a change of its own.
