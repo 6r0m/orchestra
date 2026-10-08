@@ -133,6 +133,20 @@ class ARunsPolicy(unittest.TestCase):
         self.assertNotIn("agents", policy)
         self.assertFalse([key for key in policy if key.startswith("_")], "where the settings were read stays behind")
 
+    def test_the_shipped_personas_hold_a_pass_to_the_plans_completion_criteria(self):
+        """How a role acts is its persona's to say, and nothing else in a run says this: a build passes on
+        the criteria its approved plan named, and one that cannot be met is the operator's to set aside —
+        asked for by a `BLOCKER`, written down by the engineer. Words a model reads, so only their presence
+        can be held here; a run that meets the case is what shows them at work."""
+        personas = S.run_policy(shipped())["roles"]
+        architect = " ".join(personas["architect"]["persona"].split())
+        engineer = " ".join(personas["engineer"]["persona"].split())
+        for said in ("completion criteria", "not yours to set aside", "`BLOCKER`, naming the criterion",
+                     "the operator's decision"):
+            self.assertIn(said, architect)
+        for said in ("each of the plan's completion criteria", "not yours to drop", "the operator's decision"):
+            self.assertIn(said, engineer)
+
     def test_only_the_skills_of_the_stages_its_flow_takes(self):
         settings = dict(shipped(), stage_skills={"research": "architect", "build": "implement-approved-change"})
         self.assertEqual(S.run_policy(settings, ["architect:research", "you:approve"])["stage_skills"],

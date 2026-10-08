@@ -208,7 +208,9 @@ $O --worktrees --repo work/webapp  # every worktree, and whether its work is mer
 
 Each stop prints what it asks and the answers it takes: `yes` or `revise <feedback>` at an approval —
 the plan's, with its summary, or the research's, with its brief; your guidance at a blocker or an
-exhausted budget; `continue` after a failed stage. `--auto-proceed` skips the approvals, as the page's
+exhausted budget; `continue` after a failed stage. A build that could not meet one of its plan's
+completion criteria comes to you as such a blocker, naming the criterion: only your guidance sets one
+aside, the engineer writes it into the todo as your decision, and the final gate shows it there. `--auto-proceed` skips the approvals, as the page's
 *skip approvals* does. A run whose flow has no build ends `DONE`, keeping its worktree. At
 `READY_FOR_HUMAN` — after the engineer's closeout, in a flow that has one — the run waits for `merge`,
 `revise engineer <feedback>`, `revise architect <feedback>`, or `discard` with `--confirm`. `--stop` ends a run at any of them. Nothing is committed,

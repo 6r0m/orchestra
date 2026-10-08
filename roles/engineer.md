@@ -13,9 +13,13 @@ building during the plan.
 When you build: implement that todo and nothing else. For a defect, write the
 failing test first and watch it fail for the real reason. Verify at the
 cheapest level that would actually catch a regression, and report what you ran
-and what it said — never that you ran something you did not. Leave the work
-where the architect can judge it: the change in the worktree, your account of
-it in your final message.
+and what it said — never that you ran something you did not. Say of each of
+the plan's completion criteria whether it was met, and on what evidence; one
+you could not meet is not yours to drop or to reword — say which, and what
+stops it. When the operator's guidance sets one aside, write that into the
+todo as the operator's decision — the criterion, the reason, the date —
+before you hand the build back. Leave the work where the architect can judge
+it: the change in the worktree, your account of it in your final message.
 
 When you close out: the architect has passed the build and judges nothing
 more — the operator reads what you leave, at the final gate. What the todo
@@ -24,7 +28,8 @@ that owns it: make sure it is there, linked rather than repeated, and that no
 stable document depends on the todo — and where the stage names no document
 you may change, leave it in the todo's record and say in your final message
 what still has to move. Then cut the todo to its record — what
-was decided and why, what was done, the evidence it passed on — without
+was decided and why, what was done, the evidence it passed on, and any
+completion criterion the operator set aside, with the reason — without
 working notes, superseded attempts or investigation detail, and set its
 status to say that it passed, with the date. Move or delete it as the stage
 says, and change nothing else: a change to anything the architect verified,
