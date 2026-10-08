@@ -1,15 +1,13 @@
 # A base that moved after the gate takes the change as git merges it
 
-**Status:** IMPLEMENTED; the design is accepted by the external reviewer (PATCH, 2026-10-08: one gap in the
-landing on a checked-out local base, closed here) — awaiting the reviewer's PASS. The touched tests pass on
-both hosts. It takes effect once the stack is restarted on this code, which is the operator's to do; until
-then the page's Merge confirmation already reads the new way while the workers still land the old way.
+**Status:** PASS 2026-10-08 — the external reviewer's PASS, and the release acceptance: the whole suite on
+both hosts, the stack restarted on this code, and a real run merged at once onto a base that had moved.
 **Scope:** what a Merge does when the base moved on after the final gate
-([worktrees.py](../app/workspace/worktrees.py), `_land`), and the line the run says for it
-([workflow.py](../app/orchestration/workflow.py)). Nothing before the gate changes: a base that moved while
+([worktrees.py](../../app/workspace/worktrees.py), `_land`), and the line the run says for it
+([workflow.py](../../app/orchestration/workflow.py)). Nothing before the gate changes: a base that moved while
 the run built is still brought into the worktree and judged.
-**Stable documentation owner:** D24 in [structure.md](../docs/architecture/structure.md); for the operator,
-[using.md](../docs/using.md).
+**Stable documentation owner:** D24 in [structure.md](../../docs/architecture/structure.md); for the operator,
+[using.md](../../docs/using.md).
 
 ## Goal
 
@@ -25,7 +23,7 @@ A Merge the operator has given lands, unless git itself cannot merge the change 
     *"it's very weird after merge instead just controller script deterministically do the job if no
     conflicts - now architector works again"*.
   - Effect: replaces, for the moment after the gate, what the merge flow held until now — that a Merge on a
-    base that moved lands nothing ([its record](done/2026-10-07_2000-reconcile-before-the-final-gate.md)).
+    base that moved lands nothing ([its record](2026-10-07_2000-reconcile-before-the-final-gate.md)).
 
 ### Decided under D1 — the agent's
 
@@ -55,7 +53,7 @@ A Merge the operator has given lands, unless git itself cannot merge the change 
   change back once — its recorded test results were the old base's — the engineer ran the suites again on
   the merged tree, which found no defect, the closeout ran again, and a second gate asked for a second
   Merge.
-- The verify's prompt ends "Do not run tests or builds" ([stages.py](../app/foundation/stages.py)).
+- The verify's prompt ends "Do not run tests or builds" ([stages.py](../../app/foundation/stages.py)).
 
 ## What changed
 
@@ -102,14 +100,24 @@ A Merge the operator has given lands, unless git itself cannot merge the change 
   stood. Reproduced and closed as the reviewer set out — a look as the last thing before the
   fast-forward; a look and a step, not a compare-and-swap, which git has none of for a branch together
   with its checkout.
+- **External reviewer, 2026-10-08 — PASS** on that, with the release acceptance below still to do.
 
-## Completion criteria
+## Release acceptance (2026-10-08)
 
-- The external reviewer's PASS.
-- The whole suite once on both hosts, after it.
-- The stack restarted on this code by the operator, and a real Merge onto a base that moved landing at
-  once: the run `find-one-small-6625194f` waits at its gate on a base that has moved since, and its Merge
-  on the restarted stack is that proof.
+- **The whole suite, one host after the other:** WSL: 141 classes, 696 tests, OK; Windows: 97 classes, 496
+  tests, OK.
+- **The stack restarted on this code** with the run `find-one-small-6625194f` waiting at its final gate: it
+  waited there afterwards, its history the same event for event.
+- **The operator's one Merge of that run.** It had been judged on a commit its remote base had since moved
+  three commits past, two of them changing a file the run changes too. A look beforehand said git merges
+  the two. The Merge landed at once: the remote's base is a merge commit named for the run's plan, its
+  first parent the base as it was at the Merge, its second one commit on the commit the run was judged on
+  with the tree its gate held, its own tree git's merge of the two, and what it adds to the base the run's
+  seven files. No stage ran between the gate and the landing. The run's worktree, its branch and its
+  environment are gone, and the remote holds no branch of the run. The repository's own checkout was left
+  where it was; the operator's own pull moved it, twenty seconds on.
+- **Not exercised on the live stack:** a conflict, and a base taken back, at the Merge. Both are held by the
+  tests above, on real repositories.
 
 ## Not done here
 
