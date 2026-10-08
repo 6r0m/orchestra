@@ -175,6 +175,10 @@ Do not re-derive a `states/` layer here.
   The shell scripts are pinned to LF (`.gitattributes`): WSL's bash runs them
   from a checkout either host's git made, and Git for Windows would write a
   run worktree's with CRLF, which bash refuses.
+  An environment is kept only on the host whose git reads the checkout: the
+  WSL runner started in a worktree the other host's git made runs its tests in
+  an environment of their own, gone when they end, since the host that removes
+  that worktree removes only the environment it built itself.
   A run worktree's environment is removed with the worktree, on its target host,
   only when the derived path lies under that host's environment root, crosses
   no link or reparse point, and holds `pyvenv.cfg` — removed last, so a removal

@@ -387,5 +387,92 @@ class Parallel(unittest.TestCase):
         self.assertEqual(runner.child_env(folder, 10)["PYTHONPATH"].split(os.pathsep)[0], folder)
 
 
+@unittest.skipUnless(os.name == "posix", "run-tests.sh is the runner of WSL and Linux")
+class TheRunnersEnvironment(unittest.TestCase):
+    """`run-tests.sh` builds the environment its tests run in. One built for a checkout is removed with
+    that checkout by the host whose git owns it — and a run's worktree made by the other host's git is
+    never this host's to remove, so an environment kept for it here would outlive it."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="orchestra-runner-script-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.checkout = os.path.join(self.tmp, "checkout")
+        os.makedirs(os.path.join(self.checkout, "app", "foundation"))
+        shutil.copyfile(os.path.join(PKG, "run-tests.sh"), os.path.join(self.checkout, "run-tests.sh"))
+        shutil.copyfile(os.path.join(PKG, "app", "foundation", "envpath.py"),
+                        os.path.join(self.checkout, "app", "foundation", "envpath.py"))
+        # A stand-in for uv: it answers where the environment lives as the real one does — by running
+        # envpath.py — builds one by making its folder, and "runs the tests" by saying which it was given.
+        tools = os.path.join(self.tmp, "bin")
+        os.makedirs(tools)
+        self.said = os.path.join(self.tmp, "said")
+        with open(os.path.join(tools, "uv"), "w", encoding="utf-8") as fh:
+            fh.write(textwrap.dedent("""\
+                #!/usr/bin/env bash
+                case " $* " in
+                    *" envpath.py "*|*envpath.py*) exec "%s" "${@: -2:1}" "${@: -1}" ;;
+                esac
+                case " $* " in
+                    *" sync "*) mkdir -p "$UV_PROJECT_ENVIRONMENT" && : > "$UV_PROJECT_ENVIRONMENT/pyvenv.cfg" ;;
+                    *" run "*)
+                        echo "$UV_PROJECT_ENVIRONMENT" > "%s"
+                        if [ -n "${CONTROL_TESTS_WAIT:-}" ]; then
+                            trap 'echo ended-by-a-signal >> "%s"; exit 143' TERM
+                            sleep 60 & wait
+                        fi
+                        exit "${CONTROL_TESTS_EXIT:-0}" ;;
+                esac
+                """) % (sys.executable, self.said, self.said))
+        os.chmod(os.path.join(tools, "uv"), 0o755)
+        self.cache = os.path.join(self.tmp, "cache")
+        self.environment = dict(os.environ, PATH=tools + os.pathsep + os.environ["PATH"], XDG_CACHE_HOME=self.cache)
+
+    def run_tests(self, **changes):
+        done = subprocess.run(["bash", os.path.join(self.checkout, "run-tests.sh"), "tests.some"],
+                              env=dict(self.environment, **changes), capture_output=True, text=True)
+        with open(self.said, encoding="utf-8") as fh:
+            return done, fh.read().strip()
+
+    def kept(self):
+        root = os.path.join(self.cache, "orchestra")
+        return sorted(os.listdir(root)) if os.path.isdir(root) else []
+
+    def test_a_checkout_this_hosts_git_reads_keeps_its_environment(self):
+        subprocess.run(["git", "init", "--quiet", self.checkout], check=True, capture_output=True)
+        done, used = self.run_tests()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(os.path.dirname(used), os.path.join(self.cache, "orchestra"), "under the root, by its name")
+        self.assertTrue(os.path.isfile(os.path.join(used, "pyvenv.cfg")), "and there for the next run")
+
+    def test_a_checkout_it_does_not_read_gets_one_that_ends_with_the_tests(self):
+        """A worktree the other host's git made: its `.git` names a gitdir this host cannot spell."""
+        with open(os.path.join(self.checkout, ".git"), "w", encoding="utf-8") as fh:
+            fh.write("gitdir: Q:/no/such/repository/.git/worktrees/run\n")
+        for exit_code in (0, 3):
+            done, used = self.run_tests(CONTROL_TESTS_EXIT=str(exit_code))
+            self.assertEqual(done.returncode, exit_code, "the tests' own result is the runner's: %s" % done.stderr)
+            self.assertFalse(os.path.exists(used), "the environment the tests ran in is gone with them")
+            self.assertEqual(self.kept(), [], "and none was kept under the root for a checkout no one here removes")
+
+    def test_ended_from_outside_it_hands_the_end_on_and_still_takes_its_environment_back(self):
+        with open(os.path.join(self.checkout, ".git"), "w", encoding="utf-8") as fh:
+            fh.write("gitdir: Q:/no/such/repository/.git/worktrees/run" + chr(10))
+        runner_script = subprocess.Popen(["bash", os.path.join(self.checkout, "run-tests.sh"), "tests.some"],
+                                         env=dict(self.environment, CONTROL_TESTS_WAIT="1"),
+                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(lambda: runner_script.poll() is None and runner_script.kill())
+        deadline = time.monotonic() + 30
+        while not os.path.exists(self.said) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        with open(self.said, encoding="utf-8") as fh:
+            used = fh.read().split()[0]
+        self.assertTrue(os.path.isdir(used), "the tests are running in it")
+        runner_script.send_signal(signal.SIGTERM)
+        self.assertNotEqual(runner_script.wait(timeout=30), 0)
+        with open(self.said, encoding="utf-8") as fh:
+            self.assertIn("ended-by-a-signal", fh.read(), "the tests were told, not left running")
+        self.assertFalse(os.path.exists(used))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,12 +1,12 @@
 # An architect's PASS on a build means its plan's completion criteria were met
 
-**Status:** IMPLEMENTED — awaiting the external reviewer's look (D1). The touched tests pass on both hosts; no
-run with real agents has met the case yet, and the live workers hand the new words to runs started from now.
+**Status:** PASS 2026-10-08 — the external reviewer's PASS (D1); the full suite passed on both hosts. No run
+with real agents has met the case yet: a run reads its personas when it starts, so every run from now does.
 **Scope:** what `PASS` means at `verify` when the approved plan names a completion criterion the build did
-not meet — [the architect's role](../roles/architect.md), and what [the engineer's](../roles/engineer.md)
+not meet — [the architect's role](../../roles/architect.md), and what [the engineer's](../../roles/engineer.md)
 reports and records. No workflow code, no new stage, no enforcement in the controller.
 **Stable documentation owner:** the roles themselves, which are what a run's agents read; for the operator,
-[using.md](../docs/using.md).
+[using.md](../../docs/using.md).
 
 ## Goal
 
@@ -40,11 +40,11 @@ passed, unless the operator was asked, set that criterion aside, and the todo re
   endings, since pinned — and the evidence that the change could not have made it.
 - The architect's `PASS` named the failure and called it unrelated. The judgement was right; the criterion
   was neither met nor amended, and the run reached its final gate as passed
-  ([the record](done/2026-10-07_2000-reconcile-before-the-final-gate.md)).
+  ([the record](2026-10-07_2000-reconcile-before-the-final-gate.md)).
 - The architect's role said `PASS` means ready within what was reviewed, and nothing of the plan's own
   completion criteria. It already said how a human decision is asked for: a `BLOCKER`.
 - A blocker at `verify` stops the run, and the operator's answer is guidance its next build turn receives
-  ([the stops](../docs/architecture/diagrams/stops.md)). How a role acts is its persona's to say, carried
+  ([the stops](../../docs/architecture/diagrams/stops.md)). How a role acts is its persona's to say, carried
   by a run from its start (`app/agents/nodes.py`); nothing else in a run states what a `PASS` requires.
 
 ## What changed
@@ -55,7 +55,7 @@ passed, unless the operator was asked, set that criterion aside, and the todo re
 - **The engineer's role:** each criterion reported as met or not, with its evidence; an unmet one neither
   dropped nor reworded; the operator's exception written into the todo before the build goes back; kept in
   the closeout's record.
-- **[using.md](../docs/using.md):** what such a blocker is, and that only the operator's guidance answers it.
+- **[using.md](../../docs/using.md):** what such a blocker is, and that only the operator's guidance answers it.
 
 ## Verification
 
@@ -67,7 +67,7 @@ passed, unless the operator was asked, set that criterion aside, and the todo re
 
 ## Completion criteria
 
-- The external reviewer's PASS (D1).
+- The external reviewer's PASS (D1) — had.
 - The touched tests on both hosts — in the review record.
 
 ## Review record
@@ -80,3 +80,10 @@ passed, unless the operator was asked, set that criterion aside, and the todo re
   activities, workflow, settings delivery, workbench, trace parity and architecture: 50 classes, 274 tests,
   OK. Windows — those of them its host suite holds: 30 classes, 158 tests, OK. `make public-check`: passed.
 - **Not run:** the full suite — two role texts, one test, documents; a run with real agents.
+
+### 2026-10-08 — the reviewer's PASS, and the full suite
+
+- **Reviewer:** `PASS`.
+- **The full suite, once on each host, one after the other, on the tree as published:** WSL — 140 classes,
+  685 tests, OK. Windows — 96 classes, 485 tests, OK.
+- **No restart is needed for it:** the host that starts a run reads each role's persona file then.
