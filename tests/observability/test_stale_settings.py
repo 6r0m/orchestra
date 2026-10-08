@@ -9,7 +9,6 @@ so it stops once it has started.
 import json
 import os
 import shutil
-import socket
 import subprocess
 import sys
 import tempfile
@@ -19,6 +18,11 @@ from unittest import mock
 
 HERE = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))
 PKG = os.path.abspath(os.path.join(HERE, os.pardir))
+# The suite root alone, where the shared harness lives. The checkout is not needed here: nothing of
+# `app/` is imported, and the stage this starts is a process of its own, which puts it on its own path.
+sys.path.insert(0, HERE)
+
+from ports import port_for_another_process  # noqa: E402
 
 # A process in the middle of a traced stage: its kind's settings made in the turn's private folder, as
 # `run_role` makes them — Claude Code's, whose settings hold both keys.
@@ -32,20 +36,6 @@ STAGE = textwrap.dedent("""\
     print(claude_code.trace_settings(context, telemetry.Private()), flush=True)
     time.sleep(600)
 """) % PKG
-
-
-def port_for_another_process(used):
-    """A port another process will bind, told its number through a policy: free now, then let go, so
-    something else may take it first. Never one in `used`, the policy's ports so far, which it then joins.
-    A socket this process holds binds port 0 instead."""
-    for _ in range(10):
-        with socket.socket() as probe:
-            probe.bind(("127.0.0.1", 0))
-            port = probe.getsockname()[1]
-        if port not in used:
-            used.add(port)
-            return port
-    raise OSError("no free port apart from %s" % sorted(used))
 
 
 class StaleSettings(unittest.TestCase):

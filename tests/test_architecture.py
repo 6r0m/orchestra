@@ -251,6 +251,18 @@ def scripts_not_lf(repo):
     return sorted(found)
 
 
+def git_reads(repo):
+    """Whether this host's git reads `repo` as a repository at all. A worktree's `.git` is a file naming
+    its gitdir absolutely, in the spelling of the host that made it, and the other host's git resolves
+    that name against the worktree instead and finds nothing — so what would ask git about this checkout
+    has nothing to ask. A git that will not run at all is not this case, and raises."""
+    try:
+        subprocess.run(["git", "-C", repo, "rev-parse", "--git-dir"], check=True, capture_output=True)
+    except subprocess.CalledProcessError:
+        return False
+    return True
+
+
 class PackageBoundaries(unittest.TestCase):
     def test_no_import_crosses_a_boundary_the_table_does_not_allow(self):
         found = crossing_imports(SOURCE, ALLOWED)
@@ -297,7 +309,8 @@ class EveryConcernIsReachable(unittest.TestCase):
         self.assertEqual(unrouted(os.path.join(SOURCE, "README.md"), ALLOWED), [])
 
 
-@unittest.skipUnless(os.path.exists(os.path.join(REPO, ".git")), "what git checks out is asked of a checkout")
+@unittest.skipUnless(git_reads(REPO),
+                     "this host's git does not read the checkout: a worktree the other host made")
 class ShellScriptsStayLf(unittest.TestCase):
     """The two hosts share one checkout, and a run's worktree is made by its own host's git."""
 
@@ -482,6 +495,19 @@ class TheCheckersCanFail(unittest.TestCase):
             _scripts(root, {".gitattributes": b"*.sh text eol=lf\n", "run.sh": b"#!/bin/sh\r\necho\r\n",
                             "fine.sh": b"#!/bin/sh\n"})
             self.assertEqual(scripts_not_lf(root), ["run.sh"])
+
+    def test_it_tells_a_repository_this_hosts_git_reads_from_one_it_does_not(self):
+        """What skips the LF check rather than letting it error: a worktree the other host made names its
+        gitdir in a spelling this host has none for, which is no repository here."""
+        # An absolute path as the other host writes one, which this host cannot resolve.
+        elsewhere = "/mnt/e/orchestra/.git" if sys.platform.startswith("win") else "E:/orchestra/.git"
+        with tempfile.TemporaryDirectory() as root:
+            plain = _tree(os.path.join(root, "plain"), {"run.sh": "#!/bin/sh\n"})
+            self.assertFalse(git_reads(plain), "no repository at all")
+            self.assertTrue(git_reads(_scripts(os.path.join(root, "repo"), {"run.sh": b"#!/bin/sh\n"})),
+                            "a repository of its own")
+            worktree = _tree(os.path.join(root, "worktree"), {".git": "gitdir: %s/worktrees/run\n" % elsewhere})
+            self.assertFalse(git_reads(worktree), "a gitdir this host cannot spell")
 
     def test_it_sees_an_import_that_crosses_upward(self):
         with tempfile.TemporaryDirectory() as root:
