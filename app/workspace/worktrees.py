@@ -499,6 +499,16 @@ def _tree(path, commit):
     return git(path, "rev-parse", "--verify", commit + "^{tree}").stdout.strip()
 
 
+def _passed_by(repo, hook):
+    """The file of the repository's `hook` where git would pass it by: it is there, and not executable.
+
+    Git says so in a hint and goes on, and on a drive mounted without file modes no file is executable —
+    so a check the repository's pushes must pass would be skipped with nobody told. A hook stated in git's
+    configuration (`hook.<name>.command`) is no file, and runs wherever the repository is."""
+    path = os.path.join(repo, git(repo, "rev-parse", "--git-path", "hooks/" + hook).stdout.strip())
+    return path if os.path.isfile(path) and not os.access(path, os.X_OK) else None
+
+
 def _land(repo, worktree, run_id, base, final_tree, message, merge_message, tip, now, remote, pinned=None):
     """Land `final_tree` on the base while the base is still at `tip`, the commit the run was judged on.
 
@@ -510,9 +520,17 @@ def _land(repo, worktree, run_id, base, final_tree, message, merge_message, tip,
     that commit, a checked-out branch by `--ff-only`, which keeps its files in step and refuses to write over
     the operator's own edits, a branch checked out nowhere by a compare-and-swap of its ref. A base that
     moved — forward, or back to an ancestor — takes nothing.
+
+    The push runs the repository's own pre-push hook, which is handed that merge commit and may refuse it;
+    a hook whose file git would pass by unrun (`_passed_by`) refuses the landing before anything is committed.
     """
     if now != tip:
         return {"result": "moved"}
+    skipped = _passed_by(repo, "pre-push") if remote else None
+    if skipped:
+        raise MergeRefused("the repository's pre-push hook is not executable here, and git would push past it "
+                           "unrun: %s. Make it executable; or, where the drive keeps no file modes, state it in "
+                           "git's configuration (hook.<name>.command, git 2.54 and later); or remove it" % skipped)
     head = git(repo, "rev-parse", "refs/heads/" + run_id).stdout.strip()
     parents = git(repo, "rev-list", "--parents", "-n", "1", head).stdout.split()[1:]
     if not (parents == [tip] and _tree(repo, head) == final_tree and _clean(worktree)):
@@ -539,7 +557,8 @@ def _land(repo, worktree, run_id, base, final_tree, message, merge_message, tip,
         git(repo, "merge-base", "--is-ancestor", tip, commit)
         done = git(repo, "push", "--porcelain", "--force-with-lease=refs/heads/%s:%s" % (base, tip), remote,
                    "%s:refs/heads/%s" % (commit, base), check=False, env=_unattended())
-        refused = "%s refused the push to its %s" % (remote, base)
+        # Refused by the remote, or before it by the repository's own pre-push hook: git's words say which.
+        refused = "the push to %s's %s was refused" % (remote, base)
     else:
         checkout = next((entry["path"] for entry in worktrees(repo) if entry["branch"] == base), None)
         if checkout and git(checkout, "diff", "--cached", "--quiet", check=False).returncode != 0:

@@ -420,7 +420,13 @@ still lands on a checkout.
   which a branch rewound to an ancestor refuses as one that moved on does; a
   local branch in its checkout when it is checked out, which keeps its files in step
   and refuses staged changes and any edit of the operator's it would write over; one
-  checked out nowhere by a compare-and-swap of its ref. A base that moved again takes
+  checked out nowhere by a compare-and-swap of its ref. The push runs the repository's
+  own pre-push hook, handed that merge commit — one the repository's checkout never
+  held, so a check of what is checked out says nothing of it — and what the hook
+  refuses lands nothing and is said at the gate. A hook whose file git would pass by
+  unrun refuses the landing instead: git runs a hook's file only where it is
+  executable, a drive mounted without file modes holds none that is, and a hook stated
+  in git's configuration runs on either. A base that moved again takes
   nothing — nothing is committed, merged or pushed; the change is reopened and the base
   brought in and judged as before — and a worktree that is no longer the final tree is
   refused. So a conflict never resolves in the controller, on the base or at the

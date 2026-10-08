@@ -1,8 +1,9 @@
 # A Merge at the final gate lands what the gate showed, on the base as it is — or lands nothing
 
-**Status:** IMPLEMENTED, the external reviewer's findings on the remote landing applied, two rounds of them —
-awaiting its re-review (D1). The full suite on both hosts, a restart and a run with real agents are not done; the live
-stack still runs the code from before this.
+**Status:** IMPLEMENTED and passed by the external reviewer; the public check as this repository's pre-push
+hook is built — awaiting the reviewer's look at that (D1). The full suite on both hosts, a restart and a run
+with real agents are not done; the hook is installed in no clone; the live stack still runs the code from
+before this.
 **Scope:** how a run meets a base that moved, and where it lands: the look at the base, its coming into the
 worktree and the landing ([worktrees.py](../app/workspace/worktrees.py)); the remote a base may live on
 ([repos.py](../app/workspace/repos.py)); the workflow's path around the final gate
@@ -107,6 +108,18 @@ and says so.
   worktree already: `reconcile` answered that it had come in, with nothing in conflict, and the run would have
   landed again what the base had dropped. One rewritten to another history was merged in beside the old.
 - **F15** A remote may hold several push URLs, and one `git push` to it writes to each in turn.
+- **F16** Git hands a pre-push hook one line a ref on stdin — the local name, its commit, the remote name,
+  what the remote holds — and for the controller's push the first two are the merge commit itself; a deleted
+  ref comes as `(delete)`, a push that carries nothing as no line. From a linked worktree the hook runs with
+  that worktree's `GIT_DIR`. A hook's own stdout is the push's stdout under git 2.54, so what the controller
+  relays — the push's stderr — held none of it.
+- **F17** WSL mounts this machine's repository drive without file modes: no file there is executable, `chmod`
+  succeeds and changes nothing, and WSL's git passes a `hooks/pre-push` file by with a hint and pushes —
+  measured with the hook installed as a file, three pushes it should have refused landing. A hook stated in
+  git's configuration (`hook.<name>.event`, `hook.<name>.command`) is run by git 2.54 on WSL and 2.55 on
+  Windows alike, from a checkout and from a linked worktree, handed the same stdin; `git hook list` names it.
+- **F18** The Docker that runs the scanner is WSL's; under Git for Windows' shell the check as it was failed
+  every scan for want of one — while calling its control rejected, any failure of Docker reading as that.
 
 ### Refuted
 
@@ -151,9 +164,12 @@ watched between the two looks, so a Merge can still be answered with "it moved" 
 6. Agents reach no remote. The controller reaches one only where the repository's entry names it, only where
    that remote led when the run was set up, and only while it leads to one place to fetch from and one to
    push to: it fetches the base branch, and pushes it only on the
-   operator's Merge, as a compare-and-swap on the commit the change was judged on — never a rewrite.
+   operator's Merge, as a compare-and-swap on the commit the change was judged on — never a rewrite. Its
+   push runs the repository's own pre-push hook, or does not happen: a hook git would pass by refuses it.
 7. A retried merge adopts the one it made; the operator's staged content and their edits in a checked-out
    base are never written over; a look at the base that could not be made is no answer.
+8. This repository's public check, as its pre-push hook, judges the commits a push carries and nothing of
+   the checkout, by the main checkout's own script and scanner configuration — no run judges its own landing.
 
 ## Implementation tasks
 
@@ -163,6 +179,7 @@ watched between the two looks, so a Merge can still be answered with "it moved" 
 - [x] 4. The descriptor's `remote`; the page's words for the step and for a merge that leaves the machine.
 - [x] 5. The history's rows (F5).
 - [x] 6. A recording of a run that stands on a tip; D24, the stops' view, `using.md`, the tests' index.
+- [x] 7. The public check as this repository's pre-push hook, judging the pushed commit (`make hooks`).
 
 ## Test-first and verification plan
 
@@ -178,6 +195,9 @@ watched between the two looks, so a Merge can still be answered with "it moved" 
 | a remote turned elsewhere since the run began is neither fetched from nor pushed to | `test_worktrees.Remote`, four ways of turning it; `test_stops.Reconciling`: the fingerprint taken at setup and handed to every step |
 | a base rewound or rewritten under a run is brought into nothing, the run not going on | `test_worktrees.Landing`, `Remote` — past the refused push, into the look that follows it |
 | a remote with more than one URL either way is refused before a run begins | `test_worktrees.Remote` |
+| the repository's own pre-push hook is handed the commit being landed; its refusal lands nothing, in its words | `test_worktrees.Remote` — control: the push made with `--no-verify` |
+| a pre-push hook git would pass by unrun refuses the landing | `test_worktrees.Remote`, red first: the push went past it and landed |
+| as the hook, the public check judges each pushed commit — files, what is tracked, history — and not the checkout | `test_public_check.PushedCommits`; `InstalledHook`, by real pushes from a clone and a worktree of it |
 | the gate's change is the run's files | `test_worktrees.Merge`, `Landing`; `test_workbench.Runs` |
 | the history's rows | `test_workbench.HistoryRead` |
 | a run recorded before this replays, and takes no new step | `test_replay`; `test_stops.Reconciling`'s control |
@@ -185,7 +205,9 @@ watched between the two looks, so a Merge can still be answered with "it moved" 
 The results, the controls and what was not run are in the [review record](#review-record).
 
 Not proven here: a push to a real remote, its credentials and its protections — the remote in these tests is
-a bare repository on disk. That is a live run's to show.
+a bare repository on disk. That is a live run's to show. The hook's hand-over from Git for Windows' shell to
+WSL has no test of its own: the suite's shell controls run on WSL, and the scanner behind it is a real
+container. It is proven by the real pushes in the review record.
 
 ## Documentation plan
 
@@ -196,9 +218,9 @@ a bare repository on disk. That is a live run's to show.
 
 ## Completion criteria
 
-- The external reviewer's PASS (D1); then the full suite once on both hosts.
-- A restart, and a live run on a repository whose entry names its remote: the base moved under it, brought
-  in, judged, and landed on the remote by one Merge.
+- The external reviewer's PASS on the hook (D1); then the full suite once on both hosts.
+- `make hooks` in this clone, its entry naming `remote` and `base_branch`, a restart, and a live run: landed
+  on the remote by one Merge, the remote's branch shown to hold it.
 
 ## Review record
 
@@ -272,3 +294,39 @@ a bare repository on disk. That is a live run's to show.
 - **For the pre-push hook this repository needs before it names its remote** (the reviewer's note): it must
   judge the commit being pushed, not the checkout — a remote landing leaves the local branch and its files as
   they were, and today's public check reads the index and the working tree.
+
+### 2026-10-08 — the public check as the pre-push hook
+
+- **Reviewer:** `PASS` on the merge and the reconciliation, no more design changes; next the hook that
+  judges the commit being pushed, a review of it, and only then the full suites.
+- **Built, each red first:** the public check judges a commit — `--pushed` as git's hook, `--commit` by hand
+  — its tree read into an index of its own, so what is tracked, its bytes and the history it descends from
+  are the commit's and the checkout's index is neither read nor written (F16); `make hooks` states the hook
+  in git's configuration and asks git whether it will run it (F17); under Git for Windows the check is
+  handed to WSL (F18).
+- **Changed on the way, the agent's:** the hook as first built — a file under `hooks/` — did not run for the
+  controller on this machine: three pushes it should have refused landed in a throwaway repository (F17).
+  Hence the configuration; and in the controller, a pre-push hook whose file git would pass by now refuses a
+  remote landing before anything is committed, and a refused push no longer says the remote refused what the
+  repository's own hook did.
+- **Refuted:** nothing.
+- **Verification, the modules the change touches, one host after the other:** WSL — the public check's own
+  tests, worktrees and architecture: 21 classes, 124 tests, OK. Windows — worktrees; the public check's
+  tests are WSL's: 14 classes, 86 tests, OK.
+- **Controls, one guard out at a time, each put back and the tree byte for byte as before:** the
+  controller's push made with `--no-verify`; a hook's file that git would pass by not looked for; the
+  checkout's index judged for a commit; every ref's history judged for it; a deleted ref judged; only the
+  first ref of a push judged; git not asked whether it runs the hook. Each failed the tests named for it.
+- **Real pushes through the installed hook, the real scanner, a bare repository on this machine's drive,
+  under WSL's git 2.54 and Git for Windows 2.55 alike:** a clean commit pushed; one holding the scanner's
+  control refused, the checkout clean of it; a clean one whose history holds it refused; a merge commit no
+  branch holds, leased on the base as the controller pushes, landed while the checkout staged the control —
+  which the check by hand then refused. This repository's own head, judged as a push of it: passed, 12 s.
+- **`make demo`** and **`make public-check`:** passed on this code.
+- **Not run:** the full suite; a restart; a run with real agents; a push to a real remote.
+- **Not done:** `make hooks` in this clone — it changes what the operator's own pushes do, and waits for the
+  review; this repository's entry names no remote.
+- **For the reviewer to settle:** the scanner's configuration is the checkout's, not the pushed commit's — a
+  run cannot loosen what judges it, and a change to it that landed on the remote counts once the checkout
+  holds it; a git older than 2.54 on a host that pushes from the clone reads no hook from its configuration
+  and says nothing — the install is refused there, and CI stays behind every push.

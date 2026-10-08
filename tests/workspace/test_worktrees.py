@@ -1247,13 +1247,61 @@ class Remote(Repo):
         os.chmod(hook, 0o755)
         with self.assertRaises(W.MergeRefused) as refused:
             self.land("run1", path, tip)
-        self.assertIn("origin refused the push", str(refused.exception))
+        self.assertIn("the push to origin's develop was refused: remote: this branch takes no push",
+                      str(refused.exception))
         self.assertEqual((self.remote_tip(), os.path.isdir(path), W.branch_exists(self.repo, "run1")), (tip, True, True),
                          "the remote has nothing, and the run keeps its worktree and branch")
         os.remove(hook)
         self.assertEqual(self.land("run1", path, tip)["result"], "merged")
         self.assertEqual(git(self.origin, "rev-parse", "develop^{tree}").strip(), final)
         self.assertEqual(git(self.origin, "log", "--format=%s", "develop").splitlines().count("run1: the change"), 1)
+
+    def test_the_repositorys_own_pre_push_hook_judges_the_commit_being_landed(self):
+        """A repository whose pushes must pass a check has it as its pre-push hook, and the controller's push
+        runs it — handed the commit being landed, which this repository's own checkout never held."""
+        path, tip = self.stand("run1")
+        final = W.work_tree(path)
+        hooks = git(self.repo, "config", "core.hooksPath").strip()
+        hook, handed = os.path.join(hooks, "pre-push"), os.path.join(self.tmp, "handed-to-the-hook")
+        write(hook, "#!/bin/sh\ncat > '%s'\necho 'not fit to publish' >&2\nexit 1\n" % handed.replace("\\", "/"))
+        os.chmod(hook, 0o755)
+        self.addCleanup(lambda: os.path.exists(hook) and os.remove(hook))
+        with self.assertRaises(W.MergeRefused) as refused:
+            self.land("run1", path, tip)
+        self.assertIn("the push to origin's develop was refused: not fit to publish", str(refused.exception),
+                      "the hook's own words first, and no remote said to have refused what never reached it")
+        with open(handed, encoding="utf-8") as fh:
+            _, commit, to, holds = fh.read().split()
+        self.assertEqual((git(self.repo, "rev-parse", commit + "^{tree}").strip(), to, holds),
+                         (final, "refs/heads/develop", tip), "the merge commit itself, for the remote's base")
+        self.assertNotEqual(git(self.repo, "rev-parse", "HEAD^{tree}").strip(), final,
+                            "which the repository's checkout does not hold")
+        self.assertEqual((self.remote_tip(), os.path.isdir(path), W.branch_exists(self.repo, "run1")), (tip, True, True),
+                         "the remote has nothing, and the run keeps its worktree and branch")
+        os.remove(hook)
+        self.assertEqual(self.land("run1", path, tip)["result"], "merged")
+        self.assertEqual(git(self.origin, "rev-parse", "develop^{tree}").strip(), final)
+        self.assertEqual(git(self.origin, "log", "--format=%s", "develop").splitlines().count("run1: the change"), 1)
+
+    @unittest.skipIf(WINDOWS, "git for Windows runs a hook's file whatever its mode")
+    def test_a_pre_push_hook_git_would_pass_by_lands_nothing(self):
+        """Git runs a hook's file only where it is executable, and where it is not says so in a hint and
+        pushes: on a drive mounted without file modes no file is executable, and the repository's check
+        would be passed by without a word to anyone."""
+        path, tip = self.stand("run1")
+        hook = os.path.join(git(self.repo, "config", "core.hooksPath").strip(), "pre-push")
+        write(hook, "#!/bin/sh\necho 'not fit to publish' >&2\nexit 1\n")
+        os.chmod(hook, 0o644)
+        self.addCleanup(lambda: os.path.exists(hook) and os.remove(hook))
+        with self.assertRaisesRegex(W.MergeRefused, "pre-push hook is not executable here"):
+            self.land("run1", path, tip)
+        self.assertEqual((self.remote_tip(), git(self.repo, "rev-parse", "run1").strip()), (tip, tip),
+                         "nothing pushed, nothing committed")
+        os.chmod(hook, 0o755)
+        with self.assertRaisesRegex(W.MergeRefused, "not fit to publish"):
+            self.land("run1", path, tip)
+        os.remove(hook)
+        self.assertEqual(self.land("run1", path, tip)["result"], "merged")
 
     def test_a_remote_that_cannot_be_reached_is_no_answer(self):
         path, tip = self.stand("run1")

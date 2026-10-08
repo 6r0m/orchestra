@@ -15,7 +15,7 @@ V = UV_PROJECT_ENVIRONMENT="$$(uv run --no-project --managed-python --python 3.1
     uv run --locked python
 
 .PHONY: help up check down restart workbench-install workbench-uninstall workbench-start workbench-stop \
-	workbench-restart workbench-status feature demo test public-check
+	workbench-restart workbench-status feature demo test public-check hooks
 
 help: ## Show these targets
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-19s %s\n", $$1, $$2}'
@@ -65,3 +65,6 @@ test: ## Run the whole suite in this checkout's environment
 
 public-check: ## Refuse to publish anything private: tracked files, secrets, history
 	@bash tools/public_check.sh
+
+hooks: ## Have git judge every push from this clone by the public check: yours, and a run landing on a remote
+	@bash tools/public_check.sh --install

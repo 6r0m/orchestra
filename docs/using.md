@@ -100,7 +100,8 @@ before its role's turn. If the base branch moved while the run built, it was bro
 and judged before this gate, so what you read is the change on the base as it is. Merge lands it on
 that base: the repository's own branch, or — where its entry names the `remote` its base lives on —
 that remote's, by a push it takes only while its branch is still the commit the change was judged on,
-which the confirmation says. Should the base have moved
+which the confirmation says. That push runs the repository's own pre-push hook on the commit being
+landed, and what the hook refuses lands nothing: the gate says why, in the hook's words. Should the base have moved
 again since, Merge lands nothing; the run brings it in, has it judged, and comes back to you. A base
 that was rewound or rewritten under the run is never brought in: the run stops there and says so,
 for you to continue once the base is as it was, or to stop the run and begin from the base as it is. Its
