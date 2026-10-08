@@ -1,9 +1,11 @@
 # A Merge at the final gate lands what the gate showed, on the base as it is — or lands nothing
 
-**Status:** IMPLEMENTED and passed by the external reviewer; the public check as this repository's pre-push
-hook is built, the reviewer's two points on it answered — awaiting its re-review (D1). The full suite on both
-hosts, a restart and a run with real agents are not done; the hook is installed in no clone; the live stack
-still runs the code from before this.
+**Status:** IMPLEMENTED and passed by the external reviewer, the pre-push hook with it (D1); the full suite
+passed on both hosts; released on this machine — the hook installed in this clone, this repository's entry
+naming its remote, the live stack restarted on this code and its restart acceptance passed. The first Merge
+after it, of a run from before this, landed and then failed at its cleanup on Windows (F22): the fix is
+deployed on this machine and not yet reviewed, and that run, continued, closed as merged. Still open: that
+fix's review, and one run with real agents, merged by the operator and shown to have landed on the remote.
 **Scope:** how a run meets a base that moved, and where it lands: the look at the base, its coming into the
 worktree and the landing ([worktrees.py](../app/workspace/worktrees.py)); the remote a base may live on
 ([repos.py](../app/workspace/repos.py)); the workflow's path around the final gate
@@ -52,6 +54,9 @@ and says so.
   holds it.
 - **The hook is installed only where git proves it will run it**: one that reads no hook from its
   configuration is left with none, and CI stays behind every push.
+- **The controller pins what git says it will run before a push, and nothing behind that**: not the
+  programs or the configuration a hook's command reaches. Roles run as the operator, and following a hook
+  through whatever it runs would be a sandbox attempted, not a gate held.
 
 ### Working assumptions
 
@@ -132,6 +137,18 @@ and says so.
   before it reads where it is — and the stated command finds that script through the clone's git directory:
   run by Git for Windows' own shell from a linked worktree holding a copy that passes anything, the unchanged
   script answered from WSL as the main checkout's.
+- **F21** An entry whose path is on a Windows drive is the Windows host's unless it names another target
+  (`repos.select`): this repository's own runs are set up, and landed, by the Windows worker and Git for
+  Windows — whose pre-push hook hands the check to WSL (F18). Read at the release, when the entry was
+  resolved on each host.
+- **F22** uv installs a package into every environment as hard links to one cached copy: a library file of
+  a run worktree's environment had seven names, the worker's own environment's among them. Windows deletes
+  no name of a file a process has loaded, and the Windows worker has its libraries loaded for as long as it
+  runs — so the removal of a merged run's environment stopped at the first such file, `Access is denied`,
+  and would at every retry. Windows' own list of who uses each file held (four libraries) named the worker.
+  The merge itself had landed, the worktree and the branch were gone.
+- **F23** Under `link-mode = "copy"` uv builds, from the lock as it is, an environment none of whose
+  libraries has another name, and the application's own removal removes it while the worker runs.
 
 ### Refuted
 
@@ -233,7 +250,8 @@ behind it, it is proven by the real pushes in the review record.
 
 ## Completion criteria
 
-- The external reviewer's PASS on the hook (D1); then the full suite once on both hosts.
+- The external reviewer's PASS on the hook (D1); then the full suite once on both hosts — both had, in the
+  review record.
 - `make hooks` in this clone, its entry naming `remote` and `base_branch`, a restart, and a live run: landed
   on the remote by one Merge, the remote's branch shown to hold it.
 
@@ -319,9 +337,11 @@ behind it, it is proven by the real pushes in the review record.
   are the commit's and the checkout's index is neither read nor written (F16); `make hooks` states the hook
   in git's configuration and asks git whether it will run it (F17); under Git for Windows the check is
   handed to WSL (F18).
-- **Changed on the way, the agent's:** the hook as first built — a file under `hooks/` — did not run for the
-  controller on this machine: three pushes it should have refused landed in a throwaway repository (F17).
-  Hence the configuration; and in the controller, a pre-push hook whose file git would pass by now refuses a
+- **Changed on the way, the agent's:** the hook as first built — a file under `hooks/` — did not run under
+  WSL's git on this machine's drive: three pushes it should have refused landed in a throwaway repository
+  (F17). The agent then said it would not have run for the controller of this repository's own runs; that
+  was wrong (F21) — their git is Git for Windows, which runs such a file. The configuration holds under
+  either git, and for a repository of that drive whose runs are WSL's. Hence it; and in the controller, a pre-push hook whose file git would pass by now refuses a
   remote landing before anything is committed, and a refused push no longer says the remote refused what the
   repository's own hook did.
 - **Refuted:** nothing.
@@ -370,7 +390,61 @@ behind it, it is proven by the real pushes in the review record.
 - **`make demo`** and **`make public-check`:** passed on this code.
 - **Not run:** the full suite; a restart; a run with real agents; a push to a real remote.
 - **Not done:** `make hooks` in this clone; this repository's entry names no remote.
-- **Not covered, for the reviewer to weigh:** the fingerprint holds what git is told to run, not the bytes of
-  the program that command runs — here the main checkout's own script and scanner configuration, files a
-  role's turn could write as it could any of the operator's. That is the hook's own to guard, if anyone's,
-  not the controller's, which knows a repository's hook only as git does.
+- **Put to the reviewer, and accepted as the boundary:** the fingerprint holds what git is told to run, not
+  the bytes of the program that command runs — now among the decisions under D4.
+
+### 2026-10-08 — the reviewer's PASS on the hook, and the full suite
+
+- **Reviewer:** `PASS`, no further change of code or design; its second point's refutation accepted.
+- **The full suite, once on each host, one after the other, on the commit the reviewer passed
+  (`ed9d65a`):** WSL — 137 classes, 674 tests, OK. Windows — 94 classes, 477 tests, OK.
+- **Read before the release, nothing written:** the live stack holds one run open at its final gate, begun
+  before runs stood on a base tip, so its Merge is git's own into the local branch (D25); `origin` has one
+  URL each way and answers unattended from WSL, its `main` the commit this checkout's is at; no hook is
+  installed; the entry names no remote.
+
+### 2026-10-08 — the release, as far as the operator's own run
+
+- **Operator:** *"go"*, to the hook's install, the stack's stop and restart, and the entry's remote.
+- **`make hooks`:** installed. Both gits list `public-check` for pre-push and, asked to run their pre-push
+  hooks on the line a push of this checkout's head would hand them, pass it; on a line naming no commit,
+  refuse. No remote was contacted and nothing pushed.
+- **The old stack and the Workbench stopped; the entry given `remote` and `base_branch`; both started on
+  this code.** The entry resolves on the Windows host, its runs' own (F21): the remote's branch for its base,
+  one URL each way, both fingerprints taken, no hook's file to pass by; `origin` answers unattended from
+  Windows' git and from WSL's, its `main` the commit this checkout's is at.
+- **`tests/acceptance_restart.py`:** passed, 45 checks — the stack stopped and started by the Workbench, a
+  run waiting across it, a worker killed mid-role, a merge and a discard through real workers and git.
+- **After it:** every part of the stack up; the run that was waiting answers from the new worker as it did —
+  its final gate, the same four answers.
+- **Not yet proven, the run's to show:** the Windows worker's own process reaching `origin` unattended, and
+  its git's hook reaching WSL; a role's real turns; the push itself.
+- **Still to do:** one run with real agents on this repository, merged by the operator; then the remote's
+  branch shown to hold exactly the tree the gate showed, and the local checkout as it was.
+
+### 2026-10-08 — the first Merge after the release: landed, its cleanup refused
+
+- **What happened:** the operator merged the run that had waited since before this. Its merge landed in the
+  local branch as that run's path has it — the three files, one merge commit — and its worktree and branch
+  went; the step then failed removing the run's environment (F22), and the run waits to be continued.
+- **Cause, outside this change:** D22's environments shared files. Nothing of the merge flow is involved;
+  every Merge or discard of this repository's own runs on Windows would have ended so while a worker ran.
+- **Fix, red first:** `link-mode = "copy"` in `pyproject.toml` — each environment its own files. Red: the
+  environment the Windows suite runs in, the worker's own, has libraries with other names. A control holds
+  the mechanism: an environment with a file a running process has loaded under another name is refused
+  removal, and removed by the same call once that process ends — which is what Continue runs.
+- **Proven before the deploy:** F23, on a scratch environment; the control passing; the red test red on the
+  worker's own environment.
+- **Deployed, on the operator's *"go"*:** the Windows worker stopped through the stack's owner — and with it
+  stopped, nothing held the run's leftover environment; its own environment rebuilt once
+  (`uv sync --locked --reinstall`), ten of its ten libraries shared before and none after; the worker
+  started, and it holds none of the leftover environment's files.
+- **Verification, the module the change touches and the architecture's, one host after the other:** WSL —
+  19 classes, 110 tests, OK. Windows, on the rebuilt environment — 19 classes, 110 tests, OK.
+- **Continued by the operator:** the run closed as merged, nothing merged twice; its environment went with
+  it, and the live stack holds no open run.
+- **Not done:** this change reviewed.
+- **Not run:** the full suite again, on this change.
+- **Seen, not changed:** the removal deletes `pyvenv.cfg` before `Scripts/`; stopped at a file there, a
+  retry would find no `pyvenv.cfg` and refuse the folder as no environment. Not met here — the files held
+  were under `Lib/`.

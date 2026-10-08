@@ -17,3 +17,7 @@ package = false
 # The interpreter is part of the toolchain: never an installed system Python.
 python-preference = "only-managed"
 required-version = "==0.12.15"
+# Each environment holds its own files. uv's default installs a package into every environment as hard
+# links to one cached copy, and Windows deletes no name of a file a process has loaded: a worker's own
+# libraries would hold every run worktree's environment, which is removed with its worktree (D22).
+link-mode = "copy"

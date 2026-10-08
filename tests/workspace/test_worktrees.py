@@ -977,6 +977,56 @@ class EnvironmentRemoval(Repo):
         self.assertTrue(os.path.exists(os.path.join(env, "pyvenv.cfg")))
 
 
+@unittest.skipUnless(WINDOWS, "Windows deletes no name of a file a process has loaded; Linux unlinks it")
+class EnvironmentsShareNoFile(Repo):
+    """uv installs a package into every environment as hard links to one cached copy, unless told to copy
+    (`link-mode`, pyproject.toml). A worker has its libraries loaded for as long as it runs, and Windows
+    deletes no name of a loaded file: a run worktree's environment, linked to the same copies, could not be
+    removed while a worker ran — the run merged, and its merge failed at the cleanup, again at every retry."""
+
+    def test_a_library_of_this_environment_is_no_other_environments_file(self):
+        """The environment these tests run in is the one this checkout's worker imports from."""
+        packages = os.path.join(sys.prefix, "Lib", "site-packages")
+        shared = [os.path.relpath(os.path.join(folder, name), packages)
+                  for folder, _, names in os.walk(packages) for name in names
+                  if name.lower().endswith((".pyd", ".dll")) and os.stat(os.path.join(folder, name)).st_nlink > 1]
+        self.assertEqual(shared[:3], [], "%d libraries of this environment are other environments' files too: it "
+                         "was built before pyproject.toml told uv to copy. Stop this checkout's Windows worker and "
+                         "rebuild it once: uv sync --locked --reinstall" % len(shared))
+
+    def test_control_a_library_shared_with_a_running_process_holds_the_environment_until_it_ends(self):
+        """What a shared file costs: the removal stops at it for as long as any process has it loaded under
+        any of its names, and completes — run again, as a continued merge runs it — once none has."""
+        import importlib.util
+        path = self.worktree("run1", change=False)
+        env = self.environment(path)
+        # One file under two names, as uv's cache and an environment hold a library: a process loads the one,
+        # the environment holds the other.
+        cached = os.path.join(self.tmp, "cached.dll")
+        shutil.copyfile(importlib.util.find_spec("select").origin, cached)
+        linked = os.path.join(env, "Lib", "site-packages", "package", "library.pyd")
+        os.makedirs(os.path.dirname(linked))
+        os.link(cached, linked)
+        # It ends when its input does. An environment's python is a launcher of the real one, so ending the
+        # process started here would leave the one that loaded the file running.
+        holder = subprocess.Popen([sys.executable, "-c", "import ctypes, sys; ctypes.WinDLL(sys.argv[1]); "
+                                   "print('loaded', flush=True); sys.stdin.read()", cached],
+                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+
+        def ended():
+            holder.stdin.close()
+            holder.wait(timeout=30)
+            holder.stdout.close()
+        self.addCleanup(lambda: holder.poll() is None and ended())
+        self.assertEqual(holder.stdout.readline().strip(), "loaded")
+        with self.assertRaises(PermissionError):
+            envpath.remove_environment(path)
+        self.assertTrue(os.path.isfile(linked), "the name in the environment stays")
+        ended()
+        self.assertTrue(envpath.remove_environment(path), "the same removal, once nothing has the file loaded")
+        self.assertFalse(os.path.exists(env))
+
+
 class Landing(Repo):
     """A run that stands on a recorded tip of its base: the base brought into its worktree when it moved, and
     its final tree landed only while the base is still where the run was judged."""

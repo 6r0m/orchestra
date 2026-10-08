@@ -168,6 +168,10 @@ Do not re-derive a `states/` layer here.
   environment on its own disk, in a directory named by a hash of the checkout's
   path (`envpath.py`): a run worktree of this repository gets its own
   environment, and its tests never re-sync the one the live workers import.
+  Each holds its own files (`link-mode = "copy"`): uv's default installs a
+  package into every environment as hard links to one cached copy, and Windows
+  deletes no name of a file a process has loaded, so a worker's own libraries
+  would hold every worktree's environment for as long as the worker ran.
   A run worktree's environment is removed with the worktree, on its target host,
   only when the derived path lies under that host's environment root, crosses
   no link or reparse point, and holds `pyvenv.cfg`.
