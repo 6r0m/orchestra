@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 # The suite's own folder, reached from this concern's folder inside it, and the
 # checkout above both: the shared harness and the fixtures live at the suite root.
@@ -975,6 +976,72 @@ class EnvironmentRemoval(Repo):
         with self.assertRaises(envpath.UnsafeRemoval):
             envpath.remove_environment(path)
         self.assertTrue(os.path.exists(os.path.join(env, "pyvenv.cfg")))
+
+    def refusing(self, call, named):
+        """`os.unlink` or `os.rmdir`, refusing — as a file some process holds is refused — whatever is `named`."""
+        real = getattr(os, call)
+
+        def refuse(path, *args, **kwargs):
+            if os.path.basename(os.fspath(path)) == named:
+                raise PermissionError(13, "held by a process", os.fspath(path))
+            return real(path, *args, **kwargs)
+        return mock.patch.object(os, call, refuse)
+
+    def test_a_removal_that_stopped_is_finished_by_the_same_call(self):
+        """`pyvenv.cfg` is what says the folder is an environment. Removed in the folder's own order it can go
+        before the file a removal stops at — and the retry, a continued merge's, then refuses what is left."""
+        path = self.worktree("run1", change=False)
+        env = self.environment(path)
+        # Folders added until the folder's own order holds one after pyvenv.cfg, whatever that order is on
+        # this filesystem: a removal that takes them as they come has deleted pyvenv.cfg when it gets there.
+        for letter in "abcdefghijklmnopqrstuvwxyz":
+            write(os.path.join(env, letter + "-folder", "held-by-a-process.bin"), "a library\n")
+            order = os.listdir(env)
+            if order.index(letter + "-folder") > order.index("pyvenv.cfg"):
+                break
+        else:
+            self.fail("no folder came after pyvenv.cfg in this filesystem's order")
+        for name in os.listdir(env):
+            if name not in ("pyvenv.cfg", letter + "-folder"):
+                os.remove(os.path.join(env, name, "held-by-a-process.bin"))
+        with self.refusing("unlink", "held-by-a-process.bin"):
+            with self.assertRaises(PermissionError):
+                envpath.remove_environment(path)
+        self.assertTrue(os.path.isfile(os.path.join(env, "pyvenv.cfg")), "it outlives everything it speaks for")
+        self.assertTrue(envpath.remove_environment(path), "the same removal, the file let go")
+        self.assertFalse(os.path.exists(env))
+
+    def test_a_removal_stopped_at_the_folder_itself_is_finished_too(self):
+        """All of it gone but the folder: nothing is left in it to say what it was, and nothing to lose."""
+        path = self.worktree("run1", change=False)
+        env = self.environment(path)
+        write(os.path.join(env, "Lib", "library.bin"), "a library\n")
+        with self.refusing("rmdir", os.path.basename(env)):
+            with self.assertRaises(PermissionError):
+                envpath.remove_environment(path)
+        self.assertEqual(os.listdir(env), [])
+        self.assertTrue(envpath.remove_environment(path))
+        self.assertFalse(os.path.exists(env))
+        # Control: only an empty folder is taken without its pyvenv.cfg.
+        write(os.path.join(env, "Lib", "precious.txt"), "not an environment's\n")
+        with self.assertRaises(envpath.UnsafeRemoval):
+            envpath.remove_environment(path)
+        self.assertTrue(os.path.isfile(os.path.join(env, "Lib", "precious.txt")))
+
+    def test_a_link_inside_is_removed_and_what_it_leads_to_is_kept(self):
+        path = self.worktree("run1", change=False)
+        env = self.environment(path)
+        outside = os.path.join(self.tmp, "outside")
+        write(os.path.join(outside, "precious.txt"), "not the environment's\n")
+        os.makedirs(os.path.join(env, "Lib"))
+        for link in (os.path.join(env, "linked"), os.path.join(env, "Lib", "linked")):
+            if WINDOWS:
+                subprocess.run(["cmd", "/c", "mklink", "/J", link, outside], check=True, capture_output=True)
+            else:
+                os.symlink(outside, link)
+        self.assertTrue(envpath.remove_environment(path))
+        self.assertFalse(os.path.exists(env))
+        self.assertTrue(os.path.isfile(os.path.join(outside, "precious.txt")), "the links went, not their target")
 
 
 @unittest.skipUnless(WINDOWS, "Windows deletes no name of a file a process has loaded; Linux unlinks it")

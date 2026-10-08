@@ -3,9 +3,11 @@
 **Status:** IMPLEMENTED and passed by the external reviewer, the pre-push hook with it (D1); the full suite
 passed on both hosts; released on this machine — the hook installed in this clone, this repository's entry
 naming its remote, the live stack restarted on this code and its restart acceptance passed. The first Merge
-after it, of a run from before this, landed and then failed at its cleanup on Windows (F22): the fix is
-deployed on this machine and not yet reviewed, and that run, continued, closed as merged. Still open: that
-fix's review, and one run with real agents, merged by the operator and shown to have landed on the remote.
+after it, of a run from before this, landed and then failed at its cleanup on Windows (F22): that fix is
+deployed on this machine and accepted by the reviewer, and the run, continued, closed as merged. The removal
+is made resumable on the reviewer's finding (F24) — awaiting its re-review, the live workers not yet on it.
+Still open after that: the full suite once on the final tree, and one run with real agents, merged by the
+operator and shown to have landed on the remote.
 **Scope:** how a run meets a base that moved, and where it lands: the look at the base, its coming into the
 worktree and the landing ([worktrees.py](../app/workspace/worktrees.py)); the remote a base may live on
 ([repos.py](../app/workspace/repos.py)); the workflow's path around the final gate
@@ -149,6 +151,13 @@ and says so.
   The merge itself had landed, the worktree and the branch were gone.
 - **F23** Under `link-mode = "copy"` uv builds, from the lock as it is, an environment none of whose
   libraries has another name, and the application's own removal removes it while the worker runs.
+- **F24** `shutil.rmtree` removes a folder in the order its own walk gives it. On Linux that is the
+  folder's listing order: `pyvenv.cfg` can go before the file a removal stops at, and the retry then refused
+  what was left as no environment — the test's red on WSL. On Windows under CPython 3.13 subfolders go
+  first and the folder's own files after them, so there only the last step could do it: everything gone
+  but the folder, and the retry refusing the empty folder — red on both hosts. The agent had said
+  `pyvenv.cfg` went before `Scripts/` on Windows; that was read off the listing order and not measured,
+  and is not so.
 
 ### Refuted
 
@@ -445,6 +454,29 @@ behind it, it is proven by the real pushes in the review record.
   it, and the live stack holds no open run.
 - **Not done:** this change reviewed.
 - **Not run:** the full suite again, on this change.
-- **Seen, not changed:** the removal deletes `pyvenv.cfg` before `Scripts/`; stopped at a file there, a
-  retry would find no `pyvenv.cfg` and refuse the folder as no environment. Not met here — the files held
-  were under `Lib/`.
+- **Seen then, changed in the next record:** a removal that stops after `pyvenv.cfg` has gone cannot be
+  retried (F24).
+
+### 2026-10-08 — the reviewer on the environment fix: the removal made resumable
+
+- **Reviewer:** `PATCH` — `link-mode = "copy"` right and to stay; the removal not safe to retry, to be made
+  resumable without weakening the `pyvenv.cfg` guard.
+- **Applied, red first:** `pyvenv.cfg` is removed last, whatever order the folder lists itself in, so what
+  says the folder is an environment outlives everything it speaks for and the guard reads on a retry as it
+  read the first time — no state is kept beside it. A removal stopped after it leaves the folder empty, and
+  an empty folder is removed too.
+- **The one thing the guard now lets through, for the reviewer to judge:** an empty folder at the derived
+  path, under the same checks of root and links. It holds nothing, so nothing that is not an environment's
+  can be lost by it; a folder with anything in it and no `pyvenv.cfg` is refused as before.
+- **Refuted:** nothing. Corrected, the agent's own: which order Windows removes in (F24).
+- **Verification, the modules the change touches, one host after the other:** worktrees, activities,
+  architecture and the harness — WSL: 26 classes, 147 tests, OK; Windows: 26 classes, 147 tests, OK. The
+  stop at a file listed after `pyvenv.cfg` is red before the change on WSL only, as F24 has it; the stop at
+  the folder itself on both.
+- **Controls, one guard out at a time, both hosts, the file byte for byte as before:** `pyvenv.cfg` removed
+  in its turn; an empty folder refused; a link at the top of the environment walked into. Each failed the
+  tests named for it.
+- **`make demo`** — its merged run's environment removed by this removal — and **`make public-check`:**
+  passed on this code.
+- **Not done:** the workers restarted on this code — on the operator's word, after the review.
+- **Not run:** the full suite, due once on the final tree; a run with real agents; a push to a real remote.

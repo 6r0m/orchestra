@@ -56,6 +56,11 @@ def remove_environment(checkout):
 
     Raises UnsafeRemoval, deleting nothing, unless the path lies directly under the
     real environment root, is not itself a link, and holds `pyvenv.cfg`.
+
+    `pyvenv.cfg` is what says the folder is an environment, so it is removed last, whatever
+    order the folder lists itself in: a removal that stopped — at a file some process still
+    holds — leaves it, and the same call finishes that same folder later. One stopped after
+    it leaves the folder empty, and an empty folder is removed too: it holds nothing to refuse.
     """
     path = environment_for(checkout)
     if not os.path.lexists(path):
@@ -70,10 +75,23 @@ def remove_environment(checkout):
     real = os.path.realpath(path)
     if os.path.dirname(real) != os.path.realpath(root):
         raise UnsafeRemoval("%s resolves outside %s" % (path, root))
-    if not os.path.isfile(os.path.join(real, "pyvenv.cfg")):
+    marker = os.path.join(real, "pyvenv.cfg")
+    names = os.listdir(real) if os.path.isdir(real) else None
+    if names is None or (names and not os.path.isfile(marker)):
         raise UnsafeRemoval("%s holds no pyvenv.cfg" % path)
-    # rmtree removes links found inside without following them.
-    shutil.rmtree(real)
+    for name in names:
+        if os.path.normcase(name) == "pyvenv.cfg":
+            continue
+        entry = os.path.join(real, name)
+        if os.path.isdir(entry) and not _is_link(entry):
+            # rmtree removes links found inside without following them.
+            shutil.rmtree(entry)
+        else:
+            # A file, or a link: the link itself, never what it leads to.
+            os.unlink(entry)
+    if names:
+        os.unlink(marker)
+    os.rmdir(real)
     return True
 
 

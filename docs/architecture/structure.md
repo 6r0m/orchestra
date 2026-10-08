@@ -174,7 +174,9 @@ Do not re-derive a `states/` layer here.
   would hold every worktree's environment for as long as the worker ran.
   A run worktree's environment is removed with the worktree, on its target host,
   only when the derived path lies under that host's environment root, crosses
-  no link or reparse point, and holds `pyvenv.cfg`.
+  no link or reparse point, and holds `pyvenv.cfg` — removed last, so a removal
+  that stopped at a file some process holds is the same call's to finish, and
+  the empty folder one stopped after it leaves is removed too.
 
 ## Relationships and dependency direction
 
