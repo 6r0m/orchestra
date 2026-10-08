@@ -54,6 +54,12 @@ class GitViolation(RuntimeError):
     error_type = "git_violation"
 
 
+class CloseoutViolation(RuntimeError):
+    """A closeout that is not one: it changed what the architect's `PASS` accepted, it left the todo
+    unclosed, or no tree the architect verified is there to close out."""
+    error_type = "closeout_violation"
+
+
 def run_dir(run_id):
     return os.path.join(paths.RUNTIME_ROOT, run_id)
 
@@ -164,7 +170,7 @@ class Activities:
 
     def all(self):
         return [self.prepare, self.create_worktree, self.open_run, self.open_phase, self.run_role,
-                self.record_stop, self.record_answer, self.finish_trace, self.merge, self.discard,
+                self.record_stop, self.record_answer, self.finish_trace, self.reopen, self.merge, self.discard,
                 self.worktree_view, self.review_diff, self.work_tree]
 
     def client(self):
@@ -259,15 +265,18 @@ class Activities:
         rdir = run_dir(state["run_id"])
         attempt, episode = state.get("round", 0) + 1, state.get("episode", 1)
         # Episode-scoped so a guidance reset cannot overwrite an earlier episode's logs.
-        name = "%s-e%d-%d" % (stage, episode, attempt)
+        name = terminal.turn_name(stage, episode, attempt)
         worktree = state["worktree_path"]
         client = self.client()
 
-        def compose(session_first):
-            return N.compose_prompt(stage, role, is_review, state, session_first=session_first,
+        def compose(session_first, named):
+            """The turn's prompt, its parts kept beside it under the attempt's own name for whoever shows it."""
+            parts = N.compose_parts(stage, role, is_review, state, session_first=session_first,
                                     stage_first=attempt == 1, logs=os.path.join(rdir, "logs"),
                                     skills=policy.get("stage_skills"), review_rounds=policy.get("review_rounds"),
                                     review_prompts=policy.get("review_prompts"))
+            terminal.record_parts(rdir, named, parts)
+            return N.render(parts)
 
         span = T.begin(client, state, stage, role_name, dict(adapters.view(role), kind=kind, agent=role.get("agent")),
                        log=os.path.relpath(os.path.join(rdir, "logs", name), paths.REPO))
@@ -276,6 +285,12 @@ class Activities:
         private = T.Private()
         context = T.trace_context(client, span, state, stage, role_name)
         try:
+            verified = state.get("verified_tree")
+            if stage in stages.FINAL and not verified:
+                # Unknown is not unchanged: with no tree the architect verified, nothing says what this
+                # turn may not touch.
+                raise CloseoutViolation("the run holds no tree the architect verified, so there is nothing "
+                                        "to close out")
             if "persona" not in role:
                 # A run started before agent profiles: its persona file as this host sees it, from the one
                 # resolver. A policy this host cannot map fails the step before an agent starts.
@@ -295,11 +310,11 @@ class Activities:
             # a verdict must describe the plan or the change it actually read.
             judged = self.git.work_tree(worktree) if is_review else None
             argv, minted = N.build_argv(role, resume_id, traced)
-            rc, out = self.runner(worktree, adapter.host(argv), rdir, name, compose(resume_id is None),
+            rc, out = self.runner(worktree, adapter.host(argv), rdir, name, compose(resume_id is None, name),
                                   policy["timeout_seconds"], env, kind=kind)
             effective_resume = resume_id
             if rc != 0 and N.classify_failure(role, resume_id, rc, out,
-                                              _read(os.path.join(rdir, "logs", name + ".err"))) == "session_lost":
+                                              _read(terminal.turn_files(rdir, name)["err"])) == "session_lost":
                 # Definitive not-found before any work began: a fresh session gets the
                 # whole task again, since the lost one took the task and persona with it.
                 T.warn(span, "session_lost",
@@ -307,8 +322,8 @@ class Activities:
                        "given the whole task again" % role_name)
                 effective_resume = None
                 argv, minted = N.build_argv(role, None, traced)
-                rc, out = self.runner(worktree, adapter.host(argv), rdir, name + "-rehydrated", compose(True),
-                                      policy["timeout_seconds"], env, kind=kind)
+                rc, out = self.runner(worktree, adapter.host(argv), rdir, name + terminal.RETRIED,
+                                      compose(True, name + terminal.RETRIED), policy["timeout_seconds"], env, kind=kind)
             if rc != 0:
                 raise N.TransportError("%s failed rc=%d — inspect %s/logs/%s.*" % (stage, rc, rdir, name))
             if self.git.guard(worktree, state["run_id"]) != before:
@@ -320,6 +335,31 @@ class Activities:
             if stage in stages.ANSWERS:
                 # Its answer is its product, returned to the run — never read back from a log.
                 result["output"] = N.final_message(role, out)
+            if stage in stages.FINAL:
+                # No review follows this turn, so what it may change is checked here, by its repository's
+                # own convention (`repos`): the todo folders and the documents it names. The architect's
+                # `PASS` stands for everything else.
+                left = self.git.work_tree(worktree)
+                outside = sorted(path for _, path in self.git.changed(
+                    worktree, verified, left, (state.get("todo_dir"), state.get("todo_done_dir")),
+                    state.get("closeout_docs") or ()))
+                if outside:
+                    raise CloseoutViolation(
+                        "the closeout changed what the architect verified: %s. A closeout changes only the "
+                        "todo and the repository's documents; put these back as they were — in the engineer's "
+                        "terminal or by hand — then continue to close out again" % ", ".join(outside))
+                # Whether the todo was closed at all is a fact, checked; how well is the operator's to judge.
+                plan = state["plan"].replace("\\", "/")
+                done = state.get("todo_done_dir") and "%s/%s" % (
+                    state["todo_done_dir"].replace("\\", "/").strip("/"), plan.rsplit("/", 1)[-1])
+                held = self.git.holds(worktree, left, [plan] + ([done] if done else []))
+                if plan in held or (done and done not in held):
+                    raise CloseoutViolation(
+                        "the closeout left the todo unclosed: %s. Continue to close out again" % (
+                            "it is still at %s" % plan if plan in held else "it is not at %s" % done))
+                # The tree the final gate holds from here on: the operator's to judge, and the only one a
+                # merge may commit.
+                result["final_tree"] = left
             if is_review:
                 verdict, feedback = N.parse_review(role, rc, out)
                 result.update(verdict=verdict, feedback=feedback)
@@ -333,13 +373,20 @@ class Activities:
                     limit = policy["max_rounds"][state["phase"]]
                 gate_reason = routing.gate_reason_for(
                     verdict, args.get("gate"), rounds, limit, state.get("auto_proceed", False))
-                if verdict == "PASS" and judged is not None:
-                    if self.git.work_tree(worktree) != judged:
+                if judged is not None:
+                    unchanged = self.git.work_tree(worktree) == judged
+                    if verdict == "PASS" and not unchanged:
                         raise GitViolation("the worktree changed while the architect judged it, so what it "
                                            "passed is not what is there; continue to %s it again" % stage)
-                    # What the run may go on with: exactly what was judged here — the plan the
-                    # operator is about to approve, or the change a merge may commit.
-                    result["assessed_tree" if stage == "assess" else "verified_tree"] = judged
+                    if verdict == "PASS":
+                        # What the run may go on with: exactly what was judged here — the plan the
+                        # operator is about to approve, or the change a merge may commit.
+                        result["assessed_tree" if stage == "assess" else "verified_tree"] = judged
+                    if unchanged:
+                        # What this review read, whatever its verdict, kept in the run's history for the change since
+                        # the review before; a tree that moved under any other verdict is none it judged, and that
+                        # verdict still routes. The workflow decides nothing on it.
+                        result["judged_tree"] = judged
         except Exception as exc:
             # A failed step leaves no agent behind, whichever check failed it.
             terminal.end_agent(state["run_id"], role_name)
@@ -397,17 +444,34 @@ class Activities:
         return {"trace_url": T.trace_url(client, state.get("trace_id"))}
 
     @activity.defn
+    def reopen(self, args):
+        """Take a change that goes back into its run — sent back, or in conflict — from the tree it was
+        offered in to the one the architect verified, before any role reads it again."""
+        state = args["state"]
+        with self._git_step(state["run_id"], "reopening"):
+            try:
+                return {"kept": self.git.reopen(state["worktree_path"], state["final_tree"],
+                                                state["verified_tree"])}
+            except Exception as exc:
+                raise _failure(exc) from exc
+
+    @activity.defn
     def merge(self, args):
         state = args["state"]
         stem = os.path.splitext(os.path.basename(state["plan"]))[0]
         words = " ".join(state["task"].encode("ascii", "ignore").decode().split()[:8])
-        # No agent may change the worktree between the check of the verified tree and the commit,
+        # The tree the run holds for its merge: its final tree, the todo closed in it already — or, for a
+        # run started before a flow made its build final, the tree the architect verified, its plan the
+        # controller's to finish.
+        final = state.get("final_tree")
+        # No agent may change the worktree between the check of that tree and the commit,
         # nor hold it open while it is removed; a conflict's next turn opens the terminals again.
         terminal.close_run(state["run_id"])
         with self._git_step(state["run_id"], "merge"):
             try:
                 return self.git.merge(state["repo_path"], state["worktree_path"], state["run_id"],
-                                      state["base_branch"], state.get("verified_tree"), state["plan"],
+                                      state["base_branch"], final or state.get("verified_tree"),
+                                      None if final else state["plan"],
                                       state["todo_done_dir"], ("%s: %s" % (stem, words))[:100],
                                       "Merge %s" % stem)
             except W.MergeRefused as exc:
@@ -430,10 +494,16 @@ class Activities:
     def review_diff(self, args):
         """The run's change as the operator reviews it, read by this host's own git. Reads only.
 
-        Bounded: `offset` asks for the next part of a change too large for one payload.
+        Bounded: `offset` asks for the next part of a change too large for one payload, `files_from` for the
+        next part of its file list. `base` and `tree` name a snapshot already read, or two judged trees; `file`
+        one file of it.
         """
         try:
-            return self.git.review_diff(args["worktree_path"], args.get("offset", 0))
+            return self.git.review_diff(args["worktree_path"], args.get("offset", 0), args.get("base"),
+                                        args.get("tree"), args.get("file"), args.get("files_from"))
+        except W.ChangeRefused as exc:
+            # What the reader asked for is not there to read: said as git said it, and never retried.
+            raise ApplicationError(str(exc), type="ChangeRefused", non_retryable=True) from exc
         except Exception as exc:
             raise _failure(exc) from exc
 

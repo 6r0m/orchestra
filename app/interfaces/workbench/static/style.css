@@ -137,7 +137,7 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--you); width: 1
 .runs { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .runs .none { padding: 4px 8px; color: var(--quiet); font-size: 13px; }
 .row { display: grid; gap: 2px; padding: 8px 10px 8px 12px; border-radius: 6px; text-decoration: none;
-  border-left: 3px solid var(--rule); content-visibility: auto; contain-intrinsic-size: auto 72px; }
+  border-left: 3px solid var(--rule); content-visibility: auto; contain-intrinsic-size: auto 110px; }
 .row:hover { background: var(--raised); }
 .row[aria-current="page"] { background: var(--raised); outline: 1px solid var(--control); outline-offset: -1px; }
 .row[data-tone="you"] { border-left-color: var(--you); }
@@ -154,6 +154,9 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--you); width: 1
   overflow-wrap: anywhere; }
 .row-meta { display: flex; justify-content: space-between; gap: 8px; color: var(--quiet); font-size: 12px; min-width: 0; }
 .row-meta > :first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.row-meta .row-repo { color: var(--ink); font-weight: 600; }
+.row-branch { color: var(--quiet); font: 11px/1.4 var(--mono); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
 /* How long, whole on one line: the repository's name gives way to it. */
 .row-meta > :last-child { flex-shrink: 0; white-space: nowrap; }
 .row-blocked { color: var(--bad); font-size: 12px; }
@@ -177,6 +180,9 @@ main:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .facts dt { color: var(--quiet); font-size: 12px; }
 .facts dd { margin: 0; display: flex; gap: 8px; align-items: center; min-width: 0; overflow-wrap: anywhere; }
 .facts dd code { font-size: 12.5px; }
+.facts .repo-fact { flex-basis: 100%; padding: 0 0 8px; border-bottom: 1px solid var(--rule); }
+.facts .repo-fact dd code { color: var(--ink); font-size: 16px; font-weight: 700; overflow-wrap: anywhere; }
+.facts .flow-fact dd { color: var(--ink); font-weight: 600; }
 .now { font-size: 15px; }
 .now .who { font-weight: 600; }
 .notice { display: grid; gap: 8px; padding: 12px 14px; border-radius: 8px; border: 1px solid var(--rule);
@@ -227,20 +233,55 @@ main:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .kept { display: grid; gap: 10px; padding: 14px 16px; border: 1px solid var(--rule); border-radius: 8px;
   background: var(--surface); }
 
-/* The change: what git reads in the run's worktree. */
+/* The change: what git reads in the run's worktree, file by file, each opening into its diff. */
 .change { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 .section-head { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
-.stat { margin: 0; font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--quiet); }
-.stat:empty, .patch:empty { display: none; }
-.patch { margin: 0; max-height: 640px; overflow: auto; overscroll-behavior: contain; padding: 10px 0;
-  font-size: 12.5px; line-height: 1.45; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; }
-.patch span { display: block; padding: 0 12px; white-space: pre; }
-.patch .file { color: var(--ink); font-weight: 600; margin-top: 8px; }
-.patch .meta { color: var(--quiet); }
-.patch .hunk { color: var(--engineer); }
-.patch .add { background: rgba(92, 192, 140, 0.12); color: #bfe8d1; }
-.patch .del { background: rgba(236, 106, 106, 0.12); color: #f3c3c3; }
-.patch .new { white-space: pre-wrap; overflow-wrap: anywhere; border-left: 2px solid var(--pass); color: var(--ink); }
+.chevron { flex: none; width: 1em; color: var(--quiet); }
+.chevron::before { content: "\25B8" / ""; }
+details[open] > summary .chevron::before { content: "\25BE" / ""; }
+.files { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.file-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--rule); border-radius: 8px;
+  background: var(--surface); }
+.file-list > li + li { border-top: 1px solid var(--rule); }
+.file > summary { display: flex; align-items: baseline; gap: 8px; padding: 7px 12px; cursor: pointer; list-style: none; }
+.file > summary::-webkit-details-marker { display: none; }
+.file > summary:hover { background: var(--raised); }
+.file .status { flex: none; width: 1.2em; font: 600 11.5px var(--mono); text-align: center; color: var(--quiet); }
+.file .status.A { color: var(--pass); }
+.file .status.D { color: var(--bad); }
+.path { flex: 1; min-width: 0; font: 12.5px/1.45 var(--mono); overflow-wrap: anywhere; }
+.path .dir, .path .arrow { color: var(--quiet); }
+.counts { flex: none; display: inline-flex; gap: 8px; font: 12px var(--mono); white-space: nowrap; }
+.counts .added { color: var(--pass); }
+.counts .removed { color: var(--bad); }
+.file-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 8px 12px 12px;
+  border-top: 1px solid var(--rule); }
+.file-body > button { justify-self: start; }
+/* One file's diff as an editor shows it: both line numbers, added lines green, removed red. */
+.diff { max-height: 80vh; overflow: auto; overscroll-behavior: contain; background: var(--ground);
+  border: 1px solid var(--rule); border-radius: 6px; }
+.diff-lines { display: grid; grid-template-columns: minmax(100%, max-content); padding: 4px 0;
+  font: 12.5px/1.5 var(--mono); }
+/* A long file's rows out of sight are not laid out until they come into it. */
+.ln { display: flex; content-visibility: auto; contain-intrinsic-block-size: auto 1.5em; }
+.ln .no { flex: none; width: 5.5ch; padding-right: 1ch; text-align: right; color: #6f7886; user-select: none; }
+.ln .sign { flex: none; width: 2ch; text-align: center; color: var(--quiet); user-select: none; }
+.ln .text { white-space: pre; padding-right: 16px; }
+.ln.add { background: rgba(92, 192, 140, 0.15); }
+.ln.add .text, .ln.add .sign { color: #c9eed9; }
+.ln.del { background: rgba(236, 106, 106, 0.15); }
+.ln.del .text, .ln.del .sign { color: #f6cccc; }
+.ln.hunk, .ln.note { padding: 2px 12px; color: var(--quiet); background: var(--surface); white-space: pre; }
+.ln.note { font-style: italic; }
+button.fold { justify-content: flex-start; min-height: 26px; padding: 2px 12px 2px 8.5ch; border: 0;
+  border-block: 1px dashed var(--rule); border-radius: 0; background: var(--surface); color: var(--quiet);
+  font: 12px var(--ui); }
+button.fold:hover { background: var(--raised); color: var(--ink); }
+/* The whole patch, only to copy: a small box. */
+.raw-patch { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.patch-raw { margin: 0; max-height: calc(10 * 1.45em + 20px); overflow: auto; overscroll-behavior: contain;
+  padding: 10px 12px; font-size: 12px; line-height: 1.45; white-space: pre; color: var(--quiet);
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; }
 
 /* Terminals: the vendors' own CLIs, the working role's open. */
 .agents { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
@@ -253,17 +294,58 @@ summary:hover { color: var(--ink); }
 .term-state { margin-left: 12px; color: var(--quiet); font-size: 13px; }
 .term { padding: 8px; background: #000; overflow-x: auto; border-radius: 0 0 8px 8px; }
 
-/* History: every round, its verdict and its words, kept whole. */
+/* History: the run as a transcript — each turn a row under a rule in its role's colour, opening to what it
+   received and what it produced; your answers in yours, between. */
 .history { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; max-width: 960px; }
-.phase { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
-.phase h3 { font-size: 13px; color: var(--quiet); padding: 6px 0 2px; }
-.entry { border-left: 2px solid var(--rule); padding: 3px 0 3px 12px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
-.entry-head { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; font-size: 13px; }
-.entry-head time { color: var(--quiet); font-variant-numeric: tabular-nums; }
-.entry details > summary { cursor: pointer; color: var(--quiet); font-size: 13px; overflow: hidden;
+.phase { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
+.phase h3 { font-size: 13px; color: var(--quiet); padding: 8px 0 4px; }
+.turn, .answer { border-left: 2px solid var(--rule); }
+.turn[data-role="engineer"] { border-left-color: var(--engineer); }
+.turn[data-role="architect"] { border-left-color: var(--architect); }
+.turn > summary { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; padding: 5px 0 5px 10px;
+  cursor: pointer; list-style: none; }
+.turn > summary::-webkit-details-marker { display: none; }
+.turn > summary:hover { background: var(--surface); }
+.turn-head { display: flex; flex-wrap: wrap; gap: 2px 12px; align-items: baseline; font-size: 13px; }
+.turn-head .chevron { margin-right: -6px; }
+.turn-head .role { font-weight: 600; }
+.turn-head time { margin-left: auto; color: var(--quiet); font-variant-numeric: tabular-nums; }
+.turn-head .took { font-variant-numeric: tabular-nums; }
+.turn-preview { padding-left: calc(1em + 6px); color: var(--quiet); font-size: 13px; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; }
-.entry details[open] > summary { white-space: normal; }
-.entry details .prose { margin: 6px 0 4px; }
+.turn[open] > summary .turn-preview { display: none; }
+.turn-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; padding: 6px 0 12px 22px; }
+.turn-body > button { justify-self: start; }
+.attempt { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.attempt + .attempt { border-top: 1px solid var(--rule); padding-top: 12px; }
+.attempt > h4 { margin: 0; font-size: 13px; font-weight: 600; }
+.received, .produced { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; min-width: 0; }
+.received > h4, .produced > h4 { margin: 0; font-size: 12px; font-weight: 600; color: var(--quiet); }
+.turn-output > summary { cursor: pointer; font-size: 13px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.turn-output[open] > summary .first-line { display: none; }
+.turn-output .turn-field { margin-top: 8px; }
+.prompt-parts { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 13px; }
+.prompt-parts code { font-size: 12.5px; overflow-wrap: anywhere; }
+.part-name { color: var(--quiet); }
+.prompt-part > summary, .turn-prompt > summary, .turn-raw > summary, .round-change > summary { cursor: pointer;
+  font-size: 13px; }
+.prompt-part > summary .hint { margin-left: 6px; }
+.prompt-part .turn-prose { margin-top: 6px; }
+.round-change > summary .hint { margin-left: 10px; }
+.round-change-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin-top: 8px; }
+.answer { border-left-color: var(--you); display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px;
+  padding: 5px 0 5px calc(10px + 1em + 6px); }
+.answer .turn-what { color: var(--ink); }
+.answer-words { max-width: 80ch; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink);
+  padding-left: 10px; border-left: 2px solid var(--rule); }
+.turn-field { display: grid; gap: 6px; min-width: 0; }
+.turn-prose { max-width: 80ch; max-height: 30rem; overflow: auto; overscroll-behavior: contain;
+  padding: 10px 12px; border-left: 2px solid var(--control); background: var(--surface);
+  font: 14px/1.65 var(--ui); white-space: pre-wrap; overflow-wrap: anywhere; }
+.turn-prompt .turn-field, .turn-raw .turn-field { margin-top: 8px; }
+.turn-field > button { justify-self: start; }
+.turn-field .code { max-height: 30rem; overflow: auto; overscroll-behavior: contain; }
 .verdict { font-weight: 700; font-size: 12px; letter-spacing: 0.02em; }
 .verdict.PASS { color: var(--pass); }
 .verdict.PATCH, .verdict.UNVERIFIED { color: var(--you); }

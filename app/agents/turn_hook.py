@@ -18,6 +18,10 @@ def main(args):
         events, label, source = args[0], args[1], args[2]
         # The payload is UTF-8 whatever this process's locale would decode stdin as.
         payload = json.loads(args[-1]) if source == "argument" else json.loads(sys.stdin.buffer.read().decode("utf-8"))
+        # What a dialog says and what a tool read or wrote stay out of the record: only its session and a
+        # notification's kind are kept.
+        if label in ("Notification", "PostToolUse", "PostToolUseFailure"):
+            payload = {key: payload[key] for key in ("session_id", "notification_type") if key in payload}
         payload["_hook"] = label
         line = (json.dumps(payload) + "\n").encode("utf-8")
         # One write in append mode: concurrent hooks never interleave inside a line.

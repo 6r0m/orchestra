@@ -1,6 +1,6 @@
 """Press one of the Workbench's own buttons in a headless browser, as the operator would.
 
-    python tools/demo_press.py <workbench url> <run id | stack | start> <button label | task | terminal:role | hold:role:label | absent:label,...> <what the page should say> [note]
+    python tools/demo_press.py <workbench url> <run id | stack | start> <button label | task | terminal:role | turn:stage | turn-then:stage:label | file:path | round:stage:path | history | hold:role:label | absent:label,...> <what the page should say> [note]
 
 The Windows side of `make demo` (WSL cannot reach Windows' loopback, and Windows reaches the
 Workbench's): headless Edge, driven over the DevTools protocol, opens the page, opens the run by its
@@ -10,7 +10,14 @@ opened from its chips; the page's own confirmation answered yes, and each questi
 given a note, it types it into the stop's own note first, as an answer's words are. Given `start`, it
 opens New run and types the task into the page's own form, with the first repository it offers, and
 presses Start run. Given `terminal:<role>`, it presses nothing: it opens that role's terminal, if it is
-closed, and reads its screen as the page shows it, live from its host. It waits for the page to report
+closed, and reads its screen as the page shows it, live from its host. Given `turn:<stage>`, it presses
+nothing either: it opens the run's latest turn of that stage in its history and reads what the page shows it
+produced, from that turn's record. Given `file:<path>`, it opens that file of the run's change and reads the
+lines its diff shows; given `round:<stage>:<path>`, the same file in the change since the review before the run's
+latest turn of that stage; given `history`, it reads the run's history: each exits 0 once what it reads holds the
+words expected. Given `turn-then:<stage>:<label>`, it opens that turn first, presses the button, and reads the
+turn again in the same page once what it produced is said anew: its exit code also says whether it is said
+there, not pointed to the decision above. It waits for the page to report
 what came of the press — the status line, or the alert, beside the control — and its exit code says
 whether the page's words begin as expected; for a terminal, whether it shows them. Given
 `hold:<role>:<label>`, it first opens that role's terminal — its record, while the run's worker holds no
@@ -91,6 +98,33 @@ OPEN_TERMINAL = ("(role => { const box = document.getElementById('terminal-' + r
 SCREEN = ("(role => { const rows = document.querySelector('#term-' + role + ' .xterm-rows');"
           " return rows ? rows.innerText : ''; })(%s)")
 
+# A stage's latest turn in the run's history, opened as a click on its summary opens it, and what the page then
+# shows it produced, from its record.
+LATEST_TURN = ("const turns = document.querySelectorAll("
+               "'#timeline details.turn[data-history-detail^=\"turn:' + stage + ':\"]');"
+               " const turn = turns[turns.length - 1];")
+OPEN_TURN = ("(stage => { " + LATEST_TURN + " if (!turn) return false;"
+             " if (!turn.open) turn.querySelector('summary').click(); turn.scrollIntoView(); return true; })(%s)")
+TURN_SAID = ("(stage => { " + LATEST_TURN + " const field = turn && turn.querySelector('.produced');"
+             " if (!field) return ''; field.querySelectorAll('details.turn-output').forEach((d) => { d.open = true; });"
+             " return field.innerText.replace(/\\s+/g, ' '); })(%s)")
+# A changed file opened as a click on its row opens it — in the run's change, or in a turn's change since the review
+# before it, that change opened first — and the lines its diff then shows.
+OPEN_FILE = ("((scope, path) => { const box = typeof scope === 'string' ? document.querySelector(scope) : scope;"
+             " const file = box && [...box.querySelectorAll('details.file')].find((f) => f.dataset.path === path);"
+             " if (!file) return false; if (!file.open) file.querySelector('summary').click(); file.scrollIntoView();"
+             " return true; })(%s, %s)")
+FILE_LINES = ("((scope, path) => { const box = document.querySelector(scope);"
+              " const file = box && [...box.querySelectorAll('details.file')].find((f) => f.dataset.path === path);"
+              " return file ? [...file.querySelectorAll('.diff .ln')].map((l) => l.innerText.replace(/\\s+/g, ' ')"
+              ".trim()) : []; })(%s, %s)")
+OPEN_ROUND = ("(stage => { " + LATEST_TURN + " if (!turn) return false;"
+              " if (!turn.open) turn.querySelector('summary').click();"
+              " const change = turn.querySelector('details.round-change'); if (!change) return false;"
+              " if (!change.open) change.querySelector('summary').click(); change.scrollIntoView();"
+              " if (!turn.id) turn.id = 'pressed-turn'; return '#' + turn.id; })(%s)")
+HISTORY_SAID = "document.getElementById('timeline').innerText.replace(/\\s+/g, ' ')"
+
 # A role's terminal watched: the connections the page opens for it, and the xterm it makes — whose buffer,
 # selection and scroll are read from it, not from what it drew. Then opened, as a click on its summary opens it:
 # its xterm is the first the page makes from here, and the other role's, made once that role works, is not it.
@@ -143,7 +177,7 @@ def main(url, run_id, label, said, note=None):
                              "--user-data-dir=" + profile, "about:blank"],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     asked = []
-    held = None
+    held = then = None
     try:
         # Edge writes the port it chose into its profile once it listens.
         port = wait(lambda: open(os.path.join(profile, "DevToolsActivePort")).readline().strip(), 30,
@@ -165,6 +199,34 @@ def main(url, run_id, label, said, note=None):
                 shown = [line for line in screen.splitlines() if said in line][-1].strip()
                 print("read the %s terminal in the Workbench: it shows %r" % (role, shown))
                 return 0
+            if label.startswith("turn:"):
+                stage = label.split(":", 1)[1]
+                page.value(OPEN % json.dumps(run_id))
+                wait(lambda: page.value(OPENED), 60, "the run")
+                wait(lambda: page.value(OPEN_TURN % json.dumps(stage)), 60, "the %s turn in the history" % stage)
+                message = wait(lambda: (lambda text: text if said in text else "")(
+                    page.value(TURN_SAID % json.dumps(stage))), 60, "the %s turn's record to show %r" % (stage, said))
+                print("opened the %s turn's record in the Workbench: %r" % (stage, " ".join(message.split())))
+                return 0
+            if label.startswith(("file:", "round:", "history")):
+                page.value(OPEN % json.dumps(run_id))
+                wait(lambda: page.value(OPENED), 60, "the run")
+                if label == "history":
+                    shown = wait(lambda: (lambda text: text if said in text else "")(page.value(HISTORY_SAID)), 60,
+                                 "the history to say %r" % said)
+                    print("read the run's history in the Workbench: it says %r" % said)
+                    return 0
+                if label.startswith("file:"):
+                    scope, path = "#change", label.split(":", 1)[1]
+                else:
+                    stage, path = label.split(":", 2)[1:]
+                    scope = wait(lambda: page.value(OPEN_ROUND % json.dumps(stage)), 60,
+                                 "the %s turn's change since the review before it" % stage)
+                wait(lambda: page.value(OPEN_FILE % (json.dumps(scope), json.dumps(path))), 60, "the file %s" % path)
+                lines = wait(lambda: [line for line in page.value(FILE_LINES % (json.dumps(scope), json.dumps(path)))
+                                      if said in line], 60, "the diff of %s to show %r" % (path, said))
+                print("opened %s in the Workbench's viewer: it shows %r" % (path, lines[0]))
+                return 0
             if label.startswith("absent:"):
                 labels = label.split(":", 1)[1].split(",")
                 page.value(OPEN % json.dumps(run_id))
@@ -174,6 +236,15 @@ def main(url, run_id, label, said, note=None):
                 offered = [text for text in labels if page.value(SHOWN % json.dumps(text))]
                 print("the Workbench offers run %s %s" % (run_id, ", ".join(offered) or "none of: " + ", ".join(labels)))
                 return 1 if offered else 0
+            if label.startswith("turn-then:"):
+                # A turn opened before the press, and what it produced read again once the run has moved on, in
+                # the same page: what was shown above is said in the turn once the decision no longer shows it.
+                stage, label = label.split(":", 2)[1:]
+                page.value(OPEN % json.dumps(run_id))
+                wait(lambda: page.value(OPENED), 60, "the run")
+                wait(lambda: page.value(OPEN_TURN % json.dumps(stage)), 60, "the %s turn in the history" % stage)
+                then = {"stage": stage,
+                        "before": wait(lambda: page.value(TURN_SAID % json.dumps(stage)), 60, "its record")}
             if label.startswith("hold:"):
                 role, label = label.split(":", 2)[1:]
                 page.value(OPEN % json.dumps(run_id))
@@ -218,6 +289,10 @@ def main(url, run_id, label, said, note=None):
                 time.sleep(0.2)
             # A stack action waits until what it started is up: a worker polling, Temporal answering.
             shown = wait(lambda: page.value(SAID % json.dumps(region)), 300, "the page's word on it")
+            if then:
+                then["after"] = wait(lambda: (lambda text: text if text != then["before"] else "")(
+                    page.value(TURN_SAID % json.dumps(then["stage"]))), 300,
+                    "the %s turn to say again what it produced" % then["stage"])
             if held:
                 # The role's next turn, on its worker: the page connects to it again and adds what it drew,
                 # below what was there.
@@ -235,6 +310,9 @@ def main(url, run_id, label, said, note=None):
     print("pressed %r in the Workbench: the page said %r" % (label, shown))
     for text in asked:
         print("it asked: %s" % text)
+    if then:
+        print("its %s turn, opened before: %r, then %r" % (then["stage"], then["before"], then["after"]))
+        return 0 if shown.startswith(said) and "Shown above" not in then["after"] else 1
     if held:
         before, after = held["before"], held["after"]
         print("its %s terminal, its record's first line %r selected: after %d s %d connection, the view at line "

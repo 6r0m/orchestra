@@ -74,9 +74,20 @@ believes was reviewed.
 Every stop is a named question with named answers, validated by the workflow itself: an answer it
 does not offer is rejected before it reaches history, and an answer names the stop it is for, so it
 is applied at most once and never to a later stop. The final gate is the only path to a commit, and
-the merge that follows it commits the verified tree, moves the plan to its done folder, merges with
+the merge that follows it commits exactly the tree that gate held, merges with
 an explicit merge commit, and removes the worktree and its branch — or hands a conflict back to the
 run's own agents rather than resolving it.
+
+## The controller closed the todo, until the operator read one at the gate
+
+The merge used to finish the plan itself: move it to the done folder and stamp its status, after the
+operator's answer. It was deterministic and it kept every agent out of the worktree once the
+architect had passed it. It also meant the operator approved a todo still marked for review, in the
+working folder, and that what landed was not quite what the gate had shown — and nothing in a line of
+code could cut a todo to its record or move what stays true to the document that owns it. So the
+closing became the engineer's last turn, after the architect's `PASS`. The cost was the rule that
+only a verified tree is merged: it is now the tree the gate holds, judged by the operator, with the
+closeout held to the todo and documentation by a check rather than by a review.
 
 ## The flat root was right until the repository stopped being a folder
 

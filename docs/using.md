@@ -52,10 +52,18 @@ the Workbench comes back with WSL. Nothing is exposed beyond loopback.
 
 ## The page
 
-The runs are listed down its side by whether they need you, work, or have finished, each with what
-it waits for or is doing and for how long; older finished runs are a page away, so nothing Temporal
+The runs are listed down its side under Operator action, Working and Closed. Each row names its
+repository, task and worktree branch, with what waits or is working and for how long. A run ready to
+merge stays under Operator action until you answer its final gate; Closed also includes stopped and
+discarded runs. Older closed runs are a page away, so nothing Temporal
 still retains is out of reach, and the tab's title counts the runs that need you. Each run is a link:
 the page's address names the run open, so a reload keeps it and a new tab opens it.
+
+If a vendor dialog waits in a live terminal, that running run also appears under Operator action.
+Open its terminal to answer or interrupt it. This is a terminal prompt, not a workflow stop; routine
+agent questions are denied and real blockers reach the normal workflow stop. Only a Claude role
+reports such a dialog, through its hooks, and in practice a Claude architect: a Claude engineer is
+denied what it may not do rather than asked, and a Codex role never asks.
 
 *New run* opens the form that starts one — and with no runs at all, the page opens on it: on a
 repository named in `.orchestra/repos.json` or in the file named by `ORCHESTRA_REPOS` — its menu
@@ -82,19 +90,54 @@ it, with that worker's Start beside it. A run whose worker is down is still show
 
 When a run waits for you, its decision comes first, with what to judge it by: the brief at a research's
 approval, the architect's assessment and the plan at a plan's, the architect's verification and the
-change at the final gate, the blocker or the last finding, or the failure, whole, to copy. Its
+change at the final gate, the blocker or the last finding, or the failure, whole, to copy. At the
+final gate the change is the one the engineer's closeout left — the todo cut to its record and in the
+repository's done folder — and it is exactly what Merge commits. The architect did not judge the
+closeout, which may touch only the todo and the documents the repository names (`closeout_docs` in
+its entry in `.orchestra/repos.json`; the todo alone when it names none): its
+turn in the history opens what it changed since the architect's verification. A revise undoes it
+before its role's turn. Its
 answers are the stop's own, as buttons. The note is labelled with the answers it is sent with, and a
 note typed for a stop stays while you look at other runs; an answer the workflow refuses is said
 beside what it concerns, and a merge or a discard asks first.
 
+The change is read as one snapshot of the worktree — its last commit and the tree its files make — and
+listed file by file, each by its whole path: a rename as its old path and its new one, a binary file
+said so; a very long list comes a part at a time, *List more files* reading the rest of the same snapshot. Open a file to see its diff as an editor shows one: both line numbers, added lines green,
+removed red, long unchanged runs folded a click away. A file too large to show whole shows its changes
+alone, and says so. The patch sits below in a small box; *Copy patch* copies all of it, however large,
+from the same snapshot, and *Read it again* reads a new one.
+
 Both roles' terminals follow, the one at work open and an idle one closed until you open it. Each is the
 vendor's own CLI: press Esc to interrupt a working agent, type to steer it. What you read in one is
 never drawn again under you: after its worker restarts it keeps its record until its role's next turn,
-which it then adds to. The history keeps every round with its verdict and its words — closed there when
-the decision already shows them — and a large change is read in parts, a press each.
+which it then adds to. A terminal holds the whole session, including whatever you typed during a turn.
 
-*Stop run* and *Force terminate* come after the decision, and while a run is stopping only *Force
-terminate* is offered. *Stop run* ends a run from whatever it is doing — an agent at work, a stop
+The history is the run as a transcript, phase by phase: each completed turn a row — its role, stage,
+round, verdict, how long it ran from when a worker took it, and when — and your answers rows of their own
+between them, in the phase of the step they answered, with your words and when the run took them. Open a turn to see what it received and what it produced. *Received*
+is the turn's own new prompt — the vendor keeps the conversation before it in its session — in the parts
+it was built from: the stage's skill, the task and the role's persona as the run started on a session's
+first turn, the stage's instructions, and what it was handed, such as the research brief to check, the
+findings to address or your guidance; the exact prompt is beside them, to copy. A turn whose parts were
+not recorded shows its exact prompt alone. *Produced* is its answer as the run kept it — the brief, the
+plan's account, the verdict and findings — said once: what the decision above shows is pointed to, not
+repeated, and said again in the turn once the decision moves on. An engineer's turn adds *Change since the previous review*: the files between the tree the
+review before it judged, or the worktree's last commit, and the tree the review after it judged, each
+opening in the same viewer. The worktree is live, so that is what the review judged, not proof of who
+wrote each line. After a PATCH, a turn's change is only what that turn changed in answer to it. A review
+records its tree only when the worktree did not move while it judged; where one between two engineer turns
+recorded none, the two cannot be told apart, so their change is shown once, on the later turn, which says
+so, and the earlier one points to it; a tree git has since pruned is said gone. A turn
+retried in a fresh session, its first one lost, shows each attempt; a failed attempt's retry from before
+you pressed Continue stays in the local logs but is not shown as the new turn's. A local record that has
+been removed is reported as unavailable.
+
+*Stop run* comes after the decision. While a run waits for you nothing runs on its host, so it is the
+one control offered there, quiet, saying it ends the run without merging and keeps its worktree and
+branch. While a run works, *Force terminate* follows it — a run whose status cannot be read is shown
+working — and while a run is stopping only *Force terminate* is offered. *Stop run* ends a run from
+whatever it is doing — an agent at work, a stop
 waiting, a failed stage, the final gate, a host whose worker is down — and keeps its worktree and branch
 as they are. A merge or discard already running is let finish first, and decides how the run ends.
 *Force terminate* is for a run a Stop cannot finish: it closes the run at once with no cleanup, but
@@ -156,8 +199,8 @@ Each stop prints what it asks and the answers it takes: `yes` or `revise <feedba
 the plan's, with its summary, or the research's, with its brief; your guidance at a blocker or an
 exhausted budget; `continue` after a failed stage. `--auto-proceed` skips the approvals, as the page's
 *skip approvals* does. A run whose flow has no build ends `DONE`, keeping its worktree. At
-`READY_FOR_HUMAN` the run waits for `merge`, `revise engineer <feedback>`, `revise architect
-<feedback>`, or `discard` with `--confirm`. `--stop` ends a run at any of them. Nothing is committed,
+`READY_FOR_HUMAN` — after the engineer's closeout, in a flow that has one — the run waits for `merge`,
+`revise engineer <feedback>`, `revise architect <feedback>`, or `discard` with `--confirm`. `--stop` ends a run at any of them. Nothing is committed,
 merged or removed before your `merge` or `discard`. A run waiting at a stop waits indefinitely, and
 any process may answer it.
 

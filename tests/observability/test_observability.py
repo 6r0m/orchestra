@@ -1385,13 +1385,42 @@ class TraceContract(Scenario):
         return client
 
     def test_every_row_is_one_of_the_contracts_kinds_and_carries_its_version(self):
-        """Every kind but research's, which a run that begins with research writes (the next test)."""
+        """Every kind but research's and the closeout's, which the runs that take those stages write (the next
+        two tests)."""
         from app.observability import telemetry
         client = self._flow()
         names = [event["name"] for event in client.events]
-        self.assertEqual(set(names), set(telemetry.ROW_NAMES) - {"research-phase", "architect-research"})
+        self.assertEqual(set(names), set(telemetry.ROW_NAMES) - {"research-phase", "architect-research",
+                                                                 "closeout-phase", "engineer-closeout"})
         self.assertEqual(names.count("orchestration-run"), 1, "one work item per run")
         self.assertEqual({event.get("version") for event in client.events}, {telemetry.SCHEMA_VERSION})
+
+    def test_a_run_that_closes_out_writes_that_phase_and_scores_its_build_once(self):
+        """A closeout is a phase of its own and judges nothing. A change sent back from the final gate is the
+        same build going on, so that build's first judgement stays the only one scored as its first."""
+        from app.observability import telemetry
+        from fakes import codex_review_resumed
+        client = _Events()
+        run = self.drive([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, codex_review_first("PASS")[0]),
+                          ("build-e2-1", 0, "built\n"), ("verify-e2-1", 0, codex_review_resumed("PATCH", "fix it")),
+                          ("build-e2-2", 0, "fixed\n"), ("verify-e2-2", 0, codex_review_resumed("PASS")),
+                          ("closeout-e3-1", 0, "closed out\n"),
+                          ("verify-e4-1", 0, codex_review_resumed("PASS")), ("closeout-e5-1", 0, "closed out\n")],
+                         telemetry=client, auto=True,
+                         flow=["engineer:plan", "architect:assess", "you:approve", "engineer:build",
+                               "architect:verify", "engineer:closeout", "you:merge"])
+        self.assertEqual(run.stop["reason"], "final")
+        names = [event["name"] for event in client.events]
+        self.assertEqual(names[names.index("closeout-phase"):][:2], ["closeout-phase", "engineer-closeout"],
+                         "its step under its own phase")
+        self.assertLessEqual(set(names), set(telemetry.ROW_NAMES))
+        run.answer("revise architect re-check the error path")
+        run.status = E.run(cli.follow(run.handle))
+        self.assertEqual(run.stop["reason"], "final")
+        first = [score["value"] for score in client.scores if score["name"] == "build_first_pass"]
+        self.assertEqual(first, [0.0], "not scored again when the change came back from its closeout")
+        self.assertEqual([event["name"] for event in client.events].count("closeout-phase"), 2,
+                         "each closeout is a phase the operator moved to")
 
     def test_a_run_that_begins_with_research_writes_its_phase_and_its_brief(self):
         from unittest import mock
@@ -1472,6 +1501,7 @@ class TraceContract(Scenario):
                  (N.ContentError("no verdict"), "malformed_output"),
                  (launch.ExecutorError("claude is not installed"), "executor"),
                  (A.GitViolation("staged"), "git_violation"),
+                 (A.CloseoutViolation("changed app.py"), "closeout_violation"),
                  (KeyError("phase"), "internal")]
         self.assertEqual([N.error_type(exc) for exc, _ in cases], [kind for _, kind in cases])
 

@@ -52,10 +52,12 @@ DEFAULT_ENVIRONMENT = "dev"
 # these names, so they change only on purpose and never carry a run's own values.
 SCHEMA_VERSION = "observability-schema-v1"
 RUN_NAME = "orchestration-run"
-PHASE_NAMES = {"research": "research-phase", "plan": "plan-phase", "build": "build-phase"}
+PHASE_NAMES = {"research": "research-phase", "plan": "plan-phase", "build": "build-phase",
+               "closeout": "closeout-phase"}
 PHASE_ROLES = {"research": "the architect researches",
                "plan": "the engineer plans, the architect assesses",
-               "build": "the engineer builds, the architect verifies"}
+               "build": "the engineer builds, the architect verifies",
+               "closeout": "the engineer closes out the todo"}
 GATE_NAME = "human-gate"
 ANSWER_NAME = "human-answer"
 DIFF_NAME = "final-diff"
@@ -323,7 +325,7 @@ def _mark_work_item(current, values):
 def open_phase(client, values, phase):
     """Open the node one phase's rounds hang from, under the work item in `values`; return its id.
 
-    A run's phases — its flow's work stages, research, plan and build — are what the operator
+    A run's phases — its flow's work stages, research, plan, build and closeout — are what the operator
     moves between, so each gets one node under the work item, opened when that phase starts.
     Like the work item's own
     root it is opened and closed at once and joined later by the id the workflow keeps.
@@ -865,9 +867,8 @@ def final_diff(client, values, read_diff):
             trace_context=_work_item_context(client, values), values=values,
             input={"base": "%s (worktree HEAD at run start)" % base,
                    "worktree": path, "status": values.get("status"),
-                   "command": "gdiff -s: git add -A, then git diff "
-                              "--no-ext-diff --no-textconv --cached "
-                              "(on a private copy of the index)"},
+                   "command": "git add -A and git write-tree on a private copy of the index, then "
+                              "git diff --no-ext-diff --no-textconv --find-renames --no-color <base> <tree>"},
             output={"summary": summary.strip() or "(no changes)",
                     "patch": shown or None,
                     # Cut here, or already cut by the bounded read the change came through.

@@ -191,6 +191,28 @@ class Guard(Repo):
         git(path, "commit", "-q", "-m", "agent commit")
         self.assertNotEqual(W.guard(path, "run1"), staged, "git commit is detected")
 
+    def test_an_edit_only_its_content_tells_is_in_the_tree_a_review_and_a_merge_are_held_to(self):
+        """A file rewritten to the same size in the second its index was written looks unchanged by its stat.
+        Git's own index knows to compare content then, and the private copy the tree is computed on must."""
+        import time
+        from unittest import mock
+        path = self.worktree("run1", change=False)
+        git(path, "config", "core.trustctime", "false")     # what ctime tells differs by host
+        index = git(path, "rev-parse", "--path-format=absolute", "--git-path", "index").strip()
+        app, then = os.path.join(path, "app.txt"), time.time() - 30
+        os.utime(app, (then, then))
+        git(path, "update-index", "--refresh")
+        os.utime(index, (then, then))                        # written in the second its file was
+        write(app, "two\n")                                  # the same four bytes long
+        os.utime(app, (then, then))
+        edit = git(path, "hash-object", "app.txt").strip()
+        self.assertEqual(git(path, "rev-parse", W.work_tree(path) + ":app.txt").strip(), edit)
+        # Control: a copy stamped when it was made trusts the stat, and the edit is not in its tree.
+        with mock.patch.object(W.shutil, "copy2", shutil.copyfile):
+            stale = git(path, "rev-parse", W.work_tree(path) + ":app.txt").strip()
+        self.assertEqual(stale, git(path, "rev-parse", "HEAD:app.txt").strip())
+        self.assertNotEqual(stale, edit)
+
     def test_a_role_that_stages_fails_its_stage(self):
         path = self.worktree("run1")
 
@@ -285,55 +307,202 @@ class View(Repo):
 
 
 class ReviewDiff(Repo):
-    """Reading a change for review: bounded, so no payload can be refused, and joining back exactly."""
+    """Reading a change: one snapshot named by its base and tree, each file by its exact path, every read of it
+    the same bytes whatever the worktree or the repository's settings do."""
 
-    def test_a_large_change_is_read_in_parts_that_join_back_into_the_whole_patch(self):
-        path = self.worktree("run1", change=False)
+    DEEP = "src/a-rather-long-directory-name/and-another-one-below-it/2026-09-30_1627-audit_the_codex_adapter_s_output.md"
+
+    def setUp(self):
+        super().setUp()
+        write(os.path.join(self.repo, "docs", "old name.md"), "".join("line %d of the guide\n" % n for n in range(1, 31)))
+        write(os.path.join(self.repo, "gone.txt"), "about to go\n")
+        write(os.path.join(self.repo, "long.txt"), "".join("line %d\n" % n for n in range(1, 41)))
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "more files")
+        self.path = self.worktree("run1", change=False)
+
+    def edit(self):
+        """A change holding every kind of file a list must say: added deep down, spaced, renamed and edited,
+        binary, deleted and modified."""
+        write(os.path.join(self.path, *self.DEEP.split("/")), "new\n")
+        write(os.path.join(self.path, "with space.txt"), "spaced\n")
+        os.rename(os.path.join(self.path, "docs", "old name.md"), os.path.join(self.path, "docs", "new name.md"))
+        with open(os.path.join(self.path, "docs", "new name.md"), "a", encoding="utf-8", newline="") as fh:
+            fh.write("one more line\n")
+        with open(os.path.join(self.path, "image.bin"), "wb") as fh:
+            fh.write(b"\x00\x01binary\x00")
+        os.remove(os.path.join(self.path, "gone.txt"))
+        write(os.path.join(self.path, "long.txt"),
+              "".join(("line %d\n" % n) if n != 20 else "changed 20\n" for n in range(1, 41)))
+
+    def diff(self, *args):
+        """git's own bytes of a diff, read by this test rather than the code under test."""
+        return subprocess.run(["git", "-C", self.path, "diff"] + list(args), capture_output=True, check=True).stdout
+
+    def test_each_changed_file_is_listed_by_its_exact_path(self):
+        self.edit()
+        read = W.review_diff(self.path)
+        self.assertRegex(read["base"], r"^[0-9a-f]{40}$", "the worktree's HEAD, whole")
+        self.assertEqual(read["base"], git(self.path, "rev-parse", "HEAD").strip())
+        self.assertEqual(read["tree"], W.work_tree(self.path), "the tree `git add -A` makes, and nothing staged")
+        self.assertEqual(git(self.path, "diff", "--cached", "--name-only"), "", "reading staged nothing")
+        files = {entry["path"]: entry for entry in read["files"]}
+        self.assertEqual(files, {
+            self.DEEP: {"path": self.DEEP, "old": None, "status": "A", "added": 1, "removed": 0, "binary": False},
+            "with space.txt": {"path": "with space.txt", "old": None, "status": "A", "added": 1, "removed": 0,
+                               "binary": False},
+            "docs/new name.md": {"path": "docs/new name.md", "old": "docs/old name.md", "status": "R", "added": 1,
+                                 "removed": 0, "binary": False},
+            "image.bin": {"path": "image.bin", "old": None, "status": "A", "added": None, "removed": None,
+                          "binary": True},
+            "gone.txt": {"path": "gone.txt", "old": None, "status": "D", "added": 0, "removed": 1, "binary": False},
+            "long.txt": {"path": "long.txt", "old": None, "status": "M", "added": 1, "removed": 1, "binary": False}})
+        self.assertEqual(read["files_total"], 6)
+        # Control: git's stat, which the page showed, cuts the long path.
+        self.assertNotIn(self.DEEP, read["summary"])
+        self.assertIn("...", read["summary"])
+
+    def test_a_file_is_read_whole_and_alone_or_its_changes_only_past_the_bound(self):
+        self.edit()
+        read = W.review_diff(self.path)
+        one = W.review_diff(self.path, base=read["base"], tree=read["tree"], file="long.txt")
+        self.assertEqual((one["base"], one["tree"], one["file"]["path"], one["whole"]),
+                         (read["base"], read["tree"], "long.txt", True))
+        lines = one["patch"].splitlines()
+        self.assertEqual(sum(line.startswith("diff --git ") for line in lines), 1, "that file alone")
+        self.assertEqual([line for line in lines if line.startswith("@@")], ["@@ -1,40 +1,40 @@"],
+                         "the whole file, every unchanged line with it")
+        renamed = W.review_diff(self.path, base=read["base"], tree=read["tree"], file="docs/new name.md")
+        self.assertIn("rename from docs/old name.md", renamed["patch"], "a rename read by both its paths")
+        self.assertIn("+one more line", renamed["patch"])
+        # Whether a file is read whole is decided from its sizes before any diff runs: a large file with one
+        # change never has its whole diff made, only to be thrown away.
+        calls = []
+        run = subprocess.run
+
+        def recorded(argv, *args, **kwargs):
+            calls.append(list(argv))
+            return run(argv, *args, **kwargs)
+        saved = W.FILE_LIMIT
+        self.addCleanup(setattr, W, "FILE_LIMIT", saved)
+        self.addCleanup(setattr, W.subprocess, "run", run)
+        W.subprocess.run = recorded
+        size = os.path.getsize(os.path.join(self.path, "long.txt"))
+        W.FILE_LIMIT = size - 1
+        short = W.review_diff(self.path, base=read["base"], tree=read["tree"], file="long.txt")
+        self.assertFalse(short["whole"], "past the bound, its changes only, and said so")
+        hunks = [line for line in short["patch"].splitlines() if line.startswith("@@")]
+        self.assertEqual(len(hunks), 1)
+        self.assertTrue(hunks[0].startswith("@@ -17,7 +17,7 @@"), hunks)
+        self.assertFalse([argv for argv in calls if W.WHOLE in argv], "no whole diff of a file past the bound")
+        calls.clear()
+        W.FILE_LIMIT = saved
+        self.assertTrue(W.review_diff(self.path, base=read["base"], tree=read["tree"], file="long.txt")["whole"])
+        self.assertTrue([argv for argv in calls if W.WHOLE in argv], "control: one well under the bound is read whole")
+
+    def test_a_list_too_long_for_one_read_goes_on_from_the_same_snapshot(self):
+        self.edit()
+        saved = W.FILES_LIMIT
+        W.FILES_LIMIT = 4
+        self.addCleanup(setattr, W, "FILES_LIMIT", saved)
+        first = W.review_diff(self.path)
+        self.assertEqual((len(first["files"]), first["files_total"]), (4, 6))
+        write(os.path.join(self.path, "later.txt"), "after the list was read\n")
+        rest = W.review_diff(self.path, base=first["base"], tree=first["tree"], files_from=4)
+        self.assertEqual((rest["base"], rest["tree"], rest["files_total"], rest["files_from"]),
+                         (first["base"], first["tree"], 6, 4))
+        listed = [entry["path"] for entry in first["files"] + rest["files"]]
+        self.assertEqual(sorted(listed), sorted([self.DEEP, "with space.txt", "docs/new name.md", "image.bin",
+                                                 "gone.txt", "long.txt"]),
+                         "every file of the snapshot once, the one written since in none")
+        self.assertNotIn("patch", rest, "a page of the list is the list alone")
+
+    def test_every_read_comes_from_the_snapshot_it_names_whatever_the_worktree_does(self):
+        self.edit()
         # A character that spans several bytes, laid so that a part's edge falls inside one.
-        write(os.path.join(path, "big.txt"), "".join("строка %d ✓\n" % number for number in range(4000)))
+        write(os.path.join(self.path, "big.txt"), "".join("строка %d ✓\n" % number for number in range(4000)))
+        first = W.review_diff(self.path)
+        base, tree = first["base"], first["tree"]
+        # The worktree moves on after the list was read: its terminals stay live.
+        write(os.path.join(self.path, "long.txt"), "rewritten\n")
+        write(os.path.join(self.path, "big.txt"), "gone\n")
+        one = W.review_diff(self.path, base=base, tree=tree, file="long.txt")
+        self.assertIn("+changed 20", one["patch"], "the file as it was listed")
+        self.assertNotIn("rewritten", one["patch"])
         saved = W.PATCH_CHUNK
         W.PATCH_CHUNK = 1000
-        try:
-            whole, parts, reads, offset = None, [], [], 0
-            while True:
-                read = W.review_diff(path, offset)
-                self.assertLessEqual(len(read["patch"].encode("utf-8")), W.PATCH_CHUNK)
-                parts.append(read["patch"])
-                reads.append(read)
-                whole = read["total"]
-                if read["next"] >= read["total"]:
-                    break
-                self.assertGreater(read["next"], offset, "a part always moves forward")
-                offset = read["next"]
-        finally:
-            W.PATCH_CHUNK = saved
-        joined = "".join(parts)
+        self.addCleanup(setattr, W, "PATCH_CHUNK", saved)
+        parts, offset = [], 0
+        while True:
+            read = W.review_diff(self.path, offset, base=base, tree=tree)
+            self.assertLessEqual(len(read["patch"].encode("utf-8")), W.PATCH_CHUNK)
+            self.assertEqual((read["base"], read["tree"]), (base, tree), "every part names its snapshot")
+            parts.append(read["patch"])
+            if read["next"] >= read["total"]:
+                break
+            self.assertGreater(read["next"], offset, "a part always moves forward")
+            offset = read["next"]
         self.assertGreater(len(parts), 20, "the change is larger than one part")
-        self.assertEqual(len({read["snapshot"] for read in reads}), 1, "every part is of one change")
-        self.assertEqual(len(joined.encode("utf-8")), whole, "the parts are the whole patch, byte for byte")
-        self.assertEqual(joined, W.review_diff(path)["patch"][:len(joined)])
-        self.assertIn("строка 3999 ✓", joined, "and it reads as the text it is")
-
-    def test_a_change_edited_between_two_parts_is_a_different_snapshot(self):
-        path = self.worktree("run1", change=False)
-        write(os.path.join(path, "big.txt"), "".join("line %04d value\n" % number for number in range(500)))
-        first = W.review_diff(path, 0)
-        # Same size, different content: only the snapshot can tell the two changes apart.
-        write(os.path.join(path, "big.txt"),
-              "".join("line %04d VALUE\n" % number for number in range(500)))
-        second = W.review_diff(path, 0)
-        self.assertEqual(first["total"], second["total"], "the edit kept the patch exactly as long")
-        self.assertNotEqual(first["snapshot"], second["snapshot"],
-                            "a reader joining parts across this edit would show two changes as one")
+        self.assertEqual("".join(parts).encode("utf-8"),
+                         self.diff("--no-ext-diff", "--no-textconv", "--find-renames", "--no-color", base, tree),
+                         "the parts are the snapshot's whole patch, byte for byte")
+        self.assertNotEqual(W.review_diff(self.path)["tree"], tree, "control: read again, the change is new")
 
     def test_an_offset_inside_a_character_is_refused_not_mangled(self):
-        path = self.worktree("run1", change=False)
-        write(os.path.join(path, "big.txt"), "строка\n" * 50)
-        whole = W.review_diff(path, 0)["patch"].encode("utf-8")
+        write(os.path.join(self.path, "big.txt"), "строка\n" * 50)
+        first = W.review_diff(self.path)
+        whole = first["patch"].encode("utf-8")
         inside = next(i for i, byte in enumerate(whole) if byte & 0xC0 == 0x80)
         with self.assertRaises(RuntimeError) as caught:
-            W.review_diff(path, inside)
+            W.review_diff(self.path, inside, base=first["base"], tree=first["tree"])
         self.assertIn("inside a character", str(caught.exception))
+
+    def test_only_a_file_of_the_snapshot_is_read_and_its_path_is_never_a_pattern(self):
+        write(os.path.join(self.path, "[ab].txt"), "bracketed\n")
+        write(os.path.join(self.path, "a.txt"), "plain\n")
+        read = W.review_diff(self.path)
+        self.assertEqual(sorted(entry["path"] for entry in read["files"]), ["[ab].txt", "a.txt"])
+        one = W.review_diff(self.path, base=read["base"], tree=read["tree"], file="[ab].txt")
+        self.assertIn("+bracketed", one["patch"])
+        self.assertNotIn("plain", one["patch"], "`[ab].txt` named that file, never a pattern matching a.txt")
+        for asked in ("nope.txt", ":(glob)*", "*.txt", "", "../app.txt"):
+            with self.assertRaises(W.ChangeRefused, msg=asked) as caught:
+                W.review_diff(self.path, base=read["base"], tree=read["tree"], file=asked)
+            self.assertIn("is not a file of this change", str(caught.exception))
+
+    def test_the_repositorys_settings_add_no_helper_or_colour_and_keep_renames_found(self):
+        self.edit()
+        write(os.path.join(self.path, ".gitattributes"), "*.md diff=shout\n")
+        for key, value in (("diff.renames", "false"), ("color.ui", "always"),
+                           ("diff.shout.textconv", "sed s/^/CONVERTED:/")):
+            git(self.repo, "config", key, value)
+        read = W.review_diff(self.path)
+        renamed = [entry for entry in read["files"] if entry["path"] == "docs/new name.md"]
+        self.assertEqual([(entry["status"], entry["old"]) for entry in renamed], [("R", "docs/old name.md")])
+        one = W.review_diff(self.path, base=read["base"], tree=read["tree"], file="docs/new name.md")
+        for text in (read["patch"], one["patch"]):
+            self.assertNotIn("\x1b[", text, "no colour")
+            self.assertNotIn("CONVERTED:", text, "no text conversion")
+        # Control: the same reads without the explicit options follow the settings.
+        names = self.diff("--no-color", "--name-status", "-z", read["base"], read["tree"]).split(b"\0")
+        self.assertIn(b"docs/old name.md", names)
+        self.assertFalse([name for name in names if name.startswith(b"R")])
+        self.assertEqual(names[names.index(b"docs/old name.md") - 1], b"D", "a rename shown as a delete")
+        plain = self.diff(read["base"], read["tree"])
+        self.assertIn(b"\x1b[", plain)
+        self.assertIn(b"CONVERTED:", plain)
+
+    def test_a_tree_git_no_longer_holds_is_said_gone_and_a_name_that_is_no_object_refused(self):
+        with self.assertRaises(W.ChangeRefused) as caught:
+            W.review_diff(self.path, tree="0" * 40)
+        self.assertIn("no longer holds", str(caught.exception))
+        for asked in ("HEAD", "--output=x", "abc", "0" * 39):
+            with self.assertRaises(W.ChangeRefused, msg=asked) as caught:
+                W.review_diff(self.path, tree=asked)
+            self.assertIn("is not an object name", str(caught.exception))
+        head = git(self.path, "rev-parse", "HEAD").strip()
+        self.assertEqual(W.review_diff(self.path, base=head, tree=W.work_tree(self.path))["files"], [],
+                         "control: a pair git holds is read")
 
 
 class Merge(Repo):
@@ -460,6 +629,191 @@ class Merge(Repo):
         self.assertEqual(git(self.repo, "show", "develop:app.txt"), "one\nthe base moved\nrun1\n")
         history = git(self.repo, "log", "--format=%s", "develop").splitlines()
         self.assertIn("Merge develop into run1", history, "one reconciliation merge commit, no rebase")
+
+
+class Closeout(Repo):
+    """A run whose engineer closed it out: what that closeout changed is read path by path, the tree it left is
+    exactly what a merge commits, and a change sent back is the one the architect verified again."""
+
+    PLAN = "todo/2026-09-15_1200-run1.md"
+    DONE = "todo/done/2026-09-15_1200-run1.md"
+    MESSAGES = ("2026-09-15_1200-run1: the change", "Merge 2026-09-15_1200-run1")
+
+    def at(self, path, name):
+        return os.path.join(path, *name.split("/"))
+
+    def closed(self):
+        """A run's worktree as its engineer's closeout left it — the todo moved to the done folder and cut, a
+        document edited — with the tree the architect verified before it and the tree it left."""
+        path = self.worktree("run1")
+        write(self.at(path, "docs/guide.md"), "the guide\n")
+        verified = W.work_tree(path)
+        os.remove(self.at(path, self.PLAN))
+        write(self.at(path, self.DONE), "**Status:** PASS 2026-09-15, as the engineer wrote it\nthe record\n")
+        write(self.at(path, "docs/guide.md"), "the guide\nwhat stays true\n")
+        return path, verified, W.work_tree(path)
+
+    def merge_closed(self, path, tree):
+        # No plan for the controller to finish: the closeout has.
+        return W.merge(self.repo, path, "run1", "develop", tree, None, os.path.join("todo", "done"), *self.MESSAGES)
+
+    def test_what_a_closeout_changed_is_read_path_by_path_a_move_as_its_two_ends(self):
+        path, verified, closeout = self.closed()
+        self.assertEqual(sorted(W.changed(path, verified, closeout)),
+                         [("A", self.DONE), ("D", self.PLAN), ("M", "docs/guide.md")])
+        self.assertEqual(W.changed(path, closeout, closeout), [], "control: a tree against itself changed nothing")
+
+    def test_a_merge_commits_exactly_the_tree_the_closeout_left(self):
+        path, _, closeout = self.closed()
+        # What the operator reads at the final gate is that tree: the todo where its closeout put it.
+        read = W.review_diff(path)
+        self.assertEqual(read["tree"], closeout)
+        self.assertEqual(sorted(entry["path"] for entry in read["files"]), ["app.txt", "docs/guide.md", self.DONE])
+        self.assertEqual(self.merge_closed(path, closeout)["result"], "merged")
+        self.assertEqual(git(self.repo, "rev-parse", "develop^2^{tree}").strip(), closeout,
+                         "the work commit is the tree the operator reviewed, byte for byte")
+        self.assertEqual(git(self.repo, "show", "develop:" + self.DONE),
+                         "**Status:** PASS 2026-09-15, as the engineer wrote it\nthe record\n")
+        self.assertNotIn(self.PLAN, git(self.repo, "ls-tree", "-r", "--name-only", "develop").split())
+        self.assertFalse(os.path.exists(path), "and everything the run owned is gone, as after any merge")
+        # Control: a run with no closeout has the controller finish its plan, so its commit is not the tree
+        # the merge was handed.
+        other = self.worktree("run2")
+        handed = W.work_tree(other)
+        self.assertEqual(self.merge("run2", other)["result"], "merged")
+        self.assertNotEqual(git(self.repo, "rev-parse", "develop^2^{tree}").strip(), handed)
+
+    def test_a_change_made_after_the_closeout_is_refused_and_nothing_is_committed_or_merged(self):
+        path, _, closeout = self.closed()
+        write(self.at(path, "app.txt"), "edited after the closeout\n")
+        with self.assertRaisesRegex(W.MergeRefused, "no longer the change that was offered"):
+            self.merge_closed(path, closeout)
+        self.assertEqual(self.merges_on_develop(), [])
+        self.assertEqual(git(self.repo, "rev-list", "--count", "develop..run1").strip(), "0", "no work commit either")
+        self.assertEqual(git(path, "diff", "--cached", "--name-only").strip(), "", "and nothing was staged")
+        with open(self.at(path, "app.txt"), encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "edited after the closeout\n", "the worktree is as it was found")
+
+    def test_a_closed_out_merge_whose_commit_failed_merges_when_continued(self):
+        path, _, closeout = self.closed()
+        hooks = git(self.repo, "config", "core.hooksPath").strip()
+        marker = os.path.join(self.tmp, "failed-once").replace("\\", "/")
+        write(os.path.join(hooks, "pre-commit"), "#!/bin/sh\n[ -e '%s' ] && exit 0\ntouch '%s'\nexit 1\n"
+              % (marker, marker))
+        os.chmod(os.path.join(hooks, "pre-commit"), 0o755)
+        with self.assertRaises(W.GitError):
+            self.merge_closed(path, closeout)
+        self.assertTrue(os.path.exists(self.at(path, self.DONE)), "the closed-out todo stays where its engineer put it")
+        self.assertIn(self.DONE, git(path, "diff", "--cached", "--name-only").split(),
+                      "the precondition: the failed attempt left the change staged")
+        # Tried again on a worktree that moved meanwhile, it is refused with nothing left staged for a role to find.
+        write(self.at(path, "app.txt"), "typed after the failed merge\n")
+        with self.assertRaises(W.MergeRefused):
+            self.merge_closed(path, closeout)
+        self.assertEqual(git(path, "diff", "--cached", "--name-only").strip(), "")
+        write(self.at(path, "app.txt"), "one\nrun1\n")
+        self.assertEqual(self.merge_closed(path, closeout)["result"], "merged")
+        self.assertEqual(git(self.repo, "rev-parse", "develop^2^{tree}").strip(), closeout)
+
+    def test_a_conflict_is_reopened_with_its_todo_where_the_resolving_roles_are_asked_to_read_it(self):
+        path, verified, closeout = self.closed()
+        write(os.path.join(self.repo, "app.txt"), "one\nthe base moved\n")
+        git(self.repo, "commit", "-q", "-am", "base moved")
+        result = self.merge_closed(path, closeout)
+        self.assertEqual((result["result"], result["files"]), ("conflict", ["app.txt"]))
+        self.assertFalse(os.path.exists(self.at(path, self.PLAN)),
+                         "the precondition: the todo is closed out in the run's commit, gone from its path")
+        # Before the engineer's turn on the conflict.
+        self.assertEqual(W.reopen(path, closeout, verified), [])
+        with open(self.at(path, self.PLAN), encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "**Status:** DRAFT\nplan\n", "the todo as the architect verified it")
+        self.assertFalse(os.path.exists(self.at(path, self.DONE)))
+        with open(self.at(path, "app.txt"), encoding="utf-8") as fh:
+            self.assertIn("<<<<<<<", fh.read(), "the conflict is still the engineer's to resolve")
+        self.assertTrue(git(path, "rev-parse", "--verify", "MERGE_HEAD").strip(), "and the merge is still under way")
+        # Resolved, verified, closed out again and merged: one todo, where its repository keeps it finished.
+        write(self.at(path, "app.txt"), "one\nthe base moved\nrun1\n")
+        resolved = W.work_tree(path)
+        os.remove(self.at(path, self.PLAN))
+        write(self.at(path, self.DONE), "**Status:** PASS 2026-09-15\nthe record\n")
+        final = W.work_tree(path)
+        self.assertEqual(sorted(W.changed(path, resolved, final)), [("A", self.DONE), ("D", self.PLAN)])
+        self.assertEqual(self.merge_closed(path, final)["result"], "merged")
+        tree = git(self.repo, "ls-tree", "-r", "--name-only", "develop").split()
+        self.assertIn(self.DONE, tree)
+        self.assertNotIn(self.PLAN, tree)
+        self.assertIn("Merge develop into run1", git(self.repo, "log", "--format=%s", "develop").splitlines())
+
+    def test_a_todo_its_repository_deletes_comes_back_from_the_verified_tree_when_reopened(self):
+        """Deleted by its closeout, it is in no folder and no commit: the tree the architect verified holds it."""
+        path = self.worktree("run1")
+        verified = W.work_tree(path)
+        os.remove(self.at(path, self.PLAN))
+        final = W.work_tree(path)
+        self.assertEqual(W.holds(path, final, [self.PLAN]), [])
+        self.assertEqual(W.reopen(path, final, verified), [])
+        with open(self.at(path, self.PLAN), encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "**Status:** DRAFT\nplan\n")
+        self.assertEqual(W.work_tree(path), verified)
+
+    def test_which_paths_lie_outside_the_todo_folders_and_a_repositorys_documents_is_gits_own_matching(self):
+        path = self.worktree("run1")
+        names = ("README.md", "app/part/README.md", "docs/guide.md", "app/part/docs/structure.md", "roles/engineer.md",
+                 "skills/review/SKILL.md", "AGENTS.md", "app/part/main.py", "docs.md", "todo[1]/note.md")
+        for name in names:
+            write(self.at(path, name), "one\n")
+        before = W.work_tree(path)
+        for name in names:
+            write(self.at(path, name), "two\n")
+        os.remove(self.at(path, self.PLAN))
+        write(self.at(path, self.DONE), "moved\n")
+        after = W.work_tree(path)
+
+        def outside(folders, patterns):
+            return sorted(name for _, name in W.changed(path, before, after, folders, patterns))
+        behaviour = ["AGENTS.md", "app/part/main.py", "docs.md", "roles/engineer.md", "skills/review/SKILL.md",
+                     "todo[1]/note.md"]
+        self.assertEqual(outside(("todo", "todo\\done"), ("**/README.md", "**/docs/**")), behaviour,
+                         "a README and a docs folder wherever they are; a persona, a skill and code are neither")
+        self.assertEqual(outside(("todo",), ("README.md", "docs/")),
+                         sorted(behaviour + ["app/part/README.md", "app/part/docs/structure.md"]),
+                         "a file and a folder named plainly are that file and that folder")
+        self.assertEqual(outside(("todo[1]", None), ()),
+                         sorted(set(names) - {"todo[1]/note.md"} | {self.PLAN, self.DONE}),
+                         "a folder is taken literally, never as a pattern, and one a repository has not is none")
+        self.assertEqual(W.holds(path, after, [self.PLAN, self.DONE, "todo[1]/note.md", "docs"]),
+                         [self.DONE, "todo[1]/note.md"], "a file a tree holds, by its exact name")
+
+    def test_a_reopened_change_is_the_tree_the_architect_verified_and_nothing_is_staged(self):
+        path, verified, closeout = self.closed()
+        self.assertEqual(W.reopen(path, closeout, verified), [])
+        self.assertEqual(W.work_tree(path), verified)
+        with open(self.at(path, self.PLAN), encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "**Status:** DRAFT\nplan\n", "the todo is back where its roles read it")
+        self.assertFalse(os.path.exists(self.at(path, self.DONE)))
+        self.assertEqual(git(path, "diff", "--cached", "--name-only").strip(), "", "files are written, none staged")
+        self.assertEqual(W.reopen(path, closeout, verified), [], "reopened again, it is found as it should be")
+        self.assertEqual(W.work_tree(path), verified)
+
+    def test_a_reopen_keeps_what_was_changed_again_after_the_closeout(self):
+        path, verified, closeout = self.closed()
+        write(self.at(path, "docs/guide.md"), "the guide\nwhat stays true\nand what was typed at the gate\n")
+        write(self.at(path, "app.txt"), "typed at the gate too\n")
+        self.assertEqual(W.reopen(path, closeout, verified), ["docs/guide.md"],
+                         "a path changed again since is someone's later work, and is said")
+        with open(self.at(path, "docs/guide.md"), encoding="utf-8") as fh:
+            self.assertIn("typed at the gate", fh.read())
+        with open(self.at(path, "app.txt"), encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "typed at the gate too\n", "what the closeout never touched is left alone")
+        self.assertTrue(os.path.exists(self.at(path, self.PLAN)), "the todo is back all the same")
+        self.assertFalse(os.path.exists(self.at(path, self.DONE)))
+
+    def test_a_reopen_that_cannot_read_the_verified_tree_changes_nothing(self):
+        path, _, closeout = self.closed()
+        before = W.work_tree(path)
+        with self.assertRaises(W.GitError):
+            W.reopen(path, closeout, "0" * 40)
+        self.assertEqual(W.work_tree(path), before, "a tree git does not hold is not a tree without the todo")
 
 
 class Adopt(Repo):

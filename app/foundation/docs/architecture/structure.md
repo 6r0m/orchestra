@@ -11,8 +11,8 @@ stages of a run are, and the flows a run may take them in.
 - `paths` — the one derivation of the checkout root, the runtime root a run writes under, and the directory this deployment keeps credentials in.
 - `envpath` — where each checkout's uv-managed environment lives on this host, and its guarded removal.
 - `policy` — the data-only schema and loader for the shared settings plus sparse local patch, or the complete file `ORCHESTRA_SETTINGS` names: roles, agent profiles, review budgets and their bounded role prompt additions, target hosts, and the one resolver for a role's persona file. Adapter-specific validation and run-policy composition belong to `application.settings`.
-- `stages` — the five stages, which role runs each, which work each review judges, which work answers with its product, what each asks its role for, and the verdicts a review may answer with.
-- `flows` — the flows in `flows/` a run may follow, the rules each keeps, the one grammar of a flow's name, the shape a run is handed its flow in — `{name, steps}` — the order runs took before flows, and how a run takes a flow's steps: each work, the review that judges it and the operator's step after them.
+- `stages` — the six stages, which role runs each, which work each review judges, which work answers with its product, which work makes a build final, what each asks its role for, and the verdicts a review may answer with.
+- `flows` — the flows in `flows/` a run may follow, the rules each keeps — those of every run's recorded steps, and the one more a flow read to start a run keeps — the one grammar of a flow's name, the shape a run is handed its flow in — `{name, steps}` — the order runs took before flows, and how a run takes a flow's steps: each work, the review that judges it and the operator's step after them.
 
 ## Does not own
 

@@ -586,12 +586,12 @@ class Lifecycle(unittest.TestCase):
                  "worktree_path": repo, "todo_path": os.path.join(repo, "todo.md"),
                  "agent_sessions": {"architect": "thread-1"}}
 
-        def review(stage, edit):
+        def review(stage, edit, verdict="PASS"):
             def runner(*args, **kwargs):
                 if edit:
                     with open(os.path.join(repo, "app.txt"), "a") as fh:
                         fh.write("typed while the architect judged\n")
-                return 0, codex_review_resumed("PASS")
+                return 0, codex_review_resumed(verdict)
             host = activities.Activities(runner=runner, git=worktrees, telemetry=None)
             return host.run_role({"stage": stage, "state": state, "policy": policy})
 
@@ -605,9 +605,20 @@ class Lifecycle(unittest.TestCase):
             self.assertEqual(passed["verdict"], "PASS", "control: an untouched worktree passes")
             self.assertEqual(passed.get("verified_tree"), before if stage == "verify" else None,
                              "only the verified change is what a merge may commit")
+            self.assertEqual(passed["judged_tree"], before, "the tree it judged, kept for the run's history")
             with self.assertRaises(Exception) as caught:
                 review(stage, edit=True)
             self.assertIn("changed while", str(caught.exception), stage)
+            # Any other verdict routes as it always has, but names a tree only when it is the one the architect read.
+            with open(os.path.join(repo, "app.txt"), "w") as fh:
+                fh.write("one\nverified\n")
+            sent_back = review(stage, edit=True, verdict="PATCH")
+            self.assertEqual(sent_back["verdict"], "PATCH", "a change while it judged does not fail the step")
+            self.assertNotIn("judged_tree", sent_back, "a tree that moved under the review is not what it judged")
+            with open(os.path.join(repo, "app.txt"), "w") as fh:
+                fh.write("one\nverified\n")
+            self.assertEqual(review(stage, edit=False, verdict="PATCH")["judged_tree"], before,
+                             "control: an untouched worktree's tree is the one it judged")
 
     def test_a_step_failed_by_its_checks_leaves_no_agent(self):
         ended = self.live("architect")
@@ -624,6 +635,24 @@ class Lifecycle(unittest.TestCase):
 
 
 class Hook(unittest.TestCase):
+    def test_attention_events_keep_only_status_not_tool_input_or_notification_text(self):
+        events = os.path.join(tempfile.mkdtemp(prefix="orchestra-hook-"), "turn.events")
+        self.addCleanup(shutil.rmtree, os.path.dirname(events), True)
+        for label, payload in (("Notification", {"session_id": "s1", "notification_type": "permission_prompt",
+                                                 "message": "private"}),
+                               ("PostToolUse", {"session_id": "s1", "tool_name": "Read",
+                                                "tool_input": {"file_path": "private"}, "tool_response": "private"}),
+                               ("PostToolUseFailure", {"tool_name": "Bash", "tool_input": {"command": "private"},
+                                                       "error": "private"})):
+            done = subprocess.run([sys.executable, terminal.TURN_HOOK, events, label, "stdin"],
+                                  input=json.dumps(payload).encode("utf-8"), capture_output=True)
+            self.assertEqual(done.returncode, 0)
+        with open(events, encoding="utf-8") as stream:
+            self.assertEqual([json.loads(line) for line in stream],
+                             [{"_hook": "Notification", "session_id": "s1", "notification_type": "permission_prompt"},
+                              {"_hook": "PostToolUse", "session_id": "s1"},
+                              {"_hook": "PostToolUseFailure"}])
+
     def test_a_payload_on_stdin_is_read_as_utf8_whatever_the_locale(self):
         # Claude pipes its hook payload as UTF-8; a Windows locale such as cp1251 would decode it wrongly.
         events = os.path.join(tempfile.mkdtemp(prefix="orchestra-hook-"), "turn.events")

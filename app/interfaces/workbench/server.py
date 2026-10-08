@@ -4,7 +4,8 @@
 
 It serves `static/` beside it and a small JSON API over `app.application` on `http://127.0.0.1:<workbench_port>`:
 the stack's reading and its start, stop and restart; the runs and what each is doing now, a run's
-status and timeline, its change; starting a run, answering its stop, stopping or force-terminating
+status and timeline, its recorded turn inputs and outputs, its change; starting a run, answering its
+stop, stopping or force-terminating
 it, and removing what a closed run kept; and the settings, read and applied through
 `app.application.settings`, which reach only the runs started after them. The page opens each run's agent terminals directly on the
 worker of the run's host (`app.agents.terminal`). It holds no state of its own: stopping it changes
@@ -35,7 +36,10 @@ from app.application import stack
 from app.foundation import flows
 from app.foundation import paths
 from app.foundation import policy as P
+from app.foundation import stages
 from app.workspace import repos
+from app.agents import adapters
+from app.agents import nodes
 from app.agents import terminal
 
 # The page is this server's own, served from beside it.
@@ -54,6 +58,7 @@ STATIC = {"/": ("index.html", "text/html; charset=utf-8"),
           "/rail.js": ("rail.js", JS),
           "/run.js": ("run.js", JS),
           "/change.js": ("change.js", JS),
+          "/diff.js": ("diff.js", JS),
           "/terminals.js": ("terminals.js", JS),
           "/worktrees.js": ("worktrees.js", JS),
           "/settings.js": ("settings.js", JS),
@@ -61,6 +66,7 @@ STATIC = {"/": ("index.html", "text/html; charset=utf-8"),
           "/vendor/xterm.css": ("vendor/xterm/xterm.css", "text/css; charset=utf-8")}
 RUN_ID = re.compile(r"^[\w-]{1,64}$")
 MAX_BODY = 1 << 20
+MAX_TURN_FILE = 8 << 20
 ANSWER_KEYS = {"stop", "action", "text", "confirm"}
 # The page reads the stack three ways every few seconds, and a Windows worker's process takes about
 # half a second to read: every request shares one reading at most this old, and a stack action drops it.
@@ -68,6 +74,58 @@ READING_SECONDS = 3
 # A run's status is a query its own workflow worker answers; while that worker is down the page still
 # shows the run, from its listing, after waiting this long for the answer.
 STATUS_SECONDS = datetime.timedelta(seconds=5)
+
+
+def agent_prompt(view, rdir=None):
+    """Whether the active turn has reported a vendor dialog still waiting in its terminal, as its kind reads
+    the turn's events — those of its retry in a fresh session when that is this turn's and the newer."""
+    if view.get("state") != "running" or view.get("stage") not in stages.STAGE_ROLE:
+        return False
+    episode, round_number = view.get("episode"), view.get("round")
+    if not isinstance(episode, int) or episode < 1 or not isinstance(round_number, int) or round_number < 0:
+        return False
+    rdir = rdir or terminal.run_dir(view["run_id"])
+    name = terminal.turn_name(view["stage"], episode, round_number + 1)
+    files = [attempt["events"] for attempt in terminal.turn_attempts(rdir, name)]
+    if os.path.islink(rdir) or os.path.islink(os.path.dirname(files[0])):
+        return False
+    try:
+        path = max((path for path in files if not os.path.islink(path) and os.path.isfile(path)),
+                   key=os.path.getmtime)
+        with open(path, "rb") as stream:
+            stream.seek(max(0, os.fstat(stream.fileno()).st_size - 65536))
+            lines = stream.read().splitlines()
+    except (FileNotFoundError, OSError, ValueError):
+        return False
+    events = []
+    for line in lines:
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        # Only a hook's object is an event; a line cut by the tail, or anything else, is not.
+        if isinstance(event, dict):
+            events.append(event)
+    return adapters.waiting(events)
+
+
+def turn_parts(path, prompt):
+    """The parts a turn's prompt was built from, as recorded beside it — only while each is a part a prompt has
+    and they render to that prompt, byte for byte; None for a turn with none, or with parts that are unreadable or
+    no longer its prompt's."""
+    if prompt is None or os.path.islink(path):
+        return None
+    try:
+        with open(path, "rb") as fh:
+            saved = fh.read(MAX_TURN_FILE + 1)
+        parts = json.loads(saved.decode("utf-8")) if len(saved) <= MAX_TURN_FILE else None
+    except (OSError, ValueError):
+        return None
+    if not isinstance(parts, list) or not all(
+            isinstance(part, dict) and set(part) == {"part", "text"} and part["part"] in nodes.PARTS
+            and isinstance(part["text"], str) for part in parts):
+        return None
+    return parts if nodes.render(parts) == prompt else None
 
 
 class Loop:
@@ -210,13 +268,25 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
                     run_id = parts[1]
                     if len(parts) == 2:
                         return self._send(*self._run(run_id))
+                    if parts[2:] == ["turn"]:
+                        return self._send(*self._turn(run_id))
+                    if parts[2:] == ["history"]:
+                        record = call(lambda client: runs.history(client, run_id))
+                        if record is None:
+                            return self._send(HTTPStatus.NOT_FOUND, {"error": "no run %r" % run_id})
+                        return self._send(HTTPStatus.OK, record)
                     if parts[2:] == ["diff"]:
-                        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
-                        asked = (query.get("offset") or ["0"])[0]
-                        if not asked.isdigit():
-                            return self._send(HTTPStatus.BAD_REQUEST, {"error": "offset must be a whole number"})
-                        return self._send(HTTPStatus.OK,
-                                          call(lambda client: runs.review_diff(client, run_id, int(asked))))
+                        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query, keep_blank_values=True)
+                        asked, files_from = ((query.get(key) or [default])[0]
+                                             for key, default in (("offset", "0"), ("files_from", None)))
+                        if not asked.isdigit() or not (files_from is None or files_from.isdigit()):
+                            return self._send(HTTPStatus.BAD_REQUEST,
+                                              {"error": "offset and files_from must be whole numbers"})
+                        # Which snapshot, and which of its files: its host's git checks every one of them.
+                        base, tree, file = ((query.get(key) or [None])[0] for key in ("base", "tree", "file"))
+                        return self._send(HTTPStatus.OK, call(lambda client: runs.review_diff(
+                            client, run_id, int(asked), base=base, tree=tree, file=file,
+                            files_from=None if files_from is None else int(files_from))))
                 return self._send(HTTPStatus.NOT_FOUND, {"error": "not found"})
             except Exception as exc:                # noqa: BLE001 - every failure is answered
                 return self._error(exc)
@@ -321,6 +391,7 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
                         shown = runs.view(run, await runs.status(client, run["run_id"], STATUS_SECONDS), health)
                     except Exception:               # noqa: BLE001 - a run whose status fails still lists
                         return runs.view(run, None, health)
+                    shown["agent_prompt"] = agent_prompt(shown)
                     if run["execution"] != "RUNNING":
                         finished[run["run_id"]] = shown
                     return shown
@@ -372,6 +443,7 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
             status["view"] = runs.view(execution or {"run_id": run_id, "execution": None, "started": None,
                                                      "closed": None, "task_queue": None},
                                        None if unreadable else status, health)
+            status["view"]["agent_prompt"] = agent_prompt(status["view"])
             status["view"]["kept"] = not unreadable and runs.not_kept(execution, status, removal) is None
             if status["view"]["kept"]:
                 # What its Worktrees view is opened on: the repository as the worktree view takes it again.
@@ -382,6 +454,58 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
             status["links"] = {"temporal": "%s/namespaces/%s/workflows/%s" % (TEMPORAL_UI, runs.NAMESPACE, run_id),
                                "trace": links(trace_id) if links and trace_id else None}
             return HTTPStatus.OK, status
+
+        def _turn(self, run_id):
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            stage = (query.get("stage") or [""])[0]
+            episode = (query.get("episode") or [""])[0]
+            round_number = (query.get("round") or [""])[0]
+            if (stage not in stages.STAGE_ROLE
+                    or not episode.isdecimal() or not round_number.isdecimal()
+                    or len(episode) > 9 or len(round_number) > 9
+                    or int(episode) < 1 or int(round_number) < 1):
+                return HTTPStatus.BAD_REQUEST, {"error": "name a completed turn by stage, episode and round"}
+            start = call(lambda client: runs.started(client, run_id))
+            if start is None:
+                return HTTPStatus.NOT_FOUND, {"error": "no run %r" % run_id}
+            # The kind that wrote the turn's record reads it: the run's own, as its start names it — never
+            # whichever kind would take the record's words for its own.
+            role = ((start.get("policy") or {}).get("roles") or {}).get(stages.STAGE_ROLE[stage])
+            try:
+                kind = adapters.for_role(role) if role else None
+            except adapters.Refused:
+                kind = None
+
+            rdir = terminal.run_dir(run_id)
+            name = terminal.turn_name(stage, int(episode), int(round_number))
+            logs = os.path.dirname(terminal.turn_files(rdir, name)["prompt"])
+            if os.path.islink(rdir) or os.path.islink(logs):
+                raise runs.Refusal("the turn's log directory cannot be followed through a link")
+            attempts = []
+            for index, files in enumerate(terminal.turn_attempts(rdir, name)):
+                record = {"attempt": "retried with a new session" if index else "original"}
+                for key, ext in (("input", "prompt"), ("output", "out")):
+                    path = files[ext]
+                    if os.path.islink(path):
+                        raise runs.Refusal("a turn log cannot be followed through a link")
+                    try:
+                        with open(path, "rb") as fh:
+                            saved = fh.read(MAX_TURN_FILE + 1)
+                        if len(saved) > MAX_TURN_FILE:
+                            raise runs.Refusal("this turn's %s is too large for the page; read its local log" % key)
+                        record[key] = saved.decode("utf-8")
+                    except FileNotFoundError:
+                        record[key] = None
+                if record["output"] is not None and kind is not None:
+                    message = kind.final_message(record["output"])
+                    if message != record["output"]:
+                        record["message"] = message
+                parts = turn_parts(files["parts"], record["input"])
+                if parts is not None:
+                    record["parts"] = parts
+                if record["input"] is not None or record["output"] is not None:
+                    attempts.append(record)
+            return HTTPStatus.OK, {"attempts": attempts}
 
     return Handler
 

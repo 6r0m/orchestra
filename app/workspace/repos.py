@@ -31,10 +31,16 @@ VARIABLE = "ORCHESTRA_REPOS"
 DESCRIPTORS = os.path.join(paths.REPO, ".orchestra", "repos.json")
 TARGETS = ("wsl", "windows")
 ENTRY_KEYS = {"path", "target", "base_branch", "worktree_root", "todo_dir", "todo_done_dir", "todo_name",
-              "lfs_pointers"}
+              "closeout_docs", "lfs_pointers"}
 # True keeps Git LFS files in a run's worktree as pointers instead of copying every asset
 # out of the repository's LFS store, for a repository whose assets a run does not need.
 FLAGS = {"lfs_pointers"}
+# The documents a closeout may bring up to date once the architect has passed the build, each a path as
+# git globs it — `docs/` is that folder, `**/README.md` that file wherever it is. Which files are
+# documents is the repository's to say, never a file's type: a persona, a skill or an agent's instructions
+# is Markdown too, and is behaviour. So nothing here names any: an entry that lists none, or no entry at
+# all, leaves a closeout the todo alone.
+PATHS = {"closeout_docs"}
 # Where a run's plan is written, where it moves once merged, and its name: this
 # repository's own convention unless the entry states the repository's.
 TODO_DEFAULTS = {"todo_dir": "todo", "todo_done_dir": "todo/done", "todo_name": "%Y-%m-%d_%H%M-{slug}"}
@@ -96,7 +102,7 @@ def load(path=None):
             raise Refused("repository %r: unknown keys %s" % (name, ", ".join(sorted(unknown))))
         if "target" in entry and entry["target"] not in TARGETS:
             raise Refused("repository %r: target must be one of %s" % (name, ", ".join(TARGETS)))
-        for key in ENTRY_KEYS - {"path", "target"} - FLAGS:
+        for key in ENTRY_KEYS - {"path", "target"} - FLAGS - PATHS:
             if key in NULLABLE and key in entry and entry[key] is None:
                 continue
             if key in entry and not (isinstance(entry[key], str) and entry[key]):
@@ -104,7 +110,18 @@ def load(path=None):
         for key in FLAGS:
             if key in entry and not isinstance(entry[key], bool):
                 raise Refused("repository %r: %s must be true or false" % (name, key))
+        for key in PATHS:
+            if key in entry and not (isinstance(entry[key], list) and all(_inside(each) for each in entry[key])):
+                raise Refused("repository %r: %s must list paths inside the repository, as git globs them — "
+                              "`docs/`, `**/README.md`" % (name, key))
     return raw
+
+
+def _inside(path):
+    """Whether `path` names something inside a repository and nothing else: no way out of it, and nothing
+    git would read as an option or as pathspec magic."""
+    return (isinstance(path, str) and bool(path.strip()) and "\\" not in path and path[0] not in "/:-"
+            and ".." not in path.split("/"))
 
 
 def windows_path(path):
@@ -226,5 +243,6 @@ def resolve(selected, target_root, which=shutil.which):
         raise Refused("the worktree root %s is not on a Windows drive: %s" % (root, UNC_REASON))
     resolved = {"repo_path": path, "base_branch": base, "worktree_root": root}
     resolved.update({key: selected.get(key, value) for key, value in TODO_DEFAULTS.items()})
+    resolved["closeout_docs"] = list(selected.get("closeout_docs", ()))
     resolved["lfs_pointers"] = selected.get("lfs_pointers", False)
     return resolved

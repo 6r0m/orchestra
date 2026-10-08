@@ -119,6 +119,14 @@ class Refusals(Layout):
         self.assertEqual((resolved["todo_dir"], resolved["todo_name"], resolved["todo_done_dir"]),
                          ("todo/00_current", "%Y%m%d-%H%M_{slug}", "todo/done"))
 
+    def test_the_documents_a_closeout_may_change_are_the_ones_an_entry_names_and_no_others(self):
+        self.branch("develop")
+        self.assertEqual(self.resolve()["closeout_docs"], [],
+                         "no entry names any: a closeout has the todo alone, and no file is a document by its name")
+        self.assertEqual(self.resolve(dict(self.selected, closeout_docs=["README.md", "handbook/"]))["closeout_docs"],
+                         ["README.md", "handbook/"])
+        self.assertEqual(self.resolve(dict(self.selected, closeout_docs=[]))["closeout_docs"], [])
+
 
 class Selection(unittest.TestCase):
     def setUp(self):
@@ -207,6 +215,24 @@ class Selection(unittest.TestCase):
             json.dump({"tool": {"path": self.tmp, "todo_dir": None}}, fh)
         with self.assertRaisesRegex(repos.Refused, "non-empty string"):
             repos.load(path)
+
+    def test_a_closeouts_documents_are_paths_inside_the_repository(self):
+        path = os.path.join(self.tmp, "repos.json")
+
+        def loaded(value):
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump({"tool": {"path": self.tmp, "closeout_docs": value}}, fh)
+            return repos.load(path)["tool"]["closeout_docs"]
+        for held in (["README.md", "docs/", "**/README.md", "app/*/docs/**"], []):
+            self.assertEqual(loaded(held), held)
+            self.assertEqual(repos.select("tool", repos.load(path))["closeout_docs"], held,
+                             "and the run's selection carries them to its host")
+        # Not a list, not a path, a way out of the repository, or what git would read as something else.
+        for refused in ("docs/", None, [""], [" "], [7], ["../other"], ["docs/../../other"], ["/etc"],
+                        [":(top)docs"], [":!docs"], ["-x"], ["docs\\guide.md"]):
+            with self.assertRaisesRegex(repos.Refused, "closeout_docs must list paths inside the repository",
+                                        msg=repr(refused)):
+                loaded(refused)
 
     def test_a_flag_must_be_a_boolean(self):
         path = os.path.join(self.tmp, "repos.json")

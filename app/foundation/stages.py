@@ -11,12 +11,15 @@ a run takes them in is its flow's (`flows`). What a role *is* stays configuratio
 file, its brain, its model — and belongs to `policy`.
 """
 
-STAGES = ("research", "plan", "assess", "build", "verify")
+STAGES = ("research", "plan", "assess", "build", "verify", "closeout")
 STAGE_ROLE = {"research": "architect", "plan": "engineer", "assess": "architect",
-              "build": "engineer", "verify": "architect"}
+              "build": "engineer", "verify": "architect", "closeout": "engineer"}
 # Each review, and the work it judges: a review answers with a verdict on what that work left in the
 # worktree. Every other stage is work — a read-only role researching included.
 REVIEWS = {"assess": "plan", "verify": "build"}
+# The work that makes a build final once its review has passed. No review judges it: the operator does, at
+# the final gate, which holds the tree it leaves — so what it may change is checked instead (`activities`).
+FINAL = ("closeout",)
 # The work whose product is its answer rather than a file: the run keeps it and hands it on.
 ANSWERS = ("research",)
 PHASES = ("plan", "build")            # the bounded loops: the work each review judges
@@ -42,7 +45,16 @@ _ARCHITECT_EVIDENCE = ("Judge from the todo, the repository, `git diff`, the eng
                        "reports (its final messages, in {{LOGS}}/plan-*.out and build-*.out) "
                        "and the web. Do not run tests or builds.\n")
 
-# `{{TODO_PATH}}` and `{{LOGS}}` are filled in by whoever renders the ask.
+# What a closeout is told of its repository's own convention (`repos`): where a finished todo goes, and
+# which documents the turn may bring up to date. Both are checked once the turn ends.
+CLOSEOUT_KEEPS = "Move it to {{TODO_DONE_DIR}} under its own name: that is where this repository keeps a finished todo."
+CLOSEOUT_DELETES = "Delete it: this repository deletes a finished todo."
+CLOSEOUT_DOCS = ("Besides the todo you may change only this repository's documents — %s — and nothing else the "
+                 "architect verified.")
+CLOSEOUT_NO_DOCS = "Besides the todo you may change nothing the architect verified."
+
+# `{{TODO_PATH}}`, `{{LOGS}}` and a closeout's `{{TODO_DONE}}` and `{{CLOSEOUT_DOCS}}` are filled in by whoever
+# renders the ask.
 STAGE_ASK = {
     "research": ("Research the task before anyone touches the code: the problem it poses, current "
                  "practice and its options on the live web, and what the repository shows as far as you "
@@ -60,4 +72,10 @@ STAGE_ASK = {
     "verify": ("Independently verify the implementation in this worktree "
                "(inspect `git diff` and `git status`) against the todo at "
                "{{TODO_PATH}}.\n" + _ARCHITECT_EVIDENCE + _VERDICT_ASK + _PASS_CONFIRMATION),
+    # What it must leave, never how: the method is the role's persona's, or a skill's the host binds to the
+    # stage. It may run again — after a failure, or a change sent back — with part of it done already.
+    "closeout": ("The architect passed the implementation. Close out its todo at {{TODO_PATH}}. {{TODO_DONE}} "
+                 "{{CLOSEOUT_DOCS}} What is done already stays as it is.\n"
+                 "Move and delete files as files — never `git mv`, `git rm` or `git add`, never a commit or a "
+                 "push."),
 }

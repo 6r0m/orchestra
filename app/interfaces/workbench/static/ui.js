@@ -47,14 +47,24 @@ function seconds(iso) {
   return Math.max(0, Math.floor((Date.now() - Date.parse(iso)) / 1000));
 }
 
-// How long since `iso`: "42 sec", "12 min", "1 hr, 5 min".
-export function duration(iso) {
-  const s = seconds(iso);
-  if (Number.isNaN(s)) return "";
+// `s` seconds said: "42 sec", "12 min", "1 hr, 5 min".
+function spoken(s) {
   const parts = s < 60 ? { seconds: Math.max(1, s) } : s < 3600 ? { minutes: Math.floor(s / 60) }
     : { hours: Math.floor(s / 3600), minutes: Math.floor(s / 60) % 60 };
   if (lasting) return lasting.format(parts);
   return Object.entries(parts).map(([unit, n]) => n + " " + unit.slice(0, 3)).join(" ");
+}
+
+// How long since `iso`.
+export function duration(iso) {
+  const s = seconds(iso);
+  return Number.isNaN(s) ? "" : spoken(s);
+}
+
+// How long from `start` to `end`.
+export function lasted(start, end) {
+  const s = Math.max(0, Math.round((Date.parse(end) - Date.parse(start)) / 1000));
+  return Number.isNaN(s) ? "" : spoken(s);
 }
 
 // When `iso` was, from now: "4 hr. ago".
@@ -146,10 +156,10 @@ export function confirmAction({ title, body, confirm, danger, returnTo }) {
 // ---- a run in words ---------------------------------------------------------------------------
 
 const DOING = { research: "researching", plan: "planning", assess: "assessing the plan", build: "building",
-  verify: "verifying the build" };
+  verify: "verifying the build", closeout: "closing out the todo" };
 // What the run does in a step no role takes.
-const HOLDING = { setup: "Setting up its worktree", merge: "Merging", discard: "Discarding",
-  cleanup: "Cleaning up" };
+const HOLDING = { setup: "Setting up its worktree", reopen: "Reopening the change", merge: "Merging",
+  discard: "Discarding", cleanup: "Cleaning up" };
 
 export function doing(stage) {
   return DOING[stage] || stage;
@@ -177,6 +187,7 @@ export function outcome(view) {
 
 // A run's state in a few words, and the voice it is said in: who is working, you, or trouble.
 export function headline(view) {
+  if (view.agent_prompt) return { text: "Agent needs input in terminal", tone: "you" };
   if (view.state === "waiting") return { text: decisionTitle(view.stop.reason, view.phase), tone: "you" };
   if (view.state === "failed") return { text: "A step failed", tone: "bad" };
   if (view.state === "stopping") return { text: "Stopping", tone: "quiet" };

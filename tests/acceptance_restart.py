@@ -70,7 +70,17 @@ FAKE = textwrap.dedent("""\
         message = json.dumps({"verdict": "PASS", "feedback": "Direction: the acceptance change."})
     else:
         todo = re.search(r"write the reviewable todo to exactly: (\\S+)", prompt)
-        if todo:
+        closing = re.search(r"Close out its todo at (\\S+)\\. (?:Move|Delete) it", prompt)
+        done = re.search(r"Move it to (\\S+) under its own name", prompt)
+        if closing:
+            # A closeout run again finds its own work done.
+            if os.path.exists(closing.group(1)):
+                closed = open(closing.group(1)).read().replace("**Status:** DRAFT", "**Status:** PASS")
+                os.remove(closing.group(1))
+                if done:
+                    os.makedirs(done.group(1), exist_ok=True)
+                    open(os.path.join(done.group(1), os.path.basename(closing.group(1))), "w").write(closed)
+        elif todo:
             os.makedirs(os.path.dirname(todo.group(1)), exist_ok=True)
             open(todo.group(1), "w").write("**Status:** DRAFT\\nthe acceptance plan\\n")
         elif "Implement the approved todo" in prompt:
@@ -408,13 +418,15 @@ class Acceptance:
         check(code == 0 and "READY_FOR_HUMAN" in out, "the answered run built, verified and reached READY_FOR_HUMAN")
 
         step("the change at the final gate is read in parts that join into the patch git itself prints")
-        parts, snapshots, offset, reads = [], set(), 0, 0
+        parts, snapshots, offset, reads, named = [], set(), 0, 0, {}
         while reads <= 50:
             # Through the whole path the page uses: the ReviewDiff workflow, the activity on this
-            # run's own worker, and a Temporal payload — which is where the size limit bit.
-            read = await runs.review_diff(client, run1, offset)
+            # run's own worker, and a Temporal payload — which is where the size limit bit. The first read
+            # makes the snapshot; every later one names it.
+            read = await runs.review_diff(client, run1, offset, **named)
             parts.append(read["patch"])
-            snapshots.add(read["snapshot"])
+            snapshots.add((read["base"], read["tree"]))
+            named = {"base": read["base"], "tree": read["tree"]}
             reads += 1
             if read["next"] >= read["total"]:
                 break

@@ -12,7 +12,7 @@ the turn's explicit result back out.
 - `launch` — one agent process from an argv list, with its whole descendant tree contained.
 - `ptyhost` — the pseudo-terminal the agent draws in; launched by path, inside the containment.
 - `turn_hook` — the vendors' own completion wiring, writing a turn's events into that turn's file; launched by path, by the vendor.
-- `nodes` — the prompt a turn is given, the agent argv, session identity, verdict parsing and the failure classes.
+- `nodes` — the prompt a turn is given, built as labelled parts it is rendered from byte for byte, the agent argv, session identity, verdict parsing and the failure classes.
 - `adapters` — each vendor CLI's arguments, skill invocation syntax, installed skill roots and other kind-specific mechanics behind one contract.
 - `trust` — telling this host's agent CLIs that a run's repository is one the operator works in, so no turn stops at their trust dialog.
 
@@ -58,6 +58,9 @@ when preparing a run; no vendor path crosses the Settings API.
 
 Through the vendor's own completion hook: a turn ends on Claude's `Stop` for its own
 prompt id, or Codex's `agent-turn-complete` in its own thread — never on a first event.
+Claude's notification and tool-finish hooks also record their events, keeping only the session and a
+notification's kind — never what a dialog says or what a tool read or wrote. The adapter reads a waiting
+dialog from them for the Workbench (`waiting`); they never decide a turn's result.
 
 Through a host containment primitive: a transient systemd user scope on POSIX, a job object
 on Windows. A launch no scope can hold is refused before the agent runs.

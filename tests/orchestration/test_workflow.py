@@ -309,6 +309,34 @@ class Sessions(Scenario):
         self.assertEqual(claude_code.host(claude, skills=skills), claude + ["--add-dir", skills],
                          "a Claude role reads its skills' references without a prompt")
 
+    def test_claude_engineer_is_denied_what_it_may_not_do_and_never_bypasses_the_checks(self):
+        from app.agents.adapters import claude_code
+        argv, _ = claude_code.command({"workspace_access": "write"}, None)
+        self.assertEqual(argv[argv.index("--permission-mode") + 1], "dontAsk",
+                         "bypassPermissions skips the protected-path and working-directory checks, and nothing "
+                         "here isolates the filesystem in their place")
+        self.assertEqual(argv[argv.index("--allowedTools") + 1:argv.index("--disallowedTools")], ["Edit(./**)"],
+                         "its file tools edit its worktree alone")
+        self.assertEqual(argv[argv.index("--disallowedTools") + 1:], ["AskUserQuestion", "EnterPlanMode"],
+                         "no vendor question, and no plan mode whose exit would wait on a dialog")
+
+    def test_claude_architect_keeps_read_only_mode_without_vendor_questions(self):
+        from app.agents.adapters import claude_code
+        argv, _ = claude_code.command({"workspace_access": "read"}, None)
+        self.assertEqual(argv[argv.index("--permission-mode") + 1], "plan")
+        self.assertIn("AskUserQuestion", argv)
+        self.assertIn("ExitPlanMode", argv)
+        wired = claude_code.wire(argv, "turn.events", lambda label, source: ["python", "hook", label, source])
+        hooks = json.loads(wired[wired.index("--settings") + 1])["hooks"]
+        self.assertIn("Notification", hooks)
+        self.assertIn("PostToolUse", hooks)
+        self.assertIn("PostToolUseFailure", hooks)
+        self.assertEqual([group["matcher"] for group in hooks["Notification"]],
+                         ["permission_prompt", "elicitation_dialog", "elicitation_url_dialog"],
+                         "a pipe in inline settings is a command separator in the Windows .cmd CLI shim")
+        self.assertEqual([group["hooks"][0]["command"] for group in hooks["Notification"]],
+                         ['"python" "hook" "Notification" stdin'] * 3, "each written as a Notification")
+
     def test_stage_template_reanchors_on_stage_switch(self):
         self._run_to_ready()
         by_name = {call["name"]: call for call in self.agent.calls}
@@ -606,6 +634,88 @@ class AnyProfileUnderAnyRole(Scenario):
             self.assertIn(fh.readline().strip(), self.agent.calls[0]["prompt"], "its persona file, as it named it")
 
 
+ENGINEER = {"kind": "claude-code", "workspace_access": "write", "persona": "You are the engineer of {{TODO_PATH}}.\n"}
+ARCHITECT = {"kind": "codex", "workspace_access": "read", "persona": "You are the architect judging {{TODO_PATH}}.\n"}
+TURN = {"task": "Add a retry to the export job.", "todo_path": "todo/2026-10-01_1200-export.md", "run_id": "r1",
+        "worktree_path": "/w", "phase": "plan", "round": 0, "episode": 1, "feedback": "", "guidance": ""}
+ROUNDS = {"build": {"normal": 2, "extended": 2}}
+# Every shape a turn's prompt takes: each stage, a session's first turn and a later one, a session born again,
+# and each part carried in. Their prompts as the composer made them before it built parts are in
+# fixtures/prompts.json; a deliberate change to a prompt changes its case's text there.
+PROMPT_CASES = {
+    "research, a session's first turn": dict(
+        stage="research", stage_cfg=ARCHITECT, is_review=False, state=dict(TURN, phase="research"),
+        session_first=True, stage_first=True, skills={"research": "architect"}),
+    "research, born again with its brief and your words": dict(
+        stage="research", stage_cfg=ARCHITECT, is_review=False,
+        state=dict(TURN, phase="research", episode=2, brief="Brief: one job per tenant.",
+                   guidance="Look at the scheduler too."),
+        session_first=True, stage_first=True),
+    "plan, the first turn after research": dict(
+        stage="plan", stage_cfg=ENGINEER, is_review=False, state=dict(TURN, episode=2, brief="Brief: one job per tenant."),
+        session_first=True, stage_first=True, skills={"plan": "investigate-change"}),
+    "plan, a later turn": dict(
+        stage="plan", stage_cfg=ENGINEER, is_review=False, state=dict(TURN, round=1, feedback="Name the test."),
+        session_first=False, stage_first=False, skills={"plan": "investigate-change"}),
+    "plan, a later turn with your words": dict(
+        stage="plan", stage_cfg=ENGINEER, is_review=False,
+        state=dict(TURN, round=1, feedback="Name the test.", guidance="Keep it to one module."),
+        session_first=False, stage_first=False),
+    "assess, the first in a session that researched": dict(
+        stage="assess", stage_cfg=ARCHITECT, is_review=True, state=TURN, session_first=False, stage_first=True,
+        skills={"assess": "architect"}),
+    "assess, a later turn": dict(
+        stage="assess", stage_cfg=ARCHITECT, is_review=True, state=dict(TURN, round=1, feedback="Name the test."),
+        session_first=False, stage_first=False),
+    "assess, a session born again mid-loop": dict(
+        stage="assess", stage_cfg=ARCHITECT, is_review=True, state=dict(TURN, round=2, feedback="Name the test."),
+        session_first=True, stage_first=False),
+    "build, the first turn with your words": dict(
+        stage="build", stage_cfg=ENGINEER, is_review=False,
+        state=dict(TURN, phase="build", episode=3, guidance="Approved; mind the lock."),
+        session_first=False, stage_first=True, skills={"build": "implement-approved-change"}),
+    "verify, a convergence reflection with your guidance": dict(
+        stage="verify", stage_cfg=ARCHITECT, is_review=True,
+        state=dict(TURN, phase="build", round=2, feedback="Still racy.", convergence={"phase": "build", "round": 2},
+                   convergence_seen=[]),
+        session_first=False, stage_first=False, review_rounds=ROUNDS,
+        review_prompts={"after_normal": {"architect": "Name the cause."}}),
+    "build, the final budgeted turn": dict(
+        stage="build", stage_cfg=ENGINEER, is_review=False, state=dict(TURN, phase="build", round=3, feedback="Still racy."),
+        session_first=False, stage_first=False, review_rounds=ROUNDS,
+        review_prompts={"at_limit": {"engineer": "Hand off cleanly."}}),
+    # In a repository that deletes a finished todo: one that keeps them names a folder as its host spells it
+    # (`test_stops.Closeout`), which no fixture read on both hosts can hold.
+    "closeout, the first turn after the architect's pass": dict(
+        stage="closeout", stage_cfg=ENGINEER, is_review=False,
+        state=dict(TURN, phase="closeout", episode=4, todo_done_dir=None,
+                   closeout_docs=["**/README.md", "**/docs/**"]),
+        session_first=False, stage_first=True, review_rounds=ROUNDS),
+}
+
+
+class PromptParts(unittest.TestCase):
+    """A turn's prompt is built as labelled parts and rendered from them, byte for byte the prompt it was."""
+
+    def test_every_prompt_renders_from_its_parts_exactly_as_it_was(self):
+        from app.agents import nodes as N
+        with open(os.path.join(HERE, "fixtures", "prompts.json"), encoding="utf-8") as fh:
+            captured = json.load(fh)
+        self.assertEqual(sorted(captured), sorted(PROMPT_CASES))
+        named = set()
+        for name, case in PROMPT_CASES.items():
+            args = dict(case, logs="/runtime/r1/logs")
+            prompt = N.compose_prompt(**args)
+            self.assertEqual(prompt, captured[name], name)
+            parts = N.compose_parts(**args)
+            self.assertEqual(N.render(parts), prompt, name)
+            for part in parts:
+                self.assertEqual(set(part), {"part", "text"}, name)
+                self.assertIn(part["part"], N.PARTS, name)
+            named.update(part["part"] for part in parts)
+        self.assertEqual(named, set(N.PARTS), "the matrix holds every part a prompt can carry")
+
+
 class Policy(unittest.TestCase):
     """Settings are validated whole: here their shape and references, and each kind's own values through its
     adapter (`application/test_settings.py`)."""
@@ -636,11 +746,11 @@ class Policy(unittest.TestCase):
     def test_shipped_role_profiles_pin_the_models_and_effort(self):
         settings = S.load()
         self.assertEqual((settings["roles"]["engineer"]["agent"], settings["roles"]["architect"]["agent"]),
-                         ("claude-engineer", "claude-architect"))
+                         ("claude-engineer", "codex-architect"))
         expected = {
             "claude-engineer": ("claude-code", "claude-opus-5", "max"),
             "claude-architect": ("claude-code", "claude-fable-5", "high"),
-            "codex-engineer": ("codex", "gpt-6-luna", "xhigh"),
+            "codex-engineer": ("codex", "gpt-5.6-sol", "xhigh"),
             "codex-architect": ("codex", "gpt-5.6-sol", "high"),
         }
         self.assertEqual({name: (profile["kind"], profile.get("model"), profile.get("effort"))
@@ -877,25 +987,46 @@ class Flows(Scenario):
         self.addCleanup(setattr, flows, "FLOWS_DIR", flows.FLOWS_DIR)
         flows.FLOWS_DIR = folder
         mine = os.path.join(folder, "mine.json")
+        # A flow a run may start on: one that builds closes out before its merge.
+        steps = self.CODE[:5] + ["engineer:closeout", "you:merge"]
         with open(mine, "w", encoding="utf-8") as fh:
-            json.dump(self.CODE, fh)
+            json.dump(steps, fh)
         repo = tempfile.mkdtemp(prefix="orchestra-flow-repo-")
         self.addCleanup(shutil.rmtree, repo, True)
         settings = S.load()
         self.host, self.agent = host([("plan-e1-1", 0, "planned\n"),
                                       ("assess-e1-1", 0, review_first_for(settings, "architect", "PASS")[0]),
                                       ("build-e2-1", 0, "built\n"),
-                                      ("verify-e2-1", 0, review_resumed_for(settings, "architect", "PASS"))])
+                                      ("verify-e2-1", 0, review_resumed_for(settings, "architect", "PASS")),
+                                      ("closeout-e3-1", 0, "closed out\n")])
         run = Run(handle=temporal_env.run(runs.start(client(), "a flow of my own", repo=repo, flow="mine",
                                                      check=False)))
         self.addCleanup(run.cleanup)
-        self.assertEqual((run.state["flow"], run.stop["reason"]), ({"name": "mine", "steps": self.CODE}, "approval"))
+        self.assertEqual((run.state["flow"], run.stop["reason"]), ({"name": "mine", "steps": steps}, "approval"))
         # The file now plans again after the approval; the run goes on with the steps it was handed.
         with open(mine, "w", encoding="utf-8") as fh:
             json.dump(self.CODE[:3] + ["engineer:plan", "architect:assess"], fh)
         code, out = run.answer("yes")
         self.assertEqual((code, run.stop["reason"]), (0, "final"), out)
-        self.assertEqual(self.names(), ["plan-e1-1", "assess-e1-1", "build-e2-1", "verify-e2-1"])
+        self.assertEqual(self.names(), ["plan-e1-1", "assess-e1-1", "build-e2-1", "verify-e2-1", "closeout-e3-1"])
+
+    def test_a_flow_file_that_builds_without_closing_out_starts_no_run(self):
+        """What runs started before closeouts recorded still replays (`test_replay`); no file starts another."""
+        import shutil
+        import tempfile
+        from app.foundation import flows
+        folder = tempfile.mkdtemp(prefix="orchestra-flows-")
+        self.addCleanup(shutil.rmtree, folder, True)
+        self.addCleanup(setattr, flows, "FLOWS_DIR", flows.FLOWS_DIR)
+        flows.FLOWS_DIR = folder
+        with open(os.path.join(folder, "before.json"), "w", encoding="utf-8") as fh:
+            json.dump(self.CODE, fh)
+        repo = tempfile.mkdtemp(prefix="orchestra-flow-repo-")
+        self.addCleanup(shutil.rmtree, repo, True)
+        self.host, self.agent = host([])
+        with self.assertRaisesRegex(flows.InvalidFlow, "flow 'before': a flow that builds closes out before the merge"):
+            temporal_env.run(runs.start(client(), "a flow from before", repo=repo, flow="before", check=False))
+        self.assertEqual(self.agent.calls, [], "refused before any workflow was started")
 
 
 if __name__ == "__main__":

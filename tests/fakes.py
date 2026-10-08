@@ -76,6 +76,14 @@ class FakeWorktrees:
     def __init__(self, merge_results=None):
         self.calls = []
         self.merge_results = list(merge_results or [{"result": "merged", "commit": "c0ffee"}])
+        # What a read of the change is refused with, as its host's git would refuse it; None reads it.
+        self.diff_refusal = None
+        # What each merge was handed to finish itself: the run's plan, or None when its closeout already had.
+        self.finished = []
+        # What a closeout changed outside its todo folders and its repository's documents, as `changed`
+        # names it, and whether it left the todo where it found it.
+        self.outside = []
+        self.unclosed = False
 
     def create(self, repo, base, root, run_id, target, lfs_pointers=False):
         self.calls.append(("create", run_id, target))
@@ -87,8 +95,20 @@ class FakeWorktrees:
     def work_tree(self, path):
         return "verified-tree"
 
+    def changed(self, path, base, tree, folders=(), patterns=()):
+        return list(self.outside)
+
+    def holds(self, path, tree, names):
+        # The todo's own path first, then where its repository keeps it finished, when it keeps it.
+        return names[:1] if self.unclosed else names[1:]
+
+    def reopen(self, worktree, final_tree, verified_tree):
+        self.calls.append(("reopen", final_tree, verified_tree))
+        return []
+
     def merge(self, repo, worktree, run_id, base, verified_tree, plan, done_dir, message, merge_message):
         self.calls.append(("merge", run_id, verified_tree, message, merge_message))
+        self.finished.append(plan)
         return self.merge_results.pop(0)
 
     def discard(self, repo, worktree, run_id):
@@ -98,12 +118,19 @@ class FakeWorktrees:
         return [{"path": "/fake/worktrees/one", "branch": "one", "state": "unmerged"},
                 {"path": "/fake/worktrees/two", "branch": "two", "state": "merged"}]
 
-    def review_diff(self, path, offset=0):
-        self.calls.append(("review_diff", path, offset))
+    def review_diff(self, path, offset=0, base=None, tree=None, file=None, files_from=None):
+        self.calls.append(("review_diff", path, offset, base, tree, file, files_from))
+        if self.diff_refusal:
+            from app.workspace import worktrees
+            raise worktrees.ChangeRefused(self.diff_refusal)
         patch = "diff --git a/x b/x\n"
-        return {"base": "abc1234", "summary": " 1 file changed", "summary_total": 15,
-                "patch": patch[offset:], "offset": offset, "next": len(patch), "total": len(patch),
-                "snapshot": "0" * 32}
+        base, tree = base or "b" * 40, tree or "c" * 40
+        if file is not None:
+            return {"base": base, "tree": tree, "patch": patch, "whole": True,
+                    "file": {"path": file, "old": None, "status": "M", "added": 1, "removed": 0, "binary": False}}
+        return {"base": base, "tree": tree, "summary": " 1 file changed", "summary_total": 15,
+                "files": [{"path": "x", "old": None, "status": "M", "added": 1, "removed": 0, "binary": False}],
+                "files_total": 1, "patch": patch[offset:], "offset": offset, "next": len(patch), "total": len(patch)}
 
 
 class FakeRepos:
@@ -119,7 +146,8 @@ class FakeRepos:
             from app.workspace import repos
             raise repos.Refused(self.refusal)
         return {"repo_path": "/fake/repo", "base_branch": "develop", "worktree_root": "/fake/worktrees",
-                "todo_dir": "todo", "todo_done_dir": "todo/done", "todo_name": "%Y-%m-%d_%H%M-{slug}"}
+                "todo_dir": "todo", "todo_done_dir": "todo/done", "todo_name": "%Y-%m-%d_%H%M-{slug}",
+                "closeout_docs": ["**/README.md", "**/docs/**"]}
 
 
 def installed(program):

@@ -7,7 +7,9 @@ one: its own Workbench, and its own worker — the real worker, started and stop
 through the stack's one owner — on queues of its own, sharing only the live Temporal.
 
 One run goes the whole way: the engineer plans, the architect sends the plan back once and passes it,
-the plan is approved, the engineer builds, the architect verifies, and the change is merged. One is
+the plan is approved, the engineer builds, the architect verifies, the engineer closes the todo out, its
+changed file is read in the page's viewer — in the change, and in the build's turn — and the change is
+merged, the todo in the done folder inside the merge. One is
 stopped while its engineer works, and one while it waits for approval — sent back first with a note
 typed into the page, which reaches the engineer's next plan; each ends stopped with its worktree and
 branch as they were. One is force-terminated when its Stop cannot finish, because its
@@ -105,7 +107,18 @@ FAKE = textwrap.dedent("""\
         message = json.dumps({"verdict": verdict[0], "feedback": verdict[1]})
     else:
         todo = re.search(r"write the reviewable todo to exactly: (\\S+)", prompt)
-        if "Implement the approved todo" in prompt:
+        closing = re.search(r"Close out its todo at (\\S+)\\. (?:Move|Delete) it", prompt)
+        done = re.search(r"Move it to (\\S+) under its own name", prompt)
+        if closing:
+            say("closing out the todo...", "moving it to the done folder...")
+            # A closeout run again finds its own work done.
+            if os.path.exists(closing.group(1)):
+                closed = open(closing.group(1)).read().replace("**Status:** DRAFT", "**Status:** PASS")
+                os.remove(closing.group(1))
+                if done:
+                    os.makedirs(done.group(1), exist_ok=True)
+                    open(os.path.join(done.group(1), os.path.basename(closing.group(1))), "w").write(closed)
+        elif "Implement the approved todo" in prompt:
             say("implementing the approved plan...", "running the test...")
             open("greeting.txt", "w").write("hello\\n")
         elif todo:
@@ -378,16 +391,46 @@ class Demo:
         check(self.press(merged, "Approve", "answered: approve"), "the page sent the answer, and the workflow took it")
         self.until(merged, lambda view: view["state"] == "waiting" and view["stop"]["reason"] == "final", 300,
                    "the final gate")
-        check(True, "the engineer built and the architect verified")
+        turns = [entry["stage"] for entry in self.api("/api/runs/%s" % merged)["timeline"]]
+        check(turns[-3:] == ["build", "verify", "closeout"],
+              "the engineer built, the architect verified, and the engineer closed the todo out: %s" % turns[-3:])
+
+        step("the change read file by file, and the history as turns with your answers between")
+        check(self.press(merged, "file:greeting.txt", "hello"),
+              "the change lists greeting.txt by its path, and the page's viewer opens its diff with its line")
+        check(self.press(merged, "round:build:greeting.txt", "hello"),
+              "the build turn's change since the review before it opens the same file, read from the trees the "
+              "reviews judged")
+        check(self.press(merged, "history", "you approved the plan"), "the history shows your approval as a row")
+        # The plan was sent back once: its second round only named the test, so its change is that line alone —
+        # the first round's lines are context, read from the tree the PATCH review recorded.
+        plan = self.api("/api/runs/%s" % merged)["state"]["plan"].replace(os.sep, "/")
+        check(self.press(merged, "round:plan:" + plan, "Test: greeting.txt says hello.")
+              and "+ Test: greeting.txt says hello." in self.said,
+              "the plan's second round shows the line it added in answer to the PATCH as added")
+        check(self.press(merged, "round:plan:" + plan, "# Add a greeting") and "+ # Add a greeting" not in self.said,
+              "and the first round's lines as unchanged context: after a PATCH, only that round's own change")
 
         step("the change merged by pressing Merge")
-        check(self.press(merged, "Merge", "answered: merge"), "the page sent the answer, with its confirmation")
+        check(self.press(merged, "turn-then:verify:Merge", "answered: merge"),
+              "the page sent the answer, with its confirmation")
+        check("The change is the approved plan." in self.said.splitlines()[-1],
+              "the verify turn opened at the gate, its verdict pointed to the decision, says it in the same page once "
+              "the run has merged")
         view = self.until(merged, closed, 300, "the merge")
         check(view["status"] == "MERGED", "the run ended merged")
         check("greeting.txt" in git(self.repo, "ls-tree", "--name-only", "develop"),
               "the base branch holds the change")
+        landed = git(self.repo, "ls-tree", "-r", "--name-only", "develop").split()
+        done = "todo/done/" + os.path.basename(plan)
+        check(plan not in landed and done in landed
+              and git(self.repo, "show", "develop:" + done).startswith("**Status:** PASS"),
+              "and the todo as the engineer's closeout left it, in the merge itself: %s" % done)
         check(self.press(merged, "absent:Stop run,Force terminate", "absent"),
               "the page offers the closed run neither Stop run nor Force terminate")
+        check(self.press(merged, "turn:verify", "The change is the approved plan.") and "PASS" in self.said,
+              "the page opens the verify turn and shows its verdict and feedback, read from the record its host "
+              "wrote")
 
         step("a run stopped while its engineer works")
         self.hold("hold-turn")
@@ -417,6 +460,8 @@ class Demo:
                    "the plan again, and its approval")
         with open(os.path.join(paths.RUNTIME_ROOT, waiting, "logs", "plan-e2-1.prompt"), encoding="utf-8") as fh:
             check(note in fh.read(), "the note reached the engineer's next plan, word for word")
+        check(self.press(waiting, "absent:Force terminate", "absent"),
+              "while it waits for you, the page offers Stop run alone: nothing runs on its host to force")
         check(self.press(waiting, "Stop run", "stopping"), "the page sent the Stop")
         waited = self.until(waiting, closed, 120, "the Stop")
         check(waited["status"] == "STOPPED", "the run ended stopped")

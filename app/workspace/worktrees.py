@@ -1,4 +1,4 @@
-"""A run's worktree, through the target host's own git: create, guard, merge, discard, list.
+"""A run's worktree, through the target host's own git: create, guard, reopen, merge, discard, list.
 
 Only this module stages, commits or merges, and only for the run it is given.
 Every side effect reads what git already holds before acting, so an attempt whose
@@ -162,9 +162,73 @@ def work_tree(path):
     with tempfile.TemporaryDirectory(prefix="orchestra-index-") as private:
         env = dict(os.environ, GIT_INDEX_FILE=os.path.join(private, "index"))
         if os.path.exists(index):
-            shutil.copyfile(index, env["GIT_INDEX_FILE"])
+            # With the time it was written: git takes an entry no older than its index for one whose stat
+            # cannot be trusted, and compares its content. A copy stamped now would trust the stat of a file
+            # rewritten to the same size in the second the index was written, and leave that edit out of
+            # the tree (measured).
+            shutil.copy2(index, env["GIT_INDEX_FILE"])
         git(path, "add", "-A", env=env)
         return git(path, "write-tree", env=env).stdout.strip()
+
+
+def changed(path, base, tree, folders=(), patterns=()):
+    """What differs from the tree `base` to `tree`, each as `(status, path)`: `A` a file added, `D` one
+    removed, `M` or `T` one changed — a move its removal and its addition, each path as git names it.
+
+    Left out: every path under one of `folders`, each taken literally, and every path one of `patterns`
+    matches as git globs it — `docs/` that folder, `**/README.md` that file wherever it is. The matching
+    is git's own, so what is left is what git itself says lies outside them.
+    """
+    but = [":(exclude,literal)" + folder.replace("\\", "/").strip("/") for folder in folders if folder]
+    but += [":(exclude,glob)" + pattern for pattern in patterns]
+    tokens = git(path, "diff", "--no-renames", "--name-status", "-z", base, tree,
+                 *(["--"] + but if but else [])).stdout.split("\0")
+    return list(zip(tokens[0::2], tokens[1::2]))
+
+
+def holds(path, tree, names):
+    """Which of `names` — each a file's path as git names it, never a pattern — the tree holds."""
+    found = git(path, "ls-tree", "-r", "-z", "--name-only", tree, "--", *names,
+                env=dict(os.environ, GIT_LITERAL_PATHSPECS="1")).stdout.split("\0")
+    return [name for name in names if name in found]
+
+
+def reopen(worktree, final_tree, verified_tree):
+    """Take a worktree offered for its merge back to what the architect verified: each path changed from
+    `verified_tree` to `final_tree` is again as it was verified, so the run's todo is where its roles are
+    asked to read it. Returns the paths left alone because they changed again after `final_tree` — a later
+    hand's work, or a base merged in — which the next review judges.
+
+    Files are written and removed, as they were made; nothing is staged, and a merge under way stays under
+    way. Every file is read from git before any is touched, so a tree git cannot read changes nothing — and
+    run again it finds its own work done.
+    """
+    now = work_tree(worktree)
+    since = {name for _, name in changed(worktree, final_tree, now)}
+    apart = {name for _, name in changed(worktree, verified_tree, now)}
+    kept, restored, removed = [], [], []
+    for status, name in changed(worktree, verified_tree, final_tree):
+        target = os.path.join(worktree, *name.split("/"))
+        if name in since:
+            if name in apart:
+                kept.append(name)
+        elif status == "A":
+            removed.append(target)
+        else:
+            # Bytes, as the verified plan is put back after a refused commit.
+            original = subprocess.run(["git", "-C", worktree, "cat-file", "blob", "%s:%s" % (verified_tree, name)],
+                                      capture_output=True, timeout=60)
+            if original.returncode != 0:
+                raise GitError("git cat-file in %s: rc=%d %s" % (
+                    worktree, original.returncode, original.stderr.decode("utf-8", "replace").strip()[:500]))
+            restored.append((target, original.stdout))
+    for target, content in restored:
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, "wb") as fh:
+            fh.write(content)
+    for target in removed:
+        os.remove(target)
+    return sorted(kept)
 
 
 def _merging(path):
@@ -256,7 +320,12 @@ def _unfinish_plan(worktree, verified_tree, plan, done_dir):
 
 
 def merge(repo, worktree, run_id, base, verified_tree, plan, done_dir, message, merge_message):
-    """Commit the verified change on the run branch and merge it into the local base branch.
+    """Commit the run's change on the run branch and merge it into the local base branch.
+
+    `verified_tree` is the tree the run holds for its merge, and the worktree must still be it. A run
+    hands its final tree and no `plan`, and exactly that tree is committed. A run started before a flow
+    made its build final hands the tree the architect verified and its `plan`, which is finished here:
+    moved to `done_dir`, or deleted where the repository has none.
 
     Returns `{"result": "merged", "commit": ...}` once the base holds the merge and the
     worktree, branch and environment are gone, or `{"result": "conflict", "files": [...]}`
@@ -271,17 +340,23 @@ def merge(repo, worktree, run_id, base, verified_tree, plan, done_dir, message, 
         raise MergeRefused("the run's branch or worktree is gone and %s holds no merge of it" % base)
     merging = _merging(worktree)
     if not merging and verified_tree and not _clean(worktree):
-        # Only while the work is uncommitted: a written work commit is merged, never undone.
-        _unfinish_plan(worktree, verified_tree, plan, done_dir)
+        # Only while the work is uncommitted: a written work commit is merged, never undone. An attempt
+        # whose commit was refused left the change staged, and a finished plan moved.
+        if plan:
+            _unfinish_plan(worktree, verified_tree, plan, done_dir)
+        else:
+            git(worktree, "reset", "-q")
     if merging or not _clean(worktree):
-        # Only the change the architect verified is committed.
+        # Only the tree the run holds for its merge is committed.
         if work_tree(worktree) != verified_tree:
-            raise MergeRefused("the worktree no longer matches the change the architect verified")
+            raise MergeRefused("the worktree no longer matches the change the architect verified" if plan else
+                               "the worktree is no longer the change that was offered for this merge")
         if merging:
             git(worktree, "add", "-A")
             git(worktree, "commit", "--no-edit", "-m", "Merge %s into %s" % (base, run_id))
         else:
-            _finish_plan(worktree, plan, done_dir)
+            if plan:
+                _finish_plan(worktree, plan, done_dir)
             git(worktree, "add", "-A")
             git(worktree, "commit", "-m", message)
     if git(repo, "rev-list", "--count", "refs/heads/%s..refs/heads/%s" % (base, run_id)).stdout.strip() == "0":
@@ -358,6 +433,21 @@ def discard(repo, worktree, run_id):
 # large change is read in chunks instead of failing the review it is needed for.
 PATCH_CHUNK = 512 * 1024
 SUMMARY_LIMIT = 128 * 1024
+# One file's diff is read whole up to this many bytes, and past it its changes alone; the list names at most
+# this many files. Both stay inside one payload beside the rest of a read.
+FILE_LIMIT = 512 * 1024
+FILES_LIMIT = 2000
+# Every diff of a change is read with these, whatever the repository or its user configured: no external
+# diff or text conversion runs, rename detection is on and the text is uncoloured. Git still bounds its
+# exhaustive rename search by `diff.renameLimit`, so a rename past that bound reads as a delete and an add.
+DIFF = ["--no-ext-diff", "--no-textconv", "--find-renames", "--no-color"]
+# Context enough for any file: its diff holds it whole.
+WHOLE = "-U2147483647"
+OBJECT = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+
+
+class ChangeRefused(RuntimeError):
+    """A read of a change naming what it cannot read: no object, one git no longer holds, a file not in it."""
 
 
 def _chunk(text, offset, limit):
@@ -379,19 +469,48 @@ def _chunk(text, offset, limit):
     return part.decode("utf-8", "replace"), offset + len(part), len(data)
 
 
-def review_diff(path, offset=0):
-    """The change a human reviews, exactly as `gdiff -s` copies it.
+def _files(numstat, status):
+    """Each file of a diff from its `--numstat -z` and `--name-status -z`: exact paths, never quoted or cut."""
+    counts, tokens, at = {}, numstat.split("\0"), 0
+    while at < len(tokens) and tokens[at]:
+        added, removed, name = tokens[at].split("\t", 2)
+        if name:
+            at += 1
+        else:
+            name, at = tokens[at + 2], at + 3          # a rename: its old path, then its new
+        counts[name] = (added, removed)
+    files, tokens, at = [], status.split("\0"), 0
+    while at < len(tokens) and tokens[at]:
+        letter = tokens[at][0]
+        if letter in "RC":
+            old, name, at = tokens[at + 1], tokens[at + 2], at + 3
+        else:
+            old, name, at = None, tokens[at + 1], at + 2
+        added, removed = counts.get(name, ("-", "-"))
+        binary = added == "-"
+        files.append({"path": name, "old": old, "status": letter, "added": None if binary else int(added),
+                      "removed": None if binary else int(removed), "binary": binary})
+    return files
 
-    `gdiff -s` stages everything the work tree holds (`git add -A`, gitignored
-    paths excluded) and copies `git diff --no-ext-diff --no-textconv --cached`,
-    so a new file arrives with its contents rather than as a name. The same
-    commands run here against a private copy of the index, because reading a
-    change for review must not change what anyone has staged. Returns the
-    worktree's HEAD, the diff's stat, and `PATCH_CHUNK` bytes of the patch from
-    `offset` with the patch's whole size, so the reader can ask for the rest.
 
-    Raises on any git failure: a worktree that could not be read is not a
-    worktree without changes.
+def review_diff(path, offset=0, base=None, tree=None, file=None, files_from=None):
+    """A run's change as a human reviews it: one snapshot, named by its base and its tree, and read from them.
+
+    Without `tree`, the change now: the worktree's HEAD and the tree `git add -A` would commit, made on a
+    private copy of the index (`work_tree`), so reading a change for review changes nothing anyone staged, and
+    a new file arrives with its contents. With `tree`, the change from `base` — the worktree's HEAD when not
+    given — to that tree: a snapshot read before, or the trees two reviews judged. Either is read with `DIFF`,
+    so every read of one snapshot is the same bytes whatever the live worktree does meanwhile.
+
+    Returns the base, the tree, each changed file with its exact path (`FILES_LIMIT` of them, `files_total` in
+    all) and the diff's stat, and `PATCH_CHUNK` bytes of the patch from `offset` with its whole size, so the
+    reader can ask for the rest. With `files_from`, the snapshot's files from that one on instead, again
+    `FILES_LIMIT` of them. With `file`, one of the snapshot's files: its diff whole when each side is at most
+    `FILE_LIMIT` bytes, its changes alone otherwise, and which.
+
+    Raises ChangeRefused for a name that is no object, an object git no longer holds — it prunes unreferenced
+    ones after a while — or a file not in the change; on any git failure, RuntimeError: a worktree that could
+    not be read is not a worktree without changes.
     """
     if not path:
         raise RuntimeError("no worktree path in the run's state")
@@ -405,24 +524,57 @@ def review_diff(path, offset=0):
                 done.stderr.decode("utf-8", "replace").strip()[:300]))
         return done.stdout.decode("utf-8", "replace")
 
-    base = git(["rev-parse", "--short", "HEAD"]).strip()
-    index = git(["rev-parse", "--path-format=absolute", "--git-path", "index"]).strip()
-    with tempfile.TemporaryDirectory(prefix="review-index-") as private:
-        env = dict(os.environ, GIT_INDEX_FILE=os.path.join(private, "index"))
-        # Starting from the real index, not from HEAD, keeps anything already
-        # staged exactly as `git add -A` on top of it would see it.
-        if os.path.exists(index):
-            shutil.copyfile(index, env["GIT_INDEX_FILE"])
-        git(["add", "-A"], env)
-        diff = ["diff", "--no-ext-diff", "--no-textconv", "--cached"]
-        summary, _, summary_total = _chunk(git(diff + ["--stat"], env), 0, SUMMARY_LIMIT)
-        whole = git(diff, env)
-        patch, following, total = _chunk(whole, offset, PATCH_CHUNK)
-        return {"base": base, "summary": summary, "summary_total": summary_total,
-                "patch": patch, "offset": offset, "next": following, "total": total,
-                # Which change this part belongs to: the parts of one review must be one change, and a
-                # worktree whose terminals stay live can be edited between two reads of the same size.
-                "snapshot": hashlib.sha256(whole.encode("utf-8")).hexdigest()[:32]}
+    def held(name):
+        if not isinstance(name, str) or not OBJECT.match(name):
+            raise ChangeRefused("%r is not an object name" % (name,))
+        if subprocess.run(["git", "-C", path, "cat-file", "-e", name], capture_output=True, timeout=60).returncode:
+            raise ChangeRefused("git no longer holds %s: it prunes what nothing refers to after a while" % name)
+        return name
+
+    if tree is None:
+        base, tree = git(["rev-parse", "HEAD"]).strip(), work_tree(path)
+    else:
+        base = held(base) if base is not None else git(["rev-parse", "HEAD"]).strip()
+        tree = held(tree)
+    pair = [base, tree]
+
+    def listed():
+        return _files(git(["diff"] + DIFF + ["--numstat", "-z"] + pair),
+                      git(["diff"] + DIFF + ["--name-status", "-z"] + pair))
+
+    if file is not None:
+        entry = next((each for each in listed() if each["path"] == file), None)
+        if entry is None:
+            raise ChangeRefused("%r is not a file of this change" % (file,))
+        # Its paths are names, never patterns: `[ab].txt` is that file, not a.txt.
+        literal = dict(os.environ, GIT_LITERAL_PATHSPECS="1")
+        named = ["--"] + [name for name in (entry["old"], entry["path"]) if name]
+        # Whole only when each side is small, decided before any diff runs: a large file with one changed line is
+        # never diffed whole only to be thrown away. A side whose size git does not give is not read whole.
+        sides = ([] if entry["status"] == "A" else ["%s:%s" % (base, entry["old"] or entry["path"])]) + (
+            [] if entry["status"] == "D" else ["%s:%s" % (tree, entry["path"])])
+        sizes = [subprocess.run(["git", "-C", path, "cat-file", "-s", side], capture_output=True, timeout=60)
+                 for side in sides]
+        whole = all(done.returncode == 0 and done.stdout.strip().isdigit() and int(done.stdout) <= FILE_LIMIT
+                    for done in sizes)
+        text = git(["diff"] + DIFF + [WHOLE] + pair + named, literal) if whole else None
+        if text is None or len(text.encode("utf-8")) > FILE_LIMIT:
+            text, whole = git(["diff"] + DIFF + ["-U3"] + pair + named, literal), False
+            if len(text.encode("utf-8")) > FILE_LIMIT:
+                raise ChangeRefused("%s's changes are too large to show here; copy the patch for them" % file)
+        return {"base": base, "tree": tree, "file": entry, "patch": text, "whole": whole}
+    if files_from is not None:
+        files = listed()
+        return {"base": base, "tree": tree, "files": files[files_from:files_from + FILES_LIMIT],
+                "files_total": len(files), "files_from": files_from}
+    read = {"base": base, "tree": tree}
+    if not offset:
+        files = listed()
+        summary, _, summary_total = _chunk(git(["diff"] + DIFF + ["--stat"] + pair), 0, SUMMARY_LIMIT)
+        read.update(files=files[:FILES_LIMIT], files_total=len(files), summary=summary, summary_total=summary_total)
+    patch, following, total = _chunk(git(["diff"] + DIFF + pair), offset, PATCH_CHUNK)
+    read.update(patch=patch, offset=offset, next=following, total=total)
+    return read
 
 
 def view(repo, base):

@@ -20,14 +20,14 @@ framework that owns the model — either lose the review or take the agent away 
 Orchestra keeps the agents native and puts a workflow around them:
 
 - **Two roles, one loop.** An engineer plans, an architect assesses, you approve, the engineer
-  builds, the architect verifies, you merge. Each role keeps one conversation across its two
-  stages, so the reviewer of the plan is the verifier of the build.
+  builds, the architect verifies, the engineer closes the todo out, you merge. Each role keeps one
+  conversation across its stages, so the reviewer of the plan is the verifier of the build.
 - **Only a verdict routes.** The architect ends every turn with `PASS`, `PATCH`, `BLOCKER` or
   `UNVERIFIED`, and that verdict is the only thing the workflow reads. Rounds are budgeted; when a
   budget runs out the run stops for you instead of looping.
 - **The work happens in a worktree, never on your branch.** Agents never stage, commit, merge or
-  push. The controller does that, after your explicit *Merge*, and commits exactly the tree the
-  architect verified.
+  push. The controller does that, after your explicit *Merge*, and commits exactly the tree you
+  were shown: what the architect verified, with its todo closed out.
 - **Nothing is lost when something dies.** A worker killed mid-turn takes the agent's whole process
   tree with it and the run stops for you to continue; the workflow's state is Temporal's history,
   not a process's memory.
@@ -116,7 +116,9 @@ worker that dies between spawn and assignment cannot leave an agent behind.
   fails even if an agent tries; the controller alone commits and merges, after your answer.
 - **Only what a stage judged can proceed.** A plan changed after the architect passed it goes back
   for assessment before a build starts; a change made while the architect verifies fails that step;
-  a merge commits exactly the verified tree or refuses.
+  the engineer's closeout of the todo may touch nothing the architect verified but the todo and
+  the documents the repository names; and a merge commits exactly the tree the final gate showed
+  you, or refuses.
 - **Vendor trust dialogs are recorded, not bypassed.** Orchestra records a repository you start a
   run on with the CLIs' own trust stores, so an unattended turn does not sit at a dialog — and it
   never overrides an explicit `untrusted` decision of yours.

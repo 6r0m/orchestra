@@ -11,6 +11,7 @@
     "todo_dir": "todo",
     "todo_done_dir": "todo/done",
     "todo_name": "%Y-%m-%d_%H%M-{slug}",
+    "closeout_docs": ["README.md", "docs/"],
     "lfs_pointers": false
   }
 }

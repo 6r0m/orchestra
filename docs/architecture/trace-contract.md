@@ -24,11 +24,11 @@ graph group rows by name. A run's own values are metadata.
 | kind | parent | what it records |
 |---|---|---|
 | work item | none — the trace's only root | the request, the repository, the base branch and the OS the agents run on |
-| phase | the work item | research, plan or build — the work stages of the run's flow — and which roles act in it |
+| phase | the work item | research, plan, build or closeout — the work stages of the run's flow — and which roles act in it |
 | role step | its phase | one role-run: what the role was asked, and its answer — the engineer's account, the architect's research brief, or the architect's verdict, feedback and reasoning |
 | stop | its phase; the work item for an approval | why the run stopped for a person — an approval, with what it approves: the plan's summary or the research brief; a blocker or an exhausted budget; a failed stage and the final gate write no row |
 | answer | where its stop is | what the person answered |
-| final diff | the work item | the change as `gdiff -s` copies it, cut at a size cap |
+| final diff | the work item | the change as the page reads it — what `gdiff -s` copies, under git's default settings — cut at a size cap |
 
 The work item opens and closes at setup, before any process that resumes the run exists, so it has
 no output. The trace records whether a run's build was verified — the final diff and the scores —
@@ -61,6 +61,7 @@ A failed stage's `error_type` is one of:
 | `malformed_output` | the agent answered, but not in the shape its stage requires | read the role's `.out` log |
 | `executor` | the agent could not be launched on its host | install or repair that agent on the run's target host, then `--continue` |
 | `git_violation` | the role changed the worktree's HEAD, its branch or what is staged, which only the controller may | inspect the worktree, then `--continue`, or stop the run |
+| `closeout_violation` | the engineer's closeout changed a file the architect verified — anything but the todo and the documents its repository names — or left the todo unclosed, or the run holds no verified tree to close out | put the named files back as they were, in the engineer's terminal or by hand, then `--continue`, which closes out again |
 | `lost` | the step was cut short from outside, not by a Stop: its worker stopped under it, or Temporal no longer knew it — its run force-terminated, or the step unheard past its heartbeat timeout | whether the run was force-terminated, in Temporal; if not, its failed stage says which, and Continue runs it again |
 | `internal` | anything unclassified: a defect in this component | the status message and the traceback |
 

@@ -33,8 +33,8 @@ from app.application import settings as S  # noqa: E402
 from app.foundation import policy as policy_mod  # noqa: E402
 from app.orchestration import workflow as WF  # noqa: E402
 
-# This harness exercises Codex for both roles and binds test skills to each stage; the shipped defaults
-# bind Claude profiles and the five shared methodologies. Tests that need shipped settings read them directly.
+# This harness pins a Codex architect and binds test skills to each stage, whatever the shipped defaults
+# bind. Tests that need shipped settings read them directly.
 SETTINGS = dict(S.load())
 SETTINGS["roles"] = dict(SETTINGS["roles"], architect=dict(SETTINGS["roles"]["architect"],
                                                             agent="codex-architect"))

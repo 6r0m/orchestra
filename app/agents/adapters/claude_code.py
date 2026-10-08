@@ -3,7 +3,8 @@
 A turn is `claude` started again in the role's terminal: a new session under an id minted here
 (`--session-id`), a resumed one by that id (`--resume`). A read-only role runs in plan mode; a writing one in
 `dontAsk` mode with edits allowed inside its worktree, so a turn never waits on a permission prompt — what is
-not allowed is denied and the agent works on. The host's skills folder is added for reading, where the
+not allowed is denied and the agent works on. Neither is offered the vendor's question tools, nor a way into
+or out of plan mode that would wait on a dialog. The host's skills folder is added for reading, where the
 skills a stage invokes keep their references.
 
 Its turn ends on its own hooks: `Stop` for a prompt id that `UserPromptSubmit` reported for our prompt, or
@@ -42,7 +43,10 @@ SESSION_MARKER_PREFIXES = ("CLAUDE_CODE_",)
 # Its terminal says so before it exits without any work (measured on the installed CLI).
 LOST_SESSION = ("no conversation found with session id",)
 OLD_BRAIN = "claude"
-HOOKS = ("UserPromptSubmit", "Stop", "StopFailure")
+HOOKS = ("UserPromptSubmit", "Stop", "StopFailure", "PostToolUse", "PostToolUseFailure")
+# The notifications that mean a dialog waits in its terminal for someone to answer it: each its own hook
+# matcher, since a `|` between them is a command separator to the Windows `.cmd` shim.
+DIALOGS = ("permission_prompt", "elicitation_dialog", "elicitation_url_dialog")
 WINDOWS = sys.platform.startswith("win")
 # Model and effort reach the command line, so each is a plain token.
 PLAIN_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]*")
@@ -79,12 +83,14 @@ def command(role, resume_id, traced=None):
     if role.get("effort"):
         parts += ["--effort", role["effort"]]
     if role["workspace_access"] == "read":
-        parts += ["--permission-mode", "plan"]
+        parts += ["--permission-mode", "plan", "--disallowedTools", "AskUserQuestion", "ExitPlanMode"]
     else:
         # A role turn never waits on a permission prompt: what is not allowed is denied and the agent works on,
         # as a run with no one to ask always did. Edits in the worktree are allowed; an Edit rule also governs
-        # writes.
-        parts += ["--permission-mode", "dontAsk", "--allowedTools", "Edit(./**)"]
+        # writes. Not `bypassPermissions`: it skips the protected-path and working-directory checks, and nothing
+        # here isolates the filesystem in their place.
+        parts += ["--permission-mode", "dontAsk", "--allowedTools", "Edit(./**)",
+                  "--disallowedTools", "AskUserQuestion", "EnterPlanMode"]
     return parts, minted
 
 
@@ -111,6 +117,9 @@ def _hook(sink):
 def wire(argv, events, sink):
     """Its hooks in its settings — the file it names, or its own."""
     hooks = {event: [{"hooks": [{"type": "command", "command": _hook(sink(event, "stdin"))}]}] for event in HOOKS}
+    hooks["Notification"] = [
+        {"matcher": kind, "hooks": [{"type": "command", "command": _hook(sink("Notification", "stdin"))}]}
+        for kind in DIALOGS]
     argv = list(argv)
     if "--settings" in argv:
         path = argv[argv.index("--settings") + 1]
@@ -122,6 +131,18 @@ def wire(argv, events, sink):
             json.dump(settings, fh)
         return argv
     return argv[:1] + ["--settings", json.dumps({"hooks": hooks})] + argv[1:]
+
+
+def waiting(events):
+    """Whether its turn's events end on a dialog still waiting in its terminal: a dialog's notification that
+    no tool's end, prompt or end of the turn has followed yet."""
+    for event in reversed(events):
+        hook = event.get("_hook")
+        if hook == "Notification" and event.get("notification_type") in DIALOGS:
+            return True
+        if hook in HOOKS:
+            return False
+    return False
 
 
 def completion(events, prompt, session):

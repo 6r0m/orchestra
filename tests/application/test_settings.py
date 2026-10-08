@@ -204,23 +204,23 @@ class Applying(unittest.TestCase):
             fh.write(patch if isinstance(patch, str) else json.dumps(patch))
 
     def test_an_apply_writes_the_settings_it_changes_and_nothing_else(self):
-        shown = self.apply({"pointer": "/roles/architect/agent", "value": "codex-architect"})
-        self.assertEqual(self.patch(), {"roles": {"architect": {"agent": "codex-architect"}}},
+        shown = self.apply({"pointer": "/roles/architect/agent", "value": "claude-architect"})
+        self.assertEqual(self.patch(), {"roles": {"architect": {"agent": "claude-architect"}}},
                          "no unchanged shared value copied in")
-        self.assertEqual(shown["settings"]["roles"]["architect"]["agent"], "codex-architect")
+        self.assertEqual(shown["settings"]["roles"]["architect"]["agent"], "claude-architect")
         self.assertEqual(shown["overrides"], self.patch())
 
     def test_control_a_writer_that_rebuilds_the_patch_from_the_effective_settings(self):
         """What the sparse writer is there to prevent: every shared value copied into the patch, where it
         would hide a later shared change."""
-        rebuilt = P.merge(P.read_settings(self.shared), {"roles": {"architect": {"agent": "codex-architect"}}})
+        rebuilt = P.merge(P.read_settings(self.shared), {"roles": {"architect": {"agent": "claude-architect"}}})
         self.assertIn("timeout_seconds", rebuilt)
 
     def test_a_hand_written_override_survives_an_apply(self):
         self.write_patch({"timeout_seconds": 90, "targets": {"wsl": {"terminal_port": 8501}}})
-        self.apply({"pointer": "/roles/architect/agent", "value": "codex-architect"})
+        self.apply({"pointer": "/roles/architect/agent", "value": "claude-architect"})
         self.assertEqual(self.patch(), {"timeout_seconds": 90, "targets": {"wsl": {"terminal_port": 8501}},
-                                        "roles": {"architect": {"agent": "codex-architect"}}})
+                                        "roles": {"architect": {"agent": "claude-architect"}}})
 
     def test_resetting_visible_settings_keeps_hidden_legacy_and_unrelated_local_members(self):
         self.write_patch({
@@ -260,7 +260,7 @@ class Applying(unittest.TestCase):
         self.assertFalse(os.path.exists(self.local), "a prompt patch left empty is no file")
 
     def test_revert_removes_that_setting_alone_and_the_last_one_the_file(self):
-        self.apply({"pointer": "/roles/architect/agent", "value": "codex-architect"},
+        self.apply({"pointer": "/roles/architect/agent", "value": "claude-architect"},
                    {"pointer": "/review_rounds/plan/normal", "value": 3})
         self.apply({"pointer": "/roles/architect/agent", "revert": True})
         self.assertEqual(self.patch(), {"review_rounds": {"plan": {"normal": 3}}})

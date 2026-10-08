@@ -37,7 +37,7 @@
 <div class="layout">
   <nav class="rail" aria-label="Runs">
     <section class="group" aria-labelledby="runs-waiting-title">
-      <h2 id="runs-waiting-title">Needs you <span class="count" id="runs-waiting-count"></span></h2>
+      <h2 id="runs-waiting-title">Operator action <span class="count" id="runs-waiting-count"></span></h2>
       <ul class="runs" id="runs-waiting"></ul>
     </section>
     <section class="group" aria-labelledby="runs-running-title">
@@ -45,7 +45,7 @@
       <ul class="runs" id="runs-running"></ul>
     </section>
     <section class="group" aria-labelledby="runs-finished-title">
-      <h2 id="runs-finished-title">Finished</h2>
+      <h2 id="runs-finished-title">Closed</h2>
       <ul class="runs" id="runs-finished"></ul>
       <button type="button" class="quiet" id="runs-older" hidden>Load older runs</button>
     </section>
@@ -248,9 +248,12 @@
           <p class="result" id="change-result" role="status"></p>
         </div>
         <p class="hint" id="change-said"></p>
-        <pre class="stat" id="diff-summary"></pre>
-        <pre class="patch" id="diff-patch" tabindex="0" aria-label="The change's patch"></pre>
-        <button type="button" id="diff-more" hidden></button>
+        <div id="diff-files"></div>
+        <div class="raw-patch" id="diff-raw" hidden>
+          <div class="evidence-label"><span>Patch</span><span class="hint" id="diff-size"></span>
+            <button type="button" class="copy" id="diff-copy">Copy patch</button></div>
+          <pre class="patch-raw" id="diff-patch" tabindex="0" translate="no" aria-label="The change's patch"></pre>
+        </div>
       </section>
 
       <div class="controls" id="run-controls" hidden>
@@ -283,6 +286,8 @@
 
       <section class="history" id="history" aria-labelledby="history-title">
         <h2 id="history-title">History</h2>
+        <p class="hint">Each turn: what its role was given and what it gave back, with your answers between. The
+          terminals hold each session in full.</p>
         <div id="timeline"></div>
         <details class="legend">
           <summary>What the verdicts mean</summary>

@@ -63,10 +63,10 @@ function showEmpty() {
     route();
     return;
   }
-  const waiting = runs.filter((run) => run.state === "waiting" || run.state === "failed").length;
+  const waiting = runs.filter((run) => run.agent_prompt || run.state === "waiting" || run.state === "failed").length;
   $("empty-said").textContent = waiting === 1 ? "One run waits for you: it is first in the list."
     : waiting ? waiting + " runs wait for you: they are first in the list."
-      : runs.length ? "Nothing waits for you. Open a run to watch it, or start one with New run."
+      : runs.length ? "No operator action waits. Open a run to watch it, or start one with New run."
         : "No runs yet.";
 }
 

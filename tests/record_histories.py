@@ -1,11 +1,14 @@
 """Record the event histories the replay guard replays.
 
-Rerun only when the workflow changes on purpose, and then behind `workflow.patched`,
-so the histories recorded before the change still replay:
+Rerun only when the workflow changes on purpose, and then behind `workflow.patched`
+or behind what the histories themselves record, so the ones recorded before the change
+still replay:
 `python tests/record_histories.py [name ...]` — the named histories only, every one when none is
 named. A new history is recorded by its name alone, so the ones older code wrote stay as they were:
 `approval_abort` and `failed_abort` are runs ended by an `abort` answer, which no stop offers now, so
-they cannot be recorded again — they prove that runs which took one still replay.
+they cannot be recorded again — they prove that runs which took one still replay. Nor can
+`closeout_revise_conflict_merge`, the run of the first closeouts: its closeout named the tree it left
+`closeout_tree`, and its merge's conflict was resolved with the change not reopened.
 """
 import base64
 import json
@@ -219,9 +222,30 @@ def plan_only_done():
     return run
 
 
+def closeout_revise_conflict_reopen_merge():
+    """A flow that closes out: the engineer's closeout after the architect's pass; a change sent back from the
+    final gate, reopened before it is built, verified and closed out again; then a merge that conflicts, the
+    change reopened again before it is resolved, closed out once more and merged."""
+    a1, _ = codex_review_first("PASS")
+    E.host([("plan-e1-1", 0, "p\n"), ("assess-e1-1", 0, a1),
+            ("build-e2-1", 0, "b\n"), ("verify-e2-1", 0, codex_review_resumed("PASS")),
+            ("closeout-e3-1", 0, "c\n"),
+            ("build-e4-1", 0, "tightened\n"), ("verify-e4-1", 0, codex_review_resumed("PASS")),
+            ("closeout-e5-1", 0, "c\n"),
+            ("build-e6-1", 0, "resolved\n"), ("verify-e6-1", 0, codex_review_resumed("PASS")),
+            ("closeout-e7-1", 0, "c\n")],
+           git=FakeWorktrees([{"result": "conflict", "files": ["app.txt"]}, {"result": "merged", "commit": "c1"}]))
+    run = E.Run(auto=True, flow=["engineer:plan", "architect:assess", "you:approve", "engineer:build",
+                                 "architect:verify", "engineer:closeout", "you:merge"])
+    run.answer("revise engineer tighten the guard")
+    run.answer("merge")
+    run.answer("merge")
+    return run
+
+
 RECORDINGS = (patch_loop_approval_merge, blocker_guidance_failure_continue_discard, final_revise_conflict_merge,
               approval_stop, final_merge_stop_lands, final_merge_no_worker_continue, research_revise_plan_merge,
-              plan_only_done)
+              plan_only_done, closeout_revise_conflict_reopen_merge)
 
 
 def main(names):

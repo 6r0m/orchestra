@@ -33,8 +33,9 @@ Read [docs/architecture/structure.md](docs/architecture/structure.md) before cha
 carries the accepted decisions and the invariants that must not be weakened. In short:
 
 - **Temporal owns the workflow.** Every transition is the workflow's, from `routing.py`; no agent
-  and no best-effort event decides one. A change to what the workflow commands goes behind
-  `workflow.patched(...)`, or the recorded histories in `tests/histories/` stop replaying.
+  and no best-effort event decides one. A change to what the workflow commands keeps the recorded
+  histories in `tests/histories/` replaying: it goes behind `workflow.patched(...)`, or
+  behind what those histories themselves record (D25).
 - **Git owns code and merge state.** Agents never stage, commit, merge or push; the controller does,
   and only after a human answers the final gate.
 - **Langfuse is observability only.** A run behaves identically without it.

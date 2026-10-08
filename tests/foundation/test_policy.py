@@ -151,7 +151,7 @@ class Shape(unittest.TestCase):
     def test_the_shipped_settings_bind_role_profiles_and_stage_methodologies(self):
         loaded = P.load(P.SETTINGS_FILE)
         self.assertEqual({role: settings["agent"] for role, settings in loaded["roles"].items()},
-                         {"engineer": "claude-engineer", "architect": "claude-architect"})
+                         {"engineer": "claude-engineer", "architect": "codex-architect"})
         self.assertEqual(set(loaded["agents"]),
                          {"claude-engineer", "claude-architect", "codex-engineer", "codex-architect"})
         self.assertEqual(loaded["stage_skills"], {
