@@ -19,6 +19,7 @@ sys.path[:0] = [PKG, HERE]
 
 from temporal_env import POLICY, Run, client, host  # noqa: E402
 import temporal_env  # noqa: E402
+import cast  # noqa: E402
 from fakes import (codex_first_out, codex_review_first, codex_review_resumed, review_first_for,
                    review_resumed_for)  # noqa: E402
 
@@ -471,8 +472,6 @@ class Sessions(Scenario):
         self.assertNotIn("/investigate-change",
                          N.compose_prompt("plan", roles["engineer"], False, state, True, True, skills=None),
                          "a prompt without its run policy does not invent a skill")
-        self.assertEqual(S.load()["stage_skills"]["plan"], "investigate-change",
-                         "the shared settings own the default binding")
         old = {"brain": "claude", "workspace_access": "write", "prompt_path": os.path.join(PKG, "roles", "engineer.md")}
         self.assertTrue(N.compose_prompt("plan", old, False, state, True, True,
                                          skills={"plan": "/investigate-change"}).startswith("/investigate-change\n"),
@@ -545,7 +544,8 @@ class AnotherProcess(Scenario):
 OLD_SHAPE = dict(json.loads(json.dumps(POLICY)), _policy_path="policy.json",
                  roles={"engineer": {"brain": "claude", "workspace_access": "write", "prompt": "roles/engineer.md"},
                         "architect": {"brain": "codex", "workspace_access": "read", "prompt": "roles/architect.md",
-                                      "model": "gpt-5.6-sol", "reasoning_effort": "high"}},
+                                      "model": POLICY["roles"]["architect"]["model"],
+                                      "reasoning_effort": POLICY["roles"]["architect"]["effort"]}},
                  stage_skills={"plan": "/investigate-change", "assess": "/architect",
                                "build": "/implement-approved-change", "verify": "/architect"})
 
@@ -744,17 +744,11 @@ class Policy(unittest.TestCase):
         policy_mod.validate(raw)
 
     def test_shipped_role_profiles_pin_the_models_and_effort(self):
-        settings = S.load()
-        self.assertEqual((settings["roles"]["engineer"]["agent"], settings["roles"]["architect"]["agent"]),
-                         ("claude-engineer", "codex-architect"))
-        expected = {
-            "claude-engineer": ("claude-code", "claude-opus-5", "max"),
-            "claude-architect": ("claude-code", "claude-fable-5", "high"),
-            "codex-engineer": ("codex", "gpt-5.6-sol", "xhigh"),
-            "codex-architect": ("codex", "gpt-5.6-sol", "high"),
-        }
-        self.assertEqual({name: (profile["kind"], profile.get("model"), profile.get("effort"))
-                          for name, profile in settings["agents"].items()}, expected)
+        """D18: one left out is the provider's default, whatever was last chosen on this machine, so every
+        shipped profile says both. Which model and which effort is the settings' to say, and no test's."""
+        for name, profile in S.load()["agents"].items():
+            for option in ("model", "effort"):
+                self.assertTrue(profile.get(option), "%s leaves its %s to the provider's default" % (name, option))
 
     def test_missing_persona_file_rejected(self):
         raw = self._raw()
@@ -993,14 +987,14 @@ class Flows(Scenario):
             json.dump(steps, fh)
         repo = tempfile.mkdtemp(prefix="orchestra-flow-repo-")
         self.addCleanup(shutil.rmtree, repo, True)
-        settings = S.load()
+        settings = cast.settings()
         self.host, self.agent = host([("plan-e1-1", 0, "planned\n"),
                                       ("assess-e1-1", 0, review_first_for(settings, "architect", "PASS")[0]),
                                       ("build-e2-1", 0, "built\n"),
                                       ("verify-e2-1", 0, review_resumed_for(settings, "architect", "PASS")),
                                       ("closeout-e3-1", 0, "closed out\n")])
         run = Run(handle=temporal_env.run(runs.start(client(), "a flow of my own", repo=repo, flow="mine",
-                                                     check=False)))
+                                                     check=False, settings_path=cast.file())))
         self.addCleanup(run.cleanup)
         self.assertEqual((run.state["flow"], run.stop["reason"]), ({"name": "mine", "steps": steps}, "approval"))
         # The file now plans again after the approval; the run goes on with the steps it was handed.
@@ -1025,7 +1019,8 @@ class Flows(Scenario):
         self.addCleanup(shutil.rmtree, repo, True)
         self.host, self.agent = host([])
         with self.assertRaisesRegex(flows.InvalidFlow, "flow 'before': a flow that builds closes out before the merge"):
-            temporal_env.run(runs.start(client(), "a flow from before", repo=repo, flow="before", check=False))
+            temporal_env.run(runs.start(client(), "a flow from before", repo=repo, flow="before", check=False,
+                                        settings_path=cast.file()))
         self.assertEqual(self.agent.calls, [], "refused before any workflow was started")
 
 

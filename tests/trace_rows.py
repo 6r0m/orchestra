@@ -3,10 +3,25 @@
 Kept: each row's name, type, version, level, whether it has a parent, the keys of its
 input, output and metadata, and the values views filter on. Dropped: ids, paths, the
 label and the texts, which differ between any two runs.
+
+The kept rows hold no role's agent profile: which kind, profile, model and effort ran a role is the
+settings' to say, so `expected` gives each role's row the one its run's policy held.
 """
-FILTERED = ("phase", "stage", "role", "round", "verdict", "gate_reason", "error_type", "kind", "agent", "model",
-            "effort")
+PROFILE = ("kind", "agent", "model", "effort")
+FILTERED = ("phase", "stage", "role", "round", "verdict", "gate_reason", "error_type") + PROFILE
 GOLDEN = "fixtures/trace_rows.json"
+
+
+def expected(kept, policy):
+    """The kept rows, each role's row with the profile `policy` hands that role."""
+    rows = []
+    for row in kept["rows"]:
+        role = policy["roles"].get(row["filtered"].get("role"))
+        if role is not None:
+            profile = {key: role[key] for key in PROFILE if role.get(key) is not None}
+            row = dict(row, filtered=dict(row["filtered"], **profile))
+        rows.append(row)
+    return dict(kept, rows=rows)
 
 
 def reduce(recorder):

@@ -148,16 +148,6 @@ class Shape(unittest.TestCase):
     def raw(self):
         return json.loads(SETTINGS)
 
-    def test_the_shipped_settings_bind_role_profiles_and_stage_methodologies(self):
-        loaded = P.load(P.SETTINGS_FILE)
-        self.assertEqual({role: settings["agent"] for role, settings in loaded["roles"].items()},
-                         {"engineer": "claude-engineer", "architect": "codex-architect"})
-        self.assertEqual(set(loaded["agents"]),
-                         {"claude-engineer", "claude-architect", "codex-engineer", "codex-architect"})
-        self.assertEqual(loaded["stage_skills"], {
-            "research": "architect", "plan": "investigate-change", "assess": "architect",
-            "build": "implement-approved-change", "verify": "architect"})
-
     def test_review_rounds_have_normal_and_extended_budgets_and_old_settings_still_load(self):
         raw = self.raw()
         raw.pop("max_rounds")
@@ -426,8 +416,8 @@ class TheTargetOpensItsOwnPersona(unittest.TestCase):
         return host.run_role({"stage": "plan", "state": state, "policy": json.loads(json.dumps(policy))})
 
     def test_a_runs_persona_text_reaches_the_agent(self):
-        from app.application import settings
-        sent = settings.run_policy(settings.load())
+        import cast
+        sent = cast.policy()
         sent["roles"]["engineer"]["persona"] = "A persona only this run carries."
         self.run_plan(sent)
         self.assertEqual(len(self.prompts), 1)

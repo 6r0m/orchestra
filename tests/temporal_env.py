@@ -32,12 +32,11 @@ from app.interfaces import cli  # noqa: E402
 from app.application import settings as S  # noqa: E402
 from app.foundation import policy as policy_mod  # noqa: E402
 from app.orchestration import workflow as WF  # noqa: E402
+import cast  # noqa: E402
 
-# This harness pins a Codex architect and binds test skills to each stage, whatever the shipped defaults
-# bind. Tests that need shipped settings read them directly.
-SETTINGS = dict(S.load())
-SETTINGS["roles"] = dict(SETTINGS["roles"], architect=dict(SETTINGS["roles"]["architect"],
-                                                            agent="codex-architect"))
+# The scenarios' settings: the shipped ones as their cast plays them (`cast.py`), each stage bound to a test
+# skill, whatever the shipped defaults bind. Tests that need shipped settings read them directly.
+SETTINGS = cast.settings()
 SETTINGS["stage_skills"] = {"plan": "investigate-change", "assess": "architect",
                             "build": "implement-approved-change", "verify": "architect"}
 # The policy a run started on those settings is handed, as `client.start` makes it.

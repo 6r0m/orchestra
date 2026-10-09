@@ -26,6 +26,7 @@ sys.path[:0] = [PKG, HERE]
 
 from app.application import settings as S  # noqa: E402
 from app.foundation import policy as P  # noqa: E402
+import cast  # noqa: E402
 import stand_in  # noqa: E402
 
 
@@ -54,7 +55,7 @@ class EachKindChecksItsOwnValues(unittest.TestCase):
                 with self.subTest(kind=kind, bad=bad), self.assertRaises(P.InvalidPolicy) as raised:
                     S.check(P.validate(self.with_profile(kind=kind, model=bad)))
                 self.assertEqual(raised.exception.pointer, "/agents/mine/model")
-            S.check(P.validate(self.with_profile(kind=kind, model="gpt-5.6-sol", effort="medium")))
+            S.check(P.validate(self.with_profile(kind=kind, model="any.model-1", effort="medium")))
 
     def test_the_plain_token_rule_is_the_kinds_never_the_settings(self):
         """The control: a model the stand-in takes, which a generic plain-token rule would refuse."""
@@ -182,7 +183,7 @@ class Applying(unittest.TestCase):
         self.root = tempfile.mkdtemp(prefix="orchestra-apply-")
         self.addCleanup(__import__("shutil").rmtree, self.root, True)
         os.makedirs(os.path.join(self.root, ".orchestra"))
-        shared = {key: value for key, value in shipped().items() if not key.startswith("_")}
+        shared = {key: value for key, value in cast.settings().items() if not key.startswith("_")}
         shared["agents"]["spare"] = {"kind": "codex"}
         self.shared = os.path.join(self.root, ".orchestra", "settings.json")
         self.local = os.path.join(self.root, ".orchestra", "settings.local.json")

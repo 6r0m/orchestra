@@ -32,6 +32,7 @@ from app.interfaces import cli  # noqa: E402
 from app.agents import launch  # noqa: E402
 from app.foundation import policy as policy_mod  # noqa: E402
 import temporal_env as E  # noqa: E402
+import cast  # noqa: E402
 import trace_rows  # noqa: E402
 from app.workspace import worktrees  # noqa: E402
 from fakes import (FakeAgent, FakeWorktrees, Recorder, codex_review_first,  # noqa: E402
@@ -39,7 +40,7 @@ from fakes import (FakeAgent, FakeWorktrees, Recorder, codex_review_first,  # no
 from tests.orchestration.test_workflow import Scenario  # noqa: E402
 
 # The policy a run on the shipped settings is handed.
-POL = settings.run_policy(settings.load())
+POL = cast.policy()
 WINDOWS = sys.platform.startswith("win")
 
 
@@ -114,7 +115,7 @@ class Hermetic(Scenario):
         a1, _ = codex_review_first("PASS")
         E.host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)])
         try:
-            code, out = captured(cli.run(["toy task", "--repo", repo], client=E.client(), check=False))
+            code, out = captured(cli.run(["toy task", "--repo", repo, "--settings", cast.file()], client=E.client(), check=False))
         finally:
             telemetry.resolve = original
         found = re.search(r"run-id: ([\w-]+)", out)
@@ -141,10 +142,10 @@ class RunIds(unittest.TestCase):
             self.addCleanup(shutil.rmtree, A.run_dir(rid), ignore_errors=True)
         a1, _ = codex_review_first("PASS")
         E.host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)])
-        _, first = captured(cli.run(["toy task", "--repo", repo], client=E.client(), check=False))
+        _, first = captured(cli.run(["toy task", "--repo", repo, "--settings", cast.file()], client=E.client(), check=False))
         self.assertIn("run-id: %s" % taken, first)
         E.host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)])
-        _, second = captured(cli.run(["toy task", "--repo", repo], client=E.client(), check=False))
+        _, second = captured(cli.run(["toy task", "--repo", repo, "--settings", cast.file()], client=E.client(), check=False))
         self.assertIn("run-id: %s" % fresh, second, "the retained id is never reused")
         self.assertRaises(StopIteration, next, drawn)
 
@@ -1015,8 +1016,7 @@ class TraceShape(Scenario):
             state = {"run_id": "r1", "label": "the label", "task": "t", "trace_root": "a" * 16,
                      "phase": "plan", "episode": 2, "round": 0, "phase_rounds": 2,
                      "guidance": "use B"}
-            telemetry.begin(Client(), state, "plan", "engineer",
-                            {"kind": "claude-code", "agent": "claude", "model": "opus", "effort": "high"})
+            telemetry.begin(Client(), state, "plan", "engineer", POL["roles"]["engineer"])
         finally:
             otel.get_current_span = original
         self.assertEqual(span.attributes.get(attrs.TRACE_SESSION_ID), "the label")
@@ -1033,7 +1033,7 @@ class TraceShape(Scenario):
         self.assertFalse({"episode", "attempt"} & set(metadata),
                          "two more counters beside the round read as a contradiction")
         self.assertEqual({key: metadata[key] for key in ("kind", "agent", "model", "effort")},
-                         {"kind": "claude-code", "agent": "claude", "model": "opus", "effort": "high"},
+                         {key: POL["roles"]["engineer"][key] for key in ("kind", "agent", "model", "effort")},
                          "the step's agent, as data")
         span.updates.clear()
         otel.get_current_span = lambda: span

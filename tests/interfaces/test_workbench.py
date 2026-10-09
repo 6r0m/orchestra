@@ -32,6 +32,7 @@ from app.application import settings as S  # noqa: E402
 from app.application import stack  # noqa: E402
 from app.orchestration import workflow as WF  # noqa: E402
 import temporal_env as E  # noqa: E402
+import cast  # noqa: E402
 from app.agents import terminal  # noqa: E402
 from app.interfaces.workbench import server as workbench  # noqa: E402
 from fakes import FakeWorktrees, first_message_for, review_first_for, review_resumed_for  # noqa: E402
@@ -40,15 +41,15 @@ from tests.orchestration.test_workflow import Scenario  # noqa: E402
 
 
 def configured_review_first(verdict, feedback="fb"):
-    return review_first_for(S.load(), "architect", verdict, feedback)
+    return review_first_for(E.SETTINGS, "architect", verdict, feedback)
 
 
 def configured_review_resumed(verdict, feedback="fb"):
-    return review_resumed_for(S.load(), "architect", verdict, feedback)
+    return review_resumed_for(E.SETTINGS, "architect", verdict, feedback)
 
 
 def configured_first_message(message):
-    return first_message_for(S.load(), "architect", message)
+    return first_message_for(E.SETTINGS, "architect", message)
 
 
 DIALOG = {"_hook": "Notification", "notification_type": "permission_prompt"}
@@ -167,7 +168,8 @@ class Server:
             policy = dict(E.SETTINGS, workbench_port=server.server_port)
             server.RequestHandlerClass = workbench.make_handler(
                 lambda work, timeout=300: E.run(work(E.client()), timeout), policy, terminal.token(),
-                links=lambda trace_id: "http://langfuse.test/trace/%s" % trace_id)
+                links=lambda trace_id: "http://langfuse.test/trace/%s" % trace_id,
+                environ=dict(os.environ, ORCHESTRA_SETTINGS=cast.file()))
             server.daemon_threads = True
             threading.Thread(target=server.serve_forever, daemon=True).start()
             cls._instance = server
@@ -257,6 +259,18 @@ class SettingsApi(unittest.TestCase):
                          (200, {"normal": 3, "extended": 10}))
         with open(self.local, encoding="utf-8") as fh:
             self.assertEqual(json.load(fh), {"review_rounds": {"plan": {"normal": 3}}})
+
+    def test_a_shared_file_edited_by_hand_shows_at_the_next_read(self):
+        """The view is read from the files each time the page asks: an edit needs no restart to show."""
+        _, before = self.ask("GET")
+        profile = self.shared["roles"]["engineer"]["agent"]
+        edited = json.loads(json.dumps(self.shared))
+        edited["agents"][profile]["model"] = "edited-by-hand"
+        with open(os.path.join(self.root, ".orchestra", "settings.json"), "w", encoding="utf-8") as fh:
+            json.dump(edited, fh)
+        status, after = self.ask("GET")
+        self.assertEqual((status, after["settings"]["agents"][profile]["model"]), (200, "edited-by-hand"))
+        self.assertNotEqual(after["revision"], before["revision"], "and an Apply read before it is stale")
 
     def test_a_stale_apply_is_a_conflict_and_a_refused_one_names_its_setting(self):
         _, shown = self.ask("GET")
@@ -977,7 +991,7 @@ class Runs(Scenario):
         self.assertTrue(datetime.datetime.fromisoformat(view["since"]), "since when it waits")
         self.assertEqual(view["blocked_by"], [])
         self.assertTrue(view["worktree"], "where its work is")
-        self.assertEqual((view["flow"]["name"], view["step"]), ("engineer-code", 2),
+        self.assertEqual((view["flow"]["name"], view["step"]), (S.load()["default_flow"], 2),
                          "none named: the policy's default flow, at its approval")
 
     def test_a_working_run_says_its_stage_its_role_and_since_when(self):
@@ -1064,7 +1078,7 @@ class Runs(Scenario):
     def test_the_page_lists_the_flows_and_starts_a_run_on_the_one_chosen(self):
         status, body = request("GET", "/api/flows")
         self.assertEqual(status, 200, body)
-        self.assertEqual(body["default"], "engineer-code")
+        self.assertEqual(body["default"], S.load()["default_flow"])
         listed = {found["name"]: found for found in body["flows"]}
         self.assertEqual(listed["architect-research"]["steps"][:2], ["architect:research", "you:approve"])
         status, refused = request("POST", "/api/runs", {"task": "a task", "repo": self.repo, "flow": "no-such-flow"})
@@ -1182,9 +1196,6 @@ class Runs(Scenario):
     def test_a_turn_record_is_read_by_the_kind_that_wrote_it_whatever_it_says(self):
         """A Claude engineer's answer that quotes Codex's own events stays its answer: the run's start names
         each role's kind, and only that kind reads the role's record."""
-        settings = S.load()
-        self.assertEqual(settings["agents"][settings["roles"]["engineer"]["agent"]]["kind"], "claude-code",
-                         "this case is a Claude engineer's")
         quoted = ("Codex prints one event a line, for example:\n"
                   '{"type": "thread.started", "thread_id": "example"}\n'
                   '{"type": "item.completed", "item": {"type": "agent_message", "text": "example result"}}\n'

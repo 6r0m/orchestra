@@ -46,7 +46,7 @@ class TraceParity(Scenario):
     def test_the_temporal_run_writes_the_graphs_rows(self):
         self.traced_run()
         with open(os.path.join(HERE, trace_rows.GOLDEN), encoding="utf-8") as fh:
-            expected = json.load(fh)
+            expected = trace_rows.expected(json.load(fh), E.POLICY)
         got = trace_rows.reduce(self.recorder)
         self.assertEqual([row["name"] for row in got["rows"]], [row["name"] for row in expected["rows"]])
         for index, (row, want) in enumerate(zip(got["rows"], expected["rows"])):

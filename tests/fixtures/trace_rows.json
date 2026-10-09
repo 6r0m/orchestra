@@ -40,10 +40,6 @@
   {
    "as_type": "agent",
    "filtered": {
-    "agent": "claude-engineer",
-    "effort": "max",
-    "kind": "claude-code",
-    "model": "claude-opus-5",
     "phase": "plan",
     "role": "engineer",
     "round": 1,
@@ -80,11 +76,7 @@
   {
    "as_type": "agent",
    "filtered": {
-    "agent": "codex-architect",
-    "effort": "high",
     "error_type": "telemetry_degraded",
-    "kind": "codex",
-    "model": "gpt-5.6-sol",
     "phase": "plan",
     "role": "architect",
     "round": 1,
@@ -126,10 +118,6 @@
   {
    "as_type": "agent",
    "filtered": {
-    "agent": "claude-engineer",
-    "effort": "max",
-    "kind": "claude-code",
-    "model": "claude-opus-5",
     "phase": "plan",
     "role": "engineer",
     "round": 2,
@@ -167,12 +155,8 @@
   {
    "as_type": "agent",
    "filtered": {
-    "agent": "codex-architect",
-    "effort": "high",
     "error_type": "telemetry_degraded",
     "gate_reason": "approval",
-    "kind": "codex",
-    "model": "gpt-5.6-sol",
     "phase": "plan",
     "role": "architect",
     "round": 2,
@@ -281,11 +265,7 @@
   {
    "as_type": "agent",
    "filtered": {
-   "agent": "claude-engineer",
-    "effort": "max",
     "error_type": "session_lost",
-    "kind": "claude-code",
-    "model": "claude-opus-5",
     "phase": "build",
     "role": "engineer",
     "round": 1,
@@ -324,11 +304,7 @@
   {
    "as_type": "agent",
    "filtered": {
-    "agent": "codex-architect",
-    "effort": "high",
     "error_type": "telemetry_degraded",
-    "kind": "codex",
-    "model": "gpt-5.6-sol",
     "phase": "build",
     "role": "architect",
     "round": 1,

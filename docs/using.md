@@ -172,7 +172,9 @@ run each is, and removes a closed run's from there too.
 Settings shows the profiles bound to each role, each profile's model and effort, the one optional
 methodology skill named for each stage, the plan and build review budgets, and the default flow. The
 skill picker lists names found through each agent adapter; unbound installed skills remain available to
-the vendor CLI. A run snapshots the effective settings when it starts.
+the vendor CLI. A run snapshots the effective settings when it starts. The page reads the settings files
+each time it loads, so a default edited in `.orchestra/settings.json` shows at the next reload, with no
+restart.
 
 Under each role's agent the page says what that role may do, and what holds the agent you chose to it.
 Codex is held by its own sandbox, which the operating system enforces: a read-only role cannot write, and

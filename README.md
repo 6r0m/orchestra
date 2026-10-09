@@ -170,6 +170,11 @@ file proves; [docs/history/](docs/history/) records how the system got here.
 | the repositories runs may work on | `.orchestra/repos.json` — yours; copy [`.orchestra/repos.example.json`](.orchestra/repos.example.json) |
 | credentials and machine-specific values | `.env` — see [`.env.example`](.env.example) |
 
+Each row is the one place its values are written. Whatever needs one reads it from there — production
+code through that file's loader, the suite from the same file — and keeps no copy of its own: not a
+constant in code, not a fixture, not a value a test expects
+([how a test reads them](tests/README.md#one-source-for-every-value)).
+
 Running it day to day — the page, the command line, and where to look when something is wrong — is
 [docs/using.md](docs/using.md). What is being worked on right now is in [todo/](todo/README.md).
 

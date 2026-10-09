@@ -27,8 +27,9 @@ class Shipped(unittest.TestCase):
         research = flows.load("architect-research")
         self.assertEqual(research[:2], ["architect:research", "you:approve"])
         self.assertEqual(research[2:], CLOSED)
-        self.assertEqual(P.load()["default_flow"], "engineer-code")
-        self.assertEqual([found["name"] for found in flows.available()], ["architect-research", "engineer-code"])
+        shipped = [found["name"] for found in flows.available()]
+        self.assertEqual(shipped, ["architect-research", "engineer-code"])
+        self.assertIn(P.load()["default_flow"], shipped)
 
     def test_the_order_runs_took_before_flows_never_changes_and_is_itself_a_flow(self):
         self.assertEqual(list(flows.LEGACY_FLOW), CODE)

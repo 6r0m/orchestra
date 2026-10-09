@@ -47,7 +47,7 @@ class Recording(Home):
         with open(os.path.join(self.home, claude_code.CONFIG_FILE), "w", encoding="utf-8") as fh:
             json.dump({"numStartups": 7, "projects": {"/other": {"hasTrustDialogAccepted": True,
                                                                  "history": ["keep me"]}}}, fh)
-        self.codex("model = \"gpt-5.6-sol\"\n\n[projects.'/other']\ntrust_level = \"trusted\"\n")
+        self.codex("model = \"any-model\"\n\n[projects.'/other']\ntrust_level = \"trusted\"\n")
 
         self.assertEqual(trust.ensure(REPO, ["claude-code", "codex"], self.home), ["claude-code", "codex"])
         config = self.claude()
@@ -55,7 +55,7 @@ class Recording(Home):
         self.assertEqual(config["numStartups"], 7, "the rest of the file is the operator's")
         self.assertEqual(config["projects"]["/other"]["history"], ["keep me"])
         text = self.codex()
-        self.assertIn("model = \"gpt-5.6-sol\"", text, "the config is appended to, never rewritten")
+        self.assertIn("model = \"any-model\"", text, "the config is appended to, never rewritten")
         self.assertIn("[projects.%s]" % codex.trust_key(REPO), text)
         self.assertIn("trust_level = \"trusted\"", text.split("[projects.%s]" % codex.trust_key(REPO))[1])
 
@@ -132,7 +132,7 @@ class Forgetting(Home):
 
     def test_only_this_repositorys_own_records_go_and_the_rest_of_the_file_is_untouched(self):
         near = os.path.join(REPO, "tools")        # a real directory whose key starts with ours
-        self.codex("model = \"gpt-5.6-sol\"\n")
+        self.codex("model = \"any-model\"\n")
         self.assertEqual(trust.ensure(REPO, ["claude-code", "codex"], self.home), ["claude-code", "codex"])
         # Tables of someone else's directly after ours: a block ends at the next header, whatever it is.
         with open(os.path.join(self.home, codex.CONFIG_FILE), "a", encoding="utf-8", newline="\n") as fh:
@@ -146,7 +146,7 @@ class Forgetting(Home):
         self.assertIn("[projects.%s]" % codex.trust_key(near), text, "a repository of a similar name stays")
         self.assertIn("[features]\nhooks = true", text, "and every table after ours survives")
         self.assertIn("[hooks.state]\nkeep = \"me\"", text)
-        self.assertIn("model = \"gpt-5.6-sol\"", text)
+        self.assertIn("model = \"any-model\"", text)
         import tomllib
         self.assertEqual(sorted(tomllib.loads(text)), ["features", "hooks", "model", "projects"])
         projects = self.claude()["projects"]

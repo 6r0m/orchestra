@@ -12,6 +12,7 @@ PKG = os.path.abspath(os.path.join(HERE, os.pardir))
 sys.path[:0] = [PKG, HERE]
 
 import temporal_env as E  # noqa: E402
+import cast  # noqa: E402
 from fakes import FakeWorktrees, first_message_for, review_first_for, review_resumed_for  # noqa: E402
 from app.application import client as runs  # noqa: E402
 from app.application import settings as S  # noqa: E402
@@ -40,7 +41,7 @@ class SettingsDelivery(unittest.TestCase):
         for role in ("engineer", "architect"):
             shutil.copyfile(os.path.join(PKG, "roles", role + ".md"),
                             os.path.join(self.root, "roles", role + ".md"))
-        shared = {key: value for key, value in S.load().items() if not key.startswith("_")}
+        shared = {key: value for key, value in cast.settings().items() if not key.startswith("_")}
         with open(os.path.join(self.root, ".orchestra", "settings.json"), "w", encoding="utf-8") as fh:
             json.dump(shared, fh)
         self.at = settings_server(self, self.root, {}, lambda work, timeout=300: E.run(work(E.client()), timeout))
@@ -156,8 +157,8 @@ class SettingsDelivery(unittest.TestCase):
                         {"pointer": "/review_rounds/plan/extended", "value": 0}],
         })
         self.assertEqual(status, 200, changed)
-        self.assertEqual(changed["settings"]["roles"]["engineer"]["agent"], "claude-engineer")
-        self.assertEqual(changed["settings"]["roles"]["architect"]["agent"], "codex-architect")
+        self.assertEqual({role: bound["agent"] for role, bound in changed["settings"]["roles"].items()},
+                         cast.ROLES, "reverted to the profiles its checkout's shared settings bind")
         self.assertEqual(changed["settings"]["review_rounds"]["plan"], {"normal": 1, "extended": 0})
         status, answer = ask("POST", "/api/runs/%s/answer" % run_id,
                              {"stop": research["stop"]["id"], "action": "approve"})
@@ -172,7 +173,8 @@ class SettingsDelivery(unittest.TestCase):
         self.assertIn("smoke-architect", self.agent.calls[0]["argv"])
         self.assertIn("smoke-engineer", self.agent.calls[1]["argv"])
         self.assertIn("--effort", self.agent.calls[0]["argv"])
-        self.assertIn('model_reasoning_effort="xhigh"', self.agent.calls[1]["argv"])
+        self.assertIn('model_reasoning_effort="%s"' % configured["agents"]["codex-engineer"]["effort"],
+                      self.agent.calls[1]["argv"])
         self.assertIn("Smoke architect persona.", self.agent.calls[0]["prompt"])
         self.assertIn("Smoke engineer persona.", self.agent.calls[1]["prompt"])
         self.assertTrue(self.agent.calls[1]["prompt"].startswith("$smoke-plan\n"))
