@@ -262,7 +262,16 @@ still lands on a checkout.
   once — so the end closes the job to newcomers, holds each process it lists, and after the
   termination waits until each has ended: a worktree is free to remove the moment its agents are
   ended, and an end it cannot prove — a process it lists but cannot open, or one not ended within
-  the grace — fails the step, so no merge or discard goes on as though it were. A Claude engineer runs in `dontAsk` mode with edits allowed inside its worktree, so a turn never waits on a permission prompt: what is not allowed is denied and the agent works on. That is Claude's tool policy — its file tools, shell redirections and protected paths — not a filesystem boundary: a shell command the host's own Claude settings allow can still write elsewhere, and the host's guards and the controller's git checks are tripwires. `bypassPermissions` is not used, since it skips those checks and nothing here isolates the filesystem in their place. A Claude architect stays in plan mode, and both Claude roles deny vendor question tools: a decision only the operator can make reaches the workflow through the stage result. The host's skills directory is added for reading. A Codex role never asks for tool approval either. The
+  the grace — fails the step, so no merge or discard goes on as though it were. A Claude engineer runs in `dontAsk` mode with edits allowed inside its worktree, so a turn never waits on a permission prompt: what is not allowed is denied and the agent works on. That is Claude's tool policy — its file tools, shell redirections and protected paths — not a filesystem boundary: a shell command the host's own Claude settings allow can still write elsewhere, and the host's guards and the controller's git checks are tripwires. `bypassPermissions` is not used, since it skips those checks and nothing here isolates the filesystem in their place. A Claude architect stays in plan mode, and both Claude roles deny vendor question tools: a decision only the operator can make reaches the workflow through the stage result. The host's skills directory is added for reading. A Codex role never asks for tool approval either, and
+  is the one kind held by the operating system: under its own sandbox a read-only role writes nowhere, and a
+  writing one only in its worktree and the temporary folder — measured on both hosts with no model in it,
+  where neither could stage either, a linked worktree's index lying outside it. That boundary has a price:
+  a tool that keeps its cache or its environment outside the worktree, as this repository's own test runner
+  does, does not start under it. Claude Code's sandbox would be the same kind of boundary and is not turned
+  on: it covers shell commands on Linux and WSL2 only, so a role would be held differently on each host; in
+  a linked worktree it leaves the repository's shared git directory writable; and it would need allowances
+  for each repository's tools. What holds each kind is the kind's own to say (`BOUNDARY`), and Settings says
+  it beside the role whose agent is chosen there. The
   prompt follows `--`, so no option that takes several values can swallow it. On Windows a Codex role-run uses Codex's unelevated sandbox: the elevated one
   starts its helper through an administrator prompt, which a worker outside the interactive
   desktop can never show; the ConPTY asks its terminal for win32-input-mode, in which Codex

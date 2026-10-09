@@ -1,15 +1,17 @@
 # Workbench run evidence: the change by file, history as what each role received and produced
 
-**Status:** the manual check's changes — awaiting the external re-review (D8). Q1–Q3 are closed by D5–D7.
-**Scope:** the Workbench run page's Change, History and run controls ([static/](../app/interfaces/workbench/static/),
-[server.py](../app/interfaces/workbench/server.py)); the change read on the run's host
-([worktrees.py](../app/workspace/worktrees.py) `review_diff`, the `ReviewDiff` workflow and activity); Temporal
-reads in [client.py](../app/application/client.py); prompt parts beside their composer
-([nodes.py](../app/agents/nodes.py)); the browser acceptance ([demo.py](../tools/demo.py),
-[demo_press.py](../tools/demo_press.py)) and the documents that describe the page.
-**Stable documentation owner:** [docs/using.md](../docs/using.md) (the page as the operator uses it); the
-interfaces' [structure.md](../app/interfaces/docs/architecture/structure.md) (the page's composition and what it
-reads); architecture D29 in [structure.md](../docs/architecture/structure.md) (the plain page and its vendored
+**Status:** DONE 2026-10-08 — closed on the operator's word by an architect pass in place of the external
+re-review that was pending (D9): the manual check's corrections hold, and one defect it found on real runs —
+a landed run's turns could no longer be read — is fixed. Q1–Q3 are closed by D5–D7.
+**Scope:** the Workbench run page's Change, History and run controls ([static/](../../app/interfaces/workbench/static/),
+[server.py](../../app/interfaces/workbench/server.py)); the change read on the run's host
+([worktrees.py](../../app/workspace/worktrees.py) `review_diff`, the `ReviewDiff` workflow and activity); Temporal
+reads in [client.py](../../app/application/client.py); prompt parts beside their composer
+([nodes.py](../../app/agents/nodes.py)); the browser acceptance ([demo.py](../../tools/demo.py),
+[demo_press.py](../../tools/demo_press.py)) and the documents that describe the page.
+**Stable documentation owner:** [docs/using.md](../../docs/using.md) (the page as the operator uses it); the
+interfaces' [structure.md](../../app/interfaces/docs/architecture/structure.md) (the page's composition and what it
+reads); architecture D29 in [structure.md](../../docs/architecture/structure.md) (the plain page and its vendored
 dependencies).
 
 ## Contents
@@ -84,6 +86,12 @@ full live session.
   - Effect: the design is approved; implementation starts, test first.
   - Reason: not stated.
   - Date/source: 2026-10-01, operator: *"check reviewer and /implement-approved-change"*.
+- **D9** Close this todo with an architect pass, by the project's own goals and standards.
+  - Effect: the external re-review of the manual check's changes, pending since 2026-10-01, is replaced by
+    that pass; what it finds is fixed here.
+  - Reason: not stated.
+  - Date/source: 2026-10-08, operator: *"/implement-approved-change with /architect to fully close todos use
+    our goals to very great ui ux and control auto things with our standarts"*.
 
 ### Operator gates
 
@@ -135,27 +143,27 @@ full live session.
 ### Verified facts
 
 1. **The file list is git's stat, paths shortened.** `review_diff` returns `git diff --cached --stat` and the
-   whole patch in 512 KiB parts (`review_diff`, `PATCH_CHUNK` in [worktrees.py](../app/workspace/worktrees.py));
+   whole patch in 512 KiB parts (`review_diff`, `PATCH_CHUNK` in [worktrees.py](../../app/workspace/worktrees.py));
    the stat cuts a long path with `...` — the saved run shows `...-09-30_1627-audit_the_codex_adapter_s_output.md`.
    The page prints the stat as text and the patch as one block of marked lines
-   ([change.js](../app/interfaces/workbench/static/change.js) `drawPatch`). No file can be opened on its own.
+   ([change.js](../../app/interfaces/workbench/static/change.js) `drawPatch`). No file can be opened on its own.
 2. **The change is read on the run's own host.** `client.review_diff` runs the `ReviewDiff` workflow on the run's
    workflow queue; its activity reads the worktree with that host's git through a private index
-   ([client.py](../app/application/client.py), [workflow.py](../app/orchestration/workflow.py),
-   [activities.py](../app/application/activities.py) `review_diff`).
+   ([client.py](../../app/application/client.py), [workflow.py](../../app/orchestration/workflow.py),
+   [activities.py](../../app/application/activities.py) `review_diff`).
 3. **The page builds no markup from run text.** Every node comes from `el()` and `textContent`; no `innerHTML` in
    `static/*.js` (searched). The CSP is `default-src 'self'; … style-src 'self' 'unsafe-inline'`
-   ([server.py](../app/interfaces/workbench/server.py)): same-origin scripts, no `eval`. xterm.js 5.5.0 is the one
+   ([server.py](../../app/interfaces/workbench/server.py)): same-origin scripts, no `eval`. xterm.js 5.5.0 is the one
    vendored dependency, pinned with its licence and source (`static/vendor/xterm/VERSION`).
 4. **"The research brief" is the architect's output, not the operator's input.** A work stage's final message is
    its product: the workflow keeps it as the run's `brief` and in the timeline entry (`_stage` in
-   [workflow.py](../app/orchestration/workflow.py)), shows it at the research approval, and hands it to the plan's
+   [workflow.py](../../app/orchestration/workflow.py)), shows it at the research approval, and hands it to the plan's
    prompt (`compose_prompt`, "# The architect's research brief").
 5. **Why the turn record repeated it.** A history entry shows the timeline's `brief` or `feedback` as "The
    research brief" / "The review findings", then "Recorded input and output", whose first field is the turn's
    final message — the same text — with the prompt one disclosure deeper
-   ([run.js](../app/interfaces/workbench/static/run.js) `historyEntry`, `loadTurn`).
-6. **A turn's prompt has a known shape** (`compose_prompt` in [nodes.py](../app/agents/nodes.py)): the stage's
+   ([run.js](../../app/interfaces/workbench/static/run.js) `historyEntry`, `loadTurn`).
+6. **A turn's prompt has a known shape** (`compose_prompt` in [nodes.py](../../app/agents/nodes.py)): the stage's
    skill invocation on its first turn; `# Task`, the task and the role's persona on a session's first turn; the
    stage's instructions (`stages.STAGE_ASK`); then the material carried in, each under its own heading — `# The
    architect's research brief …`, `# Your previous brief`, `# Your prior findings …` or `# Architect findings to
@@ -168,25 +176,25 @@ full live session.
 8. **A review records the tree it judged — on a PASS only.** An assess or verify computes the worktree's tree
    before the architect reads it (`worktrees.work_tree`: `git add -A` into a private index, `git write-tree`) and
    returns it as `assessed_tree` / `verified_tree` only when it passes (`run_role` in
-   [activities.py](../app/application/activities.py)); a PATCH, UNVERIFIED or BLOCKER review returns none. The
+   [activities.py](../../app/application/activities.py)); a PATCH, UNVERIFIED or BLOCKER review returns none. The
    workflow keeps only the latest; every activity's input and result is in the run's Temporal history. Found in
    implementation (the history test's PATCH review had no tree); A7 closes it.
 9. **The run's controls at a stop.** While a run waits or failed, the page shows its answers, then Stop run and
    Force terminate (`renderControls`; the [UX todo](2026-09-25_2334-workbench-ux.md)'s A3). "Stopping" is the
-   workflow's own `STOPPING` status (`view` in [client.py](../app/application/client.py)); a run whose status
+   workflow's own `STOPPING` status (`view` in [client.py](../../app/application/client.py)); a run whose status
    cannot be read shows as working. At a stop nothing runs on a host, so a Stop ends the run when its workflow
    worker reads it, keeping the worktree and branch (`client.stop`).
 10. **`make demo`** presses Stop run on waiting and working runs, Force terminate only on a run already stopping,
-    and checks a merged run offers neither ([demo.py](../tools/demo.py)).
+    and checks a merged run offers neither ([demo.py](../../tools/demo.py)).
 11. **Every answer is a recorded Update.** `client.answer` sends it as the workflow's `answer` Update with the id
     `answer:<stop-id>`, carrying the stop, the action, the role a revise names, its words and any confirmation
-    ([client.py](../app/application/client.py) `answer`, [workflow.py](../app/orchestration/workflow.py)
+    ([client.py](../../app/application/client.py) `answer`, [workflow.py](../../app/orchestration/workflow.py)
     `FeatureRun.answer` and its validator). An accepted Update's event keeps its request
     (`WorkflowExecutionUpdateAcceptedEventAttributes.accepted_request`, installed temporalio 1.33.0); one the
     validator refuses never enters the history.
 12. **The patch's parts carry one identity.** `review_diff` returns a `snapshot` hash of the whole patch, and the
     page reads its parts again from the start rather than join parts of two changes (`loadDiff` in
-    [change.js](../app/interfaces/workbench/static/change.js)). Its private index's tree (`git write-tree`, as
+    [change.js](../../app/interfaces/workbench/static/change.js)). Its private index's tree (`git write-tree`, as
     `worktrees.work_tree` makes one) names the same change as an object git can read later.
 
 ### Research (2026-10-01, primary sources; not yet measured here)
@@ -436,9 +444,9 @@ action of its own ([GitHub Docs](https://docs.github.com/en/pull-requests/collab
    empty list drawn, a history read error with no retry, an unread history taken for "no review yet"), and
    fixture captures at 1600, 1280, 900 and 390 px (one fix: the History's part classes collided with the stack
    panel's).
-10. [ ] The external review, then the full suites and the restart — on the code as it is then. The suites that
-    passed (WSL 580, Windows 395) and the restart after them proved the revision before the manual check's changes,
-    not these. No review agents (operator, 2026-10-01: *"no need more activate tester and reviewer agents"*).
+10. [x] The review of the manual check's changes — the architect pass of 2026-10-08 (D9), in the review
+    record — then the touched modules on both hosts and `make demo` whole on the code as it is then. No review
+    agents (operator, 2026-10-01: *"no need more activate tester and reviewer agents"*).
 
 **Verification so far** (after the implementation review's fixes): WSL `run-tests.sh` on test_worktrees,
 test_workflow, test_terminal, test_activities, test_observability, test_architecture, test_replay — 245 tests OK —
@@ -476,11 +484,11 @@ checks; the stale-Produced fix also shown by a fixture control without it; `make
 
 ## Documentation plan
 
-- **[docs/using.md](../docs/using.md):** the change by file and its viewer; History as turns received and
+- **[docs/using.md](../../docs/using.md):** the change by file and its viewer; History as turns received and
   produced, with your answers; the run's controls at a stop.
-- **Interfaces [structure.md](../app/interfaces/docs/architecture/structure.md):** what the page reads for a file,
+- **Interfaces [structure.md](../../app/interfaces/docs/architecture/structure.md):** what the page reads for a file,
   a round's change and a turn's parts.
-- **[tests/README.md](../tests/README.md), [tools/README.md](../tools/README.md):** rows for the new checks.
+- **[tests/README.md](../../tests/README.md), [tools/README.md](../../tools/README.md):** rows for the new checks.
 - Stable docs, code, tests and configuration do not reference this todo.
 
 ## Completion criteria
@@ -578,3 +586,26 @@ checks; the stale-Produced fix also shown by a fixture control without it; `make
   turn fell back to the first phase — now under its own heading; Raw output record closed on a redraw — kept open;
   task 10 reopened, its suites having proved the revision before. Shown on the fixture page; the tree-less
   blocker answered with guidance pinned server-side.
+
+### 2026-10-08 — the architect pass (D9): PATCH, fixed, then nothing left
+
+- **The manual check's three corrections, read in the code and on real runs.** A pointer names its turn with
+  the time that turn's row shows: seen on the saved run, whose two episodes both hold a "build, round 1" —
+  *Shown with build, round 2, at Sep 30, 05:10 PM*, the time on that row. An answer before any turn is under
+  its own heading, and a raw output record stays open when its turn is drawn again: read in the code, not
+  seen again on a page.
+- **Required finding, on the day's merged runs — fixed.** Every turn's *Change since the previous review* of a
+  run that had landed read "git no longer holds …", though git held every one of those trees: the read ran in
+  the worktree's folder, which a merge removes. An older run's first turn showed a bare
+  `WorkflowFailureError`. A snapshot named by its base and its tree is now read from the repository once the
+  worktree is gone, and what only the worktree could say is said to be gone with it. Red first — the read of a
+  held tree refused as pruned; then, with the fixed reader on the real repository, the landed run's plan turn
+  read as its one file and its first build as its six.
+- **The page's own tab icon.** Every load asked for a `/favicon.ico` the server does not hold; the page now
+  names its own, served like its other files.
+- **Not blocking:** the pointer's time comes from the turn's end in Temporal and the row's from the timeline;
+  on a run of 24 turns they were 0.01–0.04 s apart, every pair in the same minute.
+- **Evidence:** the touched modules — WSL: 54 classes, 296 tests, OK; Windows: 34 classes, 180 tests, OK;
+  `make demo` whole on the final code, 86 checks.
+- **To take effect:** the Workbench and the stack restarted on this code, which is the operator's to do. Until
+  then a landed run's turns read as before, and the page asks for an icon the running server does not serve.

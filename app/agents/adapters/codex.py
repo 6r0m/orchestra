@@ -33,6 +33,17 @@ from app.agents.adapters import _files
 NAME = "Codex"
 EXECUTABLE = "codex"
 ACCESS = ("read", "write")
+# Its own sandbox, which the operating system enforces on everything a turn runs. Measured on both hosts
+# with `codex sandbox`, no model in it, in a linked worktree: read-only wrote nowhere; workspace-write wrote
+# in the worktree and the temporary folder and nowhere else, and neither could stage — a linked worktree's
+# index lies outside it. So does a tool's cache or environment kept outside the worktree: one that needs it
+# does not start.
+BOUNDARY = {
+    "read": "Enforced by Codex's own sandbox: nothing it runs can write anywhere.",
+    "write": "Enforced by Codex's own sandbox: nothing it runs can write outside the worktree and the "
+             "temporary folder, or stage in git. A tool that keeps its cache or environment elsewhere "
+             "cannot run in its turn.",
+}
 OPTIONS = ("model", "effort")
 SKILL = "${name}"
 SESSION_MARKERS = ()

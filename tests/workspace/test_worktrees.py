@@ -505,6 +505,29 @@ class ReviewDiff(Repo):
         self.assertEqual(W.review_diff(self.path, base=head, tree=W.work_tree(self.path))["files"], [],
                          "control: a pair git holds is read")
 
+    def test_a_snapshot_is_still_read_once_the_runs_worktree_is_gone(self):
+        """A merge, a discard or a removal takes the worktree. The trees its reviews judged stay where they
+        always were, among the repository's own objects, and a turn's change is read from there: the same
+        bytes. Only what the worktree alone could say is gone with it, and is said to be."""
+        self.edit()
+        read = W.review_diff(self.path)
+        base, tree = read["base"], read["tree"]
+        one = W.review_diff(self.path, base=base, tree=tree, file="long.txt")
+        git(self.repo, "worktree", "remove", "--force", self.path)
+        self.assertFalse(os.path.exists(self.path))
+        after = W.review_diff(self.path, base=base, tree=tree, repo=self.repo)
+        self.assertEqual((after["files"], after["patch"], after["summary"]),
+                         (read["files"], read["patch"], read["summary"]), "the snapshot, as it read before")
+        self.assertEqual(W.review_diff(self.path, base=base, tree=tree, file="long.txt", repo=self.repo)["patch"],
+                         one["patch"])
+        for asked, what in (({}, "the change now"), ({"tree": tree}, "a snapshot from the worktree's own commit")):
+            with self.assertRaisesRegex(W.ChangeRefused, "worktree is gone", msg=what):
+                W.review_diff(self.path, repo=self.repo, **asked)
+        with self.assertRaisesRegex(W.ChangeRefused, "no longer holds", msg="a tree git has pruned is said so"):
+            W.review_diff(self.path, base=base, tree="0" * 40, repo=self.repo)
+        with self.assertRaisesRegex(W.ChangeRefused, "worktree is gone", msg="no repository named to read from"):
+            W.review_diff(self.path, base=base, tree=tree)
+
 
 class Merge(Repo):
     """The approved merge — one work commit, an explicit merge commit, then everything the run owned goes."""

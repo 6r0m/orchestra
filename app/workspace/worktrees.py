@@ -759,7 +759,7 @@ def _files(numstat, status):
     return files
 
 
-def review_diff(path, offset=0, base=None, tree=None, file=None, files_from=None):
+def review_diff(path, offset=0, base=None, tree=None, file=None, files_from=None, repo=None):
     """A run's change as a human reviews it: one snapshot, named by its base and its tree, and read from them.
 
     Without `tree`, the change now: the worktree's HEAD and the tree `git add -A` would commit, made on a
@@ -778,12 +778,27 @@ def review_diff(path, offset=0, base=None, tree=None, file=None, files_from=None
     `FILES_LIMIT` of them. With `file`, one of the snapshot's files: its diff whole when each side is at most
     `FILE_LIMIT` bytes, its changes alone otherwise, and which.
 
+    A worktree that is gone — merged, discarded or removed — takes with it only what it alone could say: the
+    change now, and a snapshot read from its own commit. A snapshot named by both its base and its tree is
+    read from `repo`, the repository, whose objects a worktree's always were: a run that has landed still
+    shows what each of its turns changed, for as long as git keeps those trees.
+
     Raises ChangeRefused for a name that is no object, an object git no longer holds — it prunes unreferenced
-    ones after a while — or a file not in the change; on any git failure, RuntimeError: a worktree that could
-    not be read is not a worktree without changes.
+    ones after a while — a file not in the change, or what went with a worktree that is gone; on any git
+    failure, RuntimeError: a worktree that could not be read is not a worktree without changes.
     """
     if not path:
         raise RuntimeError("no worktree path in the run's state")
+    if not os.path.isdir(path):
+        gone = "the run's worktree is gone — merged, discarded or removed"
+        if tree is None:
+            raise ChangeRefused("%s — so there is no change now to read" % gone)
+        if base is None:
+            raise ChangeRefused("%s — and this change was read from the worktree's own commit, which nothing "
+                                "else recorded" % gone)
+        if not (repo and os.path.isdir(repo)):
+            raise ChangeRefused("%s, and no repository was named to read its trees from" % gone)
+        path = repo
 
     def git(args, env=None):
         done = subprocess.run(["git", "-C", path] + args, capture_output=True,

@@ -47,9 +47,11 @@ class Loading(unittest.TestCase):
     def test_a_module_lacking_part_of_the_contract_is_refused_saying_what(self):
         stand_in.plant(self, {"partial": stand_in.variant(ACCESS=None, completion=None),
                               "odd": stand_in.variant(ACCESS='ACCESS = ("admin",)'),
-                              "flat": stand_in.variant(wire="wire = None")})
+                              "flat": stand_in.variant(wire="wire = None"),
+                              "unsaid": stand_in.variant(BOUNDARY=None),
+                              "halfsaid": stand_in.variant(BOUNDARY='BOUNDARY = {"read": "Held.", "write": ""}')})
         for kind, lacks in (("partial", ("ACCESS", "completion")), ("odd", ("ACCESS", "admin")),
-                            ("flat", ("wire",))):
+                            ("flat", ("wire",)), ("unsaid", ("BOUNDARY",)), ("halfsaid", ("BOUNDARY", "write"))):
             with self.subTest(kind=kind), self.assertRaises(adapters.Refused) as raised:
                 adapters.load(kind)
             for part in lacks:
@@ -61,6 +63,8 @@ class Loading(unittest.TestCase):
                 module = adapters.load(kind)
                 self.assertEqual(adapters.kind_name(module), kind)
                 self.assertTrue(set(module.ACCESS) <= set(adapters.ACCESSES))
+                self.assertTrue(all(module.BOUNDARY[access].strip() for access in module.ACCESS),
+                                "what holds it to each access it can run with")
 
 
 class Finding(unittest.TestCase):
@@ -72,9 +76,11 @@ class Finding(unittest.TestCase):
                               "broken": stand_in.variant(wire=None), "BadName": stand_in.SOURCE})
         found = {entry["kind"]: entry for entry in adapters.available()}
         self.assertIsNone(found[stand_in.KIND]["refused"])
-        self.assertEqual({key: found[stand_in.KIND][key] for key in ("name", "access", "options", "skill")},
+        self.assertEqual({key: found[stand_in.KIND][key] for key in ("name", "access", "options", "skill",
+                                                                     "boundary")},
                          {"name": "Stand-in", "access": ["read", "write"], "options": ["model"],
-                          "skill": "@{name}"})
+                          "skill": "@{name}",
+                          "boundary": {"read": "Held by the stand-in's word.", "write": "Held by nothing."}})
         self.assertEqual([kind for kind in SHIPPED if found[kind]["refused"]], [])
         self.assertIn("wire", found["broken"]["refused"])
         self.assertIn("not named for a kind", found["BadName"]["refused"])

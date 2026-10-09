@@ -340,10 +340,12 @@ class Access(unittest.TestCase):
 
     def test_every_file_the_page_loads_is_served_as_its_type(self):
         """The scripts and styles the page names, and every module those scripts import, each served as the
-        type a browser runs it as: a module the server does not serve is a page that never starts."""
-        kinds = {".js": "text/javascript", ".css": "text/css"}
+        type a browser runs it as: a module the server does not serve is a page that never starts. Its tab's
+        icon among them: a browser asks for one of every page, and one it is not given is an error in the
+        console at every load."""
+        kinds = {".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml"}
         page = request("GET", "/", token=False)[1].decode("utf-8")
-        wanted, served = re.findall(r'(?:src|href)="(/[^"]+\.(?:js|css))"', page), set()
+        wanted, served = re.findall(r'(?:src|href)="(/[^"]+\.(?:js|css|svg))"', page), set()
         while wanted:
             path = wanted.pop()
             if path in served:
@@ -360,6 +362,9 @@ class Access(unittest.TestCase):
                 wanted += [posixpath.normpath(posixpath.join(posixpath.dirname(path), module)) for module in
                            re.findall(r'''^\s*(?:import|export)\b[^;]*?["'](\.{1,2}/[^"']+)["']''', body, re.MULTILINE)]
         self.assertIn("/app.js", served)
+        self.assertEqual(re.findall(r'<link rel="icon" href="([^"]+)"', page), ["/favicon.svg"],
+                         "the page names its own icon, so no browser asks for one the server does not hold")
+        self.assertIn("/favicon.svg", served)
 
 
 class Ports(unittest.TestCase):
@@ -1409,6 +1414,8 @@ class Runs(Scenario):
         self.assertEqual(status, 200, more)
         self.assertIn(("review_diff", worktree, 0, diff["base"], diff["tree"], None, 2000), git.calls,
                       "the rest of a long list, from the same snapshot")
+        self.assertEqual(set(git.read_beside), {body["state"]["repo_path"]},
+                         "every read names the run's repository too, where a snapshot outlives its worktree")
         self.assertEqual(request("GET", "/api/runs/%s/diff?files_from=x" % run_id)[0], 400)
         git.diff_refusal = "nope is not a file of this change"
         status, refused = request("GET", "/api/runs/%s/diff?%s" % (run_id, urllib.parse.urlencode(

@@ -75,6 +75,7 @@ class FakeWorktrees:
 
     def __init__(self, merge_results=None, came=None, based=True):
         self.calls = []
+        self.read_beside = []
         self.merge_results = list(merge_results or [{"result": "merged", "commit": "c0ffee"}])
         # What each look at the base finds, in turn — it stands where the run does once these are spent — and
         # whether a run records the commit it began from at all: one started before runs did records none.
@@ -144,8 +145,9 @@ class FakeWorktrees:
         return [{"path": "/fake/worktrees/one", "branch": "one", "state": "unmerged"},
                 {"path": "/fake/worktrees/two", "branch": "two", "state": "merged"}]
 
-    def review_diff(self, path, offset=0, base=None, tree=None, file=None, files_from=None):
+    def review_diff(self, path, offset=0, base=None, tree=None, file=None, files_from=None, repo=None):
         self.calls.append(("review_diff", path, offset, base, tree, file, files_from))
+        self.read_beside.append(repo)
         if self.diff_refusal:
             from app.workspace import worktrees
             raise worktrees.ChangeRefused(self.diff_refusal)

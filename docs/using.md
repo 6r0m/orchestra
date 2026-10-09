@@ -142,7 +142,9 @@ opening in the same viewer. The worktree is live, so that is what the review jud
 wrote each line. After a PATCH, a turn's change is only what that turn changed in answer to it. A review
 records its tree only when the worktree did not move while it judged; where one between two engineer turns
 recorded none, the two cannot be told apart, so their change is shown once, on the later turn, which says
-so, and the earlier one points to it; a tree git has since pruned is said gone. A turn
+so, and the earlier one points to it; a tree git has since pruned is said gone. A run that has landed, or
+whose worktree was discarded or removed, still shows what each turn changed: those trees are read from the
+repository for as long as git keeps them. A turn
 retried in a fresh session, its first one lost, shows each attempt; a failed attempt's retry from before
 you pressed Continue stays in the local logs but is not shown as the new turn's. A local record that has
 been removed is reported as unavailable.
@@ -171,6 +173,13 @@ Settings shows the profiles bound to each role, each profile's model and effort,
 methodology skill named for each stage, the plan and build review budgets, and the default flow. The
 skill picker lists names found through each agent adapter; unbound installed skills remain available to
 the vendor CLI. A run snapshots the effective settings when it starts.
+
+Under each role's agent the page says what that role may do, and what holds the agent you chose to it.
+Codex is held by its own sandbox, which the operating system enforces: a read-only role cannot write, and
+a writing one cannot write outside its worktree — which also keeps a tool whose cache or environment lies
+elsewhere, such as this repository's test runner, from running in its turn. Claude Code is held by its own
+rules alone: its file edits stay in the worktree, and what a command it runs may reach is what that host's
+Claude settings allow.
 
 Apply writes only changed values to `.orchestra/settings.local.json`, so a fresh Workbench read keeps
 them and unrelated hand-written local members survive. Revert removes one override to reveal its shared

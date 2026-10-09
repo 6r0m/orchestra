@@ -24,6 +24,7 @@ import os
 NAME = "Stand-in"
 EXECUTABLE = "stand-in-agent"
 ACCESS = ("read", "write")
+BOUNDARY = {"read": "Held by the stand-in's word.", "write": "Held by nothing."}
 OPTIONS = ("model",)
 SKILL = "@{name}"
 SESSION_MARKERS = ("STAND_IN_SESSION",)

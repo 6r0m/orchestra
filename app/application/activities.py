@@ -528,7 +528,8 @@ class Activities:
         """
         try:
             return self.git.review_diff(args["worktree_path"], args.get("offset", 0), args.get("base"),
-                                        args.get("tree"), args.get("file"), args.get("files_from"))
+                                        args.get("tree"), args.get("file"), args.get("files_from"),
+                                        args.get("repo_path"))
         except W.ChangeRefused as exc:
             # What the reader asked for is not there to read: said as git said it, and never retried.
             raise ApplicationError(str(exc), type="ChangeRefused", non_retryable=True) from exc

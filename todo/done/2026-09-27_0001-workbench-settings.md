@@ -121,8 +121,8 @@ D1–D12 below are this change's operator decisions. The architecture's own deci
   fully prepare flow first with our settings and rest that will be prove that workbench will good, and
   then only test live after all syntetic tests pass".
   - Effect: the implementation starts at once. The live check that
-    [the Workbench UX todo](../2026-09-25_2334-workbench-ux.md) and
-    [the flows todo](../2026-09-25_1458-configurable-flows.md) still hold happens once, after every
+    [the Workbench UX todo](2026-09-25_2334-workbench-ux.md) and
+    [the flows todo](2026-09-25_1458-configurable-flows.md) still hold happens once, after every
     synthetic gate of this change has passed, and covers the flows, the page and Settings together.
   - Reason: stated.
   - Date/source: operator, 2026-09-28, with the external review's PASS and GO.
@@ -1509,7 +1509,7 @@ code it guards, and observed failing first.
 - **Refined:** only the settings drop `workspace_access`; the run's policy keeps it, written at the
   start. D13's list of configuration loses access (Decision 7).
 - **Noted, not this change's:** the Windows suite gate recorded in
-  [the Workbench UX todo](../2026-09-25_2334-workbench-ux.md) is still red on the test runner's tree
+  [the Workbench UX todo](2026-09-25_2334-workbench-ux.md) is still red on the test runner's tree
   wait, and waits on the operator's disposition there.
 - **Authority:** A2, A4 and A7 rewritten in place; Decisions 2, 3, 4 and 7; invariants 4 and 10;
   guards 4, 16 and 18. No decision changed.
@@ -1519,7 +1519,7 @@ code it guards, and observed failing first.
 - **Accepted, each checked against the code, and fixed:**
   1. A finished Windows class's job was only closed, which begins its processes' end without proving it,
      and `end()` printed an unproved end and went on. Every class now leaves through the one proved end,
-     and an unproved end fails it ([the Workbench UX todo](../2026-09-25_2334-workbench-ux.md) holds the
+     and an unproved end fails it ([the Workbench UX todo](2026-09-25_2334-workbench-ux.md) holds the
      runner's record). A POSIX class's group is ended when it finishes, too.
   2. `/api/flows` reads the settings, so a local patch that does not load failed the read that listed the
      flows, and the Settings view never showed its refusal. The view reads the settings first, and lists

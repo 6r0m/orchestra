@@ -356,8 +356,9 @@ async def review_diff(client, run_id, offset=0, base=None, tree=None, file=None,
     """The run's change as its target host's git reads it (`worktrees.review_diff`): the change now, or the
     snapshot `base` and `tree` name, from `offset` bytes into its patch — or its file list from `files_from`, or
     its one `file`. The change now is read against the commit of its base the run stands on, where it recorded
-    one: what the run adds to that base, whatever git holds in its worktree meanwhile. A read naming what that
-    git cannot read is refused, saying why."""
+    one: what the run adds to that base, whatever git holds in its worktree meanwhile. A snapshot is read from
+    the run's repository once its worktree is gone. A read naming what that git cannot read is refused, saying
+    why."""
     current = await readable_status(client, run_id)
     if current is None:
         raise NotWaiting("no run %r" % run_id)
@@ -372,7 +373,8 @@ async def review_diff(client, run_id, offset=0, base=None, tree=None, file=None,
     try:
         # On the run's own workflow queue: its own stack's worker reads its change.
         return await client.execute_workflow(
-            WF.ReviewDiff.run, dict(named, worktree_path=path, queue=current["queue"], offset=offset),
+            WF.ReviewDiff.run, dict(named, worktree_path=path, repo_path=current["state"].get("repo_path"),
+                                    queue=current["queue"], offset=offset),
             id="diff-%s-%s" % (run_id, os.urandom(4).hex()), task_queue=current["workflow_queue"],
             execution_timeout=datetime.timedelta(minutes=5))
     except WorkflowFailureError as error:

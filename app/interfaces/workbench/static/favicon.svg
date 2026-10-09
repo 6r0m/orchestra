@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>Orchestra Workbench</title>
+  <rect width="32" height="32" rx="7" fill="#101419"/>
+  <circle cx="10" cy="11" r="4.5" fill="#3fb3c2"/>
+  <circle cx="22" cy="11" r="4.5" fill="#a98bf5"/>
+  <circle cx="16" cy="22" r="4.5" fill="#f0b44a"/>
+</svg>

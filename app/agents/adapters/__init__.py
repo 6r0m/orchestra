@@ -14,8 +14,10 @@ What a kind's module holds, each named below by what it answers:
 
 - `NAME`: how the page shows it. `EXECUTABLE`: the one program its turn runs, which its launch
   starts and a run's preparation looks for.
-- `ACCESS`: the access it can run with, of `read` and `write`. `OPTIONS`: the settings a profile of
-  it takes beyond its kind. `SKILL`: how a stage's skill leads its prompt, `{name}` in it, or None.
+- `ACCESS`: the access it can run with, of `read` and `write`. `BOUNDARY`: for each of those, what
+  holds a turn to it — the vendor's sandbox, or only the vendor's own rules — in the words the page
+  shows beside a role that runs it. `OPTIONS`: the settings a profile of it takes beyond its kind.
+  `SKILL`: how a stage's skill leads its prompt, `{name}` in it, or None.
 - `SESSION_MARKERS`, `SESSION_MARKER_PREFIXES`: the variables a session of its vendor leaves in an
   environment, which no agent of any kind inherits. `LOST_SESSION`: how its output says the session
   it was to resume is gone. `OLD_BRAIN`: the name the old shape of a run's policy gave it.
@@ -45,9 +47,10 @@ import pkgutil
 from app.foundation import policy as P
 
 ACCESSES = ("read", "write")
-REQUIRED = ("NAME", "EXECUTABLE", "ACCESS", "OPTIONS", "SKILL", "SESSION_MARKERS", "SESSION_MARKER_PREFIXES",
-            "LOST_SESSION", "OLD_BRAIN", "validate", "command", "host", "session_in", "wire", "completion",
-            "output", "session", "final_message", "message_of", "skill_folders", "skill_roots")
+REQUIRED = ("NAME", "EXECUTABLE", "ACCESS", "BOUNDARY", "OPTIONS", "SKILL", "SESSION_MARKERS",
+            "SESSION_MARKER_PREFIXES", "LOST_SESSION", "OLD_BRAIN", "validate", "command", "host", "session_in",
+            "wire", "completion", "output", "session", "final_message", "message_of", "skill_folders",
+            "skill_roots")
 CALLABLE = ("validate", "command", "host", "session_in", "wire", "completion", "output", "session",
             "final_message", "message_of", "skill_folders", "skill_roots")
 OPTIONAL = ("trust_ensure", "trust_forget", "trace_env", "trace_settings", "reasoning", "upload", "waiting")
@@ -89,13 +92,22 @@ def load(kind):
     unknown = [access for access in module.ACCESS if access not in ACCESSES]
     if not module.ACCESS or unknown:
         raise Refused("kind %r: ACCESS must hold %s, not %s" % (kind, " or ".join(ACCESSES), unknown or "nothing"))
+    said = module.BOUNDARY if isinstance(module.BOUNDARY, dict) else {}
+    unsaid = [access for access in module.ACCESS
+              if not (isinstance(said.get(access), str) and said[access].strip())]
+    if unsaid:
+        # An operator choosing it reads this beside the role: a kind that leaves it out would be chosen blind.
+        raise Refused("kind %r: BOUNDARY must say what holds a turn to each access it can run with; it says "
+                      "nothing for %s" % (kind, ", ".join(unsaid)))
     return module
 
 
 def capabilities(module):
-    """What the page shows of a kind: its name, the access it can run with, its settings, its skills."""
-    return {"name": module.NAME, "access": list(module.ACCESS), "options": list(module.OPTIONS),
-            "skill": module.SKILL}
+    """What the page shows of a kind: its name, the access it can run with and what holds it to each, its
+    settings, its skills."""
+    return {"name": module.NAME, "access": list(module.ACCESS),
+            "boundary": {access: module.BOUNDARY[access] for access in module.ACCESS},
+            "options": list(module.OPTIONS), "skill": module.SKILL}
 
 
 def available():

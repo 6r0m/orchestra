@@ -186,7 +186,9 @@ function drawRoles(settings) {
       draw();
       focusSetting(agentPointer);
     };
-    const facts = el("p", ACCESS[contract.access], "hint");
+    // What the role may do, then what holds the agent chosen for it to that: its kind's own words.
+    const held = ((kinds()[profile.kind] || {}).boundary || {})[contract.access];
+    const facts = el("p", ACCESS[contract.access] + (held ? " " + held : ""), "hint");
 
     // Its persona: the text the run carries from its start — its file's, or the operator's own.
     const personaPointer = pointer("roles", role, "persona");

@@ -1,16 +1,17 @@
 # Configurable flows: the order of a run's work, chosen per task
 
-**Status:** IN PROGRESS — the external review passed, the containment fix with it; the operator's
-live check next
+**Status:** DONE 2026-10-08 — built, passed by the external reviewer with the containment fix, and
+proved live: an `architect-research` run with real agents went the whole way through the Workbench and
+its Merge was the operator's own. Closed on the operator's word
 **Scope:** the order of a run's steps — a new `flows/` folder and its reader `app/foundation/flows.py`;
-[workflow.py](../app/orchestration/workflow.py), [routing.py](../app/orchestration/routing.py),
-[stages.py](../app/foundation/stages.py), [policy.py](../app/foundation/policy.py) and `policy.json`, the
-role step in [activities.py](../app/application/activities.py), [nodes.py](../app/agents/nodes.py), the
-run start in [client.py](../app/application/client.py), the Workbench's Start form and the CLI, the
+[workflow.py](../../app/orchestration/workflow.py), [routing.py](../../app/orchestration/routing.py),
+[stages.py](../../app/foundation/stages.py), [policy.py](../../app/foundation/policy.py) and `policy.json`, the
+role step in [activities.py](../../app/application/activities.py), [nodes.py](../../app/agents/nodes.py), the
+run start in [client.py](../../app/application/client.py), the Workbench's Start form and the CLI, the
 trace's phases
-**Stable documentation owner:** [docs/architecture/structure.md](../docs/architecture/structure.md)
-(architecture D2, D5, D6, D13, D19, D24); [trace-contract.md](../docs/architecture/trace-contract.md);
-[diagrams/stops.md](../docs/architecture/diagrams/stops.md); [docs/using.md](../docs/using.md); a new
+**Stable documentation owner:** [docs/architecture/structure.md](../../docs/architecture/structure.md)
+(architecture D2, D5, D6, D13, D19, D24); [trace-contract.md](../../docs/architecture/trace-contract.md);
+[diagrams/stops.md](../../docs/architecture/diagrams/stops.md); [docs/using.md](../../docs/using.md); a new
 `flows/README.md`
 
 ## Contents
@@ -31,7 +32,7 @@ edit without a code change; a run keeps the flow it started with.
 ## Authority register
 
 In this todo `D<n>` alone is this register's own entry; a decision of
-[structure.md](../docs/architecture/structure.md) is written *architecture D<n>*. Entries recorded before
+[structure.md](../../docs/architecture/structure.md) is written *architecture D<n>*. Entries recorded before
 this convention keep their wording: in D5 and Q2, D11, D13 and D24 are the architecture's.
 
 ### Operator decisions
@@ -169,7 +170,7 @@ this convention keep their wording: in D5 and Q2, D11, D13 and D24 are the archi
   code; today's order and the default — and `architect-research` — the architect starts, with research
   and an abstract todo (D9).
 - **A9 [ACTIVE]:** the folder is `flows/` at the checkout root, beside `roles/`: operator-edited
-  configuration sits there by the domain architecture ([app/README.md](../app/README.md): "`policy.json`,
+  configuration sits there by the domain architecture ([app/README.md](../../app/README.md): "`policy.json`,
   `repos.json` and `roles/` sit at the checkout root, because they are the operator's to edit"), and
   `roles/` is already a folder of one file each with a README routing to them. A flow is
   `flows/<name>.json`, holding its steps; `flows/README.md` routes to each. Reading and checking them is
@@ -208,22 +209,22 @@ this convention keep their wording: in D5 and Q2, D11, D13 and D24 are the archi
 
 **Verified facts**
 
-- **Architecture D13 today** ([structure.md](../docs/architecture/structure.md)): brains, models,
+- **Architecture D13 today** ([structure.md](../../docs/architecture/structure.md)): brains, models,
   budgets, access, targets, repository descriptors and personas are configuration; "Stage asks (which
   artifact a stage produces or judges) and any new *stage* are code. There is no JSON workflow DSL."
   Architecture D2 fixes "Four stages, one workflow: `plan → assess → build → verify`".
-- **Why the routing is code** ([history/decisions.md](../docs/history/decisions.md), "The workflow engine
+- **Why the routing is code** ([history/decisions.md](../../docs/history/decisions.md), "The workflow engine
   was not the first answer"): a hand-rolled state machine came first and "lost reviewer feedback on
   routing edges — the feedback lived on the edge rather than in the state"; the fix was ordinary
   workflow code over one compact state. structure.md, "Why there is no state machine here": "Do not
   re-derive a `states/` layer here."
 - **Today's order is code:** `FeatureRun._loop` pairs `("plan", "assess")` and `("build", "verify")` by
-  phase ([workflow.py](../app/orchestration/workflow.py), `_loop`); `routing.gate_reason_for` offers the
+  phase ([workflow.py](../../app/orchestration/workflow.py), `_loop`); `routing.gate_reason_for` offers the
   approval only in the plan phase and only without `auto_proceed`; `_final_gate` sends a revise to
   `build` or back to review; `_plan_stands` re-assesses a plan changed after its PASS.
 - **Feedback lives in state:** `_stage` writes `verdict`, `feedback` and clears `guidance`; the next
   prompt carries the task, persona, the stage's ask, the architect's findings and the operator's
-  guidance ([nodes.py](../app/agents/nodes.py), `compose_prompt`). A role keeps one session across its
+  guidance ([nodes.py](../../app/agents/nodes.py), `compose_prompt`). A role keeps one session across its
   stages (architecture D7).
 - **Every consumer of the fixed set** (`grep` of `STAGE_ROLE`, `PHASES`, stage and phase names under
   `app/`): `stages.py` (`STAGES`, `STAGE_ROLE`, `PHASES`, `STAGE_ASK`); `workflow.py`; `routing.py`;
@@ -233,22 +234,22 @@ this convention keep their wording: in D5 and Q2, D11, D13 and D24 are the archi
   (`PHASE_NAMES`, `PHASE_ROLES`, a step name per stage and role); `client.start`, the CLI's
   `--auto-proceed`, the Workbench's *skip the plan approval*.
 - **A run carries its policy:** `client.start` loads `policy.json` at every start and puts the whole
-  policy into the workflow's start input ([client.py](../app/application/client.py), `start`), so what a
+  policy into the workflow's start input ([client.py](../../app/application/client.py), `start`), so what a
   run was started with is in its recorded history.
-- **Replay is guarded:** eight recorded histories under [tests/histories/](../tests/histories/), all
-  replayed by [test_replay.py](../tests/orchestration/test_replay.py), whose control shows an
+- **Replay is guarded:** eight recorded histories under [tests/histories/](../../tests/histories/), all
+  replayed by [test_replay.py](../../tests/orchestration/test_replay.py), whose control shows an
   unpatched change fails (architecture D25).
 - **Access:** the architect runs Codex with `--sandbox read-only` and live web search; the engineer
-  Claude with edits allowed in its worktree ([nodes.py](../app/agents/nodes.py), `build_argv`;
+  Claude with edits allowed in its worktree ([nodes.py](../../app/agents/nodes.py), `build_argv`;
   `policy.json`). A read-only role cannot write a research file.
 - **Read-only is taken for a reviewer today:** `run_role` sets `is_reviewer = role["workspace_access"]
-  == "read"` ([activities.py](../app/application/activities.py)), and that flag chooses the prompt's
+  == "read"` ([activities.py](../../app/application/activities.py)), and that flag chooses the prompt's
   wording, the tree snapshot, the verdict parse and what the trace records; `nodes.parse_review` raises
   "reviewer returned no parseable {verdict, feedback}" on an answer with no verdict. An architect's
   research step would fail there.
 - **A turn's output is its final message:** `terminal.run_turn` returns Claude's final message, or
   Codex's events with its final message in them, which `parse_review` already takes apart
-  ([terminal.py](../app/agents/terminal.py), [nodes.py](../app/agents/nodes.py)). Nothing bounds the
+  ([terminal.py](../../app/agents/terminal.py), [nodes.py](../../app/agents/nodes.py)). Nothing bounds the
   length of a verdict's feedback in state today.
 - **A web architect already has a home:** architecture D9 allows "a low-cost web chat whose account can
   be lost, such as DeepSeek" as "a detached architect — deliberately, never as a silent addition" — the
@@ -275,15 +276,15 @@ this convention keep their wording: in D5 and Q2, D11, D13 and D24 are the archi
   - What this design reuses of it, unchanged: the durable state of the loop, the recorded history the
     flow is kept in — the start input, shown for every run in Temporal's own web UI — Updates for the
     gates' answers, cancellation for a Stop, the visibility list the Workbench already reads its runs from
-    ([client.py](../app/application/client.py), `runs`), and replay with `workflow.patched` for
+    ([client.py](../../app/application/client.py), `runs`), and replay with `workflow.patched` for
     compatibility. What it builds is only the part Temporal leaves to its users: the interpreter, which
     is today's loop generalised.
-- **Where configuration lives:** [app/README.md](../app/README.md) — "`policy.json`, `repos.json` and
+- **Where configuration lives:** [app/README.md](../../app/README.md) — "`policy.json`, `repos.json` and
   `roles/` sit at the checkout root, because they are the operator's to edit (D13)", the architecture's
   D13; `roles/` is a folder of one file per role with a README routing to them.
 - **What a closed run keeps:** a run closed short of a merge or a discard keeps its worktree and branch
   until the operator removes them from the Workbench, through its host's own git (architecture D31;
-  [docs/using.md](../docs/using.md), "The page").
+  [docs/using.md](../../docs/using.md), "The page").
 
 **Inferences**
 
@@ -303,19 +304,19 @@ this convention keep their wording: in D5 and Q2, D11, D13 and D24 are the archi
 
 - How long a research brief runs, and so how much of it the gate after it shows: measured on the first
   real `architect-research` run.
-- Whether [tools/langfuse_dashboard.py](../tools/langfuse_dashboard.py) filters on phase names, which a
+- Whether [tools/langfuse_dashboard.py](../../tools/langfuse_dashboard.py) filters on phase names, which a
   research phase would need to join.
 
 ## Current architecture and source of truth
 
-- [structure.md](../docs/architecture/structure.md) owns the roles and stages (architecture D2), budgets
+- [structure.md](../../docs/architecture/structure.md) owns the roles and stages (architecture D2), budgets
   (D5), stops and their answers (D6), config versus code (D13), the architect's horizon (D15), skills per
   stage (D19), the worktree's lifecycle and the final gate (D24), a closed run's kept work (D31) and
   determinism (D25) — all the architecture's.
 - The order of work is `FeatureRun._loop` over the routes of `routing.py`; what each stage asks is
   `stages.STAGE_ASK`, rendered by `nodes.compose_prompt`; a stage's role and access come from
   `policy.json` through `activities.run_role`.
-- The trace's phases and steps are the [trace contract](../docs/architecture/trace-contract.md)'s.
+- The trace's phases and steps are the [trace contract](../../docs/architecture/trace-contract.md)'s.
 
 ## Problem
 
@@ -487,8 +488,9 @@ release. Architecture D13 says so by design; the operator has asked for that des
 9. [x] **Recorded histories** in `tests/histories/` — `research_revise_plan_merge` and
    `plan_only_done` — so replay guards the new paths.
 10. [x] **Docs** (below).
-11. [ ] **Verification:** the changed modules on both hosts; the whole suite once per host after the
-    external reviewer's PASS; the operator's manual check.
+11. [x] **Verification:** the changed modules on both hosts; the whole suite once per host after the
+    external reviewer's PASS; the operator's manual check — the live runs of 2026-10-08, in the review
+    record.
 
 ## Test-first and verification plan
 
@@ -518,15 +520,15 @@ the external reviewer's PASS, and a real `architect-research` run in the operato
 
 ## Documentation plan
 
-- **Authoritative owners:** [structure.md](../docs/architecture/structure.md) — architecture D2 (roles
+- **Authoritative owners:** [structure.md](../../docs/architecture/structure.md) — architecture D2 (roles
   and flows), D5 (a budget per work action), D6 (an approve gate where a flow puts it), D13 (re-decided
   per this todo's D5), D19 (skills per action), D24 (a run that ends `DONE`);
-  [diagrams/stops.md](../docs/architecture/diagrams/stops.md);
-  [trace-contract.md](../docs/architecture/trace-contract.md) (the research phase);
-  [docs/using.md](../docs/using.md) (choosing a flow, editing flows); `flows/README.md`, new, like
-  [roles/README.md](../roles/README.md): what each flow is for, linking its file.
-- **Router:** [app/README.md](../app/README.md)'s sentence on where configuration sits, and the root
-  [README.md](../README.md)'s configuration table, gain `flows/`.
+  [diagrams/stops.md](../../docs/architecture/diagrams/stops.md);
+  [trace-contract.md](../../docs/architecture/trace-contract.md) (the research phase);
+  [docs/using.md](../../docs/using.md) (choosing a flow, editing flows); `flows/README.md`, new, like
+  [roles/README.md](../../roles/README.md): what each flow is for, linking its file.
+- **Router:** [app/README.md](../../app/README.md)'s sentence on where configuration sits, and the root
+  [README.md](../../README.md)'s configuration table, gain `flows/`.
 - **Duplication avoided:** the flows' rules live in `app/foundation/flows.py` and are stated once in
   architecture D13; the page, the CLI and `flows/README.md` name a flow and never restate its rules.
 - Stable docs, code, comments, tests and configuration do not reference this todo.
@@ -735,3 +737,16 @@ the external reviewer's PASS, and a real `architect-research` run in the operato
   so WSL's last run, 446 tests, stands.
 - **Review:** PASS — the containment is fail-closed, and code review stops here.
 - **Next:** the operator's live `architect-research` run through the Workbench.
+
+### 2026-10-08 — the live runs, and closed
+
+- **`architect-research`, end to end, real agents, through the Workbench:** research, its brief approved,
+  a plan, its assessment, the plan approved, builds and verifies until a `PASS`, the closeout, the final
+  gate, two revises to the engineer from it, and the Merge, which landed on the remote's base. The
+  approvals and revises were pressed on the operator's instruction; the Merge was the operator's own. An
+  earlier `architect-research` run, left at its final gate on 2026-09-30, was merged by the operator on
+  2026-10-08 as well.
+- **`engineer-code`** went the whole way too, with real agents, and landed by one Merge.
+- **The whole suite** on the code as it is then: WSL, 141 classes, 696 tests; Windows, 97 classes, 496
+  tests; both green.
+- **Closed** by the operator, 2026-10-08: *"so what done move to done"*.

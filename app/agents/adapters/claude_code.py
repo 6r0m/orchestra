@@ -36,6 +36,14 @@ from app.agents.adapters import _files
 NAME = "Claude Code"
 EXECUTABLE = "claude"
 ACCESS = ("read", "write")
+# Its own permission rules, with no operating-system boundary under them: its sandbox covers shell commands
+# on Linux and WSL2 only, and is not turned on here. Measured on WSL, started as `command` starts a writing
+# role: its file tool was refused outside the worktree, and a command its shell ran wrote there.
+BOUNDARY = {
+    "read": "Held by Claude Code's plan mode: a rule of its own, with no operating-system boundary under it.",
+    "write": "Claude Code's own rules hold its file edits to the worktree. The commands it runs are not "
+             "confined by the operating system: what they reach is what this host's Claude settings allow.",
+}
 OPTIONS = ("model", "effort")
 SKILL = "/{name}"
 SESSION_MARKERS = ("CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT", "CLAUDE_AGENT_SDK_VERSION")

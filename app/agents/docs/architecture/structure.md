@@ -54,7 +54,9 @@ contribution, the architect's assessment, unresolved and disputed findings, and 
 decision. The addition does not replace the stage ask or the role's verdict contract.
 
 Through the adapter contract: Settings discovers skill names from the same roots a kind checks
-when preparing a run; no vendor path crosses the Settings API.
+when preparing a run; no vendor path crosses the Settings API. What holds a turn to the access it
+runs with — the vendor's sandbox, or the vendor's own rules alone — is each kind's to state, and
+Settings shows a role the words of the kind chosen for it.
 
 Through the vendor's own completion hook: a turn ends on Claude's `Stop` for its own
 prompt id, or Codex's `agent-turn-complete` in its own thread — never on a first event.
