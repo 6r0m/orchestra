@@ -181,7 +181,7 @@ Do not re-derive a `states/` layer here.
   that worktree removes only the environment it built itself. `make demo`, run there,
   builds that worktree's own for its worker and takes it back as its last act — only
   where the checkout is such a worktree for certain, its `.git` a pointer this host's
-  git cannot follow.
+  git cannot follow — and fails where that removal is refused.
   A run worktree's environment is removed with the worktree, on its target host,
   only when the derived path lies under that host's environment root, crosses
   no link or reparse point, and holds `pyvenv.cfg` — removed last, so a removal
@@ -639,9 +639,10 @@ still lands on a checkout.
   removal — confirmed once, and nothing removed under a run still open. `REJECTED` is
   what the operator did; whether the run's work is gone is a second fact, read from that
   ending and from Temporal's record of the removal, and said beside it wherever the run is
-  shown: removing, cleaned up, or cleanup required. Where the run has not closed in time
-  or the removal is refused, Reject says so in the removal's own words, tries nothing
-  again, and the removal finishes it.
+  shown: removing, cleaned up, or cleanup required. Where the run has not closed in time,
+  Reject says it is still stopping — never yet that it was rejected — and that nothing was
+  removed; where the removal is refused, it says so in the removal's own words. It tries
+  nothing again, and the removal finishes it.
 - **D18b** **A rehydrated session is bootstrapped from zero**:
   any prompt built for a session being born carries task, persona, the
   **current stage ask**, and the latest findings/guidance — never a delta

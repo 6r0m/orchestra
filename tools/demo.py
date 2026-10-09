@@ -707,18 +707,21 @@ def forget_environment():
     follow — so a checkout of this host's own, the one the live stack runs from, is never touched; and through
     the guarded removal, which takes nothing that is not exactly that environment. The demo's last act, once
     nothing of it is left running: its worker and its Workbench ran from that environment, and so does this
-    process, which loads nothing more from it."""
+    process, which loads nothing more from it. Returns what it could not remove, as `cleanup` does: an
+    environment that is not there is none left, one whose removal was refused or failed is."""
     if not os.path.isfile(os.path.join(PKG, ".git")):
-        return
+        return []
     if subprocess.run(["git", "-C", PKG, "rev-parse", "--git-dir"], capture_output=True).returncode == 0:
-        return
+        return []
     try:
         removed = envpath.remove_environment(PKG)
     except (OSError, envpath.UnsafeRemoval) as error:
-        print("  LEFT BEHIND: this worktree's environment on this host (%s)" % error, flush=True)
-        return
+        left = ["this worktree's environment on this host (%s)" % error]
+        print("  LEFT BEHIND: %s" % left[0], flush=True)
+        return left
     if removed:
         print("  removed: the environment built here for this worktree of the other host's", flush=True)
+    return []
 
 
 def interrupted(*_):
@@ -736,7 +739,7 @@ def main():
     finally:
         left = demo.cleanup()
         if not left:
-            forget_environment()
+            left = forget_environment()
     if left:
         raise SystemExit("demo failed: it left behind %s" % "; ".join(left))
     print("\nDEMO PASSED: runs %s — watched in the Workbench, answered, stopped, force-terminated, blocked by a "

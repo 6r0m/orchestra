@@ -165,7 +165,9 @@ gate, a host whose worker is down — and keeps its worktree and branch as they 
 start again. *Reject* ends it the same way and then deletes its worktree and branch, asked once: the run
 ends `REJECTED`, its history stays, and its page says how far the cleanup got. Where its host's worker is
 down or git refuses, the run is rejected all the same and says its cleanup is required, with *Remove
-worktree and branch* beside it. A merge or discard already running is let finish first, and decides how the
+worktree and branch* beside it. Where the run has not closed by the time Reject stops waiting for it — its
+own worker down, or its host still busy — Reject says it is still stopping and that nothing was removed;
+once it has closed as rejected, it says its cleanup is required. A merge or discard already running is let finish first, and decides how the
 run ends. While a run works, *Force terminate* is offered too — a run whose status cannot be read is shown
 working — and while a run is stopping it is the only one. It is for a run a Stop cannot finish: it closes
 the run at once with no cleanup, but cannot stop what the run's host is already doing — a worktree's

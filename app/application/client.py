@@ -315,25 +315,27 @@ async def reject(client, run_id):
     """Reject a run: a Stop that says so — the run then ends `REJECTED` — and, once the run has closed, the
     removal of what it kept, as `remove_worktree` removes it. A closed run is refused, as a Stop of one is.
 
-    Returns what came of it: `removed`, whether its worktree and branch went now; `kept`, whether it still
-    keeps them; and `said`, the words for it — the removal's own refusal where it did not remove. The run
-    is waited for REJECTED_WITHIN at most, nothing is removed under a run still open, and nothing is tried
-    twice: what is still kept is the existing removal's to take."""
+    Returns what came of it: `pending`, whether the run was still open when the wait for it ended — its Stop
+    recorded, the run not rejected yet; `removed`, whether its worktree and branch went now; `kept`, whether
+    it still keeps them; and `said`, the words for it — the removal's own refusal where it did not remove.
+    The run is waited for REJECTED_WITHIN at most, nothing is removed under a run still open, and nothing
+    is tried twice: what is still kept is the existing removal's to take."""
     await _while_open(client, run_id, lambda handle: handle.cancel(reason=WF.REJECT))
     deadline = time.monotonic() + REJECTED_WITHIN.total_seconds()
     while ((await execution(client, run_id)) or {}).get("execution") == "RUNNING":
         if time.monotonic() >= deadline:
-            return {"rejected": run_id, "removed": False, "kept": True,
-                    "said": "run %s has not closed yet: its Stop is recorded, and it ends once its worker hears "
-                            "it; its worktree and branch stay until then" % run_id}
+            return {"rejected": run_id, "pending": True, "removed": False, "kept": True,
+                    "said": "run %s has not closed yet: its Stop is recorded, and the run ends once its worker "
+                            "hears it and what its host is already doing is done; nothing was removed — once it "
+                            "has closed, remove what it still keeps" % run_id}
         await asyncio.sleep(1)
     try:
         await remove_worktree(client, run_id)
     except NothingKept as nothing:
-        return {"rejected": run_id, "removed": False, "kept": False, "said": str(nothing)}
+        return {"rejected": run_id, "pending": False, "removed": False, "kept": False, "said": str(nothing)}
     except Refusal as refused:
-        return {"rejected": run_id, "removed": False, "kept": True, "said": str(refused)}
-    return {"rejected": run_id, "removed": True, "kept": False,
+        return {"rejected": run_id, "pending": False, "removed": False, "kept": True, "said": str(refused)}
+    return {"rejected": run_id, "pending": False, "removed": True, "kept": False,
             "said": "run %s's worktree and branch are removed" % run_id}
 
 

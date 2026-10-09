@@ -267,8 +267,10 @@ async function lifecycle(kind, button) {
   if (runId === selected) {
     // A Reject says what came of its second half too: removed, still to be removed, or nothing to remove —
     // and there in the removal's own words alone, since a merge already running lands and ends the run merged.
+    // A run that had not closed when the wait ended is still stopping, and is not called rejected.
     if (kind !== "reject") report($("run-control-result"), control.said);
     else if (answer.removed) report($("run-control-result"), "rejected: its worktree and branch are removed");
+    else if (answer.pending) report($("run-control-result"), "stopping, cleanup pending: " + answer.said, true);
     else if (answer.kept) report($("run-control-result"), "rejected, cleanup required: " + answer.said, true);
     else report($("run-control-result"), "ended, nothing to remove: " + answer.said);
   }

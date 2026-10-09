@@ -1,8 +1,9 @@
 # Workbench: Pause and Reject pinned at the top of a run's page, and the run list in scrolling sections
 
 **Status:** BUILT, OPEN — the external reviewer passed the plan on 2026-10-09 and it was built the same
-day; the build awaits the reviewer's pass. One criterion is still unmet: the WSL suite's one whole run
-(completion criterion 2), which runs after that pass.
+day; the reviewer's PATCH on the build, two points, is worked in, and the build awaits its pass. One
+criterion is still unmet: the WSL suite's one whole run (completion criterion 2), which runs after that
+pass.
 **Scope:** how a run is ended from the page — one ending word in
 [workflow.py](../app/orchestration/workflow.py), the shared client in
 [client.py](../app/application/client.py), one route and the list's rows in
@@ -223,9 +224,10 @@ has answered it, and the turn's time limit keeps running. Nothing but the page c
 
 **Reject is a Stop that carries its reason, and then the removal.** `reject` in client.py cancels the
 run with a reason the workflow module names, waits until Temporal reports the run closed — for the
-Stop's own cleanup bound and a margin, no longer — and then calls `remove_worktree`. Where that cannot
-remove, its own refusal is what Reject says: the run is not closed yet, it kept nothing, its host's
-worker is down, git refused. The server takes it at `POST /api/runs/<run-id>/reject`, confirmed as a
+Stop's own cleanup bound and a margin, no longer — and then calls `remove_worktree`. A run still open
+when that wait ends is answered as pending: still stopping, nothing removed, and not yet called
+rejected. Where the removal cannot remove, its own refusal is what Reject says: the run kept nothing,
+its host's worker is down, git refused. The server takes it at `POST /api/runs/<run-id>/reject`, confirmed as a
 removal is.
 
 **The run itself says how it ended.** In `_stopped`, a run whose cancellation carries that reason ends
@@ -338,7 +340,8 @@ had avoided.
 | Reject while a role works: its agent ends with the run, which closes `REJECTED`, and its host's git discards once | acceptance | 404 |
 | after a Reject, the run's history and each of its turns still read | acceptance (D1) | 404 |
 | Reject unconfirmed: refused, the run still open, no git | regression guard | 404 |
-| a removal that cannot run — git's refusal, and a run not closed within the bound: Reject says the removal's own words, nothing is tried again, and the run's row and page say cleanup required until a removal succeeds, then cleaned up | regression guard | 404; a row says nothing of what it keeps |
+| a removal that cannot run: at git's refusal Reject says the removal's own words; for a run not closed within the bound it answers pending, and nothing calls the run rejected yet; either way nothing is tried again, and the run's row and page say cleanup required until a removal succeeds, then cleaned up | regression guard | 404; a row says nothing of what it keeps |
+| `make demo` ending with an environment it could not take back: it fails, naming it — one that is not there fails nothing, and a checkout this host's git reads keeps its own | regression guard, `test_demo.py` | it passes, having printed what it left |
 | Reject of a closed run: refused as a Stop of one is | regression guard | 404 |
 | the page, by `make demo`: Pause on a working run opens that role's terminal and not the other's, the agent shows it was interrupted, and `continue`, typed with no click, reaches it and the turn ends | acceptance (D5, D8) | no such control |
 | the page, by `make demo`: Reject on a run at work, its question, its result, the run ending `REJECTED` with its worktree gone and its history still shown | acceptance (D8) | no such control |
@@ -396,10 +399,20 @@ The removal's other refusals are already held by the cases beside which these go
   checks them out, the Makefile with CRLF, its `.git` a pointer WSL's git cannot follow: DEMO PASSED. It
   built that checkout an environment on WSL and removed it as its last act; the environments' root then
   held the main checkout's alone, and the live stack's workers were the same processes before and after.
-- **The guard that takes that environment back**, on three stand-in checkouts with WSL's own git: removed
-  for a pointer git cannot follow; kept for a worktree this host's git reads, and for a checkout whose
-  `.git` is a folder.
 - **`make public-check`:** passed.
+- **After the reviewer's PATCH on the build**, on WSL:
+  - *Red.* The three Reject cases failed on the answer's missing word — `pending` read `None` where
+    `True` or `False` was expected. The demo's ending case failed with `0 == 0`: a demo whose removal
+    was refused had printed what it left behind and passed.
+  - *Green.* `tests.test_demo`, `tests.interfaces.test_workbench` and `tests.test_architecture` —
+    22 classes, 126 tests, OK; and once the pending answer's words were last changed, the classes that
+    read a Reject's answer, `Runs` and `Kept`, with `tests.test_demo` — 3 classes, 36 tests, OK.
+  - *Control*, failing and then put back: the demo taking any checkout's environment, whether or not
+    this host's git reads it — `the environment the live stack may be running from is never the demo's
+    to remove`.
+  - `make demo` was not run again. What the round changed of it is its last lines, which `test_demo.py`
+    runs both ways; of the page, one branch a Reject that removes never reaches, in a script that still
+    parses.
 - **The checklist review** over the changed page files: three findings, each fixed — a row's focus ring
   was cut off by its list's box, and is drawn inside the row; the two groups of controls did not name
   the words that explain them, and do; a Pause that finds no agent under the terminal said nothing, and
@@ -422,7 +435,7 @@ The removal's other refusals are already held by the cases beside which these go
 - **Package level:** `client` under Owns in
   [application's structure](../app/application/docs/architecture/structure.md), and what goes through
   `application.client` in [interfaces' structure](../app/interfaces/docs/architecture/structure.md).
-- **Routers:** the rows of [tests/README.md](../tests/README.md) for the two test files, and the rows of
+- **Routers:** the rows of [tests/README.md](../tests/README.md) for the three test files, and the rows of
   [tools/README.md](../tools/README.md) for the demo and its driver.
 - No stable document names this todo.
 
@@ -491,3 +504,17 @@ run (2).
   below the window's edge; the layout read now refuses that.
 - **Open:** the WSL suite's whole run, after the reviewer's pass on the build; then the operator's check
   on a real agent.
+
+### 2026-10-09 — the external reviewer: PATCH on the build
+
+- **Both points taken, the reviewer's and the agent's; neither refuted.**
+  - A Reject whose run had not closed in time was reported by the page as rejected, cleanup required,
+    while Temporal still held the run open. Its answer now says `pending`, and the page says the run is
+    still stopping. Its words had also read as if the removal would follow by itself; they now say the
+    removal is the operator's once the run has closed, and do not say how it will end — a merge already
+    running still decides that.
+  - A demo whose environment could not be taken back printed that and passed. That environment is now
+    something left behind like any other, and fails the demo.
+- **Added beside the second:** the guard that keeps a checkout this host's git reads — it had no test.
+- **Seen and left, as outside the two points:** a Reject whose run is force-terminated during its wait
+  is still worded as rejected in the press's own line; the run's heading says how it ended.

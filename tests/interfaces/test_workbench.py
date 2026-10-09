@@ -1640,8 +1640,8 @@ class Runs(Scenario):
         self.assertEqual([call[0] for call in git.calls], ["create"], "and no git ran")
 
         status, body = request("POST", "/api/runs/%s/reject" % run_id, {"confirm": True})
-        self.assertEqual((status, body.get("rejected"), body.get("removed"), body.get("kept")),
-                         (200, run_id, True, False), body)
+        self.assertEqual((status, body.get("rejected"), body.get("pending"), body.get("removed"), body.get("kept")),
+                         (200, run_id, False, True, False), body)
         view = request("GET", "/api/runs/%s" % run_id)[1]["view"]
         self.assertEqual((view["state"], view["status"], view["execution"]), ("closed", "REJECTED", "CANCELED"))
         self.assertEqual((view["kept"], view["cleanup"]), (False, None), "rejected, and cleaned up")
@@ -1699,7 +1699,8 @@ class Runs(Scenario):
         def discards():
             return [call for call in git.calls if call[0] == "discard"]
         status, body = request("POST", "/api/runs/%s/reject" % run_id, {"confirm": True})
-        self.assertEqual((status, body.get("removed"), body.get("kept")), (200, False, True), body)
+        self.assertEqual((status, body.get("pending"), body.get("removed"), body.get("kept")),
+                         (200, False, False, True), "the run closed, rejected: only its removal is outstanding: %s" % body)
         self.assertIn("is locked", body["said"], "the removal's own words on why")
         self.assertEqual(len(discards()), 1, "tried once, never again by itself")
         view = request("GET", "/api/runs/%s" % run_id)[1]["view"]
@@ -1740,8 +1741,11 @@ class Runs(Scenario):
         runs.execution, runs.REJECTED_WITHIN = still_open, datetime.timedelta(seconds=1)
         status, body = request("POST", "/api/runs/%s/reject" % run_id, {"confirm": True})
         runs.execution, runs.REJECTED_WITHIN = listed, bound
-        self.assertEqual((status, body.get("removed"), body.get("kept")), (200, False, True), body)
+        self.assertEqual((status, body.get("pending"), body.get("removed"), body.get("kept")), (200, True, False, True),
+                         "still open as far as Temporal says: its end is pending, and nothing says it was rejected "
+                         "yet — unlike a closed run whose removal was refused: %s" % body)
         self.assertIn("has not closed", body["said"])
+        self.assertIn("nothing was removed", body["said"])
         self.assertEqual([call[0] for call in git.calls], ["create"], "nothing was removed under an open run")
         # Its Stop was recorded all the same, saying what it was: the run ends rejected, its work still there.
         self.wait_for(run_id, lambda body: body["view"]["state"] == "closed")
