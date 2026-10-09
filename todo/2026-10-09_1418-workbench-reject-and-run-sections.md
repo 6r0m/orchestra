@@ -1,9 +1,10 @@
-# Workbench: Pause and Reject at the top of a run's page, and closed runs in scrolling sections
+# Workbench: Pause and Reject pinned at the top of a run's page, and the run list in scrolling sections
 
-**Status:** REVIEW REQUIRED
+**Status:** REVIEW REQUIRED — the external reviewer returned PATCH on 2026-10-09; its points are worked
+in below, and this awaits its pass.
 **Scope:** how a run is ended from the page — one ending word in
 [workflow.py](../app/orchestration/workflow.py), the shared client in
-[client.py](../app/application/client.py), one route in
+[client.py](../app/application/client.py), one route and the list's rows in
 [server.py](../app/interfaces/workbench/server.py) — and the page's own files under
 [static/](../app/interfaces/workbench/static/). No new activity, workflow type, stop answer or
 command-line form.
@@ -21,11 +22,12 @@ the page is used.
 
 ## Goal
 
-A run's controls sit at the top of its page. **Pause** interrupts the agent at work and puts the
-keyboard in its terminal, so the operator types to it and it goes on. **Reject** ends the run and
-removes everything it left in its repository, with one confirmation, and its history stays readable.
-That run, and only a run rejected that way, is listed under **Rejected**. Closed and Rejected each
-scroll inside themselves once they hold more than five runs, on any window.
+A run's controls sit at the top of its page and stay in view while the page scrolls. **Pause**
+interrupts the agent at work and puts the keyboard in its terminal, so the operator types to it and it
+goes on. **Reject** ends the run and removes everything it left in its repository, with one
+confirmation; its history stays readable, and the page says how far the cleanup got. That run, and only
+a run rejected that way, is listed under **Rejected**. Each section of the run list scrolls inside
+itself once it holds more than five runs, on any window.
 
 ## Authority register
 
@@ -38,9 +40,10 @@ All 2026-10-09, in the operator's words.
     but mess should be removed"*.
 - **D2** Rejected lists only the runs rejected with that button. A stopped run is not rejected.
   - *"only that run which we explicitly press reject button, stop it's not reject!"*
-- **D3** Closed and Rejected each become a scroll box, adaptively, once they hold more than five runs.
+- **D3** Sections of the run list become scroll boxes, adaptively, once they hold more than five runs.
   - *"sections with scrollbars"*; *"ok let's simplify - adaptive scrollbox if over 5 runs"*; *"read
-    about adaptive design please"*.
+    about adaptive design please"*. Earlier that day, the one time sections were named: *"each sections
+    closed, rejected should have scroll box if not compact in screens"*.
 - **D4** A run's control-plane buttons sit at the top, placed by web-interface practice.
   - *"all control plane buttons should be in top think with web skills - so pause / or reject should be
     there"*.
@@ -58,6 +61,20 @@ All 2026-10-09, in the operator's words.
 - **D8** The page's behaviour is tested properly, in a real browser.
   - *"need to test properly - you could use drive browser skill"*.
 
+### Decided with the external reviewer — the reviewer's and the agent's
+
+Points the operator's words left open, settled by the reviewer's PATCH of 2026-10-09 where the agent
+agrees.
+
+- **Under D4, the controls stay in view while the run's page scrolls.** D4 says the top; a control that
+  has to be scrolled back to is searched for again, which D5 names as the thing to end.
+- **Under D3, all four lists are boxes.** One rule for every list is less than a rule with two
+  exceptions. Operator action is the last to give up height, and the counts stay in the headings.
+- **Under D1, a rejected run says where its cleanup stands** — removing, cleaned up, or cleanup
+  required with the removal beside it — from facts that exist already.
+- **Under D5 and D8, Pause is proven in a browser through to a typed follow-up.** A check on a real
+  agent is the operator's own, after the reviewer's pass.
+
 ### Working assumptions
 
 - **A1 [ACTIVE]:** Pause is the Esc a role's terminal already takes, sent for the operator: the run is
@@ -65,29 +82,32 @@ All 2026-10-09, in the operator's words.
   (architecture D17).
 - **A2 [ACTIVE]:** Reject is offered in every state that offers *Stop run*. At the final gate *Discard*
   stays the stop's own answer.
-- **A3 [ACTIVE]:** "The top" is the header of the run's own page, not the Workbench's bar, and it is not
-  pinned while the page scrolls. "Control-plane buttons" are the run's own controls and the removal of
-  what a closed run kept; a stop's answers stay in its decision, beside their evidence.
-- **A4 [ACTIVE]:** On a window too short for five rows in each box, a box shows fewer and still scrolls.
-- **A5 [ACTIVE]:** The live Temporal server hands a cancellation's reason to the workflow as the test
-  server does. Unverified on the live server.
-- **A6 [ACTIVE]:** `make demo` can run against the candidate code before a merge. Unverified from inside
-  a run's own worktree.
+- **A3 [ACTIVE]:** "Control-plane buttons" are the run's own controls and the removal of what a closed
+  run kept, on the run's own page. A stop's answers stay in its decision, beside their evidence.
+- **A4 [ACTIVE]:** On a window too short for five rows in every box, the boxes share the list's height
+  and each still scrolls.
+- **A5 [ACTIVE]:** The live Temporal server records a cancellation's reason as the API defines it. The
+  rest of the path is proven (see Verified evidence); this one copy, inside the server, is not.
+- **A6 [ACTIVE]:** `make demo` runs from inside a run's own worktree. Reasoned from its code and one
+  probe (see Verified evidence), never run there.
 
 ## Non-goals
 
 - No paused state in the workflow, and nothing that resumes a stopped run (A1).
 - Reject stays Temporal's cancellation: no new stop answer, activity, workflow type or command.
+- No state of its own for a cleanup that is pending or failed: two facts that exist say it.
 - No `--reject` on the command line, which has no removal either (architecture D31).
 - A run stopped and later removed by hand is not listed as rejected (D2).
-- Operator action and Working are not boxed, and a stop's answers do not move (A3).
-- The labels of the controls that exist do not change.
+- A stop's answers do not move (A3), and the labels of the controls that exist do not change.
 - No change to how many closed runs a page holds, or to *Load older runs*.
+- No check on a real agent as part of this change's build: it spends a real turn, and is the operator's.
 - The New run form preselecting the first listed repository is a separate defect, not fixed here.
+- The environment `make demo` leaves on WSL for a worktree Windows made is not fixed here; whoever runs
+  the demo from such a worktree removes it by hand.
 
 ## Verified evidence
 
-Read from the checkout at `a0846f7` on 2026-10-09. One probe was run; no test of the suite was.
+Read from the checkout at `a0846f7` on 2026-10-09. Two probes were run; no test of the suite was.
 
 **Verified facts**
 
@@ -95,6 +115,9 @@ Read from the checkout at `a0846f7` on 2026-10-09. One probe was run; no test of
   `WorkflowHandle.cancel(reason=…)` and `workflow.cancellation_reason()`, read in the installed package.
   Probed on the time-skipping test server the suite uses: a cancellation sent with the reason `reject`
   was read by the workflow as `reject`, and one sent with none as the empty string.
+- **The reason's path, link by link.** The client sends it in the cancel request; the API defines the
+  cancel-requested event's `cause` as "User provided reason for requesting cancellation" (the pinned
+  package's own stubs); the SDK handed that event's cause to the workflow in the probe above.
 - **A Stop closes the run for good.** `stop` in client.py is Temporal's cancellation; the workflow ends
   the run `STOPPED`, runs no git and bounds its cleanup (`_stopped` in workflow.py,
   `STOP_CLEANUP_SECONDS` in [policy.py](../app/foundation/policy.py)). An answer, and `--continue`,
@@ -105,30 +128,54 @@ Read from the checkout at `a0846f7` on 2026-10-09. One probe was run; no test of
   it is handed; `outcome` in [ui.js](../app/interfaces/workbench/static/ui.js), the page's label.
 - **Removal:** `remove_worktree` in client.py refuses an open run, a run that kept nothing and a second
   removal, each in words that say why (`not_kept`); it needs the run's workflow worker and its target
-  host's worker, and runs once.
+  host's worker, and runs once. How a removal went is Temporal's own record of it (`removal`).
+- **What a closed run still keeps is worked out for its page, not for its row.** `_run` in server.py
+  asks `removal` and `not_kept`; `_run_page` does not, and keeps a closed run's row for good once read
+  (`finished`).
 - **An interrupted turn goes on with what the operator types.** A role's terminal on the page sends each
   key over that role's socket while its agent is live (`term.onData` in
-  [terminals.js](../app/interfaces/workbench/static/terminals.js)); on Windows a lone Esc is delivered
-  as the key ([ptyhost.py](../app/agents/ptyhost.py)). An interrupt completes nothing, and the turn ends
-  on the completion of a prompt typed after it (architecture D17;
-  `test_esc_and_typing_reach_the_agent_and_an_interrupt_completes_nothing` in
+  [terminals.js](../app/interfaces/workbench/static/terminals.js)) — the Esc key as the one byte Pause
+  would send; on Windows a lone Esc is delivered as the key ([ptyhost.py](../app/agents/ptyhost.py)). An
+  interrupt completes nothing, and the turn ends on the completion of a prompt typed after it
+  (architecture D17; `test_esc_and_typing_reach_the_agent_and_an_interrupt_completes_nothing` in
   [test_terminal.py](../tests/agents/test_terminal.py)). The turn's own time limit keeps running
   meanwhile (`timeout_seconds`, an hour as shipped).
 - **The run's controls sit far down its page:** `run-controls` and `run-kept` follow the decision and
   the whole change in [index.html](../app/interfaces/workbench/static/index.html), and the terminals
   come after those. That was chosen: the [workbench UX todo](done/2026-09-25_2334-workbench-ux.md) put a
   run's decision first in the page and in the tab order, and its own controls after it.
+- **Pinning has a pattern here.** The Workbench's bar is pinned at the top and the page's scroll padding
+  keeps what is scrolled to clear of it; the rail is pinned under it; Settings pins its apply bar at the
+  bottom, with a scroll margin on its controls (`.top`, `html`, `.rail`, `.apply-bar` in
+  [style.css](../app/interfaces/workbench/static/style.css)). Below 640 px the Workbench's bar may wrap
+  and grow past the height the others are pinned under.
 - **The rail:** three lists, every closed run in the third (`GROUPS` and `render` in
-  [rail.js](../app/interfaces/workbench/static/rail.js)); one scroll area for all of it (`.rail` in
-  [style.css](../app/interfaces/workbench/static/style.css)). Below 1000 px wide the rail sits above the
-  page at its full height, so every closed run a page holds comes before the run's own page. A row's
-  view already carries its `status` (`view` in client.py).
+  [rail.js](../app/interfaces/workbench/static/rail.js)); one scroll area for all of it. Operator action
+  and Working show a count in their headings, and the page's title the count that waits. Below 1000 px
+  wide the rail sits above the page at its full height, so every closed run a page holds comes before
+  the run's own page. A row's view already carries its `status` (`view` in client.py).
 - **Tests:** each half of a reject is covered in
   [test_workbench.py](../tests/interfaces/test_workbench.py), class `Runs`; a Stop's endings in
-  [test_stops.py](../tests/orchestration/test_stops.py). The suite never runs the page's scripts; its
-  controls are pressed by `make demo`, by label, in headless Edge
+  [test_stops.py](../tests/orchestration/test_stops.py), a Stop while an agent works among them
+  (`test_a_run_whose_agent_works_ends_stopped_and_its_agent_with_it`). The suite never runs the page's
+  scripts; its controls are pressed by `make demo`, by label, in headless Edge
   ([demo.py](../tools/demo.py), [demo_press.py](../tools/demo_press.py)). The demo's agents answer no
   Esc today; the suite's stand-in CLI does ([fake_cli.py](../tests/fake_cli.py), its `interrupt` word).
+- **What `make demo` needs of the checkout it runs in.** Its own files, all tracked; a settings file, a
+  repository, queues, ports, a Workbench and a worker of its own, made in a temporary folder
+  (`setup` in demo.py); the live Temporal. Every git call it makes is on its own repository, and it stops
+  only its own worker — a stack that is not the checkout's own manages its WSL worker alone (`managed`
+  in [stack.py](../app/application/stack.py)). In a worktree Git for Windows made, the Makefile is
+  checked out with CRLF: GNU Make 4.3 on WSL read a CRLF copy of it and printed the demo's recipe clean.
+  The shell scripts are pinned to LF, and Python reads either.
+- **What it leaves there.** Run on WSL from a worktree Windows made, the Makefile and
+  [workers.sh](../workers.sh) build that worktree an environment on WSL, which nothing removes: a
+  worktree's environment goes with it on its own host only. The test runner avoids this for such a
+  worktree ([run-tests.sh](../run-tests.sh)); these two do not.
+- **How the demo's driver reads a press.** It finds a control by its label anywhere in the run's view,
+  and reads the status line nearest that control (`button`, `REGION` and `SAID` in demo_press.py); it
+  takes the page as loaded once the `runs-finished` list holds an entry. It has no way to type into a
+  terminal.
 - **Web-interface practice**, from the checklist the `web-design-review` skill pins: a destructive
   action needs a confirmation; flex or grid over script measurement for layout; an inner scroll area
   contains its overscroll; nothing pinned may cover the focused element.
@@ -160,15 +207,16 @@ Read from the checkout at `a0846f7` on 2026-10-09. One probe was run; no test of
 Capability gaps. To interrupt an agent the operator has to find its terminal far down the page, click
 into it and press Esc. Throwing a run away takes two controls on two states of the page, both below the
 decision and the change, where the operator did not find them. Nothing tells a run the operator rejected
-from one that was merely stopped. And the Closed list is as long as the page holds, which on a narrow
+from one that was merely stopped. And the run list is as long as the page holds, which on a narrow
 window is all above the run's own page.
 
 ## Decision
 
-**Pause is the page pressing Esc for the operator (D5, A1).** While a role works, **Pause** in the
-run's header opens that role's terminal, sends it the one Esc its own keyboard would, and leaves the
-keyboard there. The words beside it say what follows: what is typed steers this turn, the run moves on
-when the agent has answered it, and the turn's time limit keeps running. Nothing but the page changes.
+**Pause is the page pressing Esc for the operator (D5, A1).** While a role works, **Pause** opens that
+role's terminal and no other, sends it the one Esc its own keyboard would, and leaves the keyboard
+there, so the next thing typed reaches the agent with no click. The words beside it say what it is and
+what follows: it interrupts the agent, what is typed steers this turn, the run moves on when the agent
+has answered it, and the turn's time limit keeps running. Nothing but the page changes.
 
 **Reject is a Stop that carries its reason, and then the removal.** `reject` in client.py cancels the
 run with a reason the workflow module names, waits until Temporal reports the run closed — for the
@@ -182,33 +230,43 @@ removal is.
 cleanup activity, handed `STOPPED` as now, and no command added — so the histories recorded for a Stop
 already hold every command a reject issues.
 
+**A rejected run says where its cleanup stands.** That ending is the operator's act; whether the mess is
+gone is a second fact, and both exist: the run's ending, and Temporal's record of its removal. From
+them the run's page and its row say one of three things — stopping and then removing while they run;
+rejected, cleaned up; rejected, cleanup required, with *Remove worktree and branch* beside it. A row is
+kept for good only once its run is cleaned up.
+
 **Rejected is that ending and nothing else (D2).** The rail routes a closed row whose status is
-`REJECTED` to Rejected and every other closed row to Closed; its label reads *Rejected*. A row whose
-status cannot be read stays in Closed.
+`REJECTED` to Rejected and every other closed row to Closed. A row whose status cannot be read stays in
+Closed.
 
-**The run's controls move to its header (D4).** `run-controls` and `run-kept` sit at the top of the
-run's page, beside its title, in that order in the page and in the tab order: Pause while a role works,
-*Stop run*, **Reject** (A2) with one confirmation that says it ends the run and deletes its worktree and
-branch with any work in them, and *Force terminate* where it is offered today. They stay quiet, so the
-decision remains the one raised element.
+**The run's controls are a strip pinned at the top (D4).** The run's title, cut to one line,
+`run-controls` and `run-kept` make one strip at the top of the run's page, pinned under the Workbench's
+bar while the page scrolls, as the rail is; what is scrolled to or focused stays clear of it, as it does
+of the bar. It comes first in the page and in the tab order: Pause while a role works, *Stop run*,
+**Reject** (A2) with one confirmation that says it ends the run and deletes its worktree and branch with
+any work in them, and *Force terminate* where it is offered today. They stay quiet, so the decision
+remains the one raised element.
 
-**The boxes are styles alone (D3).** Closed and Rejected each show at most five rows and scroll inside
-themselves beyond that; rows in those two lists share one height, so five is five at any width; the
-limit gives way on a short window (A4); and the same boxes hold below 1000 px, where the rail sits above
-the page. No script measures a row.
+**The boxes are styles alone (D3).** Each of the four lists is as tall as its runs up to five rows and
+scrolls inside itself beyond that. When the four do not fit the window together they share its height,
+Operator action giving up its own last (A4); below 1000 px, where the rail sits above the page, each
+keeps its five-row limit. No script measures a row.
 
 ### Premise / KISS gate
 
 Each part rests on something that already works. The terminal already takes an Esc and a typed prompt;
-Temporal already records why a run was cancelled and hands it to the workflow; the run's status is
-already what every surface reads; client.py already owns the Stop and the removal, refusals included.
-Added: one ending word and one read in the workflow, one client function, one route, two buttons, one
-list, a few style rules. Removed: nothing — *Stop run* keeps a run's work on purpose. Given up
-knowingly: the run does not know it is paused, so its row still reads as working and a pause longer than
-the turn's time limit fails the step; Reject does not finish in the background — where the run has not
-closed in time or its host cannot remove now, it says so and the removal that exists finishes it; and
-on a waiting run the keyboard now reaches *Stop run* and Reject before the decision's answers, the order
-the earlier design had avoided.
+Temporal already records why a run was cancelled and hands it to the workflow, and lists each removal;
+the run's status is already what every surface reads; client.py already owns the Stop and the removal,
+refusals included; the stylesheet already pins a bar and keeps focus clear of it. Added: one ending word
+and one read in the workflow, one client function, one route, the removal read for a rejected row, two
+buttons, one list, a few style rules, one verb in the demo's driver. Removed: nothing — *Stop run* keeps
+a run's work on purpose. Given up knowingly: the run does not know it is paused, so its row still reads
+as working and a pause longer than the turn's time limit fails the step; Reject does not finish in the
+background — where the run has not closed in time or its host cannot remove now, it says so and the
+removal that exists finishes it; the pinned strip takes a line of every run's page; and on a waiting run
+the keyboard reaches *Stop run* and Reject before the decision's answers, the order the earlier design
+had avoided.
 
 ### Alternatives considered
 
@@ -218,42 +276,47 @@ the earlier design had avoided.
   the workflow, and a second way a closing run's work is removed.
 - **A paused state in the workflow.** It would stop the turn's clock and show the pause on every
   surface, at the price of a new state, a new answer and new commands, for what one key already does.
+- **`REJECTED` only once the removal has succeeded.** The ending would then wait on a second host, and a
+  run the operator rejected would read as merely stopped whenever its cleanup failed — the mix-up D2
+  rules out.
 - **Calling a run rejected when it is stopped and its work is gone.** It would list a run stopped and
-  removed by hand as rejected (D2), cost one more Temporal read per closed row, and leave a cached row
-  stale when a run is removed later.
+  removed by hand as rejected (D2).
 - **The reject's sequence in the page's script.** It ends with the tab that started it, and the suite
   runs no page script, so its failure paths would have no test.
-- **A script that measures five rows, or a header pinned while the page scrolls.** The first is what the
-  pinned checklist advises against where styles can do it; the second can cover what has focus on a
-  small window, for controls that are one scroll away.
+- **A script that measures five rows.** What the pinned checklist advises against where styles can do it.
 
 ## Required invariants
 
-1. Pause sends what the operator's own Esc sends, once a press, to the role at work, and tells the run
-   nothing (architecture D17).
+1. Pause sends what the operator's own Esc sends, once a press, to the role at work and no other, and
+   tells the run nothing (architecture D17).
 2. Reject's Stop is the Stop as it is: no git, taken with no worker polling (architecture D31).
 3. A removal runs only once the run is closed, once, through its target host's git, and is refused under
    a git side effect of the run still running (architecture D31).
 4. The workflow commands nothing new, and every recorded history replays as written (D25).
 5. A Stop that carries no reason ends `STOPPED`, exactly as now.
 6. The server refuses an unconfirmed Reject, and nothing happens.
-7. Reject never says more than happened, and retries nothing by itself.
+7. Reject never says more than happened, and retries nothing by itself. A rejected run that still keeps
+   work says so on its page and in its row, and offers the removal.
 8. A run is listed as rejected only by its own `REJECTED` ending (D2).
-9. A run that waits or works is never boxed or hidden (architecture D29), and every closed run a page
-   holds stays reachable in its box.
-10. The labels `make demo` presses do not change.
-11. D7 holds for every check below.
+9. Every run a page holds stays reachable in its box. Operator action is the last list to give up
+   height, and the counts in the headings and in the page's title stay.
+10. The pinned strip never covers what has the keyboard, or what a link scrolls to.
+11. The labels `make demo` presses do not change, each control keeps a status line of its own nearest
+    it, and Pause says what it did there, so the demo's driver reads every press as it does now.
+12. D7 holds for every check below.
 
 ## Implementation tasks
 
 - [ ] Write the red cases below and see each fail for its own reason.
 - [ ] The workflow: the reason's name, and the `REJECTED` ending in `_stopped`.
 - [ ] `reject` in client.py — the Stop with its reason, the bounded wait, the removal.
-- [ ] The server's `reject` route, confirmed, its call bounded as a removal's is.
-- [ ] The page: the controls and what a run kept in the run's header; Pause; Reject, its confirmation
-      and its result; the *Rejected* label and list; the two boxes.
-- [ ] `make demo`: a step that presses Pause and one that presses Reject, with an agent that answers an
-      Esc; its line about *Stop run* alone reworded.
+- [ ] The server: the `reject` route, confirmed, its call bounded as a removal's is; and where a
+      rejected run's cleanup stands, in its row as in its page.
+- [ ] The page: the pinned strip with the controls and what a run kept; Pause; Reject, its confirmation,
+      its result and its cleanup's standing; the *Rejected* list; the four boxes.
+- [ ] `make demo`: an agent that answers an Esc, a step that presses Pause and types on, a step that
+      presses Reject on a run at work, and the driver's one new verb — a line typed into whatever has
+      the keyboard; its line about *Stop run* alone reworded.
 - [ ] The stable documents in the documentation plan.
 - [ ] The verification below, then the diff read against this todo.
 
@@ -265,12 +328,14 @@ the earlier design had avoided.
 |---|---|---|
 | a Stop carrying the reason ends the run `REJECTED`; one carrying none ends it `STOPPED` | regression guard, `test_stops.py` | every Stop ends `STOPPED` |
 | Reject confirmed at an approval: the run closes `REJECTED`, its host's git discards once, it keeps nothing | acceptance, `test_workbench.py` | the route answers 404 |
+| Reject while a role works: its agent ends with the run, which closes `REJECTED`, and its host's git discards once | acceptance | 404 |
+| after a Reject, the run's history and each of its turns still read | acceptance (D1) | 404 |
 | Reject unconfirmed: refused, the run still open, no git | regression guard | 404 |
-| a removal that cannot run — git's refusal, and a run not closed within the bound: Reject says the removal's own words, and nothing is tried again | regression guard | 404 |
+| a removal that cannot run — git's refusal, and a run not closed within the bound: Reject says the removal's own words, nothing is tried again, and the run's row and page say cleanup required until a removal succeeds, then cleaned up | regression guard | 404; a row says nothing of what it keeps |
 | Reject of a closed run: refused as a Stop of one is | regression guard | 404 |
-| the page, by `make demo`: Pause in the header of a working run opens its role's terminal, the agent shows it was interrupted, a typed line reaches it and the turn ends | acceptance (D8) | no such control |
-| the page, by `make demo`: Reject in the header, its question, its result, the run ending `REJECTED` with its worktree gone | acceptance (D8) | no such control |
-| the page, in a headless browser at a wide, a narrow and a short window: the controls at the top of the run's page; a rejected run under Rejected and a stopped one under Closed; a section of five runs or fewer without a scrollbar, one of more scrolling inside itself; Operator action and Working whole | acceptance (D8) | one list, one scroll, controls below the change |
+| the page, by `make demo`: Pause on a working run opens that role's terminal and not the other's, the agent shows it was interrupted, and `continue`, typed with no click, reaches it and the turn ends | acceptance (D5, D8) | no such control |
+| the page, by `make demo`: Reject on a run at work, its question, its result, the run ending `REJECTED` with its worktree gone and its history still shown | acceptance (D8) | no such control |
+| the page, in a headless browser at a wide, a narrow and a short window, at the top of a run's page and scrolled to its history: the controls in view and nothing that has the keyboard under them; a rejected run under Rejected and a stopped one under Closed; each of the four sections without a scrollbar at five runs or fewer and scrolling inside itself at more | acceptance (D8) | one list, one scroll, controls below the change |
 | the `web-design-review` checklist over the changed page files finds nothing this change brought | reviewer-checked | — |
 
 The removal's other refusals are already held by the cases beside which these go, in class `Runs`.
@@ -287,12 +352,14 @@ The removal's other refusals are already held by the cases beside which these go
   own — the demo's.
 - Not part of this change: `tests/acceptance_restart.py`, which restarts the live stack (D7). The
   Workbench's service shows the change only once restarted, which is the operator's step after a merge.
+- The operator's own, after the reviewer's pass, and no criterion of the build: Pause and a typed
+  `continue` on one real turn of each kind of agent a role is bound to.
 
 ## Documentation plan
 
-- **Authoritative stable owner:** architecture D31 — a Stop may carry the operator's reason, and Reject
-  is that Stop and then the removal; architecture D29 — the four groups, the boxes, where a run's
-  controls sit, and Pause as the page's own key press.
+- **Authoritative stable owner:** architecture D31 — a Stop may carry the operator's reason, Reject is
+  that Stop and then the removal, and a rejected run says where its cleanup stands; architecture D29 —
+  the four groups and their boxes, the pinned strip, and Pause as the page's own key press.
 - **Beside them:** the Stop invariant in
   [orchestration's structure](../app/orchestration/docs/architecture/structure.md) and the closing
   paragraph of [the stops view](../docs/architecture/diagrams/stops.md), which both name the ending a
@@ -303,8 +370,8 @@ The removal's other refusals are already held by the cases beside which these go
 - **Package level:** `client` under Owns in
   [application's structure](../app/application/docs/architecture/structure.md), and what goes through
   `application.client` in [interfaces' structure](../app/interfaces/docs/architecture/structure.md).
-- **Routers:** the rows of [tests/README.md](../tests/README.md) for the two test files, and the
-  `demo.py` row of [tools/README.md](../tools/README.md).
+- **Routers:** the rows of [tests/README.md](../tests/README.md) for the two test files, and the rows of
+  [tools/README.md](../tools/README.md) for the demo and its driver.
 - No stable document names this todo.
 
 ## Completion criteria
@@ -312,8 +379,8 @@ The removal's other refusals are already held by the cases beside which these go
 1. Every case of the red matrix that the suite can hold passes, having been seen failing first.
 2. The four modules above pass whole on WSL, and the WSL suite passes once.
 3. `make demo` passes with its Pause and Reject steps, on the live Temporal server (A5, A6).
-4. The headless-browser row passes at the three window sizes, and what was pressed and seen is recorded
-   here.
+4. The headless-browser row passes at the three window sizes, scrolled and not, and what was pressed and
+   seen is recorded here.
 5. The checklist review is recorded here, with each finding fixed or answered.
 6. The documents in the documentation plan say what the code does.
 7. The diff holds this change alone: `activities.py`, `cli.py`, `terminal.py` and every recorded history
@@ -332,6 +399,23 @@ The removal's other refusals are already held by the cases beside which these go
   the run's controls move to the top of its page (D4). D1 gained the kept history; D5 and D8 were added.
 - **Rechecked for something simpler, at the operator's asking:** Reject no longer words its own
   outcomes — the removal's refusals are its words; no history is recorded for a rejected run, since it
-  issues a Stop's commands; the demo's driver needs no new verb for the lists, which the headless row
-  reads.
-- **Authority:** D1–D8 as they stand; no gate open.
+  issues a Stop's commands.
+- **`make demo` reasoned through, at the operator's asking:** nothing in it needs the checkout's own git
+  or touches the live workers; the two links that were guesses — make reading a CRLF Makefile, and the
+  API naming the event's cause as the user's reason — were checked. Found on the way: the environment it
+  leaves on WSL for a worktree Windows made.
+
+### 2026-10-09 — the external reviewer: PATCH
+
+- **Worked in, as the reviewer's and the agent's:** the controls pinned while the page scrolls; all four
+  lists boxed; a rejected run saying where its cleanup stands; the cases for a Reject at work and for
+  the history after one; Pause proven in a browser through a typed `continue`, which gives the demo's
+  driver one verb; the scrolled state in the browser row; a real-agent check left to the operator.
+- **Not taken as stated:** that the pinned controls and the four boxes were explicit operator
+  requirements changed into assumptions — the operator's words, quoted in D3 and D4, say "the top" and
+  name Closed and Rejected, so both were open and are now settled on their merits; and that Pause rests
+  on vendor behaviour of its own — it sends the byte the terminal sends today when the operator presses
+  Esc, over the same socket.
+- **Kept against the review's wording:** `REJECTED` is still the run's ending before the removal runs.
+  It records what the operator did (D2); the cleanup's standing is shown beside it.
+- **Authority:** D1–D8 as they stand; no gate open. Awaiting the reviewer's pass.
