@@ -38,9 +38,10 @@ fails `test_worktrees`' `Remote` and `Guard` — cleared from the environment, b
 These tests are of Orchestra, not of agents. Nothing in this folder starts a vendor's agent or calls a
 model, so no run of it — the whole suite on both hosts included — spends quota or needs a login. `claude`
 and `codex` are played by a stand-in program (`fake_cli.py`) where a terminal is driven, and by scripted
-turns (`fakes.FakeAgent`) everywhere else: what an agent "answers" is data the test wrote, so the same run
-gives the same result every time. What is real is everything around the agent: the processes, the
-worktrees, the PTY and Temporal's own test server.
+turns (`fakes.FakeAgent`) everywhere else: what an agent "answers" is data the test wrote, so the agent's
+scripted responses are repeatable. What is real is everything around the agent — the processes, the
+worktrees, the PTY and Temporal's own test server — so a run can still fail on timing or on the host, as
+any test of real processes can.
 
 | what | a real agent or model | started |
 |---|---|---|
@@ -63,6 +64,13 @@ then does, is a claim about the agent: only a real run answers it
 A live run can confirm an integration path, but it is not the regression guard for a deterministic
 policy rule. A scripted run can prove which prompt and options Orchestra sends; only a real agent
 can show how it responds. Use both when a claim spans both sides of that boundary.
+
+Scripted agents are the default: a claim goes to a real agent only when no scripted turn can establish it.
+Before any real run, ask the vendor's own CLI what it answers with no model called — the efforts its
+`--help` names, the models its catalog lists (`codex debug models`). Where a change does need a real run,
+it comes last, after every scripted check is green. A real run spends quota on your account, so a person
+starts it, knowingly, and nothing in this repository does
+([D10](../docs/architecture/structure.md#invariants)).
 
 ## One source for every value
 
