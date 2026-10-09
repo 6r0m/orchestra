@@ -181,15 +181,21 @@ export function decisionTitle(reason, phase) {
 const CLEANUP = { removing: "Rejected, removing its worktree and branch", required: "Rejected, cleanup required",
   unknown: "Rejected" };
 
-// How a closed run ended: the workflow's word, or Temporal's when it ended the run itself.
-export function outcome(view) {
-  if (view.execution === "TERMINATED") return "Force terminated";
-  if (view.execution && !["COMPLETED", "CANCELED"].includes(view.execution)) {
-    return "Ended: " + view.execution.toLowerCase().replace(/_/g, " ");
+// How a closed run ended: the workflow's word, or Temporal's when it ended the run itself. Read from the two
+// facts a run's view carries of it, and a Reject's answer too.
+export function ending({ execution, status }) {
+  if (execution === "TERMINATED") return "Force terminated";
+  if (execution && !["COMPLETED", "CANCELED"].includes(execution)) {
+    return "Ended: " + execution.toLowerCase().replace(/_/g, " ");
   }
-  if (view.status === "REJECTED") return CLEANUP[view.cleanup] || "Rejected, cleaned up";
-  return { MERGED: "Merged", DISCARDED: "Discarded", STOPPED: "Stopped", DONE: "Done", REFUSED: "Refused",
-    ABORTED: "Aborted" }[view.status] || (view.status ? view.status.toLowerCase() : "Closed");
+  return { MERGED: "Merged", DISCARDED: "Discarded", STOPPED: "Stopped", REJECTED: "Rejected", DONE: "Done",
+    REFUSED: "Refused", ABORTED: "Aborted" }[status] || (status ? status.toLowerCase() : "Closed");
+}
+
+// That ending as a closed run shows it: a rejected run says where its cleanup stands beside it.
+export function outcome(view) {
+  const how = ending(view);
+  return how === "Rejected" ? CLEANUP[view.cleanup] || "Rejected, cleaned up" : how;
 }
 
 // A run's state in a few words, and the voice it is said in: who is working, you, or trouble.

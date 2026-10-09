@@ -636,7 +636,10 @@ still lands on a checkout.
   host's worker has not taken within a minute fails never having run, and the workbench
   names the worker to start. *Reject* is the workbench's one press for both: the Stop
   that says the run was rejected, a bounded wait for the run to close, then that same
-  removal — confirmed once, and nothing removed under a run still open. `REJECTED` is
+  removal — confirmed once, and nothing removed under a run still open. Its answer keeps
+  two things apart: how the run ended, in Temporal's word and the run's own — so a run
+  that a force terminate during the wait, a Stop sent before it or a merge already running
+  ended first is never called rejected — and what came of its work. `REJECTED` is
   what the operator did; whether the run's work is gone is a second fact, read from that
   ending and from Temporal's record of the removal, and said beside it wherever the run is
   shown: removing, cleaned up, or cleanup required. Where the run has not closed in time,

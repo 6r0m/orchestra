@@ -1642,6 +1642,8 @@ class Runs(Scenario):
         status, body = request("POST", "/api/runs/%s/reject" % run_id, {"confirm": True})
         self.assertEqual((status, body.get("rejected"), body.get("pending"), body.get("removed"), body.get("kept")),
                          (200, run_id, False, True, False), body)
+        self.assertEqual((body.get("execution"), body.get("status")), ("CANCELED", "REJECTED"),
+                         "and how the run ended, as Temporal and the run itself say it")
         view = request("GET", "/api/runs/%s" % run_id)[1]["view"]
         self.assertEqual((view["state"], view["status"], view["execution"]), ("closed", "REJECTED", "CANCELED"))
         self.assertEqual((view["kept"], view["cleanup"]), (False, None), "rejected, and cleaned up")
@@ -1751,6 +1753,49 @@ class Runs(Scenario):
         self.wait_for(run_id, lambda body: body["view"]["state"] == "closed")
         view = request("GET", "/api/runs/%s" % run_id)[1]["view"]
         self.assertEqual((view["status"], view["cleanup"]), ("REJECTED", "required"))
+
+    def test_a_force_terminate_during_a_rejects_wait_is_the_ending_the_reject_reports(self):
+        """A Reject waits for its run to close, and a force terminate pressed meanwhile closes it first. The
+        removal still runs — the run is closed, and keeps work — and the answer says how the run really ended,
+        never that it was rejected."""
+        a1, _ = configured_review_first("PASS", "Direction: A.")
+        git = FakeWorktrees()
+        self.host, self.agent = E.host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)], git=git)
+        run_id = self.start("a run force terminated while its reject waits")
+        self.addCleanup(self.close, run_id)
+        self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "approval")
+        # The Stop's cleanup on the run's host is held, as a busy host holds it: the run is stopping meanwhile.
+        cleaning, let_go, closing = threading.Event(), threading.Event(), terminal.close_run
+        self.addCleanup(setattr, terminal, "close_run", closing)
+        self.addCleanup(let_go.set)
+
+        def held(*args, **kwargs):
+            cleaning.set()
+            let_go.wait(60)
+            return closing(*args, **kwargs)
+        terminal.close_run = held
+        answered = []
+        pressed = threading.Thread(daemon=True, target=lambda: answered.append(
+            request("POST", "/api/runs/%s/reject" % run_id, {"confirm": True})))
+        pressed.start()
+        self.assertTrue(cleaning.wait(30), "the Reject's Stop was heard, and its cleanup began")
+        self.assertEqual(request("GET", "/api/runs/%s" % run_id)[1]["view"]["state"], "stopping")
+        self.assertEqual(request("POST", "/api/runs/%s/terminate" % run_id, {"confirm": True}),
+                         (200, {"terminated": run_id}))
+        let_go.set()
+        pressed.join(60)
+        self.assertEqual(len(answered), 1, "the Reject answered once its run had closed")
+        status, body = answered[0]
+        self.assertEqual((status, body.get("pending"), body.get("removed"), body.get("kept")),
+                         (200, False, True, False), "its work is removed all the same: %s" % body)
+        self.assertEqual((body.get("execution"), body.get("status")), ("TERMINATED", "STOPPING"),
+                         "the ending is Temporal's termination, and the run's own word stayed where that cut it: "
+                         "nothing here says rejected")
+        self.assertEqual([call[0] for call in git.calls], ["create", "discard"])
+        view = request("GET", "/api/runs/%s" % run_id)[1]["view"]
+        self.assertEqual((view["execution"], view["status"], view["kept"], view["cleanup"]),
+                         ("TERMINATED", "STOPPING", False, None), "as the run's own page says it")
+        self.assertEqual(self.row(run_id)["status"], "STOPPING", "and its row, which is not listed as rejected")
 
     def test_a_second_removal_while_one_runs_is_refused(self):
         a1, _ = configured_review_first("PASS", "Direction: A.")

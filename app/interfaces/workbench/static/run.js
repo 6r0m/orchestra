@@ -4,7 +4,7 @@
 // redraws their nodes.
 
 import { api } from "./api.js";
-import { $, PARTS, at, blockedBy, clock, code, confirmAction, copyButton, decisionTitle, doing, el, headline,
+import { $, PARTS, at, blockedBy, clock, code, confirmAction, copyButton, decisionTitle, doing, el, ending, headline,
   lasted, outcome, report, score, unchanged, wrote } from "./ui.js";
 import { stackButton, stackReading } from "./stack.js";
 import { interrupt, showTerminals, updateTerminals } from "./terminals.js";
@@ -265,14 +265,18 @@ async function lifecycle(kind, button) {
     return;
   }
   if (runId === selected) {
-    // A Reject says what came of its second half too: removed, still to be removed, or nothing to remove —
-    // and there in the removal's own words alone, since a merge already running lands and ends the run merged.
-    // A run that had not closed when the wait ended is still stopping, and is not called rejected.
+    // A Reject says two things, kept apart. How the run ended, as the run's own page says it — rejected,
+    // unless something ended it first: a force terminate pressed while the Reject waited, a Stop sent before
+    // it, a merge already running. And what came of its work: removed, still to be removed, or nothing to
+    // remove. A run that had not closed when the wait ended is still stopping, and is given no ending.
     if (kind !== "reject") report($("run-control-result"), control.said);
-    else if (answer.removed) report($("run-control-result"), "rejected: its worktree and branch are removed");
     else if (answer.pending) report($("run-control-result"), "stopping, cleanup pending: " + answer.said, true);
-    else if (answer.kept) report($("run-control-result"), "rejected, cleanup required: " + answer.said, true);
-    else report($("run-control-result"), "ended, nothing to remove: " + answer.said);
+    else {
+      const how = ending(answer).toLowerCase();
+      if (answer.removed) report($("run-control-result"), how + ": its worktree and branch are removed");
+      else if (answer.kept) report($("run-control-result"), how + ", cleanup required: " + answer.said, true);
+      else report($("run-control-result"), how + ", nothing to remove: " + answer.said);
+    }
   }
   wrote();
 }
