@@ -35,10 +35,12 @@ fails `test_worktrees`' `Remote` and `Guard` — cleared from the environment, b
 
 ## No test runs a real agent
 
-Nothing in this folder starts a vendor's agent or calls a model, so no run of it spends quota or needs a
-login. `claude` and `codex` are played by a stand-in program (`fake_cli.py`) where a terminal is driven,
-and by scripted turns (`fakes.FakeAgent`) everywhere else. What is real is everything around the agent:
-the processes, the worktrees, the PTY and Temporal's own test server.
+These tests are of Orchestra, not of agents. Nothing in this folder starts a vendor's agent or calls a
+model, so no run of it — the whole suite on both hosts included — spends quota or needs a login. `claude`
+and `codex` are played by a stand-in program (`fake_cli.py`) where a terminal is driven, and by scripted
+turns (`fakes.FakeAgent`) everywhere else: what an agent "answers" is data the test wrote, so the same run
+gives the same result every time. What is real is everything around the agent: the processes, the
+worktrees, the PTY and Temporal's own test server.
 
 | what | a real agent or model | started |
 |---|---|---|

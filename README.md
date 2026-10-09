@@ -143,8 +143,9 @@ worker that dies between spawn and assignment cannot leave an agent behind.
 
 ## What is proven
 
-The suite is the argument. It runs on both hosts and covers the things that are easy to claim and
-hard to do: crash and restart, process-tree containment, exact turn completion for each vendor,
+The suite is the argument. Its agents are scripted stand-ins, so no run of it calls a model or spends
+quota ([what is real in it, and what is not](tests/README.md#no-test-runs-a-real-agent)). It runs on both
+hosts and covers the things that are easy to claim and hard to do: crash and restart, process-tree containment, exact turn completion for each vendor,
 session loss and rehydration, merge and discard lifecycles, replay-safe workflow evolution, large
 diffs through Temporal's payload limit, and the operator's page.
 

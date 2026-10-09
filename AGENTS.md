@@ -26,8 +26,10 @@ Before pushing: `make public-check`. `make hooks`, once in a clone, has git itse
 every push from that clone, on the commits the push carries — yours, and a run landing on the
 remote. It also runs on every push here, and it is the only
 automated check — the suite is not run by CI, because it drives real processes, real worktrees
-and a PTY, so it must run on a real host. Run `make test` yourself on the host you changed, and
-on both when the change touches launching, terminals or worktrees.
+and a PTY, so it must run on a real host. Its agents are scripted stand-ins: it calls no model and
+spends no quota ([tests/README.md](tests/README.md#no-test-runs-a-real-agent)). Run `make test`
+yourself on the host you changed, and on both when the change touches launching, terminals or
+worktrees.
 
 ## What owns what
 
