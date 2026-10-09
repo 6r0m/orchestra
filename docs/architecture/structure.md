@@ -271,7 +271,10 @@ still lands on a checkout.
   on: it covers shell commands on Linux and WSL2 only, so a role would be held differently on each host; in
   a linked worktree it leaves the repository's shared git directory writable; and it would need allowances
   for each repository's tools. What holds each kind is the kind's own to say (`BOUNDARY`), and Settings says
-  it beside the role whose agent is chosen there. The
+  it beside the role whose agent is chosen there. A host's own Claude settings hold a role's turn as they
+  hold any session there: their hooks run beside the ones a run gives the turn — measured, a recursive
+  delete outside the worktree refused by such a hook in a turn started as a writing role's is — so a net
+  under an accident is the host's to keep, and Orchestra carries none. The
   prompt follows `--`, so no option that takes several values can swallow it. On Windows a Codex role-run uses Codex's unelevated sandbox: the elevated one
   starts its helper through an administrator prompt, which a worker outside the interactive
   desktop can never show; the ConPTY asks its terminal for win32-input-mode, in which Codex

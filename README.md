@@ -122,7 +122,9 @@ worker that dies between spawn and assignment cannot leave an agent behind.
   runs under Codex's sandbox, which the operating system enforces: it cannot write outside its
   worktree. A Claude Code role is held by Claude Code's own rules alone, and a command a writing one
   runs can write wherever your account can. Settings says which of the two holds the agent you choose.
-  Run it on repositories and hosts you trust
+  A guard you keep in that host's own Claude settings — a hook that refuses a recursive delete outside
+  the working folder, say — runs in a role's turns as in any session there: a net under an accident,
+  not a boundary. Run it on repositories and hosts you trust
   ([the accepted limits](docs/architecture/structure.md#risks-and-technical-debt)).
 - **Only what a stage judged can proceed.** A plan changed after the architect passed it goes back
   for assessment before a build starts; a change made while the architect verifies fails that step;

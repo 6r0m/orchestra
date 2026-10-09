@@ -179,7 +179,9 @@ Codex is held by its own sandbox, which the operating system enforces: a read-on
 a writing one cannot write outside its worktree — which also keeps a tool whose cache or environment lies
 elsewhere, such as this repository's test runner, from running in its turn. Claude Code is held by its own
 rules alone: its file edits stay in the worktree, and what a command it runs may reach is what that host's
-Claude settings allow.
+Claude settings allow. Those settings' own permission rules and hooks hold a role's turn as they hold any
+session of yours there, so a guard you keep in them — one that refuses a recursive delete outside the
+working folder, say — stands under a run's engineer too.
 
 Apply writes only changed values to `.orchestra/settings.local.json`, so a fresh Workbench read keeps
 them and unrelated hand-written local members survive. Revert removes one override to reveal its shared
