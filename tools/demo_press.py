@@ -1,6 +1,6 @@
 """Press one of the Workbench's own buttons in a headless browser, as the operator would.
 
-    python tools/demo_press.py <workbench url> <run id | stack | start> <button label | task | terminal:role | turn:stage | turn-then:stage:label | file:path | round:stage:path | history | hold:role:label | absent:label,...> <what the page should say> [note]
+    python tools/demo_press.py <workbench url> <run id | stack | start> <button label | task | terminal:role | turn:stage | turn-then:stage:label | file:path | round:stage:path | history | hold:role:label | type-after:role:label:line | layout:WIDTHxHEIGHT | absent:label,...> <what the page should say> [note]
 
 The Windows side of `make demo` (WSL cannot reach Windows' loopback, and Windows reaches the
 Workbench's): headless Edge, driven over the DevTools protocol, opens the page, opens the run by its
@@ -24,9 +24,16 @@ whether the page's words begin as expected; for a terminal, whether it shows the
 terminal for the role — selects its first line and leaves it open past the page's old fifteen-second
 retry, then presses the button with that label and waits for the role's next turn to reach the terminal:
 its exit code also says whether the terminal was never drawn again — one connection until the turn, the
-selection kept, the record not written twice. Given `absent:` and labels, it presses nothing either: its
-exit code says whether the run's view, once shown, offers none of those buttons. Nothing is shown on
-screen.
+selection kept, the record not written twice. Given `type-after:<role>:<label>:<line>`, it presses the button
+and then types the line, with Enter, into whatever the press left the keyboard in, clicking nothing: its
+exit code also says whether the keyboard was in that role's terminal and no other terminal was opened, and
+the note is what that terminal's screen must then show. Given `layout:<width>x<height>`, it presses nothing:
+it opens the run in a window of that size and reads how the page is laid out — the run's pinned controls
+seen whole at the top of the page and with the page scrolled to its history, nothing that takes the keyboard
+left under them, each list of runs scrolling inside itself only past five runs — and, for each `list:run`
+the expected words name, that the run is in that list; `none` names none. Given `absent:` and labels, it presses nothing
+either: its exit code says whether the run's view, once shown, offers none of those buttons. Nothing is
+shown on screen.
 """
 import json
 import os
@@ -164,6 +171,41 @@ REGION = ("(b => { let node = b.parentElement; while (node && !node.querySelecto
 SAID = ("(id => [...document.getElementById(id).querySelectorAll('[role=status], [role=alert]')]"
         ".map((n) => n.textContent.trim()).find((t) => t && t !== 'sending…' && t !== 'starting…') || '')(%s)")
 
+# After a press that leaves the keyboard in a role's terminal: whether it is there, and whether the other
+# role's terminal was left closed.
+KEYBOARD_IN = "(role => document.getElementById('term-' + role).contains(document.activeElement))(%s)"
+OTHERS_CLOSED = ("(role => [...document.querySelectorAll('details.terminal')]"
+                 ".every((box) => box.dataset.role === role || !box.open))(%s)")
+
+# The run's page as it is laid out now: each control of its pinned strip — whether it is whole inside the
+# window and nothing lies over it — and how far the page is scrolled.
+CONTROLS = ("(() => [...document.querySelectorAll('#run-strip button, #run-strip a.button')]"
+            ".filter((b) => b.offsetParent !== null).map((b) => { const r = b.getBoundingClientRect();"
+            " const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);"
+            " return { label: b.textContent.trim(), scrolled: Math.round(scrollY),"
+            " seen: r.width > 0 && r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth"
+            " && (hit === b || b.contains(hit)) }; }))()")
+# The page scrolled to its end, then the keyboard given to a control it had scrolled past: how far below the
+# pinned strip that control then is — never under it.
+FOCUS_BELOW = ("(() => { scrollTo(0, document.documentElement.scrollHeight);"
+               " const first = document.querySelector('#run .run-head button, #run .run-head a[href], #agents summary');"
+               " if (!first) return null; first.focus();"
+               " return Math.round(first.getBoundingClientRect().top"
+               " - document.getElementById('run-strip').getBoundingClientRect().bottom); })()")
+# Each list of runs: how many it holds, whether it scrolls inside itself, and which runs it holds.
+LISTS = ("(() => Object.fromEntries(['runs-waiting', 'runs-running', 'runs-finished', 'runs-rejected'].map((id) => {"
+         " const list = document.getElementById(id); const rows = [...list.querySelectorAll('a.row')];"
+         " return [id, { rows: rows.length, scrolls: list.scrollHeight - list.clientHeight > 1,"
+         " runs: rows.map((row) => row.dataset.run) }]; })))()")
+# The rail that holds them, where it is pinned beside the run: how far it scrolls as a whole, and how many rows'
+# height the tallest list past five still shows. Null where the window is too narrow for a rail beside the run.
+RAIL = ("(() => { const rail = document.querySelector('.rail');"
+        " if (getComputedStyle(rail).position !== 'sticky') return null;"
+        " const tall = [...rail.querySelectorAll('.runs')].filter((list) => list.querySelectorAll('a.row').length > 5)"
+        ".map((list) => list.clientHeight / list.querySelector('a.row').offsetHeight);"
+        " return { scrolls: rail.scrollHeight - rail.clientHeight, shown: Math.max(0, ...tall),"
+        " least: Math.min(...tall) }; })()")
+
 # The page's own confirmation, when it asks one: its question, and its yes.
 ASKED = ("(d => d.open ? [document.getElementById('confirm-title').textContent,"
          " document.getElementById('confirm-body').textContent].filter(Boolean).join(' ') : '')"
@@ -171,13 +213,69 @@ ASKED = ("(d => d.open ? [document.getElementById('confirm-title').textContent,"
 YES = "document.getElementById('confirm-yes').click(); true"
 
 
+def laid_out(page, run_id, size, said):
+    """The run's page at the window size it was opened at: its pinned controls seen whole at the top of the
+    run's page and with the page scrolled to its history; nothing that takes the keyboard left under them;
+    each list of runs scrolling inside itself once it holds more than five, and never before; and each run
+    `said` names, as `list:run`, in that list — `none` names none. Prints what it saw; 0 when all of it holds."""
+    page.value(OPEN % json.dumps(run_id))
+    wait(lambda: page.value(OPENED), 60, "the run")
+    time.sleep(6)                                   # two of the page's reads of the run and of the list
+    wrong = []
+    # The top of the run's own page: below the runs' lists, where the window is too narrow for them beside it.
+    page.value("document.getElementById('run-strip').scrollIntoView(); true")
+    time.sleep(0.5)
+    top = page.value(CONTROLS)
+    page.value("document.getElementById('history').scrollIntoView(); true")
+    time.sleep(0.5)
+    scrolled = page.value(CONTROLS)
+    for where, controls in (("at the top", top), ("scrolled to the history", scrolled)):
+        wrong += ["%s is not seen whole %s" % (control["label"], where) for control in controls if not control["seen"]]
+    below = page.value(FOCUS_BELOW)
+    if below is not None and below < 0:
+        wrong.append("what took the keyboard is %d px under the pinned controls" % -below)
+    lists = page.value(LISTS)
+    for name, found in lists.items():
+        if found["rows"] > 5 and not found["scrolls"]:
+            wrong.append("%s holds %d runs and does not scroll" % (name, found["rows"]))
+        if found["rows"] <= 5 and found["scrolls"]:
+            wrong.append("%s holds %d runs and scrolls" % (name, found["rows"]))
+    if not any(found["rows"] > 5 for found in lists.values()):
+        wrong.append("no list holds more than five runs, so no scrolling was proven")
+    rail = page.value(RAIL)
+    if rail and any(found["rows"] > 5 for found in lists.values()):
+        if rail["least"] < 0.99:
+            wrong.append("a list of more than five runs shows less than one of them")
+        if rail["scrolls"] > 1 and rail["shown"] > 1.05:      # a heading's few pixels are not a row to give up
+            wrong.append("the runs' lists scroll as a whole by %d px while one past five still shows %.1f rows"
+                         % (rail["scrolls"], rail["shown"]))
+    for placed in filter(None, said.split(",")) if said != "none" else ():
+        name, run = placed.split(":", 1)
+        if run not in lists.get(name, {}).get("runs", ()):
+            wrong.append("run %s is not listed under %s" % (run, name))
+    print("laid the page out at %s: its controls %s, seen whole at the top and with the page scrolled %d px; what "
+          "took the keyboard is %s px below them; the lists hold %s runs and %s scroll; %s"
+          % (size, ", ".join(control["label"] for control in top) or "none, the run being closed",
+             max([control["scrolled"] for control in scrolled] or [0]), below,
+             ", ".join("%s %d" % (name[len("runs-"):], found["rows"]) for name, found in lists.items()),
+             ", ".join(name[len("runs-"):] for name, found in lists.items() if found["scrolls"]) or "none",
+             "beside the run they scroll as a whole by %d px, a list past five showing %.1f rows"
+             % (rail["scrolls"], rail["shown"]) if rail else "they lie above the run, not beside it"))
+    for text in wrong:
+        print("wrong: %s" % text)
+    return 1 if wrong else 0
+
+
 def main(url, run_id, label, said, note=None):
     profile = tempfile.mkdtemp(prefix="orchestra-demo-edge-")
+    # A layout is read at the window size it names; every press at the browser's own.
+    size = label.split(":", 1)[1] if label.startswith("layout:") else None
     edge = subprocess.Popen([EDGE, "--headless=new", "--disable-gpu", "--no-first-run", "--remote-debugging-port=0",
-                             "--user-data-dir=" + profile, "about:blank"],
+                             "--user-data-dir=" + profile]
+                            + (["--window-size=" + size.replace("x", ",")] if size else []) + ["about:blank"],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     asked = []
-    held = then = None
+    held = then = typed = None
     try:
         # Edge writes the port it chose into its profile once it listens.
         port = wait(lambda: open(os.path.join(profile, "DevToolsActivePort")).readline().strip(), 30,
@@ -189,6 +287,8 @@ def main(url, run_id, label, said, note=None):
             page.call("Page.navigate", url=url)
             wait(lambda: page.value("document.readyState === 'complete' && "
                                     "document.querySelector('#runs-finished li') !== null"), 30, "the Workbench page")
+            if size:
+                return laid_out(page, run_id, size, said)
             if label.startswith("terminal:"):
                 role = label.split(":", 1)[1]
                 page.value(OPEN % json.dumps(run_id))
@@ -245,6 +345,10 @@ def main(url, run_id, label, said, note=None):
                 wait(lambda: page.value(OPEN_TURN % json.dumps(stage)), 60, "the %s turn in the history" % stage)
                 then = {"stage": stage,
                         "before": wait(lambda: page.value(TURN_SAID % json.dumps(stage)), 60, "its record")}
+            if label.startswith("type-after:"):
+                # A press that leaves the keyboard in a role's terminal, and a line typed there without a click.
+                role, label, line = label.split(":", 3)[1:]
+                typed = {"role": role, "line": line}
             if label.startswith("hold:"):
                 role, label = label.split(":", 2)[1:]
                 page.value(OPEN % json.dumps(run_id))
@@ -273,7 +377,7 @@ def main(url, run_id, label, said, note=None):
                     pressed = button("#run", label)
             wait(lambda: page.value(pressed + " !== undefined"), 60, "the %r button" % label)
             # Typed once its stop is drawn: drawing a new stop clears the note.
-            if note:
+            if note and not typed:
                 page.value("document.getElementById('stop-note').value = %s; true" % json.dumps(note))
             region = "banners" if run_id == "stack" else page.value(REGION % pressed)
             page.value(pressed + ".click(); true")
@@ -289,6 +393,19 @@ def main(url, run_id, label, said, note=None):
                 time.sleep(0.2)
             # A stack action waits until what it started is up: a worker polling, Temporal answering.
             shown = wait(lambda: page.value(SAID % json.dumps(region)), 300, "the page's word on it")
+            if typed:
+                # Where the press left the keyboard, read before a key is sent; then the line, as keys: text
+                # into whatever has the keyboard, and Enter. The terminal's screen says whether its agent got it.
+                role = json.dumps(typed["role"])
+                typed["keyboard"] = page.value(KEYBOARD_IN % role)
+                typed["alone"] = page.value(OTHERS_CLOSED % role)
+                page.call("Input.insertText", text=typed["line"])
+                for kind in ("rawKeyDown", "keyUp"):
+                    page.call("Input.dispatchKeyEvent", type=kind, key="Enter", code="Enter",
+                              windowsVirtualKeyCode=13, nativeVirtualKeyCode=13)
+                screen = wait(lambda: (lambda text: text if note in text else "")(page.value(SCREEN % role)), 90,
+                              "the %s terminal to show %r" % (typed["role"], note))
+                typed["screen"] = [text for text in screen.splitlines() if note in text][-1].strip()
             if then:
                 then["after"] = wait(lambda: (lambda text: text if text != then["before"] else "")(
                     page.value(TURN_SAID % json.dumps(then["stage"]))), 300,
@@ -310,6 +427,11 @@ def main(url, run_id, label, said, note=None):
     print("pressed %r in the Workbench: the page said %r" % (label, shown))
     for text in asked:
         print("it asked: %s" % text)
+    if typed:
+        print("the keyboard was %s the %s terminal, %s; %r typed there, and its screen shows %r"
+              % ("in" if typed["keyboard"] else "NOT in", typed["role"],
+                 "the only one opened" if typed["alone"] else "NOT the only one opened", typed["line"], typed["screen"]))
+        return 0 if shown.startswith(said) and typed["keyboard"] and typed["alone"] else 1
     if then:
         print("its %s turn, opened before: %r, then %r" % (then["stage"], then["before"], then["after"]))
         return 0 if shown.startswith(said) and "Shown above" not in then["after"] else 1

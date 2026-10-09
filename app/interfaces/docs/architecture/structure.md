@@ -31,7 +31,7 @@ print, serve and exit. The page holds no state of its own.
 
 This package's relationships are drawn once, in [the main view](diagrams/main.md).
 
-Through `application.client`: every start, answer, Stop, force terminate and removal, so the
+Through `application.client`: every start, answer, Stop, Reject, force terminate and removal, so the
 page and the command line can do nothing the workflow's own rules and validators, or Temporal's own
 lifecycle, do not allow. Through `application.stack`: the stack's reading and every start, stop
 and restart of it, so neither keeps a second copy of how the stack runs.

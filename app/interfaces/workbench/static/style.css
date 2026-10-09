@@ -18,11 +18,16 @@
   --ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
   --mono: "Cascadia Mono", Consolas, ui-monospace, monospace;
   --top: 52px;
+  /* The room a run's pinned controls take under the top bar, and the height every row of the runs list has. */
+  --strip: 72px;
+  --row: 118px;
 }
 * { box-sizing: border-box; }
 /* What the page hides stays hidden, whatever display a rule gives the element. */
 [hidden] { display: none !important; }
-html { scroll-padding-top: calc(var(--top) + 12px); }
+/* What is scrolled to, or takes the keyboard, stays clear of what is pinned above it: the top bar, and
+   under it a run's own controls. */
+html { scroll-padding-top: calc(var(--top) + var(--strip) + 12px); }
 body { margin: 0; background: var(--ground); color: var(--ink); font: 14px/1.5 var(--ui);
   -webkit-tap-highlight-color: transparent; }
 h1, h2, h3 { text-wrap: balance; line-height: 1.25; margin: 0; }
@@ -130,15 +135,28 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--you); width: 1
 /* The runs list narrows with the window, so a narrow or portrait one leaves the run its room. */
 .layout { display: grid; grid-template-columns: clamp(240px, 22vw, 330px) minmax(0, 1fr); min-height: calc(100vh - var(--top)); }
 .rail { position: sticky; top: var(--top); align-self: start; height: calc(100vh - var(--top)); overflow: auto;
+  display: flex; flex-direction: column; gap: 18px;
   padding: 16px 12px 24px; border-right: 1px solid var(--rule); background: var(--surface); }
-.group + .group { margin-top: 18px; }
+/* Each list is a box of its own: as tall as its runs up to five rows, and scrolling inside itself beyond that.
+   A list of five or fewer is always whole. Where the window has no room for all four, only the lists past five
+   give up height — never the one that waits for the operator, and never their last row — and the rail itself
+   scrolls for whatever still does not fit. */
+.group { display: flex; flex-direction: column; flex: 0 0 auto; }
+/* A minimum of its own — its heading and one row — because a flex item's automatic one is its whole content. */
+.group:not(:first-child):has(.runs > li:nth-child(6)) { flex-shrink: 1; min-height: calc(var(--row) + 28px); }
 .group h2 { display: flex; align-items: baseline; gap: 8px; padding: 0 8px 8px; font-size: 13px; color: var(--quiet); }
 .group h2 .count { color: var(--ink); font-variant-numeric: tabular-nums; }
-.runs { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.runs { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; align-content: start; min-height: 0;
+  max-height: calc(5 * var(--row) + 4 * 2px); overflow-y: auto; overscroll-behavior: contain; }
+.runs:has(.row) { min-height: var(--row); }
 .runs .none { padding: 4px 8px; color: var(--quiet); font-size: 13px; }
-.row { display: grid; gap: 2px; padding: 8px 10px 8px 12px; border-radius: 6px; text-decoration: none;
-  border-left: 3px solid var(--rule); content-visibility: auto; contain-intrinsic-size: auto 110px; }
+/* Every row is one height, whatever its task's length, so five rows are five at any width. */
+.row { display: grid; gap: 2px; align-content: start; block-size: var(--row); padding: 8px 10px 8px 12px;
+  border-radius: 6px; text-decoration: none; border-left: 3px solid var(--rule); content-visibility: auto;
+  contain-intrinsic-size: auto var(--row); }
 .row:hover { background: var(--raised); }
+/* Drawn inside the row: the list scrolls, and would cut off a ring drawn around it. */
+.row:focus-visible { outline-offset: -2px; }
 .row[aria-current="page"] { background: var(--raised); outline: 1px solid var(--control); outline-offset: -1px; }
 .row[data-tone="you"] { border-left-color: var(--you); }
 .row[data-tone="bad"] { border-left-color: var(--bad); }
@@ -151,7 +169,9 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--you); width: 1
 .row[data-tone="architect"] .row-what { color: var(--architect); }
 .row[data-tone="quiet"] .row-what { color: var(--quiet); font-weight: 500; }
 .row-task { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-  overflow-wrap: anywhere; }
+  overflow-wrap: anywhere; min-height: 3em; }
+/* A row that says what blocks it gives that line one of its task's two. */
+.row:has(.row-blocked) .row-task { -webkit-line-clamp: 1; min-height: 1.5em; }
 .row-meta { display: flex; justify-content: space-between; gap: 8px; color: var(--quiet); font-size: 12px; min-width: 0; }
 .row-meta > :first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .row-meta .row-repo { color: var(--ink); font-weight: 600; }
@@ -160,10 +180,10 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--you); width: 1
 /* How long, whole on one line: the repository's name gives way to it. */
 .row-meta > :last-child { flex-shrink: 0; white-space: nowrap; }
 .row-blocked { color: var(--bad); font-size: 12px; }
-#runs-older { margin: 8px 0 0 4px; }
+#runs-older { align-self: start; margin: -10px 0 0 4px; }
 
 /* The main area and its views. */
-main { min-width: 0; padding: 24px 32px 48px; }
+main { --pad-top: 24px; --pad-x: 32px; min-width: 0; padding: var(--pad-top) var(--pad-x) 48px; }
 main:focus { outline: none; }
 main:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 /* One column that may shrink below its widest content: a long patch line or a terminal scrolls in its own box. */
@@ -173,8 +193,18 @@ main:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .empty h1 { font-size: 18px; }
 .empty p { color: var(--quiet); }
 
+/* A run's own controls and what it kept: one strip across the top of its page, pinned under the top bar while
+   the page scrolls, as the rail is. It names its run by the run's id, which reads as the task's first words. */
+.strip { position: sticky; top: var(--top); z-index: 15; display: flex; flex-wrap: wrap; gap: 8px 16px;
+  align-items: center; margin: calc(-1 * var(--pad-top)) calc(-1 * var(--pad-x)) 0; padding: 10px var(--pad-x);
+  background: var(--ground); border-bottom: 1px solid var(--rule); }
+.strip-run { margin-right: auto; min-width: 0; color: var(--quiet); font-size: 12.5px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; min-width: 0; }
+
 /* A run: its task, its facts, its flow, and what it is doing now. */
 .run-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.run-head > .hint:empty { display: none; }
 .facts { display: flex; flex-wrap: wrap; gap: 8px 28px; margin: 0; font-size: 13px; }
 .facts > div { display: grid; gap: 1px; min-width: 0; max-width: 100%; }
 .facts dt { color: var(--quiet); font-size: 12px; }
@@ -227,11 +257,6 @@ main:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .code { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; padding: 10px 12px; font-size: 12.5px;
   background: var(--ground); border: 1px solid var(--rule); border-radius: 6px; }
 .decision .field textarea { background: var(--ground); }
-
-/* A run's own controls, after its decision. */
-.controls { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
-.kept { display: grid; gap: 10px; padding: 14px 16px; border: 1px solid var(--rule); border-radius: 8px;
-  background: var(--surface); }
 
 /* The change: what git reads in the run's worktree, file by file, each opening into its diff. */
 .change { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
@@ -492,11 +517,16 @@ summary:hover { color: var(--ink); }
 @media (max-width: 1000px) {
   .layout { grid-template-columns: minmax(0, 1fr); }
   .rail { position: static; height: auto; max-height: none; border-right: 0; border-bottom: 1px solid var(--rule); }
-  main { padding: 20px 16px 40px; }
+  main { --pad-top: 20px; --pad-x: 16px; padding-bottom: 40px; }
   .top { gap: 10px; padding: 0 12px; }
 }
 @media (max-width: 640px) {
-  .top { height: auto; min-height: var(--top); flex-wrap: wrap; padding: 8px 12px; }
+  /* The top bar wraps here and is no fixed height to pin anything under: it scrolls away, and a run's controls
+     pin at the top of the window, where they wrap too. */
+  :root { --strip: 112px; }
+  html { scroll-padding-top: calc(var(--strip) + 12px); }
+  .top { position: static; height: auto; min-height: var(--top); flex-wrap: wrap; padding: 8px 12px; }
+  .strip { top: 0; }
   .brand span { display: none; }
   .form.inline { grid-template-columns: minmax(0, 1fr); }
   .part { grid-template-columns: 1fr; }

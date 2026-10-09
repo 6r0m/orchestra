@@ -60,6 +60,26 @@ export function updateTerminals({ open, shown, working, since }) {
   }
 }
 
+// The Esc the operator's own key would send `role`'s agent, sent for them: its terminal is opened, as a click
+// on it opens it, the one byte goes over the socket every key goes over, and the terminal is given the
+// keyboard, so what is typed next reaches the agent with no click. True once sent; false when no agent is
+// under that terminal to hear it within a moment.
+export async function interrupt(role) {
+  if (!run || !ROLES.includes(role)) return false;
+  $("terminal-" + role).open = true;
+  make(role);
+  const entry = terminals[role];
+  const live = () => entry.live && entry.socket && entry.socket.readyState === WebSocket.OPEN;
+  for (let waited = 0; entry && !live() && waited < 5000; waited += 100) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  if (!entry || terminals[role] !== entry || !live()) return false;
+  entry.socket.send("\x1b");
+  $("terminal-" + role).scrollIntoView({ block: "nearest" });
+  entry.term.focus();
+  return true;
+}
+
 function make(role) {
   if (!run || terminals[role]) return;
   const mount = $("term-" + role);

@@ -52,10 +52,14 @@ the Workbench comes back with WSL. Nothing is exposed beyond loopback.
 
 ## The page
 
-The runs are listed down its side under Operator action, Working and Closed. Each row names its
+The runs are listed down its side under Operator action, Working, Closed and Rejected. Each row names its
 repository, task and worktree branch, with what waits or is working and for how long. A run ready to
 merge stays under Operator action until you answer its final gate; Closed also includes stopped and
-discarded runs. Older closed runs are a page away, so nothing Temporal
+discarded runs, and Rejected holds only the runs you ended with *Reject* — each saying whether its
+worktree and branch are gone, or that its cleanup is still required. Each list shows up to five runs and
+scrolls inside itself beyond that; on a window too short for all four, the lists past five give up height
+and the shorter ones stay whole. Older closed
+runs are a page away, so nothing Temporal
 still retains is out of reach, and the tab's title counts the runs that need you. Each run is a link:
 the page's address names the run open, so a reload keeps it and a new tab opens it.
 
@@ -123,7 +127,8 @@ alone, and says so. The patch sits below in a small box; *Copy patch* copies all
 from the same snapshot, and *Read it again* reads a new one.
 
 Both roles' terminals follow, the one at work open and an idle one closed until you open it. Each is the
-vendor's own CLI: press Esc to interrupt a working agent, type to steer it. What you read in one is
+vendor's own CLI: press Esc to interrupt a working agent — or *Pause*, at the top, which presses it for you —
+and type to steer it. What you read in one is
 never drawn again under you: after its worker restarts it keeps its record until its role's next turn,
 which it then adds to. A terminal holds the whole session, including whatever you typed during a turn.
 
@@ -149,19 +154,27 @@ retried in a fresh session, its first one lost, shows each attempt; a failed att
 you pressed Continue stays in the local logs but is not shown as the new turn's. A local record that has
 been removed is reported as unavailable.
 
-*Stop run* comes after the decision. While a run waits for you nothing runs on its host, so it is the
-one control offered there, quiet, saying it ends the run without merging and keeps its worktree and
-branch. While a run works, *Force terminate* follows it — a run whose status cannot be read is shown
-working — and while a run is stopping only *Force terminate* is offered. *Stop run* ends a run from
-whatever it is doing — an agent at work, a stop
-waiting, a failed stage, the final gate, a host whose worker is down — and keeps its worktree and branch
-as they are. A merge or discard already running is let finish first, and decides how the run ends.
-*Force terminate* is for a run a Stop cannot finish: it closes the run at once with no cleanup, but
-cannot stop what the run's host is already doing — a worktree's creation, a merge or a discard already
-running goes on and may still change the repository — and its confirmation says so.
+A run's own controls are a strip at the top of its page, named by the run's id, and stay there while the
+page scrolls. While a role works, *Pause* is first: it presses Esc in that role's terminal for you, opens
+the terminal and leaves the keyboard in it, so you type and press Enter with no click. It is an interrupt,
+not a freeze — what you type steers the turn, the run moves on once the agent has answered it, and the
+turn's time limit keeps running — and the run itself is told nothing, so its row still says the role works.
+*Stop run* and *Reject* follow, quiet while the run waits for you, where nothing runs on its host. *Stop
+run* ends a run from whatever it is doing — an agent at work, a stop waiting, a failed stage, the final
+gate, a host whose worker is down — and keeps its worktree and branch as they are; a stopped run does not
+start again. *Reject* ends it the same way and then deletes its worktree and branch, asked once: the run
+ends `REJECTED`, its history stays, and its page says how far the cleanup got. Where its host's worker is
+down or git refuses, the run is rejected all the same and says its cleanup is required, with *Remove
+worktree and branch* beside it. A merge or discard already running is let finish first, and decides how the
+run ends. While a run works, *Force terminate* is offered too — a run whose status cannot be read is shown
+working — and while a run is stopping it is the only one. It is for a run a Stop cannot finish: it closes
+the run at once with no cleanup, but cannot stop what the run's host is already doing — a worktree's
+creation, a merge or a discard already running goes on and may still change the repository — and its
+confirmation says so.
 
 A run that closed keeping its worktree and branch — stopped, force-terminated, ended `DONE` by a flow
-with no build, or closed any other way short of a merge or a discard — says so; look at its change, then *Remove worktree and branch*,
+with no build, or closed any other way short of a merge or a discard — says so at the top of its page; look at
+its change, then *Remove worktree and branch*, in the same strip,
 confirmed, deletes them through its host's own git as a discard would. It is refused while a merge
 or discard of that run still runs on its host, and when git itself refuses, the page says why.
 *Worktrees*, at the top, lists any repository's worktrees, which of them are still unmerged and which

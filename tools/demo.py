@@ -18,9 +18,13 @@ termination cannot stop what a host is already doing. Then the worker goes down 
 works: its stage's settings go with it, the run says it is blocked by it, the run's own button starts
 it again, and the failed stage is continued. A restart of the worker while a run waits leaves the run
 waiting, and its engineer's terminal, open on its record, is never drawn again until the engineer's next
-turn reaches it; that run is discarded. What the run stopped at its approval kept is removed. The demo's
+turn reaches it; that run is discarded. What the run stopped at its approval kept is removed. One is paused
+from the top of its page while its engineer works — the engineer interrupted, its terminal given the
+keyboard, a line typed there reaching it — then read at three window sizes, its controls pinned while the
+page scrolls and each list of runs scrolling inside itself, and rejected at work: ended, its worktree and
+branch removed, its history kept, and listed apart from the runs that were only stopped. The demo's
 worker is stopped from its Workbench, and everything it made is removed, its runs, the reads of their
-changes and the removal from Temporal too: the Workbench lists every run Temporal retains.
+changes and the removals from Temporal too: the Workbench lists every run Temporal retains.
 
 It is isolated by its own policy, never by a mode of the production code: a workflow queue and target
 queue of its own, polled only by its own worker, which carries the fakes, so no real run can reach a
@@ -55,6 +59,7 @@ sys.path.append(TESTS)
 from app.agents import adapters, terminal, trust  # noqa: E402
 from app.application import client as runs  # noqa: E402
 from app.application import stack  # noqa: E402
+from app.foundation import envpath  # noqa: E402
 from app.foundation import paths  # noqa: E402
 from app.foundation import policy as P  # noqa: E402
 from app.observability import telemetry  # noqa: E402
@@ -67,7 +72,8 @@ TASKS = {"merged": "Add a greeting to the repository, with the test that proves 
          "waiting": "Stop me at my approval: add a greeting to the repository",
          "stuck": "Hold my merge, then terminate me: add a greeting to the repository",
          "down": "Lose my worker at work: add a greeting to the repository",
-         "discarded": "Restart my worker, then discard me: add a greeting to the repository"}
+         "discarded": "Restart my worker, then discard me: add a greeting to the repository",
+         "rejected": "Pause me, then reject me at work: add a greeting to the repository"}
 
 # The demo's agents, speaking the turn contract the runner expects through `fake_cli`, as the
 # acceptance's do — and taking a few seconds a turn so that a person can watch them work.
@@ -87,6 +93,23 @@ FAKE = textwrap.dedent("""\
         for line in lines:
             fake_cli.draw(line)
             time.sleep(1.5)
+
+    # A turn the demo pauses: at work until an Esc reaches it, as a vendor's CLI is, then going on with the
+    # line typed after it — a prompt of its own, whose completion ends the turn.
+    typed = None
+    if os.path.exists(os.path.join(state, "hold-pause")):
+        fake_cli.raw_input_mode()
+        fake_cli.draw("working, until I am paused")
+        while fake_cli.read_key() != "\\x1b":
+            pass
+        fake_cli.draw("Interrupted")
+        typed = ""
+        while True:
+            key = fake_cli.read_key()
+            if key in ("\\r", "\\n"):
+                break
+            typed += key
+        fake_cli.draw("heard: " + typed)
 
     # A turn the demo holds at work, so that a Stop reaches an agent mid-turn.
     while os.path.exists(os.path.join(state, "hold-turn")):
@@ -130,7 +153,7 @@ FAKE = textwrap.dedent("""\
             say("reading the architect's finding...", "naming the test in the plan...")
             open(open(os.path.join(state, "todo")).read(), "a").write("Test: greeting.txt says hello.\\n")
         message = "done"
-    complete(message)
+    complete(message, typed=typed)
     time.sleep(0.2)
 """).replace("{{TESTS}}", TESTS)
 
@@ -460,8 +483,9 @@ class Demo:
                    "the plan again, and its approval")
         with open(os.path.join(paths.RUNTIME_ROOT, waiting, "logs", "plan-e2-1.prompt"), encoding="utf-8") as fh:
             check(note in fh.read(), "the note reached the engineer's next plan, word for word")
-        check(self.press(waiting, "absent:Force terminate", "absent"),
-              "while it waits for you, the page offers Stop run alone: nothing runs on its host to force")
+        check(self.press(waiting, "absent:Force terminate,Pause", "absent"),
+              "while it waits for you, the page offers no Force terminate and no Pause: nothing runs on its host "
+              "to force or to interrupt")
         check(self.press(waiting, "Stop run", "stopping"), "the page sent the Stop")
         waited = self.until(waiting, closed, 120, "the Stop")
         check(waited["status"] == "STOPPED", "the run ended stopped")
@@ -564,6 +588,51 @@ class Demo:
         check((removal.get("execution"), removal.get("task_queue")) == ("COMPLETED", P.workflow_queue(self.policy)),
               "through a workflow of its own, remove-%s, on the demo's own workflow queue" % waiting)
 
+        step("an engineer paused from the top of its run's page, and typed to")
+        self.hold("hold-pause")
+        rejected = self.start("rejected")
+        self.until(rejected, lambda view: view["state"] == "running" and view["stage"] == "plan", 120,
+                   "the engineer at work")
+        check(self.press(rejected, "terminal:engineer", "working, until I am paused"),
+              "the engineer is at work, and reads its keys as a vendor's CLI does")
+        check(self.press(rejected, "type-after:engineer:Pause:continue", "paused the engineer", "heard: continue"),
+              "Pause pressed: the engineer's terminal opened, and no other, with the keyboard in it; the engineer "
+              "was interrupted; and `continue`, typed with no click, reached it")
+        self.hold("hold-pause", False)
+        self.until(rejected, lambda view: view["state"] == "waiting", 300,
+                   "the turn ending on what was typed, and the plan's approval")
+        with open(os.path.join(paths.RUNTIME_ROOT, rejected, "logs", "plan-e1-1.err"), encoding="utf-8") as fh:
+            check("Interrupted" in fh.read(), "its turn's record shows the interrupt it took")
+
+        step("the run's controls pinned at the top of its page, at three window sizes")
+        check(self.press(rejected, "Approve", "answered: approve"), "approved")
+        self.hold("hold-turn")
+        self.until(rejected, lambda view: view["state"] == "running" and view["stage"] == "build", 300,
+                   "the engineer building")
+        for size, window in (("1600x1000", "a wide window"), ("600x900", "a narrow one, the runs above the run"),
+                             ("1280x520", "a short one")):
+            check(self.press(rejected, "layout:" + size, "none"),
+                  "at %s, %s: Pause, Stop run and Reject seen whole at the top and with the page scrolled to its "
+                  "history, nothing that takes the keyboard under them, and each list of runs scrolling inside "
+                  "itself only past five" % (size, window))
+
+        step("a run rejected while its engineer works: ended, and its work removed, in one press")
+        check(self.press(rejected, "Reject", "rejected: its worktree and branch are removed"),
+              "Reject pressed, confirmed: the page said the run was rejected and its work removed")
+        check(self.asked("Reject this run?", "deletes its worktree and its branch", "Its history stays"),
+              "and its question said what it ends, what it deletes and what stays")
+        view = self.until(rejected, closed, 120, "the Reject")
+        self.hold("hold-turn", False)
+        check((view["status"], view["execution"], view["cleanup"]) == ("REJECTED", "CANCELED", None),
+              "the run ended rejected — the Stop's own reason, as the live Temporal recorded it, read by the run — "
+              "and cleaned up: %s, %s, %s" % (view["status"], view["execution"], view["cleanup"]))
+        check(not self.kept(rejected, view["worktree"]), "its worktree and branch are gone, by its host's git")
+        check(wait(lambda: self.agents() == 0, 30, "its agent ending"), "its agent ended with it")
+        check(self.press(rejected, "history", "you approved the plan"),
+              "its history is still there to read, its worktree gone")
+        check(self.press(rejected, "layout:1600x1000", "runs-rejected:%s,runs-finished:%s" % (rejected, working)),
+              "it is listed under Rejected, and the run that was only stopped under Closed")
+
         step("the demo's worker stopped from its Workbench")
         _, pid = self.worker()
         check(self.press("stack", "Stop WSL worker", "done: stop WSL worker"), "Stop pressed, confirmed")
@@ -631,6 +700,27 @@ class Demo:
         return left
 
 
+def forget_environment():
+    """In a worktree the other host's git made, take back the environment this demo built for it here: that
+    host removes the worktree with the environment it built itself, and nothing here would ever remove this
+    one. Only where the checkout is such a worktree for certain — its `.git` a pointer this host's git cannot
+    follow — so a checkout of this host's own, the one the live stack runs from, is never touched; and through
+    the guarded removal, which takes nothing that is not exactly that environment. The demo's last act, once
+    nothing of it is left running: its worker and its Workbench ran from that environment, and so does this
+    process, which loads nothing more from it."""
+    if not os.path.isfile(os.path.join(PKG, ".git")):
+        return
+    if subprocess.run(["git", "-C", PKG, "rev-parse", "--git-dir"], capture_output=True).returncode == 0:
+        return
+    try:
+        removed = envpath.remove_environment(PKG)
+    except (OSError, envpath.UnsafeRemoval) as error:
+        print("  LEFT BEHIND: this worktree's environment on this host (%s)" % error, flush=True)
+        return
+    if removed:
+        print("  removed: the environment built here for this worktree of the other host's", flush=True)
+
+
 def interrupted(*_):
     # The first Ctrl-C ends the demo; a second — pressed again, or passed on by `uv run`, whose child
     # gets a process group's SIGINT twice (measured) — must not cut its cleanup short.
@@ -645,11 +735,13 @@ def main():
         demo.run()
     finally:
         left = demo.cleanup()
+        if not left:
+            forget_environment()
     if left:
         raise SystemExit("demo failed: it left behind %s" % "; ".join(left))
     print("\nDEMO PASSED: runs %s — watched in the Workbench, answered, stopped, force-terminated, blocked by a "
-          "worker brought back, discarded and their kept work removed, all from its buttons, and removed"
-          % ", ".join(demo.runs))
+          "worker brought back, discarded, paused, rejected and their kept work removed, all from its buttons, "
+          "and removed" % ", ".join(demo.runs))
     return 0
 
 

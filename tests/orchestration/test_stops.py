@@ -761,6 +761,24 @@ class Stop(Lifecycle):
         self.assertTrue(ended.wait(30), "its agent ended, and nothing of it runs on")
         self.assertEqual(self.git_run(), ["create"])
 
+    def test_a_stop_that_says_the_operator_rejected_the_run_ends_it_rejected(self):
+        """The Stop is the same one — the same cleanup, no git — and only the run's own word for how it ended
+        differs: `REJECTED` when its cancellation carries the workflow's reason for that, `STOPPED` when it
+        carries none, or any other."""
+        a1, _ = codex_review_first("PASS")
+        endings = {}
+        for said in (WF.REJECT, None, "any other reason"):
+            self.git = FakeWorktrees()
+            run = self.drive([("plan-e1-1", 0, "p\n"), ("assess-e1-1", 0, a1)], git=self.git)
+            self.assertEqual(run.stop["reason"], "approval")
+            E.run(run.handle.cancel() if said is None else run.handle.cancel(reason=said))
+            status = E.run(E.cli.follow(run.handle, answered=run.stop["id"]))
+            endings[said] = (status["state"]["status"], status["lines"][-1])
+            self.assertEqual(self.git_run(), ["create"], "a Stop runs no git, whatever it says")
+            self.assertEqual(E.run(run.handle.describe()).status.name, "CANCELED", "Temporal's own record of it")
+        self.assertEqual(endings, {WF.REJECT: ("REJECTED", "REJECTED"), None: ("STOPPED", "STOPPED"),
+                                   "any other reason": ("STOPPED", "STOPPED")})
+
     def test_a_run_whose_host_has_no_worker_ends_stopped_without_waiting_for_one(self):
         # No worker polls this host's queue: the run waits for it from its first step, and the Stop's
         # cleanup there waits its policy's bound, here a short one, never for a worker.

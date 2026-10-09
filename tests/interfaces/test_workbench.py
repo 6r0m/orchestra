@@ -631,6 +631,16 @@ class Kept(unittest.TestCase):
         self.assertIn("never made a worktree", runs.not_kept(self.listed(), {"state": {"status": "STOPPED"}}))
         self.assertIn("removed already", runs.not_kept(self.listed(), self.status(status="STOPPED"), "COMPLETED"))
 
+    def test_a_rejected_runs_cleanup_stands_where_its_ending_and_its_removal_say(self):
+        rejected = self.status(status="REJECTED")
+        self.assertEqual(runs.cleanup(self.listed(), rejected), "required", "rejected, and no removal took its work")
+        self.assertEqual(runs.cleanup(self.listed(), rejected, "RUNNING"), "removing")
+        self.assertEqual(runs.cleanup(self.listed(), rejected, "FAILED"), "required", "a removal git refused")
+        self.assertIsNone(runs.cleanup(self.listed(), rejected, "COMPLETED"), "cleaned up")
+        self.assertIsNone(runs.cleanup(self.listed(), {"state": {"status": "REJECTED"}}), "it never made a worktree")
+        self.assertIsNone(runs.cleanup(self.listed(), self.status(status="STOPPED")), "a stopped run is not rejected")
+        self.assertIsNone(runs.cleanup(self.listed(), None), "a status that cannot be read says nothing of it")
+
 
 class HistoryRead(unittest.TestCase):
     """What `client.history` reads from events as Temporal writes them, in every order a run takes: a turn's time is
@@ -1592,6 +1602,151 @@ class Runs(Scenario):
         self.assertEqual(status, 400, body)
         self.assertIn("removed already", body["error"])
         self.assertEqual(len(discards()), 2)
+
+    def close(self, run_id):
+        """Whatever a failing test left open ends here, so its stage never runs on a later test's fakes."""
+        handle = E.client().get_workflow_handle(run_id)
+        if E.run(handle.describe()).close_time is None:
+            E.run(handle.terminate("the test is over"))
+
+    def row(self, run_id):
+        """The run as the list shows it. The test server lists no executions, so Temporal's listing of this one
+        is its own description of it."""
+        listed, saved = E.run(runs.execution(E.client(), run_id)), runs.runs
+
+        async def only_this(client, limit=200, cursor=None):
+            return [listed], None
+        runs.runs = only_this
+        try:
+            status, body = request("GET", "/api/runs")
+        finally:
+            runs.runs = saved
+        self.assertEqual(status, 200, body)
+        return next(run for run in body["runs"] if run["run_id"] == run_id)
+
+    def test_reject_ends_a_run_removes_what_it_kept_and_keeps_its_history(self):
+        a1, _ = configured_review_first("PASS", "Direction: A.")
+        git = FakeWorktrees()
+        self.host, self.agent = E.host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)], git=git)
+        self.host.runner = recorded(self.agent)
+        run_id = self.start("a run to reject")
+        self.addCleanup(self.close, run_id)
+        self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "approval")
+        status, body = request("POST", "/api/runs/%s/reject" % run_id, {})
+        self.assertEqual(status, 400, body)
+        self.assertIn("confirm", body["error"])
+        self.assertEqual(E.run(E.client().get_workflow_handle(run_id).describe()).status.name, "RUNNING",
+                         "unconfirmed, nothing happened")
+        self.assertEqual([call[0] for call in git.calls], ["create"], "and no git ran")
+
+        status, body = request("POST", "/api/runs/%s/reject" % run_id, {"confirm": True})
+        self.assertEqual((status, body.get("rejected"), body.get("removed"), body.get("kept")),
+                         (200, run_id, True, False), body)
+        view = request("GET", "/api/runs/%s" % run_id)[1]["view"]
+        self.assertEqual((view["state"], view["status"], view["execution"]), ("closed", "REJECTED", "CANCELED"))
+        self.assertEqual((view["kept"], view["cleanup"]), (False, None), "rejected, and cleaned up")
+        self.assertEqual([call for call in git.calls if call[0] == "discard"], [("discard", run_id)],
+                         "removed once, by its host's git, as a discard removes it")
+        # Its history stays: the turns Temporal recorded, and each one's record on its host.
+        status, record = request("GET", "/api/runs/%s/history" % run_id)
+        self.assertEqual((status, [turn["stage"] for turn in record["turns"]]), (200, ["plan", "assess"]))
+        for turn in record["turns"]:
+            status, read = request("GET", turn_path(run_id, turn))
+            self.assertEqual((status, bool(read["attempts"])), (200, True), "its %s turn still reads" % turn["stage"])
+        row = self.row(run_id)
+        self.assertEqual((row["status"], row["cleanup"]), ("REJECTED", None), "and the list says the same")
+        status, body = request("POST", "/api/runs/%s/reject" % run_id, {"confirm": True})
+        self.assertEqual(status, 409, "a closed run is refused, as a Stop of one is: %s" % (body,))
+
+    def test_reject_while_a_role_works_ends_the_run_rejected_and_removes_its_work(self):
+        release = threading.Event()
+        self.addCleanup(release.set)
+        git = FakeWorktrees()
+        self.host, self.agent = E.host([], git=git)
+
+        def working(worktree, argv, rdir, name, prompt, timeout, env, *, kind):
+            release.wait(60)
+            return 1, ""
+        self.host.runner = working
+        run_id = self.start("a run rejected at work")
+        self.addCleanup(self.close, run_id)
+        self.wait_for(run_id, lambda body: body["view"]["stage"] == "plan")
+        began = time.monotonic()
+        status, body = request("POST", "/api/runs/%s/reject" % run_id, {"confirm": True})
+        self.assertEqual((status, body.get("removed"), body.get("kept")), (200, True, False), body)
+        self.assertLess(time.monotonic() - began, 45, "it waited for the run to close, never for its turn to end")
+        view = request("GET", "/api/runs/%s" % run_id)[1]["view"]
+        self.assertEqual((view["state"], view["status"], view["kept"], view["cleanup"]),
+                         ("closed", "REJECTED", False, None))
+        self.assertEqual([call[0] for call in git.calls], ["create", "discard"])
+
+    def test_a_reject_whose_removal_is_refused_says_why_and_the_run_says_cleanup_required_until_it_is_removed(self):
+        a1, _ = configured_review_first("PASS", "Direction: A.")
+
+        class Locked(FakeWorktrees):
+            refusals = ["fatal: '/fake/worktree' is locked, use 'git worktree unlock' first"]
+
+            def discard(self, repo, worktree, run_id):
+                super().discard(repo, worktree, run_id)
+                if self.refusals:
+                    raise RuntimeError(self.refusals.pop(0))
+        git = Locked()
+        self.host, self.agent = E.host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)], git=git)
+        run_id = self.start("a run rejected whose removal git refuses")
+        self.addCleanup(self.close, run_id)
+        self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "approval")
+
+        def discards():
+            return [call for call in git.calls if call[0] == "discard"]
+        status, body = request("POST", "/api/runs/%s/reject" % run_id, {"confirm": True})
+        self.assertEqual((status, body.get("removed"), body.get("kept")), (200, False, True), body)
+        self.assertIn("is locked", body["said"], "the removal's own words on why")
+        self.assertEqual(len(discards()), 1, "tried once, never again by itself")
+        view = request("GET", "/api/runs/%s" % run_id)[1]["view"]
+        self.assertEqual((view["status"], view["kept"], view["cleanup"]), ("REJECTED", True, "required"),
+                         "rejected is what the operator did; that its work is still there is said beside it")
+        self.assertEqual(self.row(run_id)["cleanup"], "required", "and in the list")
+        asked = runs.removal
+
+        async def unread(client, run_id):
+            raise RPCError("deadline exceeded", RPCStatusCode.DEADLINE_EXCEEDED, b"")
+        runs.removal = unread
+        try:
+            row = self.row(run_id)
+        finally:
+            runs.removal = asked
+        self.assertEqual((row["status"], row["cleanup"]), ("REJECTED", "unknown"),
+                         "a removal that cannot be read just now is said unknown, never taken for cleaned up")
+        self.assertEqual(self.row(run_id)["cleanup"], "required", "and read again, not kept from that read")
+        self.assertEqual(request("POST", "/api/runs/%s/remove" % run_id, {"confirm": True}),
+                         (200, {"removed": run_id}), "the removal that exists finishes it")
+        self.assertEqual((request("GET", "/api/runs/%s" % run_id)[1]["view"]["cleanup"], self.row(run_id)["cleanup"]),
+                         (None, None), "cleaned up — in the list too, which kept no row from before the removal")
+
+    def test_a_reject_whose_run_does_not_close_in_time_removes_nothing_and_says_so(self):
+        a1, _ = configured_review_first("PASS", "Direction: A.")
+        git = FakeWorktrees()
+        self.host, self.agent = E.host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)], git=git)
+        run_id = self.start("a run rejected whose worker does not hear it")
+        self.addCleanup(self.close, run_id)
+        self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "approval")
+        listed, bound = runs.execution, runs.REJECTED_WITHIN
+
+        async def still_open(client, run_id):
+            # As Temporal lists a run whose Stop no worker has read yet.
+            return dict(await listed(client, run_id), execution="RUNNING")
+        self.addCleanup(setattr, runs, "execution", listed)
+        self.addCleanup(setattr, runs, "REJECTED_WITHIN", bound)
+        runs.execution, runs.REJECTED_WITHIN = still_open, datetime.timedelta(seconds=1)
+        status, body = request("POST", "/api/runs/%s/reject" % run_id, {"confirm": True})
+        runs.execution, runs.REJECTED_WITHIN = listed, bound
+        self.assertEqual((status, body.get("removed"), body.get("kept")), (200, False, True), body)
+        self.assertIn("has not closed", body["said"])
+        self.assertEqual([call[0] for call in git.calls], ["create"], "nothing was removed under an open run")
+        # Its Stop was recorded all the same, saying what it was: the run ends rejected, its work still there.
+        self.wait_for(run_id, lambda body: body["view"]["state"] == "closed")
+        view = request("GET", "/api/runs/%s" % run_id)[1]["view"]
+        self.assertEqual((view["status"], view["cleanup"]), ("REJECTED", "required"))
 
     def test_a_second_removal_while_one_runs_is_refused(self):
         a1, _ = configured_review_first("PASS", "Direction: A.")

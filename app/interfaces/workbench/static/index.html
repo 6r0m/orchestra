@@ -46,10 +46,14 @@
       <ul class="runs" id="runs-running"></ul>
     </section>
     <section class="group" aria-labelledby="runs-finished-title">
-      <h2 id="runs-finished-title">Closed</h2>
+      <h2 id="runs-finished-title">Closed <span class="count" id="runs-finished-count"></span></h2>
       <ul class="runs" id="runs-finished"></ul>
-      <button type="button" class="quiet" id="runs-older" hidden>Load older runs</button>
     </section>
+    <section class="group" aria-labelledby="runs-rejected-title">
+      <h2 id="runs-rejected-title">Rejected <span class="count" id="runs-rejected-count"></span></h2>
+      <ul class="runs" id="runs-rejected"></ul>
+    </section>
+    <button type="button" class="quiet" id="runs-older" hidden>Load older runs</button>
   </nav>
   <main id="main" tabindex="-1">
     <section class="view empty" id="view-empty" hidden aria-labelledby="empty-title">
@@ -216,7 +220,27 @@
     </section>
 
     <article class="view run" id="run" hidden aria-labelledby="run-task">
+      <div class="strip" id="run-strip">
+        <code class="strip-run" id="run-strip-id" translate="no"></code>
+        <div class="controls" id="run-controls" role="group" aria-label="This run's controls"
+          aria-describedby="run-controls-hint" hidden>
+          <button type="button" id="run-pause" hidden>Pause</button>
+          <button type="button" id="run-stop">Stop run</button>
+          <button type="button" class="danger" id="run-reject">Reject</button>
+          <button type="button" class="danger quiet" id="run-terminate">Force terminate</button>
+          <p class="result" id="run-control-result" role="status"></p>
+        </div>
+        <div class="controls" id="run-kept" role="group" aria-label="What it kept" aria-describedby="run-kept-text"
+          hidden>
+          <a class="button" id="run-kept-show">Show in Worktrees</a>
+          <button type="button" class="danger" id="run-remove">Remove worktree and branch</button>
+          <p class="result" id="run-kept-result" role="status"></p>
+        </div>
+      </div>
+
       <header class="run-head">
+        <p class="hint" id="run-controls-hint"></p>
+        <p class="hint" id="run-kept-text"></p>
         <h1 id="run-task"></h1>
         <dl class="facts" id="run-facts"></dl>
         <ol class="score" id="run-score" aria-label="Its flow"></ol>
@@ -255,22 +279,6 @@
             <button type="button" class="copy" id="diff-copy">Copy patch</button></div>
           <pre class="patch-raw" id="diff-patch" tabindex="0" translate="no" aria-label="The change's patch"></pre>
         </div>
-      </section>
-
-      <div class="controls" id="run-controls" hidden>
-        <button type="button" id="run-stop">Stop run</button>
-        <button type="button" class="danger quiet" id="run-terminate">Force terminate</button>
-        <p class="hint" id="run-controls-hint"></p>
-        <p class="result" id="run-control-result" role="status"></p>
-      </div>
-
-      <section class="kept" id="run-kept" hidden aria-label="What it kept">
-        <p id="run-kept-text"></p>
-        <div class="actions">
-          <a class="button" id="run-kept-show">Show in Worktrees</a>
-          <button type="button" class="danger" id="run-remove">Remove worktree and branch</button>
-        </div>
-        <p class="result" id="run-kept-result" role="status"></p>
       </section>
 
       <section class="agents" id="agents" aria-labelledby="agents-title">

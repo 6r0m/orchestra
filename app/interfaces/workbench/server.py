@@ -5,7 +5,7 @@
 It serves `static/` beside it and a small JSON API over `app.application` on `http://127.0.0.1:<workbench_port>`:
 the stack's reading and its start, stop and restart; the runs and what each is doing now, a run's
 status and timeline, its recorded turn inputs and outputs, its change; starting a run, answering its
-stop, stopping or force-terminating
+stop, stopping, rejecting or force-terminating
 it, and removing what a closed run kept; and the settings, read and applied through
 `app.application.settings`, which reach only the runs started after them. The page opens each run's agent terminals directly on the
 worker of the run's host (`app.agents.terminal`). It holds no state of its own: stopping it changes
@@ -341,6 +341,13 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
                     call(lambda client: runs.remove_worktree(client, parts[1]),
                          timeout=runs.REMOVAL.total_seconds() + 60)
                     return self._send(HTTPStatus.OK, {"removed": parts[1]})
+                if len(parts) == 3 and parts[0] == "runs" and RUN_ID.match(parts[1]) and parts[2] == "reject":
+                    if body.get("confirm") is not True:
+                        return self._send(HTTPStatus.BAD_REQUEST, {"error": "reject ends the run and deletes its "
+                                                                            "worktree and branch, so it must be confirmed"})
+                    return self._send(HTTPStatus.OK, call(
+                        lambda client: runs.reject(client, parts[1]),
+                        timeout=(runs.REJECTED_WITHIN + runs.REMOVAL).total_seconds() + 60))
                 if parts == ["settings"]:
                     return self._apply(body)
                 if parts == ["stack"]:
@@ -391,11 +398,20 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
                     if run["run_id"] in finished:
                         return finished[run["run_id"]]   # a finished run's state never changes again
                     try:
-                        shown = runs.view(run, await runs.status(client, run["run_id"], STATUS_SECONDS), health)
+                        status = await runs.status(client, run["run_id"], STATUS_SECONDS)
                     except Exception:               # noqa: BLE001 - a run whose status fails still lists
                         return runs.view(run, None, health)
+                    shown = runs.view(run, status, health)
+                    # Where a rejected run's cleanup stands: the one thing of a closed run that a later
+                    # removal still changes, so its removal is asked after until nothing of it is left.
+                    shown["cleanup"] = None
+                    if shown["status"] == "REJECTED":
+                        try:
+                            shown["cleanup"] = runs.cleanup(run, status, await runs.removal(client, run["run_id"]))
+                        except Exception:           # noqa: BLE001 - not read now: said so, never guessed
+                            shown["cleanup"] = "unknown"
                     shown["agent_prompt"] = agent_prompt(shown)
-                    if run["execution"] != "RUNNING":
+                    if run["execution"] != "RUNNING" and shown["cleanup"] is None:
                         finished[run["run_id"]] = shown
                     return shown
                 return (list(await asyncio.gather(*(one(run) for run in listed))), older)
@@ -448,6 +464,7 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
                                        None if unreadable else status, health)
             status["view"]["agent_prompt"] = agent_prompt(status["view"])
             status["view"]["kept"] = not unreadable and runs.not_kept(execution, status, removal) is None
+            status["view"]["cleanup"] = None if unreadable else runs.cleanup(execution, status, removal)
             if status["view"]["kept"]:
                 # What its Worktrees view is opened on: the repository as the worktree view takes it again.
                 state = status["state"]

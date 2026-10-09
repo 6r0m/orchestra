@@ -13,7 +13,8 @@ state, its console lines and its timeline are read through the `status` query.
 
 A Stop is Temporal's cancellation of the run, heard wherever the run waits: it ends the run
 `STOPPED` after a bounded cleanup and runs no git, except that a git side effect already running
-lands first and decides how the run ends.
+lands first and decides how the run ends. One that says the operator rejected the run (`REJECT`) ends
+it `REJECTED` instead, and is otherwise the same Stop.
 """
 import asyncio
 from datetime import timedelta
@@ -58,6 +59,9 @@ HINTS = {
 }
 # The stops the trace records, as it always has; the others are the workflow's own.
 TRACED_STOPS = ("approval", "blocker", "exhausted")
+# What a Stop says, in Temporal's own record of the cancellation, when the operator rejected the run: the run
+# then ends `REJECTED` rather than `STOPPED`. The Stop is the same one, and commands nothing more.
+REJECT = "rejected by the operator"
 
 
 def _message(error):
@@ -581,8 +585,9 @@ class FeatureRun:
                                             retry_policy=ONCE)
         except ActivityError as error:
             self._line("the %s host's cleanup did not run: %s" % (s["target"], _message(error)))
-        s["status"] = "STOPPED"
-        self._line("STOPPED")
+        # The Stop's own reason, as Temporal recorded it with the cancellation, names how the run ended.
+        s["status"] = "REJECTED" if workflow.cancellation_reason() == REJECT else "STOPPED"
+        self._line(s["status"])
 
     @workflow.update
     def answer(self, answer):

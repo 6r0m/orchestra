@@ -176,12 +176,18 @@ export function decisionTitle(reason, phase) {
     failed: "A step failed", final: "Ready to merge" }[reason] || reason;
 }
 
+// Where a rejected run's cleanup stands, beside its ending: its worktree and branch going, or still there —
+// or, where its removal could not be read just now, nothing said of it.
+const CLEANUP = { removing: "Rejected, removing its worktree and branch", required: "Rejected, cleanup required",
+  unknown: "Rejected" };
+
 // How a closed run ended: the workflow's word, or Temporal's when it ended the run itself.
 export function outcome(view) {
   if (view.execution === "TERMINATED") return "Force terminated";
   if (view.execution && !["COMPLETED", "CANCELED"].includes(view.execution)) {
     return "Ended: " + view.execution.toLowerCase().replace(/_/g, " ");
   }
+  if (view.status === "REJECTED") return CLEANUP[view.cleanup] || "Rejected, cleaned up";
   return { MERGED: "Merged", DISCARDED: "Discarded", STOPPED: "Stopped", DONE: "Done", REFUSED: "Refused",
     ABORTED: "Aborted" }[view.status] || (view.status ? view.status.toLowerCase() : "Closed");
 }
@@ -196,7 +202,8 @@ export function headline(view) {
     if (view.role) return { text: view.role + " " + doing(view.stage), tone: view.role };
     return { text: HOLDING[view.stage] || view.stage || "Starting", tone: "quiet" };
   }
-  return { text: outcome(view), tone: "quiet" };
+  // A rejected run that still keeps its work is trouble the operator has to finish.
+  return { text: outcome(view), tone: view.cleanup === "required" ? "bad" : "quiet" };
 }
 
 // The hosts whose down workers hold a run up.

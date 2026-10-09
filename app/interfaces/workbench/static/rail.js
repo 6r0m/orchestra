@@ -1,5 +1,5 @@
-// The runs: every one Temporal holds, grouped by whether it waits for the operator, works or has closed, each a
-// link that opens it; older closed runs a page at a time.
+// The runs: every one Temporal holds, grouped by whether it waits for the operator, works, has closed or was
+// rejected, each a link that opens it; older closed runs a page at a time.
 
 import { api } from "./api.js";
 import { $, blockedBy, clock, el, headline, unchanged } from "./ui.js";
@@ -13,7 +13,14 @@ let selected = null;
 
 const GROUPS = { waiting: "runs-waiting", failed: "runs-waiting", running: "runs-running", stopping: "runs-running" };
 const NONE = { "runs-waiting": "No operator action waits.", "runs-running": "Nothing is working.",
-  "runs-finished": "No closed runs yet." };
+  "runs-finished": "No closed runs yet.", "runs-rejected": "No rejected runs." };
+
+// The list a run is shown in. A closed run is under Rejected only by its own ending, which only the operator's
+// Reject gives it; a stopped run, and one whose ending cannot be read, stays under Closed.
+function listOf(run) {
+  if (run.agent_prompt) return "runs-waiting";
+  return GROUPS[run.state] || (run.status === "REJECTED" ? "runs-rejected" : "runs-finished");
+}
 
 // The runs as last read, and whether they have been read at all.
 export const runsListed = () => listed;
@@ -53,8 +60,8 @@ export function select(runId) {
 }
 
 function render() {
-  const groups = { "runs-waiting": [], "runs-running": [], "runs-finished": [] };
-  for (const run of listed) groups[run.agent_prompt ? "runs-waiting" : GROUPS[run.state] || "runs-finished"].push(run);
+  const groups = { "runs-waiting": [], "runs-running": [], "runs-finished": [], "runs-rejected": [] };
+  for (const run of listed) groups[listOf(run)].push(run);
   for (const [id, runs] of Object.entries(groups)) {
     const count = $(id + "-count");
     if (count) count.textContent = runs.length ? String(runs.length) : "";

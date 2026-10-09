@@ -178,7 +178,10 @@ Do not re-derive a `states/` layer here.
   An environment is kept only on the host whose git reads the checkout: the
   WSL runner started in a worktree the other host's git made runs its tests in
   an environment of their own, gone when they end, since the host that removes
-  that worktree removes only the environment it built itself.
+  that worktree removes only the environment it built itself. `make demo`, run there,
+  builds that worktree's own for its worker and takes it back as its last act — only
+  where the checkout is such a worktree for certain, its `.git` a pointer this host's
+  git cannot follow.
   A run worktree's environment is removed with the worktree, on its target host,
   only when the derived path lies under that host's environment root, crosses
   no link or reparse point, and holds `pyvenv.cfg` — removed last, so a removal
@@ -492,9 +495,16 @@ still lands on a checkout.
   merges.
 
 - **D29** **The workbench is the operator's surface.** One page on `http://127.0.0.1:<workbench_port>`
-  lists every run Temporal holds, grouped by whether it waits for the operator, runs or has
-  closed — every open run, however old, and the closed ones newest first a page at a time, so a
-  run waiting for an answer is never off the list and everything Temporal still retains is reachable. A
+  lists every run Temporal holds, grouped by whether it waits for the operator, runs, has
+  closed or was rejected — every open run, however old, and the closed ones newest first a page at a time, so a
+  run waiting for an answer is never off the list and everything Temporal still retains is reachable. A run is
+  under Rejected only by its own `REJECTED` ending (D31). Each group is a list as tall as its runs up to five
+  rows, scrolling inside itself beyond that; a list of five or fewer is always whole, and where the window has no
+  room for all four only the lists past five give up height — never the one that waits for the operator. A run's own controls —
+  Pause, Stop run, Reject, Force terminate, and the removal of what a closed run kept — are a strip pinned at
+  the top of its page while the page scrolls, clear of whatever takes the keyboard. *Pause* is the page's own
+  key press: it sends the role at work the one Esc its terminal would, opens that terminal and leaves the
+  keyboard in it — the run is told nothing, and what the operator types then steers that turn (D17). A
   run that waits shows its stop first, with that stop's answers as buttons and what to judge them by;
   then both roles' terminals from their host's worker, the one at work open and an idle one opened when
   the operator opens it; its flow with the step it is at; its history as a transcript — each completed
@@ -522,10 +532,10 @@ still lands on a checkout.
   for them, since they act on every part — and a part that is down raises a banner, with its start
   where this side can start it. It
   also shows any repository's worktrees, which of them are merged and which run each is. It starts
-  runs on the flow chosen from `flows/`, read again each time its list is opened, stops or
+  runs on the flow chosen from `flows/`, read again each time its list is opened, stops, rejects or
   force-terminates them (D31), and removes what a closed run kept. It holds no
   state: every read is Temporal's, a worker's or the stack owner's, and every write is a start, an
-  answer Update, a Stop, a force terminate or a removal through `client.py`, which the command line
+  answer Update, a Stop, a Reject, a force terminate or a removal through `client.py`, which the command line
   uses too, or a stack action through the stack's owner — so the page can do nothing the workflow's
   own rules and validators, Temporal's own lifecycle or the stack's owner do not allow. A change is read in bounded
   parts, because Temporal refuses a payload past its own limit and a review that cannot be read is
@@ -596,6 +606,9 @@ still lands on a checkout.
   the worktree and branch stay as they are, and its cleanup — the run's terminals and
   trace, closed on its target host — waits a minute at most, which a policy may only
   shorten (`stop_cleanup_seconds`), so a host whose worker is gone never holds a Stop.
+  A Stop may say why: one that carries the operator's rejection as its reason — which
+  the run reads from Temporal's own record of the cancellation — ends the run
+  `REJECTED`, and is in every other way the same Stop, commanding nothing more.
   A working role's turn hears the Stop at its next heartbeat,
   and the terminals' close ends its agent sooner. A git side effect already running —
   the worktree's creation, a merge, a discard — is never cut off: the run shows
@@ -621,7 +634,14 @@ still lands on a checkout.
   has landed. A removal runs once, like every git side effect: when git refuses, the
   workbench says why, and only the operator's next removal tries again. One that its
   host's worker has not taken within a minute fails never having run, and the workbench
-  names the worker to start.
+  names the worker to start. *Reject* is the workbench's one press for both: the Stop
+  that says the run was rejected, a bounded wait for the run to close, then that same
+  removal — confirmed once, and nothing removed under a run still open. `REJECTED` is
+  what the operator did; whether the run's work is gone is a second fact, read from that
+  ending and from Temporal's record of the removal, and said beside it wherever the run is
+  shown: removing, cleaned up, or cleanup required. Where the run has not closed in time
+  or the removal is refused, Reject says so in the removal's own words, tries nothing
+  again, and the removal finishes it.
 - **D18b** **A rehydrated session is bootstrapped from zero**:
   any prompt built for a session being born carries task, persona, the
   **current stage ask**, and the latest findings/guidance — never a delta

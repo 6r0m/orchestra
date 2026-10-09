@@ -1,12 +1,14 @@
 """The one client of runs, shared by the workbench and the command line.
 
 Start a run, list runs, read a run's status and what it is doing now, answer the stop it waits
-at, stop it or force it to terminate, and read its change and its repository's worktrees — each
+at, stop it, reject it or force it to terminate, and read its change and its repository's worktrees — each
 through Temporal, so every write goes through the workflow's own start rules, Updates and
 validators, or Temporal's own lifecycle. Nothing here prints.
 """
+import asyncio
 import datetime
 import os
+import time
 
 from temporalio.api.enums.v1 import TaskQueueType
 from temporalio.api.taskqueue.v1 import TaskQueue
@@ -46,6 +48,9 @@ TAKEN = datetime.timedelta(minutes=1)
 # How long an action waits for a run's status once a worker polls to answer it: the preflight still counts
 # a worker dead for less than POLLING as polling.
 READ = datetime.timedelta(seconds=30)
+# How long a Reject waits for its run to close before it removes anything. A Stop's cleanup is bounded, so
+# a run waiting at a stop has closed by then even with its host's worker gone.
+REJECTED_WITHIN = datetime.timedelta(seconds=policy_mod.STOP_CLEANUP_SECONDS + 30)
 
 
 class Refusal(RuntimeError):
@@ -58,6 +63,11 @@ class NotWaiting(Refusal):
 
 class NotAccepted(Refusal):
     """The workflow's validator refused the answer."""
+
+
+class NothingKept(Refusal):
+    """The run keeps no work of its own to remove: it never made a worktree, its work landed or was
+    discarded, or a removal already took it."""
 
 
 async def connect(identity=None):
@@ -301,6 +311,32 @@ async def force_terminate(client, run_id, reason):
     await _while_open(client, run_id, lambda handle: handle.terminate(reason=reason))
 
 
+async def reject(client, run_id):
+    """Reject a run: a Stop that says so — the run then ends `REJECTED` — and, once the run has closed, the
+    removal of what it kept, as `remove_worktree` removes it. A closed run is refused, as a Stop of one is.
+
+    Returns what came of it: `removed`, whether its worktree and branch went now; `kept`, whether it still
+    keeps them; and `said`, the words for it — the removal's own refusal where it did not remove. The run
+    is waited for REJECTED_WITHIN at most, nothing is removed under a run still open, and nothing is tried
+    twice: what is still kept is the existing removal's to take."""
+    await _while_open(client, run_id, lambda handle: handle.cancel(reason=WF.REJECT))
+    deadline = time.monotonic() + REJECTED_WITHIN.total_seconds()
+    while ((await execution(client, run_id)) or {}).get("execution") == "RUNNING":
+        if time.monotonic() >= deadline:
+            return {"rejected": run_id, "removed": False, "kept": True,
+                    "said": "run %s has not closed yet: its Stop is recorded, and it ends once its worker hears "
+                            "it; its worktree and branch stay until then" % run_id}
+        await asyncio.sleep(1)
+    try:
+        await remove_worktree(client, run_id)
+    except NothingKept as nothing:
+        return {"rejected": run_id, "removed": False, "kept": False, "said": str(nothing)}
+    except Refusal as refused:
+        return {"rejected": run_id, "removed": False, "kept": True, "said": str(refused)}
+    return {"rejected": run_id, "removed": True, "kept": False,
+            "said": "run %s's worktree and branch are removed" % run_id}
+
+
 async def _while_open(client, run_id, end):
     """End the run with `end(handle)` if it is still open; a closed one is refused, whether or not
     Temporal would take the request — its test server takes a cancellation of a closed run."""
@@ -513,6 +549,18 @@ def not_kept(listed, status, removal=None):
     return None
 
 
+def cleanup(listed, status, removal=None):
+    """Where a rejected run's cleanup stands, from two facts that exist — the run's own ending and how the
+    removal of its work went: "removing" while that removal runs, "required" while it still keeps work no
+    removal is taking, None once nothing of it is left. None too for a run that was not rejected, and for
+    one whose status cannot be read."""
+    if ((status or {}).get("state") or {}).get("status") != "REJECTED":
+        return None
+    if removal == "RUNNING":
+        return "removing"
+    return "required" if not_kept(listed, status, removal) is None else None
+
+
 async def removal(client, run_id):
     """How the removal of what `run_id` kept went — its workflow's status — or None if none ran."""
     removed = await execution(client, "remove-%s" % run_id)
@@ -531,7 +579,7 @@ async def remove_worktree(client, run_id):
     current = await readable_status(client, run_id)
     reason = not_kept(listed, current, await removal(client, run_id))
     if reason:
-        raise Refusal(reason)
+        raise NothingKept(reason)
     state = current["state"]
     await preflight(client, queues(current["workflow_queue"], current["queue"]))
     try:

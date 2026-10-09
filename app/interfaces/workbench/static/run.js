@@ -1,12 +1,13 @@
-// One run, in the order it needs the operator: what it is and does now, the decision it waits for with its
-// evidence, its own controls, what it kept, its terminals, its history and its change. The terminals and
-// the change reader are their own owners; this module asks them, and never redraws their nodes.
+// One run, in the order it needs the operator: its own controls and what it kept, pinned at the top; what
+// it is and does now, the decision it waits for with its evidence, its terminals, its history and its
+// change. The terminals and the change reader are their own owners; this module asks them, and never
+// redraws their nodes.
 
 import { api } from "./api.js";
 import { $, PARTS, at, blockedBy, clock, code, confirmAction, copyButton, decisionTitle, doing, el, headline,
   lasted, outcome, report, score, unchanged, wrote } from "./ui.js";
 import { stackButton, stackReading } from "./stack.js";
-import { showTerminals, updateTerminals } from "./terminals.js";
+import { interrupt, showTerminals, updateTerminals } from "./terminals.js";
 import { placeChange, readOnceFor, showChangeFor } from "./change.js";
 import { chevron, fileList } from "./diff.js";
 import { removeKept } from "./worktrees.js";
@@ -29,11 +30,14 @@ const ASK = {
   discard: { title: "Discard this run's work?", confirm: "Discard", danger: true,
     body: "Discard deletes the worktree and its branch, with the change in them." },
 };
-// A run's lifecycle, after its decision: Stop ends it from whatever it is doing and keeps its work; force
-// terminate is for a run a Stop cannot finish, and says what it cannot stop.
+// A run's lifecycle: Stop ends it from whatever it is doing and keeps its work; Reject ends it and removes
+// that work; force terminate is for a run a Stop cannot finish, and says what it cannot stop.
 const LIFECYCLE = {
   stop: { title: "Stop this run?", body: "Its worktree and branch stay as they are.", confirm: "Stop run",
     danger: true, said: "stopping" },
+  reject: { title: "Reject this run?", confirm: "Reject", danger: true, sent: { confirm: true },
+    body: "Reject ends the run and deletes its worktree and its branch, with any work in them. Its history " +
+      "stays." },
   terminate: { title: "Force terminate this run?", confirm: "Force terminate", danger: true, said: "terminated",
     body: "Force terminate closes the run at once, with no cleanup, but cannot stop what its host is already " +
       "doing. An agent at work ends at its turn's next heartbeat; a worktree's creation, a merge or a discard " +
@@ -72,8 +76,9 @@ export function show(runId) {
   for (const id of ["run-facts", "run-score", "run-now", "run-blocked", "run-kept", "timeline", "lines"]) {
     delete $(id).dataset.drew;
   }
-  for (const id of ["run-task", "run-now", "lines"]) $(id).textContent = "";
-  for (const id of ["run-facts", "run-score", "timeline"]) $(id).replaceChildren();
+  for (const id of ["run-task", "run-now", "lines", "run-controls-hint"]) $(id).textContent = "";
+  $("run-strip-id").textContent = runId || "";
+  for (const id of ["run-facts", "run-score", "timeline", "run-kept-text"]) $(id).replaceChildren();
   for (const id of ["stop", "run-blocked", "run-kept", "run-controls"]) $(id).hidden = true;
   for (const id of ["run-control-result", "run-kept-result", "run-blocked-result"]) report($(id), "");
   showTerminals(null);
@@ -177,7 +182,7 @@ function renderScore(view) {
 function renderNow(view, status) {
   const line = $("run-now");
   if (unchanged(line, [status.unreadable, view.state, view.agent_prompt, view.stage, view.role, view.since, view.closed, view.status,
-    view.execution, status.state && status.state.refusal])) return;
+    view.execution, view.cleanup, status.state && status.state.refusal])) return;
   line.replaceChildren(...nowSaid(view, status));
 }
 
@@ -220,20 +225,29 @@ function renderBlocked(view) {
     stackButton("start", host, "Start the " + PARTS[host], $("run-blocked-result"))));
 }
 
-// The run's own controls, after its decision. While it waits for you nothing runs on its host, so a Stop ends it:
-// Stop run alone, quiet, its consequence beside it. While it works, Stop run then Force terminate — a run whose
-// status cannot be read shows as working, so a Stop its worker never reads can still be forced; while it is
-// stopping, Force terminate alone; once closed, neither.
+// The run's own controls, pinned at the top of its page. While a role works, Pause, which interrupts it for
+// the operator to type to; Stop run and Reject while the run is open and not already stopping — quiet while it
+// waits for you, so its decision stays the one raised thing; Force terminate while it works — a run whose
+// status cannot be read shows as working, so a Stop its worker never reads can still be forced — and alone
+// while it is stopping; once closed, none of them.
 function renderControls(view) {
   const stopping = view.state === "stopping";
   const atStop = view.state === "waiting" || view.state === "failed";
+  const role = view.state === "running" ? view.role : null;
   $("run-controls").hidden = view.state === "closed";
-  $("run-stop").hidden = stopping;
-  $("run-stop").classList.toggle("quiet", atStop);
+  $("run-pause").hidden = !role;
+  $("run-pause").dataset.role = role || "";
+  for (const id of ["run-stop", "run-reject"]) {
+    $(id).hidden = stopping;
+    $(id).classList.toggle("quiet", atStop);
+  }
   $("run-terminate").hidden = atStop;
-  $("run-controls-hint").textContent = stopping
-    ? "The Stop waits for what the run's host is already doing; Force terminate closes the run at once."
-    : atStop ? "Ends the run here without merging; its worktree and branch stay." : "";
+  $("run-controls-hint").textContent = view.state === "closed" ? ""
+    : stopping ? "The Stop waits for what the run's host is already doing; Force terminate closes the run at once."
+      : (role ? "Pause interrupts the " + role + " and puts the keyboard in its terminal: what you type steers " +
+        "this turn, and the run moves on once the " + role + " has answered it. The turn's time limit keeps " +
+        "running. " : "") +
+        "Stop run ends the run without merging and keeps its worktree and branch; Reject ends it and removes them.";
 }
 
 async function lifecycle(kind, button) {
@@ -243,24 +257,58 @@ async function lifecycle(kind, button) {
   const runId = selected;
   if (!(await confirmAction({ ...control, returnTo: button })) || runId !== selected) return;
   report($("run-control-result"), "sending…");
+  let answer;
   try {
-    await api("/api/runs/" + encodeURIComponent(runId) + "/" + kind, control.sent || {});
+    answer = await api("/api/runs/" + encodeURIComponent(runId) + "/" + kind, control.sent || {});
   } catch (error) {
     if (runId === selected) report($("run-control-result"), "not accepted: " + error.message, true);
     return;
   }
-  if (runId === selected) report($("run-control-result"), control.said);
+  if (runId === selected) {
+    // A Reject says what came of its second half too: removed, still to be removed, or nothing to remove —
+    // and there in the removal's own words alone, since a merge already running lands and ends the run merged.
+    if (kind !== "reject") report($("run-control-result"), control.said);
+    else if (answer.removed) report($("run-control-result"), "rejected: its worktree and branch are removed");
+    else if (answer.kept) report($("run-control-result"), "rejected, cleanup required: " + answer.said, true);
+    else report($("run-control-result"), "ended, nothing to remove: " + answer.said);
+  }
   wrote();
 }
 $("run-stop").onclick = () => lifecycle("stop", $("run-stop"));
+$("run-reject").onclick = () => lifecycle("reject", $("run-reject"));
 $("run-terminate").onclick = () => lifecycle("terminate", $("run-terminate"));
 
-// What a closed run kept — its worktree and branch, unmerged — until the operator removes them.
+// Pause: the Esc the operator's own keyboard would send the role at work, sent for them, its terminal opened
+// and given the keyboard. The run is told nothing; what is typed next is the turn's to answer.
+$("run-pause").onclick = async () => {
+  const runId = selected;
+  const role = $("run-pause").dataset.role;
+  if (!role) return;
+  report($("run-control-result"), "sending…");
+  const sent = await interrupt(role);
+  if (runId !== selected) return;
+  if (sent) report($("run-control-result"), "paused the " + role + ": type to it in its terminal, and it goes on");
+  else {
+    report($("run-control-result"), "not paused: no agent is under the " + role + "'s terminal now — open it " +
+      "below and press Esc once its turn shows there", true);
+  }
+};
+
+// What a closed run kept — its worktree and branch, unmerged — until the operator removes them: its removal
+// in the pinned strip, and what it is beside the run's title. A rejected run that still keeps them says its
+// cleanup did not finish.
 function renderKept(runId, view) {
   $("run-kept").hidden = !view.kept;
-  if (!view.kept || unchanged($("run-kept"), [runId, view.worktree, view.worktrees_of])) return;
-  $("run-kept-text").replaceChildren("It keeps its worktree ", code(view.worktree), " and its branch ", code(runId),
-    ". Read its change, then remove them once you are done with them.");
+  if (unchanged($("run-kept"), [runId, view.kept, view.worktree, view.worktrees_of, view.status])) return;
+  if (!view.kept) {
+    $("run-kept-text").replaceChildren();
+    return;
+  }
+  const rejected = view.status === "REJECTED";
+  $("run-kept-text").replaceChildren(
+    rejected ? "Its cleanup did not finish: it still keeps its worktree " : "It keeps its worktree ",
+    code(view.worktree), " and its branch ", code(runId),
+    rejected ? ". Remove them with the button above." : ". Read its change, then remove them once you are done with them.");
   // Its repository as the Worktrees view takes it: its repos.json name, or its path.
   $("run-kept-show").href = "#worktrees=" + encodeURIComponent(view.worktrees_of);
   $("run-remove").onclick = () => removeKept(runId, $("run-kept-result"), refreshRun, $("run-remove"),
