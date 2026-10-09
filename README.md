@@ -112,11 +112,18 @@ worker that dies between spawn and assignment cannot leave an agent behind.
 - **The page's own token.** The API and the terminal sockets accept only a token generated on first
   use, from the page's own origin, and the terminal sockets take it in the handshake's header rather
   than in a URL.
-- **Agents cannot reach a remote.** A role's git environment refuses every transport, so a push
-  fails even if an agent tries; the controller alone commits and merges, after your answer. It
+- **An agent's push reaches no remote.** A role's git environment refuses every transport, so a push
+  fails even if an agent tries — a guard against a push made by mistake, not a wall against a role that
+  set out to undo it (the next point); the controller alone commits and merges, after your answer. It
   pushes only where a repository's entry names the remote its base branch lives on: that one
   branch, on your Merge, by a push that forces nothing and rewrites nothing — and only to where that
   remote led when the run began.
+- **Orchestra sandboxes no agent.** What holds a role to its worktree is its vendor's own. A Codex role
+  runs under Codex's sandbox, which the operating system enforces: it cannot write outside its
+  worktree. A Claude Code role is held by Claude Code's own rules alone, and a command a writing one
+  runs can write wherever your account can. Settings says which of the two holds the agent you choose.
+  Run it on repositories and hosts you trust
+  ([the accepted limits](docs/architecture/structure.md#risks-and-technical-debt)).
 - **Only what a stage judged can proceed.** A plan changed after the architect passed it goes back
   for assessment before a build starts; a change made while the architect verifies fails that step;
   a base branch that moved while a run built is brought into it and judged before the final gate;

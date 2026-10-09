@@ -1,8 +1,9 @@
 # Workbench run evidence: the change by file, history as what each role received and produced
 
-**Status:** DONE 2026-10-08 — closed on the operator's word by an architect pass in place of the external
-re-review that was pending (D9): the manual check's corrections hold, and one defect it found on real runs —
-a landed run's turns could no longer be read — is fixed. Q1–Q3 are closed by D5–D7.
+**Status:** DONE 2026-10-09 — every criterion met: the manual check's corrections reviewed by an architect
+pass in place of the external re-review (D9), the defect that pass found on landed runs fixed, the full suites
+on both hosts, the stack and the Workbench restarted on that code, and a landed run's turns read through the
+running page. Q1–Q3 are closed by D5–D7.
 **Scope:** the Workbench run page's Change, History and run controls ([static/](../../app/interfaces/workbench/static/),
 [server.py](../../app/interfaces/workbench/server.py)); the change read on the run's host
 ([worktrees.py](../../app/workspace/worktrees.py) `review_diff`, the `ReviewDiff` workflow and activity); Temporal
@@ -444,9 +445,9 @@ action of its own ([GitHub Docs](https://docs.github.com/en/pull-requests/collab
    empty list drawn, a history read error with no retry, an unread history taken for "no review yet"), and
    fixture captures at 1600, 1280, 900 and 390 px (one fix: the History's part classes collided with the stack
    panel's).
-10. [x] The review of the manual check's changes — the architect pass of 2026-10-08 (D9), in the review
-    record — then the touched modules on both hosts and `make demo` whole on the code as it is then. No review
-    agents (operator, 2026-10-01: *"no need more activate tester and reviewer agents"*).
+10. [x] The review of the manual check's changes — the architect pass of 2026-10-08, in place of the external
+    re-review (D9) — then the full suites and the restart, on the code as it is then (review record, 2026-10-09).
+    No review agents (operator, 2026-10-01: *"no need more activate tester and reviewer agents"*).
 
 **Verification so far** (after the implementation review's fixes): WSL `run-tests.sh` on test_worktrees,
 test_workflow, test_terminal, test_activities, test_observability, test_architecture, test_replay — 245 tests OK —
@@ -607,5 +608,17 @@ checks; the stale-Produced fix also shown by a fixture control without it; `make
   on a run of 24 turns they were 0.01–0.04 s apart, every pair in the same minute.
 - **Evidence:** the touched modules — WSL: 54 classes, 296 tests, OK; Windows: 34 classes, 180 tests, OK;
   `make demo` whole on the final code, 86 checks.
-- **To take effect:** the Workbench and the stack restarted on this code, which is the operator's to do. Until
-  then a landed run's turns read as before, and the page asks for an icon the running server does not serve.
+
+### 2026-10-09 — external review of the closure: PATCH, the criterion put back and met
+
+- **Accepted:** D9 put the architect pass in place of the external review and of nothing else. Task 10's own
+  terms — the full suites and the restart — had been swapped for the touched modules and the demo, and the
+  record said DONE before the change was live. Task 10 reads as it did, and is met.
+- **The full suites,** on the committed code: WSL, 141 classes, 698 tests; Windows, 97 classes, 498 tests;
+  both green.
+- **The stack and the Workbench restarted** on that code, with no run working or waiting.
+- **Through the running page:** every turn's change of the two runs that landed on 2026-10-08 is read — 13 and
+  5 turns, each with its files; the first build of one opened in the History as its six files. The run of
+  2026-09-30, which recorded no base, reads its two builds, and for its plan says in words that its change
+  went with the worktree. Settings says what holds each role's agent; the page's icon is served, and no file
+  it loads fails.
