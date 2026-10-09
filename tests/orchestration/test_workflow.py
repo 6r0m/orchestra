@@ -540,12 +540,12 @@ class AnotherProcess(Scenario):
 
 
 # A run's policy as a run started before agent profiles carries it: a brain for each role, the access it
-# stored, a persona file's path and where the policy was loaded, and each skill as `/name`.
+# stored, a persona file's path and where the policy was loaded, and each skill as `/name`. Its model and
+# effort are that run's own, invented here: nothing the settings say now reaches a run already started.
 OLD_SHAPE = dict(json.loads(json.dumps(POLICY)), _policy_path="policy.json",
                  roles={"engineer": {"brain": "claude", "workspace_access": "write", "prompt": "roles/engineer.md"},
                         "architect": {"brain": "codex", "workspace_access": "read", "prompt": "roles/architect.md",
-                                      "model": POLICY["roles"]["architect"]["model"],
-                                      "reasoning_effort": POLICY["roles"]["architect"]["effort"]}},
+                                      "model": "model-of-that-run", "reasoning_effort": "effort-of-that-run"}},
                  stage_skills={"plan": "/investigate-change", "assess": "/architect",
                                "build": "/implement-approved-change", "verify": "/architect"})
 
@@ -627,6 +627,12 @@ class AnyProfileUnderAnyRole(Scenario):
         self.assertEqual(run.stop["reason"], "approval")
         self.assertEqual(sorted(looked), ["claude", "codex"], "its brains' programs, found through their kinds")
         self.assertEqual([call["kind"] for call in self.agent.calls], ["claude-code", "codex"])
+        planned, assessed = (call["argv"] for call in self.agent.calls)
+        self.assertEqual(assessed[assessed.index("--model") + 1], "model-of-that-run")
+        self.assertIn('model_reasoning_effort="effort-of-that-run"', assessed,
+                      "its model, and its `reasoning_effort` as its effort, as that run held them")
+        self.assertFalse({"--model", "--effort"} & set(planned),
+                         "and none for a role that held none, whatever the settings say now")
         self.assertTrue(self.agent.calls[0]["prompt"].startswith("/investigate-change\n"))
         self.assertTrue(self.agent.calls[1]["prompt"].startswith("$architect\n"),
                         "its `/name` skill is the skill `name`, invoked as the architect's kind does")

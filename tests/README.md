@@ -89,7 +89,9 @@ Three things are a test's own, and stay in it:
   stays the settings' to say, so a scenario that needs a kind of agent the settings do not define gets
   a profile added there, not a model written here.
 - **An example it invents to exercise a rule** — a model token no vendor has, a settings file written
-  into a temporary checkout. That is its input, not a copy, and it never names a real model.
+  into a temporary checkout, the policy a run started earlier carried. That is its input, not a copy: it
+  names no real model, and it does not follow today's settings either. What an earlier run held is that
+  run's own, and its test holds that it reaches the agent unchanged.
 - **A value something outside the settings depends on**, pinned with its reason beside it — the workflow
   queue: runs started on it would be polled by no worker after a rename.
 

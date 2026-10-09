@@ -1016,7 +1016,8 @@ class TraceShape(Scenario):
             state = {"run_id": "r1", "label": "the label", "task": "t", "trace_root": "a" * 16,
                      "phase": "plan", "episode": 2, "round": 0, "phase_rounds": 2,
                      "guidance": "use B"}
-            telemetry.begin(Client(), state, "plan", "engineer", POL["roles"]["engineer"])
+            telemetry.begin(Client(), state, "plan", "engineer",
+                            {"kind": "claude-code", "agent": "a-profile", "model": "a-model", "effort": "an-effort"})
         finally:
             otel.get_current_span = original
         self.assertEqual(span.attributes.get(attrs.TRACE_SESSION_ID), "the label")
@@ -1033,7 +1034,7 @@ class TraceShape(Scenario):
         self.assertFalse({"episode", "attempt"} & set(metadata),
                          "two more counters beside the round read as a contradiction")
         self.assertEqual({key: metadata[key] for key in ("kind", "agent", "model", "effort")},
-                         {key: POL["roles"]["engineer"][key] for key in ("kind", "agent", "model", "effort")},
+                         {"kind": "claude-code", "agent": "a-profile", "model": "a-model", "effort": "an-effort"},
                          "the step's agent, as data")
         span.updates.clear()
         otel.get_current_span = lambda: span
