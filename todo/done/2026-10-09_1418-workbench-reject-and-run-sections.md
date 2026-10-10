@@ -2,8 +2,9 @@
 
 **Status:** DONE 2026-10-10 — closed by the operator's decision (D9): every criterion met, the WSL suite
 whole, the Workbench's service and the WSL worker restarted on that code, and Reject and Pause checked
-there on real agents. Not seen by the external reviewer: the fix of its last PATCH, on which no PASS was
-relayed, and the fix the live check brought (invariant 13).
+there on real agents. The external reviewer then passed Pause and Reject as the operator uses them, and
+returned invariant 13 for one gap, followed up in
+[its own todo](../2026-10-10_1117-the-page-sends-an-agent-no-terminal-answer.md).
 **Scope:** how a run is ended from the page — one ending word in
 [workflow.py](../../app/orchestration/workflow.py), the shared client in
 [client.py](../../app/application/client.py), one route and the list's rows in

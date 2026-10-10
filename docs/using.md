@@ -128,7 +128,9 @@ from the same snapshot, and *Read it again* reads a new one.
 
 Both roles' terminals follow, the one at work open and an idle one closed until you open it. Each is the
 vendor's own CLI: press Esc to interrupt a working agent — or *Pause*, at the top, which presses it for you —
-and type to steer it. What you read in one is
+and type to steer it. Its agent gets what you type and press and nothing of the page's own; the one thing
+given up for that is F3 held with Shift, Alt or Ctrl, which a terminal spells exactly as one of its own
+answers and the page therefore does not send. What you read in one is
 never drawn again under you: after its worker restarts it keeps its record until its role's next turn,
 which it then adds to. A terminal holds the whole session, including whatever you typed during a turn.
 

@@ -100,9 +100,11 @@ FAKE = textwrap.dedent("""\
     typed = None
     if os.path.exists(os.path.join(state, "hold-pause")):
         fake_cli.raw_input_mode()
-        # What a vendor's CLI asks its terminal as it starts — its kind, its colours — and so leaves in its
-        # record, which every terminal the page connects draws again from its start.
-        sys.stdout.write("\\x1b[c\\x1b]10;?\\x07\\x1b]11;?\\x07")
+        # What a vendor's CLI asks its terminal as it starts — its kind, its colours, where its cursor is — and
+        # so leaves in its record, which every terminal the page connects draws again from its start. The
+        # cursor is asked after from the top row's second column: its report from there, `ESC [ 1 ; 2 R`, is
+        # spelled as Shift+F3 is.
+        sys.stdout.write("\\x1b[c\\x1b]10;?\\x07\\x1b]11;?\\x07\\x1b7\\x1b[1;2H\\x1b[6n\\x1b8")
         fake_cli.draw("working, until I am paused")
         while fake_cli.read_key() != "\\x1b":
             pass
@@ -604,7 +606,8 @@ class Demo:
             drawn = fh.read()
         check(b"working, until I am paused" in drawn and b"Interrupted" not in drawn,
               "the page's terminal, connected, sent the engineer nothing: what it would answer the questions the "
-              "engineer's CLI asked at its start is no key of the operator's")
+              "engineer's CLI asked at its start — its cursor's place among them, reported in the bytes of a key "
+              "chord — is no key of the operator's")
         check(self.press(rejected, "type-after:engineer:Pause:continue", "paused the engineer", "heard: continue"),
               "Pause pressed: the engineer's terminal opened, and no other, with the keyboard in it; the engineer "
               "was interrupted; and `continue`, typed with no click, reached it — that line and nothing more")

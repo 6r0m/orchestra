@@ -10,10 +10,11 @@ export const ROLES = ["engineer", "architect"];
 // reports, a window report, a colour or another setting. xterm answers every query in what it draws — those
 // an agent's CLI made as it started among them, drawn again from the record on each connection — and such
 // an answer is nobody's key: sent on, it lands in the agent's own prompt as text, ahead of what the operator
-// types there. A modified F3, which a cursor report from the top row can look like, is a key.
+// types there. It is known by its bytes alone, and a cursor's report from the top row — `ESC [ 1 ; 2 R` —
+// is spelled exactly as F3 held with Shift, Alt or Ctrl is. Nothing here tells the two apart, so neither is
+// sent: a clean prompt is chosen over those chords.
 const REPORT = new RegExp("^(?:\\x1b\\[[?>]?[\\d;]*c|\\x1b\\[\\??[\\d;]*n|\\x1b\\[\\??\\d+;\\d+R|" +
   "\\x1b\\[\\??[\\d;]+\\$y|\\x1b\\[[\\d;]+t|\\x1b\\][\\s\\S]*?(?:\\x07|\\x1b\\\\)|\\x1bP[\\s\\S]*?\\x1b\\\\)+$");
-const MODIFIED_F3 = /^\x1b\[1;[2-8]R$/;
 const terminals = {};
 // The run these terminals are of, whether it can still get a new terminal, the role last shown, and since
 // when the run last read has done what it does.
@@ -101,7 +102,7 @@ function make(role) {
   terminals[role] = entry;
   // The agent is sent what the operator types and presses, and never this terminal's own answers.
   term.onData((data) => {
-    if (REPORT.test(data) && !MODIFIED_F3.test(data)) return;
+    if (REPORT.test(data)) return;
     if (entry.live && entry.socket && entry.socket.readyState === WebSocket.OPEN) entry.socket.send(data);
   });
   connect(role, entry, run.target);
