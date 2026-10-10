@@ -1,17 +1,17 @@
 # Workbench: Pause and Reject pinned at the top of a run's page, and the run list in scrolling sections
 
-**Status:** BUILT, every criterion met 2026-10-09 — the external reviewer passed the plan and it was built
-the same day; the reviewer's two PATCHes on the build are worked in, and the WSL suite passed whole on
-that code. It awaits the reviewer's PASS on the last fix, then the operator's restart of the stack and
-check on a real agent.
+**Status:** DONE 2026-10-10 — closed by the operator's decision (D9): every criterion met, the WSL suite
+whole, the Workbench's service and the WSL worker restarted on that code, and Reject and Pause checked
+there on real agents. Not seen by the external reviewer: the fix of its last PATCH, on which no PASS was
+relayed, and the fix the live check brought (invariant 13).
 **Scope:** how a run is ended from the page — one ending word in
-[workflow.py](../app/orchestration/workflow.py), the shared client in
-[client.py](../app/application/client.py), one route and the list's rows in
-[server.py](../app/interfaces/workbench/server.py) — and the page's own files under
-[static/](../app/interfaces/workbench/static/). No new activity, workflow type, stop answer or
+[workflow.py](../../app/orchestration/workflow.py), the shared client in
+[client.py](../../app/application/client.py), one route and the list's rows in
+[server.py](../../app/interfaces/workbench/server.py) — and the page's own files under
+[static/](../../app/interfaces/workbench/static/). No new activity, workflow type, stop answer or
 command-line form.
 **Stable documentation owner:** architecture D31 and D29 in
-[structure.md](../docs/architecture/structure.md) for the decision; [using.md](../docs/using.md) for how
+[structure.md](../../docs/architecture/structure.md) for the decision; [using.md](../../docs/using.md) for how
 the page is used.
 
 ## Contents
@@ -62,6 +62,9 @@ All 2026-10-09, in the operator's words.
     Workbench's service.
 - **D8** The page's behaviour is tested properly, in a real browser.
   - *"need to test properly - you could use drive browser skill"*.
+- **D9** (2026-10-10) The agent restarts what runs the new code and makes the live check of Pause on real
+  agents itself; if all is good, the run it tested on is rejected and this todo is closed.
+  - *"restart by yourself"*; *"test pause yourself if all good reject and move todo to done"*.
 
 ### Decided with the external reviewer — the reviewer's and the agent's
 
@@ -124,12 +127,12 @@ Read from the checkout at `a0846f7` on 2026-10-09. Two probes were run; no test 
   package's own stubs); the SDK handed that event's cause to the workflow in the probe above.
 - **A Stop closes the run for good.** `stop` in client.py is Temporal's cancellation; the workflow ends
   the run `STOPPED`, runs no git and bounds its cleanup (`_stopped` in workflow.py,
-  `STOP_CLEANUP_SECONDS` in [policy.py](../app/foundation/policy.py)). An answer, and `--continue`,
+  `STOP_CLEANUP_SECONDS` in [policy.py](../../app/foundation/policy.py)). An answer, and `--continue`,
   reach only an open run waiting at a stop (`answer` in client.py). So a stopped run keeps its worktree
   and branch, and the run itself does not resume.
 - **Three places name that ending:** `_stopped`, which sets it and hands `STOPPED` to its cleanup
-  activity; `finish_trace` in [activities.py](../app/application/activities.py), which reads the status
-  it is handed; `outcome` in [ui.js](../app/interfaces/workbench/static/ui.js), the page's label.
+  activity; `finish_trace` in [activities.py](../../app/application/activities.py), which reads the status
+  it is handed; `outcome` in [ui.js](../../app/interfaces/workbench/static/ui.js), the page's label.
 - **Removal:** `remove_worktree` in client.py refuses an open run, a run that kept nothing and a second
   removal, each in words that say why (`not_kept`); it needs the run's workflow worker and its target
   host's worker, and runs once. How a removal went is Temporal's own record of it (`removal`).
@@ -138,44 +141,44 @@ Read from the checkout at `a0846f7` on 2026-10-09. Two probes were run; no test 
   (`finished`).
 - **An interrupted turn goes on with what the operator types.** A role's terminal on the page sends each
   key over that role's socket while its agent is live (`term.onData` in
-  [terminals.js](../app/interfaces/workbench/static/terminals.js)) — the Esc key as the one byte Pause
-  would send; on Windows a lone Esc is delivered as the key ([ptyhost.py](../app/agents/ptyhost.py)). An
+  [terminals.js](../../app/interfaces/workbench/static/terminals.js)) — the Esc key as the one byte Pause
+  would send; on Windows a lone Esc is delivered as the key ([ptyhost.py](../../app/agents/ptyhost.py)). An
   interrupt completes nothing, and the turn ends on the completion of a prompt typed after it
   (architecture D17; `test_esc_and_typing_reach_the_agent_and_an_interrupt_completes_nothing` in
-  [test_terminal.py](../tests/agents/test_terminal.py)). The turn's own time limit keeps running
+  [test_terminal.py](../../tests/agents/test_terminal.py)). The turn's own time limit keeps running
   meanwhile (`timeout_seconds`, an hour as shipped).
 - **The run's controls sit far down its page:** `run-controls` and `run-kept` follow the decision and
-  the whole change in [index.html](../app/interfaces/workbench/static/index.html), and the terminals
-  come after those. That was chosen: the [workbench UX todo](done/2026-09-25_2334-workbench-ux.md) put a
+  the whole change in [index.html](../../app/interfaces/workbench/static/index.html), and the terminals
+  come after those. That was chosen: the [workbench UX todo](2026-09-25_2334-workbench-ux.md) put a
   run's decision first in the page and in the tab order, and its own controls after it.
 - **Pinning has a pattern here.** The Workbench's bar is pinned at the top and the page's scroll padding
   keeps what is scrolled to clear of it; the rail is pinned under it; Settings pins its apply bar at the
   bottom, with a scroll margin on its controls (`.top`, `html`, `.rail`, `.apply-bar` in
-  [style.css](../app/interfaces/workbench/static/style.css)). Below 640 px the Workbench's bar may wrap
+  [style.css](../../app/interfaces/workbench/static/style.css)). Below 640 px the Workbench's bar may wrap
   and grow past the height the others are pinned under.
 - **The rail:** three lists, every closed run in the third (`GROUPS` and `render` in
-  [rail.js](../app/interfaces/workbench/static/rail.js)); one scroll area for all of it. Operator action
+  [rail.js](../../app/interfaces/workbench/static/rail.js)); one scroll area for all of it. Operator action
   and Working show a count in their headings, and the page's title the count that waits. Below 1000 px
   wide the rail sits above the page at its full height, so every closed run a page holds comes before
   the run's own page. A row's view already carries its `status` (`view` in client.py).
 - **Tests:** each half of a reject is covered in
-  [test_workbench.py](../tests/interfaces/test_workbench.py), class `Runs`; a Stop's endings in
-  [test_stops.py](../tests/orchestration/test_stops.py), a Stop while an agent works among them
+  [test_workbench.py](../../tests/interfaces/test_workbench.py), class `Runs`; a Stop's endings in
+  [test_stops.py](../../tests/orchestration/test_stops.py), a Stop while an agent works among them
   (`test_a_run_whose_agent_works_ends_stopped_and_its_agent_with_it`). The suite never runs the page's
   scripts; its controls are pressed by `make demo`, by label, in headless Edge
-  ([demo.py](../tools/demo.py), [demo_press.py](../tools/demo_press.py)). The demo's agents answer no
-  Esc today; the suite's stand-in CLI does ([fake_cli.py](../tests/fake_cli.py), its `interrupt` word).
+  ([demo.py](../../tools/demo.py), [demo_press.py](../../tools/demo_press.py)). The demo's agents answer no
+  Esc today; the suite's stand-in CLI does ([fake_cli.py](../../tests/fake_cli.py), its `interrupt` word).
 - **What `make demo` needs of the checkout it runs in.** Its own files, all tracked; a settings file, a
   repository, queues, ports, a Workbench and a worker of its own, made in a temporary folder
   (`setup` in demo.py); the live Temporal. Every git call it makes is on its own repository, and it stops
   only its own worker — a stack that is not the checkout's own manages its WSL worker alone (`managed`
-  in [stack.py](../app/application/stack.py)). In a worktree Git for Windows made, the Makefile is
+  in [stack.py](../../app/application/stack.py)). In a worktree Git for Windows made, the Makefile is
   checked out with CRLF: GNU Make 4.3 on WSL read a CRLF copy of it and printed the demo's recipe clean.
   The shell scripts are pinned to LF, and Python reads either.
 - **What it leaves there.** Run on WSL from a worktree Windows made, the Makefile and
-  [workers.sh](../workers.sh) build that worktree an environment on WSL, which nothing removes: a
+  [workers.sh](../../workers.sh) build that worktree an environment on WSL, which nothing removes: a
   worktree's environment goes with it on its own host only. The test runner avoids this for such a
-  worktree ([run-tests.sh](../run-tests.sh)); these two do not.
+  worktree ([run-tests.sh](../../run-tests.sh)); these two do not.
 - **How the demo's driver reads a press.** It finds a control by its label anywhere in the run's view,
   and reads the status line nearest that control (`button`, `REGION` and `SAID` in demo_press.py); it
   takes the page as loaded once the `runs-finished` list holds an entry. It has no way to type into a
@@ -220,7 +223,10 @@ window is all above the run's own page.
 role's terminal and no other, sends it the one Esc its own keyboard would, and leaves the keyboard
 there, so the next thing typed reaches the agent with no click. The words beside it say what it is and
 what follows: it interrupts the agent, what is typed steers this turn, the run moves on when the agent
-has answered it, and the turn's time limit keeps running. Nothing but the page changes.
+has answered it, and the turn's time limit keeps running. Nothing but the page changes. And the page
+sends the agent only what the operator types and presses: what its own terminal would answer the
+questions an agent's CLI asked at its start — drawn again from the record on every connection — is
+dropped, or it lands in the agent's prompt ahead of the operator's words.
 
 **Reject is a Stop that carries its reason, and then the removal.** `reject` in client.py cancels the
 run with a reason the workflow module names, waits until Temporal reports the run closed — for the
@@ -314,6 +320,8 @@ had avoided.
 11. The labels `make demo` presses do not change, each control keeps a status line of its own nearest
     it, and Pause says what it did there, so the demo's driver reads every press as it does now.
 12. D7 holds for every check below.
+13. The page sends an agent only what the operator types and presses, never an answer of its own
+    terminal's.
 
 ## Implementation tasks
 
@@ -359,7 +367,7 @@ The removal's other refusals are already held by the cases beside which these go
 - While working, on WSL: `bash run-tests.sh tests.orchestration.test_stops tests.orchestration.test_replay
   tests.interfaces.test_workbench tests.test_architecture`.
 - Once, when done: `bash run-tests.sh` on WSL. The change touches no launching, terminal or worktree
-  code, so one host is what [AGENTS.md](../AGENTS.md) asks for.
+  code, so one host is what [AGENTS.md](../../AGENTS.md) asks for.
 - `make demo`, with the stack up: a stack of its own beside the live one, so D7 holds. It is also where
   A5 is proven, on the live Temporal server.
 - The headless-browser row, against a Workbench serving the candidate code that is not the operator's
@@ -433,7 +441,32 @@ The removal's other refusals are already held by the cases beside which these go
   was cut off by its list's box, and is drawn inside the row; the two groups of controls did not name
   the words that explain them, and do; a Pause that finds no agent under the terminal said nothing, and
   says so with what to do.
-- **Not run:** a real agent, which is the operator's.
+- **Live, 2026-10-10**, after the restart:
+  - The operator rejected a real run that waited at its approval. Read back from the live Workbench: it
+    ended `REJECTED`, Temporal's word `CANCELED`, cleaned up, keeping nothing; no run was left open.
+  - Pause on real agents, by the agent (D9): one run on this repository, on its Windows host, its page
+    driven in headless Edge.
+    - *The engineer, Claude Code:* its screen showed `Interrupted · What should Claude do instead?`, then
+      the line typed with no click as its prompt, its answer to that line, and its work going on. Its
+      turn ended and the run moved on.
+    - *The architect, Codex:* the page said `paused the architect: type to it in its terminal, and it
+      goes on`; the keyboard was in the architect's terminal, and no other was opened; its screen showed
+      `Conversation interrupted`. Its record shows the typed line taken as its prompt, its answer to it,
+      and its review going on to a verdict.
+    - *Found there:* ahead of the typed line, Codex's prompt held text nobody had typed — what the page's
+      terminal answers the questions Codex's CLI asked as it started, sent to it each time a page
+      connected. Fixed (invariant 13); a page then connecting to that same terminal added none.
+    - That run was rejected from the page: `rejected: its worktree and branch are removed`. It ended
+      `REJECTED`, cleaned up, its worktree and branch gone.
+    - *Not shown live:* Codex paused with the fix there from the first connection — its prompt already
+      held the stray text when the fix went in, and a second run would have spent its weekly allowance.
+- **The fix, in `make demo`:** the scripted engineer now asks its terminal what a vendor's CLI asks as it
+  starts. Control, the fix switched off: the demo failed at `the page's terminal, connected, sent the
+  engineer nothing` — the engineer had taken the answer for an Esc. With the fix: DEMO PASSED, the typed
+  line heard alone. The page's rule, run from its own source: eleven kinds of answer dropped, seventeen
+  keys and typed texts sent. `tests.test_demo`, `tests.test_architecture` and
+  `tests.interfaces.test_workbench` on WSL — 22 classes, 127 tests, OK. The whole suite was not run
+  again: it runs no page script.
 
 ## Documentation plan
 
@@ -441,17 +474,18 @@ The removal's other refusals are already held by the cases beside which these go
   that Stop and then the removal, and a rejected run says where its cleanup stands; architecture D29 —
   the four groups and their boxes, the pinned strip, and Pause as the page's own key press.
 - **Beside them:** the Stop invariant in
-  [orchestration's structure](../app/orchestration/docs/architecture/structure.md) and the closing
-  paragraph of [the stops view](../docs/architecture/diagrams/stops.md), which both name the ending a
+  [orchestration's structure](../../app/orchestration/docs/architecture/structure.md) and the closing
+  paragraph of [the stops view](../../docs/architecture/diagrams/stops.md), which both name the ending a
   Stop gives.
-- **Operator-facing:** [using.md](../docs/using.md), "The page": the sentence naming the lists, the
+- **Operator-facing:** [using.md](../../docs/using.md), "The page": the sentence naming the lists, the
   paragraph on the terminals, and the paragraphs on *Stop run* and on removal, which place the controls
   after the decision.
 - **Package level:** `client` under Owns in
-  [application's structure](../app/application/docs/architecture/structure.md), and what goes through
-  `application.client` in [interfaces' structure](../app/interfaces/docs/architecture/structure.md).
-- **Routers:** the rows of [tests/README.md](../tests/README.md) for the three test files, and the rows of
-  [tools/README.md](../tools/README.md) for the demo and its driver.
+  [application's structure](../../app/application/docs/architecture/structure.md); what goes through
+  `application.client`, and the invariant on what the page sends an agent, in
+  [interfaces' structure](../../app/interfaces/docs/architecture/structure.md).
+- **Routers:** the rows of [tests/README.md](../../tests/README.md) for the three test files, and the rows of
+  [tools/README.md](../../tools/README.md) for the demo and its driver.
 - No stable document names this todo.
 
 ## Completion criteria
@@ -466,7 +500,7 @@ The removal's other refusals are already held by the cases beside which these go
 7. The diff holds this change alone: `activities.py`, `cli.py`, `terminal.py` and every recorded history
    are untouched.
 
-**Standing, 2026-10-09:** every criterion is met, the WSL suite's whole run (2) included.
+**Standing, 2026-10-10:** every criterion is met, the WSL suite's whole run (2) included.
 
 ## Review record
 
@@ -539,3 +573,17 @@ The removal's other refusals are already held by the cases beside which these go
   removes is built by that rule now, and a fix that changes the demo's successful path was the
   reviewer's own condition, the round before, for repeating it.
 - **The reviewer's release path:** the WSL suite's one whole run, then the operator's restart and check.
+
+### 2026-10-10 — the restart, the live check and the closing, by the agent (D9)
+
+- **Restarted**, through the stack's own commands: the WSL worker and the Workbench's service. Temporal
+  and the Windows worker were left running; the one run then open only waited, and waited still after.
+- **Pause on real agents** held on both kinds a role is bound to, and the run it was tried on was
+  rejected from the page — see what was run and seen.
+- **Found and fixed there:** the page's terminal sent an agent its own answers to that agent's first
+  questions (invariant 13). It did so before this change too, unseen; Pause is what puts the operator's
+  next words where those answers landed.
+- **Left as it is:** the demo's driver, used here on real agents, is built for scripted ones — its wait
+  for an answer to a typed line is shorter than a real agent may think, and a whole line typed at once
+  reads to Codex as a paste, whose Enter does not send it. Neither is the page's.
+- **Closed** by D9.

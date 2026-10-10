@@ -19,8 +19,9 @@ works: its stage's settings go with it, the run says it is blocked by it, the ru
 it again, and the failed stage is continued. A restart of the worker while a run waits leaves the run
 waiting, and its engineer's terminal, open on its record, is never drawn again until the engineer's next
 turn reaches it; that run is discarded. What the run stopped at its approval kept is removed. One is paused
-from the top of its page while its engineer works — the engineer interrupted, its terminal given the
-keyboard, a line typed there reaching it — then read at three window sizes, its controls pinned while the
+from the top of its page while its engineer works — the engineer, sent nothing by the page's terminal as
+that connects, interrupted, its terminal given the keyboard, a line typed there reaching it and that line
+alone — then read at three window sizes, its controls pinned while the
 page scrolls and each list of runs scrolling inside itself, and rejected at work: ended, its worktree and
 branch removed, its history kept, and listed apart from the runs that were only stopped. The demo's
 worker is stopped from its Workbench, and everything it made is removed, its runs, the reads of their
@@ -99,6 +100,9 @@ FAKE = textwrap.dedent("""\
     typed = None
     if os.path.exists(os.path.join(state, "hold-pause")):
         fake_cli.raw_input_mode()
+        # What a vendor's CLI asks its terminal as it starts — its kind, its colours — and so leaves in its
+        # record, which every terminal the page connects draws again from its start.
+        sys.stdout.write("\\x1b[c\\x1b]10;?\\x07\\x1b]11;?\\x07")
         fake_cli.draw("working, until I am paused")
         while fake_cli.read_key() != "\\x1b":
             pass
@@ -595,9 +599,15 @@ class Demo:
                    "the engineer at work")
         check(self.press(rejected, "terminal:engineer", "working, until I am paused"),
               "the engineer is at work, and reads its keys as a vendor's CLI does")
+        # Its terminal's record as it stands, mid-turn: the turn's own files are written once the turn has ended.
+        with open(terminal.record_path(rejected, "engineer"), "rb") as fh:
+            drawn = fh.read()
+        check(b"working, until I am paused" in drawn and b"Interrupted" not in drawn,
+              "the page's terminal, connected, sent the engineer nothing: what it would answer the questions the "
+              "engineer's CLI asked at its start is no key of the operator's")
         check(self.press(rejected, "type-after:engineer:Pause:continue", "paused the engineer", "heard: continue"),
               "Pause pressed: the engineer's terminal opened, and no other, with the keyboard in it; the engineer "
-              "was interrupted; and `continue`, typed with no click, reached it")
+              "was interrupted; and `continue`, typed with no click, reached it — that line and nothing more")
         self.hold("hold-pause", False)
         self.until(rejected, lambda view: view["state"] == "waiting", 300,
                    "the turn ending on what was typed, and the plan's approval")

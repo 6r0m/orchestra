@@ -6,6 +6,14 @@ import { CONFIG } from "./api.js";
 import { $ } from "./ui.js";
 
 export const ROLES = ["engineer", "architect"];
+// What a terminal emulator answers a query with: its device attributes, a status or cursor report, a mode it
+// reports, a window report, a colour or another setting. xterm answers every query in what it draws — those
+// an agent's CLI made as it started among them, drawn again from the record on each connection — and such
+// an answer is nobody's key: sent on, it lands in the agent's own prompt as text, ahead of what the operator
+// types there. A modified F3, which a cursor report from the top row can look like, is a key.
+const REPORT = new RegExp("^(?:\\x1b\\[[?>]?[\\d;]*c|\\x1b\\[\\??[\\d;]*n|\\x1b\\[\\??\\d+;\\d+R|" +
+  "\\x1b\\[\\??[\\d;]+\\$y|\\x1b\\[[\\d;]+t|\\x1b\\][\\s\\S]*?(?:\\x07|\\x1b\\\\)|\\x1bP[\\s\\S]*?\\x1b\\\\)+$");
+const MODIFIED_F3 = /^\x1b\[1;[2-8]R$/;
 const terminals = {};
 // The run these terminals are of, whether it can still get a new terminal, the role last shown, and since
 // when the run last read has done what it does.
@@ -91,7 +99,9 @@ function make(role) {
   // the record only grows, so a connection made again skips what is shown and adds only what is new.
   const entry = { runId: run.id, term: term, socket: null, timer: null, live: false, shown: 0, skip: 0 };
   terminals[role] = entry;
+  // The agent is sent what the operator types and presses, and never this terminal's own answers.
   term.onData((data) => {
+    if (REPORT.test(data) && !MODIFIED_F3.test(data)) return;
     if (entry.live && entry.socket && entry.socket.readyState === WebSocket.OPEN) entry.socket.send(data);
   });
   connect(role, entry, run.target);
