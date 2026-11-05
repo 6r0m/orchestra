@@ -153,10 +153,10 @@ export function confirmAction({ title, body, confirm, danger, returnTo }) {
   });
 }
 
-// The page's own word that something the operator did was refused: `title` says what, `said` what came of it,
-// `reason` the refusal's own words, whole, and `what` names what it concerns. It stays whatever the page does
-// meanwhile, until the operator closes it — Close, or Escape; one refused while it is shown waits behind it.
-// Focus then goes back to what had it.
+// The page's own word that something the operator did was refused, or not confirmed: `title` says what, `said`
+// what came of it, `reason` the refusal's own words, whole, and `what` names what it concerns. It stays whatever
+// the page does meanwhile, until the operator closes it — Close, or Escape; one said while it is shown waits
+// behind it. Focus then goes back to what had it.
 const refusals = [];
 let beforeRefusals = null;
 

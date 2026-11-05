@@ -112,14 +112,17 @@ $("start").onsubmit = async (event) => {
     wrote();
     if (location.hash === from) location.hash = "#run=" + encodeURIComponent(started.run_id);
   } catch (error) {
-    report($("start-result"), "refused: " + error.message, true);
-    // A refusal is the Workbench's answer, and no run was made. With no answer at all, whether one was is not
-    // known here: the list says.
-    sayRefused(error.status
-      ? { title: "The run was not started", said: "The Workbench refused it: no run was made.", reason: error.message,
-        what: repo }
-      : { title: "The start was not confirmed", said: "The Workbench did not answer. A run it started all the same " +
-        "shows in the list of runs.", reason: error.message, what: repo });
+    // A 4xx is the Workbench's refusal before any run is made: it checks the request, the repository, the flow,
+    // the settings and the workers before it starts one. Anything else — its own failure or timeout, which may
+    // come after Temporal took the start, or no answer at all — leaves whether a run was made unknown here, and
+    // the list of runs says; starting it again could start it twice.
+    const refused = error.status >= 400 && error.status < 500;
+    report($("start-result"), (refused ? "refused: " : "not confirmed: ") + error.message, true);
+    sayRefused(refused
+      ? { title: "The run was not started", said: "The Workbench refused it before making a run.",
+        reason: error.message, what: repo }
+      : { title: "The start was not confirmed", said: "Whether a run was made is not known: check the list of runs " +
+        "before starting it again.", reason: error.message, what: repo });
   } finally {
     button.disabled = false;
   }

@@ -426,6 +426,12 @@ class Demo:
         check(closed(view) and view["status"] == "REFUSED" and not view["worktree"],
               "the run ended refused, before any work: %s, no worktree" % view["status"])
 
+        step("a start the Workbench refuses, and one it does not confirm, each said as what it is")
+        for status, title in (("400", "The run was not started"), ("502", "The start was not confirmed"),
+                              ("none", "The start was not confirmed")):
+            check(self.press("start", "answered:" + status, title),
+                  "a start answered %s in the page: %r, in its window and its form alike" % (status, title))
+
         step("a run started from the Workbench, its agents working in live terminals")
         merged = self.start("merged")
         view = self.until(merged, lambda view: view["state"] == "waiting", 300, "the plan's approval")

@@ -1,6 +1,6 @@
 """Press one of the Workbench's own buttons in a headless browser, as the operator would.
 
-    python tools/demo_press.py <workbench url> <run id | stack | start> <button label | task | refused:repo:task | terminal:role | turn:stage | turn-then:stage:label | file:path | round:stage:path | history | hold:role:label | type-after:role:label:line | layout:WIDTHxHEIGHT | absent:label,...> <what the page should say> [note]
+    python tools/demo_press.py <workbench url> <run id | stack | start> <button label | task | refused:repo:task | answered:status | terminal:role | turn:stage | turn-then:stage:label | file:path | round:stage:path | history | hold:role:label | type-after:role:label:line | layout:WIDTHxHEIGHT | absent:label,...> <what the page should say> [note]
 
 The Windows side of `make demo` (WSL cannot reach Windows' loopback, and Windows reaches the
 Workbench's): headless Edge, driven over the DevTools protocol, opens the page, opens the run by its
@@ -11,7 +11,10 @@ given a note, it types it into the stop's own note first, as an answer's words a
 opens New run and types the task into the page's own form, with the first repository it offers, and
 presses Start run; given `refused:<repo>:<task>` for it, it starts the run on that listed repository and
 reads the window the page opens once the run is refused: its exit code says whether the window says the
-words expected, stays open through the page's reads and a move to another view, and closes on its Close.
+words expected, stays open through the page's reads and a move to another view, and closes on its Close;
+given `answered:<status>`, the page's start is answered in the page itself with that HTTP status, or with no
+answer at all for `none`, and no write of the page's reaches any server: its exit code says whether the window
+then names the words expected and the form's alert says the same kind of thing — refused, or not confirmed.
 Given `terminal:<role>`, it presses nothing: it opens that role's terminal, if it is
 closed, and reads its screen as the page shows it, live from its host. Given `turn:<stage>`, it presses
 nothing either: it opens the run's latest turn of that stage in its history and reads what the page shows it
@@ -303,6 +306,44 @@ def refused(page, repo, task, said):
     return 0 if started.startswith("started ") and said in window and stayed and moved and shut else 1
 
 
+# Every write of the page's answered in the page, so none reaches the Workbench: its start with `status` — an
+# HTTP status, or none at all for `none` — and any other write refused outright. Its reads still go through.
+ANSWER_STARTS = ("(answer => { const real = window.fetch; window.__starts = 0;"
+                 " window.fetch = (path, options) => {"
+                 " if (!(options && options.method === 'POST')) return real(path, options);"
+                 " if (path !== '/api/runs') return Promise.reject(new TypeError('this check sends no other write'));"
+                 " window.__starts += 1;"
+                 " if (answer === 'none') return Promise.reject(new TypeError('Failed to fetch'));"
+                 " return Promise.resolve(new Response(JSON.stringify({ error: 'answered ' + answer + ' by the check' }),"
+                 " { status: Number(answer), headers: { 'Content-Type': 'application/json' } })); };"
+                 " return true; })(%s)")
+
+
+def answered(page, status, said):
+    """A start the page sends, answered in the page with `status` — or with no answer, for `none` — so nothing is
+    started anywhere: whether the window then says `said`, the form's alert says the same kind of thing — a 4xx
+    is refused, anything else not confirmed — the page sent the start once, and the window closes on its Close.
+    Prints what it saw; 0 when all of it holds."""
+    page.value("location.hash = '#new'; true")
+    wait(lambda: page.value("document.getElementById('start-repo').options.length > 0"), 30,
+         "the repositories the page offers")
+    page.value(ANSWER_STARTS % json.dumps(status))
+    page.value("document.getElementById('start-task').value = %s; true" % json.dumps("A start answered " + status))
+    pressed = button("#start", "Start run")
+    wait(lambda: page.value(pressed + " !== undefined"), 60, "the 'Start run' button")
+    region = page.value(REGION % pressed)
+    page.value(pressed + ".click(); true")
+    window = wait(lambda: page.value(REFUSAL), 30, "the page's window on the start answered %s" % status)
+    alert = wait(lambda: page.value(SAID % json.dumps(region)), 10, "the form's word on it")
+    sent = page.value("window.__starts")
+    page.value("document.getElementById('refusal-close').click(); true")
+    shut = not page.value(REFUSAL)
+    kind = "refused: " if status.isdigit() and 400 <= int(status) < 500 else "not confirmed: "
+    print("the start answered %s in the page, sent %s time(s): the window said %r; the form said %r; the window %s "
+          "on its Close" % (status, sent, window, alert, "closed" if shut else "did NOT close"))
+    return 0 if said in window and alert.startswith(kind) and sent == 1 and shut else 1
+
+
 def main(url, run_id, label, said, note=None):
     profile = tempfile.mkdtemp(prefix="orchestra-demo-edge-")
     # A layout is read at the window size it names; every press at the browser's own.
@@ -329,6 +370,8 @@ def main(url, run_id, label, said, note=None):
             if run_id == "start" and label.startswith("refused:"):
                 repo, task = label.split(":", 2)[1:]
                 return refused(page, repo, task, said)
+            if run_id == "start" and label.startswith("answered:"):
+                return answered(page, label.split(":", 1)[1], said)
             if label.startswith("terminal:"):
                 role = label.split(":", 1)[1]
                 page.value(OPEN % json.dumps(run_id))

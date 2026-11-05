@@ -45,12 +45,15 @@ operator closes it.
   A refusal arriving while one is shown waits behind it.
 - **Which refusals.** The runs started from this page are watched, in memory as unsent notes are, until
   the list reads them closed: one closed `REFUSED` opens the window with its reason, read from the run.
-  A start the server refuses opens it too, beside the form's alert; a start the server never answered
-  says it is not confirmed, since whether a run was made is not known there.
+  A start the server refuses — a 4xx, every one of which `client.start` and the server raise before
+  `start_workflow` — opens it as *not started*. Its own failure or timeout (502, which may come after
+  Temporal took the start) and no answer at all open it as *not confirmed*: check the list of runs before
+  starting it again. The form's alert says the same kind of thing as the window.
 - **Proof.** `make demo` starts a run on a listed folder that is no git repository, as the operator does,
   and reads the window: it says the refusal, stays open through the page's own reads and a move to another
   view, and closes on its Close. The demo first checks that folder is in no repository's tree, where its
-  git would find that repository and the run would start on it.
+  git would find that repository and the run would start on it. A start answered in the page itself —
+  400, 502, no answer — is read in its window and its form, no write of the page's reaching a server.
 - **Docs.** The operator's side in [using.md](../docs/using.md); the demo's and its driver's rows in
   [tools/README.md](../tools/README.md).
 
@@ -62,6 +65,12 @@ operator closes it.
 - **The refusal's words in every row of the run list.** The run's own read carries them, and the window
   reads them once, for one run.
 
+## Review record
+
+- **External reviewer, 2026-11-05 — PATCH, taken.** Any HTTP status was read as *no run was made*, a 502
+  among them, which the server answers for its own failure or timeout after Temporal may have taken the
+  start — inviting a second start of the same task. Now only a 4xx says *not started*.
+
 ## Verification
 
 - **Red:** `make demo` with the new check and the page as it was: the start was accepted (`started
@@ -70,5 +79,10 @@ operator closes it.
   was made, the host's own words (*… is not a git repository*) and the repository and run; it stayed
   through the page's reads and a move to Worktrees and closed on its Close; the run ended `REFUSED` with no
   worktree; every other run of the demo as before.
+- **The reviewer's PATCH, checked in a browser** with `demo_press`'s `answered:` mode, each write of the
+  page's answered in the page: 400 said *The run was not started* and `refused: …`; 502 and no answer said
+  *The start was not confirmed* and `not confirmed: …`; each start sent once, each window closed on its
+  Close. **Mutation control:** with any HTTP status read as refused again, the 502 case failed — the window
+  said *The run was not started*, the form `refused: …` — and the page file was then restored byte for byte.
 - **Not run:** the whole suite, which runs no page script — after the external reviewer's final pass; the
-  server's own refusal of a start, which the demo does not drive.
+  whole demo again, whose new step for these answers calls the mode checked above.

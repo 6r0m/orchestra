@@ -89,7 +89,9 @@ budget, a failed stage or the final gate.
 A start that is refused says why in a window that stays until you close it: refused by the Workbench at
 once, or by the run's host before any work — its repository no git repository there, say, or an agent's
 program or a stage's skill missing — when the run is listed under Closed as refused, its reason on its
-page. The window comes to the tab the run was started from, while that tab stays open.
+page. The window comes to the tab the run was started from, while that tab stays open. A start the
+Workbench did not confirm — it failed or timed out itself, or never answered — is said as not confirmed,
+never as refused: the run may have been made, so check the list of runs before starting it again.
 
 A run shows what it is — its repository, host, flow, run and branch, worktree, its plan once it has
 one, when it started, and links to its Temporal and (if configured) Langfuse pages — its flow drawn
