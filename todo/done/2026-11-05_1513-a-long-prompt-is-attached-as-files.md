@@ -1,11 +1,13 @@
 # A long prompt is attached as files
 
-**Status:** BUILT 2026-11-05 — red, then green on both hosts. It awaits the external reviewer's PASS and the
-operator's word to close it; the Windows worker runs it once restarted.
-**Scope:** how a role turn's prompt reaches the agent's CLI ([nodes.py](../app/agents/nodes.py) `attach`,
-[activities.py](../app/application/activities.py) `run_role`, the Claude adapter's `readable`).
-**Stable documentation owner:** D17 in the [architecture](../docs/architecture/structure.md) and the agents'
-[structure](../app/agents/docs/architecture/structure.md).
+**Status:** DONE 2026-11-05 — the goal met: the reviewer passed the implementation; green in the full suite on
+both hosts; the operator's stopped run continued on the restarted Windows worker, its agent reading the
+attached guidance whole and its turn ending normally — the check the reviewer set; closed on the operator's
+word.
+**Scope:** how a role turn's prompt reaches the agent's CLI ([nodes.py](../../app/agents/nodes.py) `attach`,
+[activities.py](../../app/application/activities.py) `run_role`, the Claude adapter's `readable`).
+**Stable documentation owner:** D17 in the [architecture](../../docs/architecture/structure.md) and the agents'
+[structure](../../app/agents/docs/architecture/structure.md).
 
 ## Goal
 
@@ -41,6 +43,12 @@ file the agent reads, and a step stopped on such a prompt goes on with Continue.
   `readable(argv, folders)`, optional in the adapter contract, Claude's an `--add-dir`.
 - D17's sentence, in the architecture and the agents' structure.
 
+## Review record
+
+- **External reviewer, 2026-11-05:** the implementation passed its tests; a real agent's reading of an attachment
+  stays UNVERIFIED until the operator's blocked run is continued on a restarted Windows worker and its turn is
+  seen to read the attached guidance and end normally.
+
 ## Verification
 
 - **Red:** the new tests before the code — `tests.agents.test_prompt_size`: no `attach`, `cost`, `readable`;
@@ -53,5 +61,12 @@ file the agent reads, and a step stopped on such a prompt goes on with Continue.
   agent takes, refused with errno 206 — the operator's failure, as the control; with its long part attached,
   launched. On WSL a whole turn with the attached prompt completes; on Windows the test's fake CLI runs through
   a `.cmd` shim, which cannot carry a newline, so that half is WSL's (as the suite already skips it there).
-- **Not run:** a real agent reading an attachment — Claude through its `--add-dir`, Codex through its sandbox
-  on Windows; the operator's run, continued once the Windows worker is restarted, is that check.
+- **The full suite, after the review:** on WSL 150 classes, 744 tests, OK; on Windows 102 classes, 517 tests,
+  OK.
+- **The operator's run, continued on the restarted Windows worker:** the plan turn that had stopped at
+  errno 206 launched — its prompt 9,742 bytes where it had been 47,012, the 37,498-character guidance written
+  to its attachments and named under its own heading. Claude's own session shows the turn's first act was to
+  read that file, whole — its 297 lines, nothing cut; the turn ended normally, its answer a plan that follows
+  the guidance, and the run went on to the architect's assessment, whose prompt fits and attaches nothing.
+- **Not seen live:** a Codex turn given an attachment. Its sandbox bounds writes, not reads (as measured
+  without a model), so it reads the file as Claude does through `--add-dir`.

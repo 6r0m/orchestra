@@ -1,10 +1,11 @@
 # A run's change, live, as the main block of its page
 
-**Status:** BUILT 2026-11-05 — red, then green in its tests and in `make demo`. It awaits the external
-reviewer's PASS and the operator's word to close it; the live workers serve the change once restarted.
+**Status:** DONE 2026-11-05 — the goal met: reviewer PASS; green in `make demo` and in the full suite on both
+hosts; both live workers restarted on it, and seen live on the operator's run at work; closed on the
+operator's word.
 **Scope:** the run's page — its one *Change* section, moved up and kept current — and the read behind it.
-**Stable documentation owner:** [using.md](../docs/using.md) for what the operator sees; the interfaces' and
-agents' structure documents for whichever read is chosen.
+**Stable documentation owner:** [using.md](../../docs/using.md) for what the operator sees; the agents',
+application's and interfaces' structure documents for the feed and its read.
 
 ## Goal
 
@@ -51,61 +52,23 @@ doing reads from its work, not only from its terminal. One section, never two vi
 - **What the page already reaches.** Each host's worker serves the run's terminals over its own WebSocket,
   which the page connects to with its token; nothing else is served there.
 
-## How the page learns of a change — transport only
+## Considered and not taken
 
-Both read the same git, through the same worker; they differ only in how the news reaches the page.
-
-| | A — poll the existing read | B — pushed on the connection the page already has to the worker (recommended) |
-|---|---|---|
-| How | While a role works and the run's page is open, the page reads the change every ~10 s through `ReviewDiff` | The worker the page already connects to serves `/<run>/changes`: while someone watches, it reads the worktree's changed files against the run's base every ~2 s, and sends only when they change |
-| Live | every ~10 s | within ~2 s |
-| Cost | a Temporal execution per read — hundreds on a long run, listed in Temporal's UI; a tree written each time | no Temporal record; one cheap git read per ~2 s on the host, and only while watched |
-| New machinery | none | one channel beside the terminals; the worker finds the run's worktree from its own record, never from the page |
-| A file's diff | the snapshot already read | opened by the existing read, once, on click |
-
-## Proposed page
-
-- **One Change section, moved up:** right under the line saying what the run does now, above its terminals
-  and history, headed **Change — 3 files · +120 −8 · updated 4 s ago**. Nothing about it is a spoiler.
-- **While the run works,** its file list — status, path, `+/−` — kept current, the file changed last first
-  and marked a moment when it changes; a click opens its diff in place, read as one snapshot.
-- **At a decision that judges a change,** the decision comes first and the section is the snapshot judged,
-  as now; a live list never stands in for what the architect judged.
-- **Once closed,** the run's last change: merged, or what its worktree still holds.
-- Said plainly when there is nothing yet (*no change yet*), and when its host's worker is down (*the Windows
-  worker is down: the change cannot be read*).
-
-## Open question for the operator
-
-- **Go ahead with B?** Pushed by the worker the page already connects to: current within ~2 s, nothing
-  recorded in Temporal, cheap on a large worktree. A — the page asking the existing read every ~10 s — is
-  smaller to build, but each ask is a Temporal execution and a full tree written on the host.
-
-## Build
-
-- **workspace** — `change_fingerprint(path)`: the worktree's `git status` (no optional locks, so the index is
-  never written), HEAD, and each listed file's size and time — cheap, and changed whenever the change is.
-- **application** — a change feed for this host: the run's worktree and the base it stands on now, from its
-  workflow's own status (a reconcile moves the base); the fingerprint every few seconds; a summary that writes
-  nothing — `change_summary(path, base)` — only when it moved; a file's diff read when its row is opened, through
-  the existing reader. Its pace follows its cost: a slow read is asked less often. A run on another host, a
-  worktree gone, or a status that cannot be read is said, never guessed.
-- **agents** — the worker's socket serves a feed it is handed, by name, beside the terminals: same origin,
-  same token; it knows nothing of git or Temporal (agents imports only foundation).
-- **interfaces** — the worker hands its socket the feed; the page's one *Change* section moves up and listens
-  while the run works.
+- **A — the page polling the existing read** (`ReviewDiff`) every ~10 s while a role works: smaller to build,
+  but each read a Temporal execution — hundreds on a long run — and a tree written on the host each time. B
+  reads the same git through the same worker, pushed within seconds, recorded nowhere, and only while watched.
 
 ## What changed
 
-- [worktrees.py](../app/workspace/worktrees.py) `change_fingerprint`; [changes.py](../app/application/changes.py)
-  `ChangeFeed`; [terminal.py](../app/agents/terminal.py) `serve(..., feeds=)`; [worker.py](../app/interfaces/worker.py)
+- [worktrees.py](../../app/workspace/worktrees.py) `change_fingerprint`; [changes.py](../../app/application/changes.py)
+  `ChangeFeed`; [terminal.py](../../app/agents/terminal.py) `serve(..., feeds=)`; [worker.py](../../app/interfaces/worker.py)
   hands the feed over and binds it to its client.
-- [worktrees.py](../app/workspace/worktrees.py) `change_summary`, which the feed sends; the page's
-  [diff.js](../app/interfaces/workbench/static/diff.js) names no tree a list does not hold, and says a new file too
+- [worktrees.py](../../app/workspace/worktrees.py) `change_summary`, which the feed sends; the page's
+  [diff.js](../../app/interfaces/workbench/static/diff.js) names no tree a list does not hold, and says a new file too
   large to count while the run works.
-- [change.js](../app/interfaces/workbench/static/change.js): one section, first on the page; live while a role
+- [change.js](../../app/interfaces/workbench/static/change.js): one section, first on the page; live while a role
   works on the run, a row kept while its file is unchanged; the snapshot judged under a decision that judges it;
-  otherwise what was last seen, and its button. [run.js](../app/interfaces/workbench/static/run.js) decides which.
+  otherwise what was last seen, and its button. [run.js](../../app/interfaces/workbench/static/run.js) decides which.
 - The demo's held engineer of the run stopped at work drafts a file; the driver's `change:` mode reads it, its
   `change-rows` mode sends the page summaries in the worker's place, and its `change-idle` mode watches a waiting
   run's page.
@@ -139,6 +102,8 @@ Both read the same git, through the same worker; they differ only in how the new
   runs*. `workers.sh` now, once the worker is gone and its reapers have had their wait, ends what the scope still
   holds through the scope and collects it — and refuses, saying so, while the scope still holds a worker, its pid
   file or not. Windows needed nothing: its reads die with the worker's job.
+- **External reviewer, 2026-11-05 — PASS** for the live change, its regression fixes and the worker's lifecycle,
+  on the evidence above; no further change within this scope.
 
 ## Verification
 
@@ -200,5 +165,10 @@ Both read the same git, through the same worker; they differ only in how the new
   `tests.test_demo` — 43 classes, 256 tests, OK; on Windows the first three — 21 classes, 129 tests, OK.
 - **On the live Workbench:** the operator's run, waiting at its plan's approval, shows its change first on its
   page, as the snapshot that decision judges.
-- **Not verified live:** the line a page says when its run's worker is up but sends no change — a worker
-  started before this code — since no run of the live stack was at work to show it.
+- **The full suite, after the final PASS:** on WSL 150 classes, 744 tests, OK; on Windows 102 classes, 517
+  tests, OK. Then both live workers restarted on this code, each idle: Windows, then WSL.
+- **Live, on a real run at work:** the operator's run, continued on the restarted Windows worker, its engineer
+  at its plan turn — the run's page shows its change first, *1 file changed · +950 −0 · read now, and again as
+  the worktree changes.*, listing the run's todo with nothing pressed, and that file opens into its diff.
+- **Not seen live:** the line a page says when its run's worker is up but serves no change — only a worker
+  started before this code does that, and neither does now.

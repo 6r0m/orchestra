@@ -1,16 +1,16 @@
 # Agent text read as the Markdown it is written in
 
-**Status:** BUILT 2026-11-05 — red, then green in `make demo` on the final code. It awaits the external
-reviewer's PASS and the operator's word to close it.
+**Status:** DONE 2026-11-05 — the goal met: reviewed with no blocking issue; green in `make demo` and in the
+full suite on both hosts; rechecked on the live Workbench; closed on the operator's word.
 **Scope:** how the Workbench page draws what agents write: a decision's evidence, what a turn produced, and
-the parts a turn received ([run.js](../app/interfaces/workbench/static/run.js), a new `markdown.js`, a vendored
-markdown-it, [style.css](../app/interfaces/workbench/static/style.css),
-[server.py](../app/interfaces/workbench/server.py)'s list of served files), and its scripted proof
-([demo.py](../tools/demo.py), [demo_press.py](../tools/demo_press.py)). The workflow and what is copied do not
+the parts a turn received ([run.js](../../app/interfaces/workbench/static/run.js), a new `markdown.js`, a vendored
+markdown-it, [style.css](../../app/interfaces/workbench/static/style.css),
+[server.py](../../app/interfaces/workbench/server.py)'s list of served files), and its scripted proof
+([demo.py](../../tools/demo.py), [demo_press.py](../../tools/demo_press.py)). The workflow and what is copied do not
 change.
 **Stable documentation owner:** the invariant on agent text in
-[interfaces' structure](../app/interfaces/docs/architecture/structure.md) and the
-[architecture](../docs/architecture/structure.md); [using.md](../docs/using.md) for what the operator sees.
+[interfaces' structure](../../app/interfaces/docs/architecture/structure.md) and the
+[architecture](../../docs/architecture/structure.md); [using.md](../../docs/using.md) for what the operator sees.
 
 ## Goal
 
@@ -68,6 +68,12 @@ a parser off the shelf, while agent text still never reaches the page as markup.
 - **A parser of our own:** the operator asked for one off the shelf, and Markdown's edge cases are the
   parser's to own.
 
+## Review record
+
+- **External reviewer, 2026-11-05:** read with the live change's first review — *markdown-it parses the text,
+  while the Workbench constructs permitted DOM elements using text rather than inserting agent-generated HTML…
+  I found no blocking Markdown issue* — and not reopened at its final PASS.
+
 ## Verification
 
 - **Red:** `make demo` with the page as it was: the plan approval's evidence read *The change is the approved
@@ -84,8 +90,10 @@ a parser off the shelf, while agent text still never reaches the page as markup.
   link — and the page file was then restored byte for byte.
 - **On the live Workbench,** restarted on this code: the renderer's check, with the summary's line — bold
   drawn, its link and raw HTML its words — passed; the operator's run's history reads *through a selective
-  extraction of audio* where it read `**selective extraction**`.
+  extraction of audio* where it read `**selective extraction**`. Again at the close, with both workers on the
+  final code: the same elements and nothing else, the two web links only, the path on hover.
 - **Unit tests on WSL:** `tests.interfaces.test_workbench` — every file the page loads served as its type —
   `tests.test_architecture` and `tests.test_demo`: 22 classes, 127 tests, OK. `make public-check` passed; the
   new vendored files are untracked until staged, so its scan of them comes with the commit and its push.
-- **Not run:** the whole suite.
+- **The full suite, after the final PASS:** on WSL 150 classes, 744 tests, OK; on Windows 102 classes, 517
+  tests, OK.
