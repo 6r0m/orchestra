@@ -20,6 +20,7 @@ import tempfile
 from temporalio.worker import Worker
 
 from app.application import activities
+from app.application import changes
 from app.application import client as runs
 from app.application import settings
 from app.application import stack
@@ -45,15 +46,18 @@ def sweep(gone=()):
 async def main(target):
     policy = settings.load()
     sweep()
-    # This host's live agent terminals, for the workbench page. Before the pid file: a second worker
-    # of this policy stops here, on the port the first holds, and never touches the first one's record.
-    terminal.serve(policy["targets"][target]["terminal_port"], policy["workbench_port"])
+    # This host's live agent terminals, and the change of each run whose worktree is here, for the workbench
+    # page. Before the pid file: a second worker of this policy stops here, on the port the first holds, and
+    # never touches the first one's record.
+    change = changes.ChangeFeed(target)
+    terminal.serve(policy["targets"][target]["terminal_port"], policy["workbench_port"], feeds={"change": change.poll})
     os.makedirs(paths.RUNTIME_ROOT, exist_ok=True)
     record = stack.pid_file(policy, target)
     with open(record, "w", encoding="utf-8") as fh:
         fh.write(str(os.getpid()))
     try:
         client = await runs.connect(identity="%d@%s" % (os.getpid(), socket.gethostname()))
+        change.bind(client, asyncio.get_running_loop())
         queue = P.queue(policy, target)
         host = activities.Activities()
         # Role-runs are sequential by policy; the pool only keeps a long one from blocking the trace writes.

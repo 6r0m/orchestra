@@ -8,7 +8,7 @@ the turn's explicit result back out.
 
 ## Owns
 
-- `terminal` — each role's live terminal on this host: its record, its WebSocket, a role turn run in it, and that turn's completion.
+- `terminal` — each role's live terminal on this host: its record, its WebSocket — which also serves the feeds the worker hands it — a role turn run in it, and that turn's completion.
 - `launch` — one agent process from an argv list, with its whole descendant tree contained.
 - `ptyhost` — the pseudo-terminal the agent draws in; launched by path, inside the containment.
 - `turn_hook` — the vendors' own completion wiring, writing a turn's events into that turn's file; launched by path, by the vendor.
@@ -68,7 +68,9 @@ Through a host containment primitive: a transient systemd user scope on POSIX, a
 on Windows. A launch no scope can hold is refused before the agent runs.
 
 Through the worker's WebSocket: the terminal's record and its live bytes reach the page, and
-keystrokes come back.
+keystrokes come back. The same socket serves each feed the worker hands it, by name, beside the terminals —
+the run's change is one — with the same origin and token; what a feed reads is the worker's to compose, and
+this package knows nothing of it.
 
 ## Invariants
 

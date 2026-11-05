@@ -425,17 +425,27 @@ def run_turn(worktree, argv, rdir, name, prompt, timeout, env, on_tick=None, *, 
 
 # ---- the WebSocket ---------------------------------------------------------------------
 
-def serve(port, workbench_port, host="127.0.0.1"):
-    """Serve this host's terminals on `ws://127.0.0.1:<port>/<run-id>/<role>`, in a thread of its own.
+def serve(port, workbench_port, host="127.0.0.1", feeds=None):
+    """Serve this host's terminals on `ws://127.0.0.1:<port>/<run-id>/<role>`, in a thread of its own, and each
+    of `feeds` on `ws://127.0.0.1:<port>/<run-id>/<name>`.
 
     A connection needs the workbench page's origin and its token, offered as the subprotocol
     `token.<token>` beside `workbench.v1`: in the handshake's own header, never in the URL. It first
     receives whether an agent is under the terminal now and the terminal's record, then its live bytes,
     and is told again whenever an agent starts or ends; what it sends is typed into the terminal. A run
     with no terminal on this host — closed, or the worker restarted — is sent its record and closed.
+
+    A feed is what the worker hands this socket to say about a run as it changes, which this module knows
+    nothing of: `feed(run_id, memo)` returns a message to send as JSON, or None, and how long until it is
+    asked again — None to end the watch. It is asked in a thread, for each watcher, with that watcher's own
+    `memo`; one that fails tells its watcher why and ends the watch. A feed may not take a role's name.
     Returns once the socket listens; the server ends with this process.
     """
     from websockets.asyncio.server import serve as ws_serve
+    from websockets.exceptions import ConnectionClosed
+    feeds = dict(feeds or {})
+    if set(feeds) & set(P.ROLES):
+        raise ValueError("a feed may not take a role's name: %s" % ", ".join(sorted(set(feeds) & set(P.ROLES))))
     ready, failure = threading.Event(), []
     origins = allowed_origins(workbench_port)
     expected = token()
@@ -448,13 +458,38 @@ def serve(port, workbench_port, host="127.0.0.1"):
         if TOKEN_PROTOCOL + expected not in offered:
             return connection.respond(HTTPStatus.FORBIDDEN, "token required\n")
         parts = [part for part in parsed.path.split("/") if part]
-        if len(parts) != 2 or parts[1] not in P.ROLES or not re.fullmatch(r"[\w-]+", parts[0]):
+        if len(parts) != 2 or (parts[1] not in P.ROLES and parts[1] not in feeds) \
+                or not re.fullmatch(r"[\w-]+", parts[0]):
             return connection.respond(HTTPStatus.NOT_FOUND, "no such terminal\n")
         return None
+
+    async def follow(connection, run_id, name):
+        memo = {}
+        while True:
+            try:
+                message, wait = await asyncio.to_thread(feeds[name], run_id, memo)
+            except Exception as exc:                 # noqa: BLE001 - told to its watcher, and logged here
+                print("the %s feed of run %s failed: %r" % (name, run_id, exc), file=sys.stderr, flush=True)
+                await connection.send(json.dumps({"error": "%s: %s" % (type(exc).__name__, exc)}))
+                return
+            if message is not None:
+                await connection.send(json.dumps(message))
+            if wait is None:
+                return
+            try:
+                # Waiting on the watcher, so one that goes ends its watch at once rather than at the next look;
+                # what it sends is ignored.
+                await asyncio.wait_for(connection.recv(), wait)
+            except asyncio.TimeoutError:
+                pass
+            except ConnectionClosed:
+                return
 
     async def handler(connection):
         parsed = urllib.parse.urlsplit(connection.request.path)
         run_id, role = [part for part in parsed.path.split("/") if part]
+        if role in feeds:
+            return await follow(connection, run_id, role)
         terminal = get(run_id, role)
         if terminal is None:
             await connection.send(json.dumps({"live": False}))

@@ -60,13 +60,15 @@ STATIC = {"/": ("index.html", "text/html; charset=utf-8"),
           "/change.js": ("change.js", JS),
           "/diff.js": ("diff.js", JS),
           "/terminals.js": ("terminals.js", JS),
+          "/markdown.js": ("markdown.js", JS),
           "/worktrees.js": ("worktrees.js", JS),
           "/settings.js": ("settings.js", JS),
           # The tab's icon — the engineer's colour, the architect's and yours: named by the page, so no
           # browser asks for a `/favicon.ico` this server does not hold.
           "/favicon.svg": ("favicon.svg", "image/svg+xml"),
           "/vendor/xterm.js": ("vendor/xterm/xterm.js", JS),
-          "/vendor/xterm.css": ("vendor/xterm/xterm.css", "text/css; charset=utf-8")}
+          "/vendor/xterm.css": ("vendor/xterm/xterm.css", "text/css; charset=utf-8"),
+          "/vendor/markdown-it.js": ("vendor/markdown-it/markdown-it.esm.min.mjs", JS)}
 RUN_ID = re.compile(r"^[\w-]{1,64}$")
 MAX_BODY = 1 << 20
 MAX_TURN_FILE = 8 << 20

@@ -923,6 +923,41 @@ class Adopt(Repo):
                                            capture_output=True).returncode, 0)
 
 
+class Fingerprint(Repo):
+    """What a live view of a run's change asks every few seconds: whether anything in its worktree moved —
+    cheap, and writing nothing of the worktree's git."""
+
+    def setUp(self):
+        super().setUp()
+        self.path = self.worktree("run1", change=False)
+
+    def test_it_moves_when_the_change_does_and_only_then(self):
+        first = W.change_fingerprint(self.path)
+        self.assertEqual(W.change_fingerprint(self.path), first, "nothing moved, so neither did it")
+        write(os.path.join(self.path, "new.txt"), "a file the agent wrote\n")
+        added = W.change_fingerprint(self.path)
+        self.assertNotEqual(added, first, "a new file")
+        write(os.path.join(self.path, "new.txt"), "a file the agent wrote, then wrote again\n")
+        rewritten = W.change_fingerprint(self.path)
+        self.assertNotEqual(rewritten, added, "a changed file the change already held")
+        write(os.path.join(self.path, "app.txt"), "one, edited\n")
+        self.assertNotEqual(W.change_fingerprint(self.path), rewritten, "a tracked file edited")
+
+    def test_it_writes_nothing_of_the_worktrees_git(self):
+        write(os.path.join(self.path, "app.txt"), "one, edited\n")
+        index = git(self.path, "rev-parse", "--path-format=absolute", "--git-path", "index").strip()
+        before = (os.stat(index).st_mtime_ns, open(index, "rb").read())
+        for _ in range(3):
+            W.change_fingerprint(self.path)
+        self.assertEqual((os.stat(index).st_mtime_ns, open(index, "rb").read()), before,
+                         "the worktree's index is the controller's to write")
+
+    def test_a_worktree_that_is_gone_is_refused(self):
+        folders.remove(self.path)
+        with self.assertRaises(W.ChangeRefused):
+            W.change_fingerprint(self.path)
+
+
 class Cleanup(Repo):
     """Nothing a run owns is removed until the base is proven to hold its work."""
 

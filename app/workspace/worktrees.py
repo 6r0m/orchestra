@@ -237,6 +237,36 @@ def guard(path, run_id):
     return hashlib.sha256("\0".join(parts).encode("utf-8")).hexdigest()
 
 
+def change_fingerprint(path):
+    """Whether anything in the worktree at `path` moved, cheaply: its HEAD, what `git status` lists — every
+    untracked file by name — and each listed file's size and time. Equal while nothing moved, and different
+    once a file is added, removed or written again, so the change is read again only then.
+
+    Read with no optional lock, so the worktree's index — the controller's — is never written. Raises
+    ChangeRefused for a worktree that is gone; on any git failure, RuntimeError.
+    """
+    if not os.path.isdir(path):
+        raise ChangeRefused("the run's worktree is gone — merged, discarded or removed")
+    listed = git(path, "--no-optional-locks", "status", "--porcelain=v1", "-z", "--untracked-files=all",
+                 "--ignore-submodules=all", check=False)
+    head = git(path, "rev-parse", "--verify", "--quiet", "HEAD", check=False)
+    if listed.returncode or head.returncode:
+        raise RuntimeError("git status in %s: rc=%d %s" % (path, listed.returncode or head.returncode,
+                                                             (listed.stderr or head.stderr).strip()[:300]))
+    parts, tokens, at = [head.stdout.strip(), listed.stdout], listed.stdout.split("\0"), 0
+    while at < len(tokens) and tokens[at]:
+        entry, name = tokens[at], tokens[at][3:]
+        # A rename or copy names its old path next, which is no file of the worktree now.
+        at += 2 if "R" in entry[:2] or "C" in entry[:2] else 1
+        try:
+            found = os.stat(os.path.join(path, name))
+            parts.append("%s %d %d" % (name, found.st_size, found.st_mtime_ns))
+        except OSError:
+            # Deleted: what status said of it is all there is.
+            parts.append(name)
+    return hashlib.sha256("\0".join(parts).encode("utf-8", "surrogateescape")).hexdigest()
+
+
 def work_tree(path):
     """The tree `git add -A` would commit, computed on a private copy of the index."""
     index = git(path, "rev-parse", "--path-format=absolute", "--git-path", "index").stdout.strip()

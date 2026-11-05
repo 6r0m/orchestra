@@ -24,7 +24,7 @@ print, serve and exit. The page holds no state of its own.
 | `cli.py` | the command line over the shared client and the stack's owner |
 | `worker.py` | this host's Temporal worker and the queues it polls |
 | `workbench/server.py` | the page's HTTP server and its small JSON API |
-| `workbench/static/` | the page itself: HTML, CSS, its JavaScript as native modules — the stack, runs, new-run form, Settings, terminals, the history as turns and answers, the change and its file-by-file diff viewer, worktrees, and `app.js` their entry — and a pinned xterm.js |
+| `workbench/static/` | the page itself: HTML, CSS, its JavaScript as native modules — the stack, runs, new-run form, Settings, terminals, the history as turns and answers, the change and its file-by-file diff viewer, worktrees, agent text drawn as Markdown, and `app.js` their entry — and a pinned xterm.js and markdown-it |
 | `workbench/orchestra-workbench.service` | the systemd user unit the page runs as, rendered for a checkout by `make workbench-install` |
 
 ## Relationships
@@ -37,7 +37,8 @@ lifecycle, do not allow. Through `application.stack`: the stack's reading and ev
 and restart of it, so neither keeps a second copy of how the stack runs.
 
 Through the worker's WebSocket: the page attaches to a run's live terminals on whichever
-host is running them.
+host is running them, and — while the run works — to its change, which that worker reads from the run's
+worktree and sends again whenever it moves: a snapshot, whose files open through the change's own reader.
 Its Operator action list also projects a waiting vendor dialog from the active turn's local
 hook events — Claude's; Codex reports none — and the workflow still owns actual stops and their answers.
 
@@ -64,7 +65,7 @@ when the decision above moves on; nothing else of it is read again.
 - **The workbench never manages its own process (D32).** Systemd runs it; it starts and stops the stack, and the stack never includes it.
 - **A stop's answers are the ones it publishes (D6).** The page and the command line offer exactly the actions a stop publishes; the page owns their labels, colours and dialogs, the command line their shorthands and how each is typed, and neither keeps its own list.
 - **Everything listens on `127.0.0.1`**, and the API and the terminal sockets accept only the page's token, from the page's own origin. The terminal sockets take that token in the handshake's own header, never in a URL.
-- **Agent text reaches the page as terminal bytes or as text, never as markup** — a file's lines in the diff viewer too.
+- **Agent text reaches the page as terminal bytes or as text, never as markup** — a file's lines in the diff viewer too. What an agent writes in Markdown is drawn as Markdown all the same: the vendored markdown-it only parses it, with raw HTML off, and the page's `markdown.js` makes from its tokens only the elements it knows, every word set as text. A link opens only over http(s); any other is its words, its target on hover; an image is its words, so nothing agent text names is loaded. What is copied, a failure, an exact prompt and a raw record stay as written.
 - **The page sends an agent only what the operator types and presses (D17).** A terminal emulator answers the queries in what it draws, and the page's draws a role's record from its start on every connection — the questions an agent's CLI asked its terminal as it started among them. Those answers are no key of the operator's and are never sent: they would land in the agent's own prompt as text, ahead of what the operator types there. An answer is known by its bytes alone, and a cursor's report from the top row is spelled exactly as F3 held with Shift, Alt or Ctrl is — so those chords are not sent either: a clean prompt is chosen over them.
 
 ## Accepted decisions
@@ -78,4 +79,5 @@ The invariants above name the ones that bind this package.
 
 The page's token keeps other sites and other users out, not other processes of the same
 user, which can read it (D28). The page is plain HTML, CSS and JavaScript with no build
-step, which is deliberate; the cost is that its one vendored dependency is pinned by hand.
+step, which is deliberate; the cost is that its two vendored dependencies, xterm.js and markdown-it, are pinned
+by hand, each with its version, source and integrity in its `VERSION`.

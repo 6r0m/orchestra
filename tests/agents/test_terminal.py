@@ -388,10 +388,23 @@ class Socket(unittest.TestCase):
     """The terminal's WebSocket: the workbench's token and origin, the record, then live bytes."""
 
     PORT, WORKBENCH = 18391, 18390
+    # What the feed this socket is handed answers, look by look, in the test now running: a message or None and
+    # how long until the next look — None to end — or an exception it raises. Each look is kept.
+    script = []
+    looks = []
 
     @classmethod
     def setUpClass(cls):
-        terminal.serve(cls.PORT, cls.WORKBENCH)
+        terminal.serve(cls.PORT, cls.WORKBENCH, feeds={"change": cls.feed})
+
+    @classmethod
+    def feed(cls, run_id, memo):
+        cls.looks.append((run_id, dict(memo)))
+        memo["looked"] = memo.get("looked", 0) + 1
+        step = cls.script.pop(0)
+        if isinstance(step, Exception):
+            raise step
+        return step
 
     def setUp(self):
         self.run_id = "test-terminal-%s" % uuid.uuid4().hex[:8]
@@ -495,6 +508,44 @@ class Socket(unittest.TestCase):
                 except Exception:
                     return "closed"
         self.assertEqual(asyncio.run(talk()), "closed")
+
+    def watch(self, path=None):
+        """Every message the feed sends one watcher, and whether the socket then closed of itself."""
+        from websockets.exceptions import ConnectionClosedOK
+
+        async def talk():
+            got = []
+            async with self.connect(path=path or "%s/change" % self.run_id) as ws:
+                try:
+                    while True:
+                        got.append(json.loads(await asyncio.wait_for(ws.recv(), 5)))
+                except ConnectionClosedOK:
+                    return got, True
+                except asyncio.TimeoutError:
+                    return got, False
+        return asyncio.run(talk())
+
+    def test_a_feed_sends_what_each_look_finds_and_ends_when_it_says(self):
+        Socket.script = [({"files": 1}, 0.05), (None, 0.05), ({"files": 2}, None)]
+        Socket.looks = []
+        self.assertEqual(self.watch(), ([{"files": 1}, {"files": 2}], True),
+                         "a look that finds nothing new sends nothing, and the last one ends the watch")
+        self.assertEqual([run for run, _ in Socket.looks], [self.run_id] * 3)
+        self.assertEqual([memo.get("looked", 0) for _, memo in Socket.looks], [0, 1, 2],
+                         "one memo per watcher, kept from one look to the next")
+
+    def test_a_feed_that_fails_says_so_and_ends(self):
+        Socket.script = [RuntimeError("git broke")]
+        self.assertEqual(self.watch(), ([{"error": "RuntimeError: git broke"}], True))
+
+    def test_a_feed_takes_the_token_and_origin_a_terminal_does_and_only_the_names_it_was_handed(self):
+        self.assertEqual(self.refused(path="%s/change" % self.run_id, token="wrong"), 403)
+        self.assertEqual(self.refused(path="%s/change" % self.run_id, origin="http://evil.example"), 403)
+        self.assertEqual(self.refused(path="%s/changes" % self.run_id), 404)
+
+    def test_a_feed_may_not_take_a_roles_name(self):
+        with self.assertRaises(ValueError):
+            terminal.serve(self.PORT + 2, self.WORKBENCH, feeds={"engineer": self.feed})
 
     def test_a_closed_terminal_replays_its_record_read_only(self):
         term = terminal.open_terminal(self.run_id, "architect")

@@ -94,7 +94,7 @@ Do not re-derive a `states/` layer here.
 | [client.py](../../app/application/client.py) | the one client of runs — start, list, status, answer, stop, force terminate, the change, the worktrees and the removal of what a closed run kept — shared by the page and the CLI |
 | [stack.py](../../app/application/stack.py) | the stack's one reading and its one owner: Temporal and each host's worker, started, stopped and restarted for the Makefile, the command line and the page |
 | [app/agents/](../../app/agents/README.md) — [nodes.py](../../app/agents/nodes.py) | prompt composition, the agent argv, session identity, verdict parsing, failure classes |
-| [terminal.py](../../app/agents/terminal.py) · [ptyhost.py](../../app/agents/ptyhost.py) · [turn_hook.py](../../app/agents/turn_hook.py) | each role's live terminal on its host — its record, its WebSocket, a role turn run in it and that turn's completion |
+| [terminal.py](../../app/agents/terminal.py) · [ptyhost.py](../../app/agents/ptyhost.py) · [turn_hook.py](../../app/agents/turn_hook.py) | each role's live terminal on its host — its record, its WebSocket, a role turn run in it and that turn's completion; the same socket serves the run's change, live, from [changes.py](../../app/application/changes.py) |
 | [launch.py](../../app/agents/launch.py) | one agent process from an argv list, with its whole descendant tree contained |
 | [trust.py](../../app/agents/trust.py) | telling this host's agent CLIs that a run's repository is one the operator works in, so no turn stops at their trust dialog |
 | [app/workspace/](../../app/workspace/README.md) — [worktrees.py](../../app/workspace/worktrees.py) | the run's worktree through the target's own git: create, guard, merge, discard, the view |
@@ -546,7 +546,8 @@ still lands on a checkout.
   browser nor a rebound DNS name can use them; the terminal sockets take that token in the
   handshake's own header, never in a URL, which browsers print and proxies log. Everything listens
   on `127.0.0.1`. It is plain HTML, CSS and JavaScript — native modules, one per concern — with a
-  pinned, vendored xterm.js and no build step; agent text reaches it only as terminal bytes or as text, never as markup.
+  pinned, vendored xterm.js and markdown-it and no build step; agent text reaches it only as terminal bytes or as text,
+  never as markup — its Markdown is parsed, not rendered, and the page builds what it shows from the tokens.
 
 ## Invariants
 

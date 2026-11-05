@@ -119,7 +119,10 @@ FAKE = textwrap.dedent("""\
             typed += key
         fake_cli.draw("heard: " + typed)
 
-    # A turn the demo holds at work, so that a Stop reaches an agent mid-turn.
+    # A turn the demo holds at work, so that a Stop reaches an agent mid-turn. The run stopped at work drafts a
+    # file first, as an agent at work writes: the page's change shows it while the turn goes on.
+    if os.path.exists(os.path.join(state, "hold-turn")) and "Stop me at work" in prompt:
+        open("draft.txt", "w").write("drafted while at work\\n")
     while os.path.exists(os.path.join(state, "hold-turn")):
         say("still working...")
 
@@ -134,7 +137,9 @@ FAKE = textwrap.dedent("""\
                        "PASS", "Direction: add greeting.txt and its test.\\nBlast radius: one new file.")
         else:
             say("reading the change...", "comparing it with the approved plan...")
-            verdict = ("PASS", "The change is the approved plan.")
+            # Written in Markdown, as agents write: the page draws its table as a table.
+            verdict = ("PASS", "The change is the approved plan.\\n\\n| file | change |\\n|---|---|\\n"
+                               "| greeting.txt | **new** |")
         message = json.dumps({"verdict": verdict[0], "feedback": verdict[1]})
     else:
         todo = re.search(r"write the reviewable todo to exactly: (\\S+)", prompt)
@@ -440,6 +445,11 @@ class Demo:
         check(verdicts == ["PATCH", "PASS"], "the architect sent the plan back once, then passed it: %s" % verdicts)
         check(view["stop"]["reason"] == "approval" and "approve" in view["actions"],
               "the run waits for approval, and says so")
+        check(self.press(merged, "markdown", "greeting.txt"),
+              "the architect's assessment drawn as the Markdown it wrote: its table a table, no row left as pipes")
+        check(self.press("page", "markdown-safety", "none"),
+              "the page's renderer, given hostile Markdown, makes only its own elements, links only to the web and "
+              "loads nothing")
 
         step("the plan approved by pressing the Workbench's own button")
         check(self.press(merged, "Approve", "answered: approve"), "the page sent the answer, and the workflow took it")
@@ -493,6 +503,9 @@ class Demo:
                    "the engineer at work")
         check(self.press(working, "terminal:engineer", "still working"),
               "the page's own terminal shows the engineer at work, live from its host")
+        check(self.press(working, "change:drafted while at work", "draft.txt"),
+              "the run's change, first on its page, lists the file its engineer wrote while still at work — "
+              "read by its host's worker with nothing pressed — and opens its diff")
         check(self.press(working, "Stop run", "stopping") and self.asked("Stop this run?", "stay as they are"),
               "the page asked first, then sent the Stop")
         view = self.until(working, closed, 120, "the Stop")

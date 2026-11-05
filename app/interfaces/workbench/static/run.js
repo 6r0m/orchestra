@@ -8,8 +8,9 @@ import { $, PARTS, at, blockedBy, clock, code, confirmAction, copyButton, decisi
   lasted, outcome, report, score, unchanged, wrote } from "./ui.js";
 import { stackButton, stackReading } from "./stack.js";
 import { interrupt, showTerminals, updateTerminals } from "./terminals.js";
-import { placeChange, readOnceFor, showChangeFor } from "./change.js";
+import { placeChange, readOnceFor, showChangeFor, watchChange } from "./change.js";
 import { chevron, fileList } from "./diff.js";
+import { markdown, markdownLine } from "./markdown.js";
 import { removeKept } from "./worktrees.js";
 
 // How an answer is shown. Which answers a stop takes comes with the stop, and whether one is accepted is
@@ -116,7 +117,7 @@ export async function refreshRun() {
   if (status.unreadable) return;
   renderStop(status.stop, status.timeline);
   renderKept(runId, view);
-  renderChange(view, status.stop, status.timeline);
+  renderChange(view, status.stop);
   renderHistory(view, status.timeline, status.stop);
   if (!unchanged($("lines"), status.lines)) $("lines").textContent = status.lines.join("\n");
   showTerminals(runId, state.target);
@@ -343,7 +344,7 @@ function evidencePart(part) {
   label.appendChild(el("span", part.label));
   if (part.verdict) label.appendChild(el("span", part.verdict, "verdict " + part.verdict));
   if (part.code) label.appendChild(copyButton(part.text, part.label.toLowerCase()));
-  box.append(label, el(part.code ? "pre" : "div", part.text, part.code ? "code" : "prose"));
+  box.append(label, part.code ? el("pre", part.text, "code") : markdown(part.text, "prose"));
   return box;
 }
 
@@ -435,11 +436,17 @@ async function answer(stop, action, button) {
 
 // The change sits under the decision when the decision judges it — at a plan's or a build's approval and
 // at the final gate, read at once — after the history once a plan exists, and nowhere before.
-function renderChange(view, stop, timeline) {
+// The run's change, its result, first on its page: live while the run works, from its host's worker; the snapshot
+// a decision judges, under that decision; and once closed, what its kept worktree holds, read by the button.
+function renderChange(view, stop) {
   const judged = stop && ((stop.reason === "approval" && ["plan", "build"].includes(stop.phase)) || stop.reason === "final");
-  const exists = view.worktree && (view.state === "closed" ? view.kept
-    : judged || timeline.some((entry) => entry.stage === "plan"));
-  placeChange(!exists ? "none" : judged ? "evidence" : "later");
+  const exists = view.worktree && (view.state !== "closed" || view.kept);
+  placeChange(exists ? "first" : "none");
+  if (exists && view.state !== "closed" && !judged) {
+    watchChange(selected, view.host);
+    return;
+  }
+  watchChange(null);
   if (judged) readOnceFor(stop);
 }
 
@@ -564,8 +571,8 @@ function turnRow(entry, role, turn, openDetails, bodies) {
   const summary = el("summary", null);
   summary.appendChild(head);
   const said = entry.brief || entry.feedback;
-  if (said) summary.appendChild(el("span", shownAbove.has(said) ? "Shown above, in the decision" : firstLine(said),
-    "turn-preview"));
+  if (said) summary.appendChild(shownAbove.has(said) ? el("span", "Shown above, in the decision", "turn-preview")
+    : markdownLine(firstLine(said), "turn-preview"));
   const body = bodies.get(key) || el("div", null, "turn-body");
   if (bodies.has(key)) refreshProduced(body, entry);
   row.append(summary, body);
@@ -670,7 +677,7 @@ function received(attempt, role) {
         const one = el("details", null, "prompt-part");
         const label = el("summary", name);
         if (started) label.appendChild(el("span", started, "hint"));
-        one.append(label, el("div", text, "turn-prose"));
+        one.append(label, markdown(text, "turn-prose"));
         item.appendChild(one);
       }
       list.appendChild(item);
@@ -723,8 +730,8 @@ function produced(attempt, entry, index, opened) {
     const output = el("details", null, "turn-output");
     const summary = el("summary");
     if (review) summary.append(el("span", review.verdict, "verdict " + review.verdict), " ");
-    summary.appendChild(el("span", text ? firstLine(text) : "no findings", "first-line"));
-    output.append(summary, field(review ? review.verdict + "\n\n" + text : text, "what it produced", text));
+    summary.appendChild(text ? markdownLine(firstLine(text), "first-line") : el("span", "no findings", "first-line"));
+    output.append(summary, field(review ? review.verdict + "\n\n" + text : text, "what it produced", text, true));
     output.open = Boolean(opened && opened.output);
     box.appendChild(output);
   }
@@ -741,10 +748,12 @@ function produced(attempt, entry, index, opened) {
   return box;
 }
 
-// Text kept whole, with its copy: `shown` when what is shown differs from what is copied.
-function field(text, what, shown) {
+// Text kept whole, with its copy: `shown` when what is shown differs from what is copied, drawn as its Markdown
+// when it is an agent's answer, and as written otherwise. Copy always copies it as written.
+function field(text, what, shown, asMarkdown) {
   const box = el("div", null, "turn-field");
-  box.append(copyButton(text, what), el("div", shown ?? text, "turn-prose"));
+  box.append(copyButton(text, what), asMarkdown ? markdown(shown ?? text, "turn-prose")
+    : el("div", shown ?? text, "turn-prose"));
   return box;
 }
 

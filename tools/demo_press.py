@@ -1,6 +1,6 @@
 """Press one of the Workbench's own buttons in a headless browser, as the operator would.
 
-    python tools/demo_press.py <workbench url> <run id | stack | start> <button label | task | refused:repo:task | answered:status | terminal:role | turn:stage | turn-then:stage:label | file:path | round:stage:path | history | hold:role:label | type-after:role:label:line | layout:WIDTHxHEIGHT | absent:label,...> <what the page should say> [note]
+    python tools/demo_press.py <workbench url> <run id | stack | start | page> <button label | task | refused:repo:task | answered:status | markdown | markdown-safety | change:words | terminal:role | turn:stage | turn-then:stage:label | file:path | round:stage:path | history | hold:role:label | type-after:role:label:line | layout:WIDTHxHEIGHT | absent:label,...> <what the page should say> [note]
 
 The Windows side of `make demo` (WSL cannot reach Windows' loopback, and Windows reaches the
 Workbench's): headless Edge, driven over the DevTools protocol, opens the page, opens the run by its
@@ -15,6 +15,14 @@ words expected, stays open through the page's reads and a move to another view, 
 given `answered:<status>`, the page's start is answered in the page itself with that HTTP status, or with no
 answer at all for `none`, and no write of the page's reaches any server: its exit code says whether the window
 then names the words expected and the form's alert says the same kind of thing — refused, or not confirmed.
+Given `markdown`, it presses nothing: it opens the run and reads its decision's evidence as the page draws
+it, and exits 0 when a table there holds the words expected and no table is left as rows of pipes. Given
+`markdown-safety` for the run `page`, it presses nothing either: it has the page's own renderer draw a fixed
+Markdown text, hostile parts among it, and exits 0 when every part is drawn as it should be and nothing
+outside the renderer's own elements is made, no link leads off the web and nothing is loaded.
+Given `change:<words>`, it presses nothing but a file: it opens the run and waits for its change, live, to
+list the file expected, then opens that file: it exits 0 when the change comes before the terminals with
+nothing pressed to read it, lists that file, and its diff shows the words.
 Given `terminal:<role>`, it presses nothing: it opens that role's terminal, if it is
 closed, and reads its screen as the page shows it, live from its host. Given `turn:<stage>`, it presses
 nothing either: it opens the run's latest turn of that stage in its history and reads what the page shows it
@@ -344,6 +352,117 @@ def answered(page, status, said):
     return 0 if said in window and alert.startswith(kind) and sent == 1 and shut else 1
 
 
+# The decision's evidence as the page draws it: its tables' cells, and whether a Markdown table's rule row is left
+# in its text as pipes.
+EVIDENCE = ("(() => { const box = document.getElementById('stop-evidence');"
+            " if (!box || !box.offsetParent || !box.textContent.trim()) return null;"
+            " return { cells: [...box.querySelectorAll('table th, table td')].map((c) => c.textContent.trim()),"
+            " strong: box.querySelectorAll('strong').length, pipes: /\\|\\s*:?-{3,}/.test(box.innerText),"
+            " text: box.innerText.replace(/\\s+/g, ' ').slice(0, 300) }; })()")
+
+
+def markdown(page, run_id, said):
+    """The run's decision, its evidence drawn as Markdown: 0 when a table there holds `said` and no table is left
+    as rows of pipes. Prints what it saw."""
+    page.value(OPEN % json.dumps(run_id))
+    wait(lambda: page.value(OPENED), 60, "the run")
+    shown = wait(lambda: page.value(EVIDENCE), 60, "the run's decision and its evidence")
+    print("the decision's evidence in the Workbench: %d table cells %s, %d bold, %s; it reads %r"
+          % (len(shown["cells"]), shown["cells"][:8], shown["strong"],
+             "a table left as rows of pipes" if shown["pipes"] else "no table left as pipes", shown["text"]))
+    return 0 if any(said in cell for cell in shown["cells"]) and not shown["pipes"] else 1
+
+
+# Markdown an agent could write, hostile parts among it: raw HTML, a script, an event attribute, a `javascript:`
+# link, an image, a path on the agent's host, and what an answer is made of.
+SAMPLE = "\n".join([
+    "## Heading", "", "| Capability | Verdict |", "|:--|--:|", "| **audio** | `keep` |", "", "- one", "- two", "",
+    "> quoted", "", "```js", "let a = 1;", "```", "",
+    "See https://example.com/a and [docs](https://example.com/b).", "",
+    "[local](C:/path/to/repo/Source/File.h:35) [bad](javascript:alert(1)) ![pic](https://example.com/p.png)", "",
+    "<img src=x onerror=alert(1)> <script>alert(1)</script> <b onclick=alert(1)>raw</b>"])
+# The page's renderer imported in the page and given SAMPLE: what it made of each part.
+SAFETY = ("import('/markdown.js').then((m) => { const box = m.markdown(%s); const all = [...box.querySelectorAll('*')];"
+          " return { tags: [...new Set(all.map((n) => n.tagName.toLowerCase()))].sort(),"
+          " cells: box.querySelectorAll('table th, table td').length,"
+          " aligned: [...box.querySelectorAll('th, td')].map((c) => c.style.textAlign),"
+          " links: [...box.querySelectorAll('a')].map((a) => [a.getAttribute('href'), a.target, a.rel]),"
+          " local: [...box.querySelectorAll('[title]')].map((n) => [n.textContent, n.title]),"
+          " events: all.filter((n) => [...n.attributes].some((x) => /^on/i.test(x.name))).length,"
+          " text: box.textContent, line: (l => ({ tags: [...l.querySelectorAll('*')].map((n) => n.tagName.toLowerCase()),"
+          " text: l.textContent }))(m.markdownLine(%s, 'first-line')) }; })")
+# A summary's one line, drawn inline: its emphasis drawn, its link and raw HTML its words.
+LINE = "**gist** with [a link](https://example.com/c) and <b onclick=alert(1)>raw</b>"
+# Every element the renderer may make, and no other.
+ALLOWED = {"div", "p", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "blockquote", "table", "thead",
+           "tbody", "tr", "th", "td", "strong", "em", "s", "code", "pre", "hr", "br", "a", "span"}
+
+
+def markdown_safety(page):
+    """The page's renderer given SAMPLE: 0 when the table, list, quote, code and links are drawn, the path stays
+    words with its target on hover, and nothing outside ALLOWED is made — no image, script or event attribute,
+    no link off the web — the raw HTML kept as its words. Prints what it saw."""
+    found = page.call("Runtime.evaluate", expression=SAFETY % (json.dumps(SAMPLE), json.dumps(LINE)),
+                      awaitPromise=True, returnByValue=True)
+    if "exceptionDetails" in found:
+        print("the page's renderer could not be used: %s" % found["exceptionDetails"].get("exception", {})
+              .get("description", found["exceptionDetails"].get("text")))
+        return 1
+    seen = found["result"]["value"]
+    wrong = []
+    if set(seen["tags"]) - ALLOWED:
+        wrong.append("it made %s" % sorted(set(seen["tags"]) - ALLOWED))
+    for tag in ("table", "ul", "blockquote", "pre", "code", "strong", "h2"):
+        if tag not in seen["tags"]:
+            wrong.append("no %s" % tag)
+    if seen["cells"] != 4 or seen["aligned"] != ["left", "right", "left", "right"]:
+        wrong.append("the table is %d cells aligned %s" % (seen["cells"], seen["aligned"]))
+    web = [["https://example.com/a", "_blank", "noopener noreferrer"],
+           ["https://example.com/b", "_blank", "noopener noreferrer"]]
+    if seen["links"] != web:
+        wrong.append("its links are %s" % seen["links"])
+    if ["local", "C:/path/to/repo/Source/File.h:35"] not in seen["local"]:
+        wrong.append("the path is not its words with its target on hover: %s" % seen["local"])
+    if seen["events"]:
+        wrong.append("%d element(s) carry an event attribute" % seen["events"])
+    for words in ("[bad](javascript:alert(1))", "<img src=x onerror=alert(1)>", "<script>alert(1)</script>", "pic"):
+        if words not in seen["text"]:
+            wrong.append("%r is not kept as its words" % words)
+    line = seen["line"]
+    if line["tags"] != ["strong"] or line["text"] != "gist with a link and <b onclick=alert(1)>raw</b>":
+        wrong.append("a summary's line is %s reading %r" % (line["tags"], line["text"]))
+    print("the page's renderer drew the sample as %s; links %s; on hover %s; a summary's line as %s, reading %r"
+          % (", ".join(seen["tags"]), seen["links"], seen["local"], line["tags"], line["text"]))
+    for text in wrong:
+        print("wrong: %s" % text)
+    return 1 if wrong else 0
+
+
+# The run's change as the page shows it: whether it comes before the terminals, whether its read was asked for —
+# the button shown — its line, and the paths it lists.
+CHANGE = ("(() => { const box = document.getElementById('change'); if (!box || box.hidden) return null;"
+          " return { first: Boolean(box.compareDocumentPosition(document.getElementById('agents'))"
+          " & Node.DOCUMENT_POSITION_FOLLOWING), button: !document.getElementById('diff-load').hidden,"
+          " said: document.getElementById('change-said').innerText,"
+          " paths: [...box.querySelectorAll('details.file')].map((f) => f.dataset.path) }; })()")
+
+
+def change(page, run_id, path, words):
+    """The run's change, live: 0 when it comes first on the run's page, lists `path` with nothing pressed to
+    read it, and that file's diff, opened, shows `words`. Prints what it saw."""
+    page.value(OPEN % json.dumps(run_id))
+    wait(lambda: page.value(OPENED), 60, "the run")
+    shown = wait(lambda: (lambda seen: seen if seen and path in seen["paths"] else None)(page.value(CHANGE)), 90,
+                 "the run's change to list %s" % path)
+    wait(lambda: page.value(OPEN_FILE % (json.dumps("#change"), json.dumps(path))), 30, "the file %s" % path)
+    lines = wait(lambda: [line for line in page.value(FILE_LINES % (json.dumps("#change"), json.dumps(path)))
+                          if words in line], 60, "the diff of %s to show %r" % (path, words))
+    print("the run's change in the Workbench, %s: %r, listing %s, nothing pressed to read it%s; %s opened: %r"
+          % ("first on its page" if shown["first"] else "NOT before its terminals", " ".join(shown["said"].split()),
+             shown["paths"], " — yet its button is shown" if shown["button"] else "", path, lines[0]))
+    return 0 if shown["first"] and not shown["button"] else 1
+
+
 def main(url, run_id, label, said, note=None):
     profile = tempfile.mkdtemp(prefix="orchestra-demo-edge-")
     # A layout is read at the window size it names; every press at the browser's own.
@@ -372,6 +491,12 @@ def main(url, run_id, label, said, note=None):
                 return refused(page, repo, task, said)
             if run_id == "start" and label.startswith("answered:"):
                 return answered(page, label.split(":", 1)[1], said)
+            if label == "markdown-safety":
+                return markdown_safety(page)
+            if label == "markdown":
+                return markdown(page, run_id, said)
+            if label.startswith("change:"):
+                return change(page, run_id, said, label.split(":", 1)[1])
             if label.startswith("terminal:"):
                 role = label.split(":", 1)[1]
                 page.value(OPEN % json.dumps(run_id))
@@ -535,4 +660,7 @@ def main(url, run_id, label, said, note=None):
 if __name__ == "__main__":
     if len(sys.argv) not in (5, 6):
         sys.exit(__doc__.strip().splitlines()[2].strip())
+    # What the page said reaches a Windows console whose code page lacks many of its characters — a minus sign,
+    # a dash: written escaped, never crashing the press it reports.
+    sys.stdout.reconfigure(errors="backslashreplace")
     sys.exit(main(*sys.argv[1:]))

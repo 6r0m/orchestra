@@ -2,9 +2,10 @@
 // the tree its files make — listed file by file, each opening into its diff, and its whole patch to copy. Read
 // again, it is a new snapshot; nothing of the last one is mixed into it.
 
-import { api } from "./api.js";
-import { $, report } from "./ui.js";
+import { api, CONFIG } from "./api.js";
+import { $, PARTS, clock, report } from "./ui.js";
 import { copyPatch, fileList } from "./diff.js";
+import { stackReading } from "./stack.js";
 
 const size = new Intl.NumberFormat(undefined, { style: "unit", unit: "kilobyte", unitDisplay: "short",
   maximumFractionDigits: 0 });
@@ -16,6 +17,7 @@ let loadedFor = null;
 
 // The change of `run`, not yet read.
 export function showChangeFor(run) {
+  watchChange(null);
   runId = run;
   shown = null;
   loadedFor = null;
@@ -25,15 +27,104 @@ export function showChangeFor(run) {
   $("diff-raw").hidden = true;
   $("diff-patch").textContent = "";
   $("diff-load").textContent = "Read the change";
+  $("diff-load").hidden = false;
 }
 
-// Where the change sits: under the decision when it is what the decision judges, after the history
-// otherwise, or nowhere while the run has no change to read.
+// Where the change sits: the run's result, so first after what the run does now — after a decision that does
+// not judge it — and under the decision that does; or nowhere while the run has no worktree to read.
 export function placeChange(where) {
   const section = $("change");
   section.hidden = where === "none";
-  const after = where === "evidence" ? $("stop") : $("history");
-  if (where !== "none" && section.previousElementSibling !== after) after.after(section);
+  if (where !== "none" && section.previousElementSibling !== $("stop")) $("stop").after(section);
+}
+
+// ---- live, while the run works ---------------------------------------------------------------------------
+
+// The change as the run's host's worker sends it, while the run works: a snapshot each time something in the
+// worktree moved, listed as any snapshot is, each file opening through the same reader. The worker reads; the
+// page only shows, and says plainly when it cannot.
+let watching = null;
+
+// Watches `run`'s change on its `target` host's worker; with no run, stops watching.
+export function watchChange(run, target) {
+  if (watching && watching.runId === run && watching.target === target) return;
+  const was = watching;
+  watching = run ? { runId: run, target: target, socket: null, retry: null, seen: false } : null;
+  if (was) {
+    clearTimeout(was.retry);
+    if (was.socket) was.socket.close();
+    // What was listed stays, said to be as last seen; the change now is the button's to read.
+    if (was.seen && was.runId === runId) $("change-said").textContent = "As last seen while the run worked.";
+  }
+  if (!watching) {
+    $("diff-load").hidden = false;
+    return;
+  }
+  $("diff-load").hidden = true;
+  $("diff-raw").hidden = true;
+  report($("change-result"), "");
+  $("change-said").textContent = "Watching the worktree…";
+  listen(watching);
+}
+
+function listen(watch) {
+  const port = CONFIG.terminal_ports[watch.target];
+  // As a terminal is reached: the IPv4 loopback, the token in the handshake's own header, never in the URL.
+  const socket = new WebSocket("ws://127.0.0.1:" + port + "/" + encodeURIComponent(watch.runId) + "/change",
+    ["workbench.v1", "token." + CONFIG.token]);
+  watch.socket = socket;
+  let ended = false;
+  socket.onmessage = (event) => {
+    if (watching !== watch) return;
+    const said = JSON.parse(event.data);
+    if (said.gone) {
+      ended = true;
+      $("change-said").textContent = "The change cannot be read any more: " + said.gone + ".";
+    } else if (said.waiting) {
+      $("change-said").textContent = "No change yet: " + said.waiting + ".";
+    } else if (said.error) {
+      // What was shown last stays, said to be no longer current.
+      $("change-said").textContent = "Not current — " + said.error + ". Asked again in a moment.";
+    } else {
+      showLive(watch, said);
+    }
+  };
+  socket.onclose = () => {
+    if (watching !== watch || ended) return;
+    // A browser says no more of a refused socket than that it closed: the stack's own reading tells a worker
+    // that is down from one that is up and sends no change — one started before it could.
+    const reading = stackReading();
+    const part = reading && reading.components.find((each) => each.name === watch.target);
+    const worker = "the " + (PARTS[watch.target] || watch.target + " worker");
+    $("change-said").textContent = (watch.seen ? "Not current — " : "") + (part && part.state === "up"
+      ? worker + " is up but sends no live change: restart it when no turn is running, to load the code that does"
+      : worker + " is not answering") + "; asked again in a few seconds.";
+    watch.retry = setTimeout(() => { if (watching === watch) listen(watch); }, 5000);
+  };
+}
+
+// One snapshot shown: its line — how many files, lines added and removed, and when it was read — then its files,
+// those the operator opened kept open, each read again from the new snapshot.
+function showLive(watch, snapshot) {
+  watch.seen = true;
+  shown = snapshot;
+  const said = $("change-said");
+  if (!snapshot.files_total) {
+    said.replaceChildren("No change yet: the worktree holds what its base does. Read ", clock(snapshot.read, "ago"),
+      ".");
+    $("diff-files").replaceChildren();
+    return;
+  }
+  const text = snapshot.files.filter((file) => !file.binary);
+  const added = text.reduce((sum, file) => sum + file.added, 0);
+  const removed = text.reduce((sum, file) => sum + file.removed, 0);
+  said.replaceChildren((snapshot.files_total === 1 ? "1 file" : snapshot.files_total + " files") + " changed · +"
+    + added + " −" + removed + " · read ", clock(snapshot.read, "ago"), ", and again as the worktree changes.");
+  const opened = [...$("diff-files").querySelectorAll("details.file[open]")].map((file) => file.dataset.path);
+  $("diff-files").replaceChildren(fileList(watch.runId, snapshot, snapshot.files, snapshot.files_total));
+  for (const file of $("diff-files").querySelectorAll("details.file")) {
+    if (opened.includes(file.dataset.path)) file.open = true;
+  }
 }
 
 // At a stop that asks the operator to judge a change, the change is read once, on its own.

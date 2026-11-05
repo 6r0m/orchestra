@@ -517,6 +517,28 @@ summary:hover { color: var(--ink); }
 .refusal h2 { color: var(--bad); }
 .refusal pre { max-height: 40vh; overflow: auto; color: var(--ink); }
 
+/* Agent text drawn as its Markdown: blocks apart by a little space, at the size of the prose around them; tables
+   ruled, code in the code face, and a path that is no web link marked as words with a target on hover. */
+.md { white-space: normal; overflow-wrap: anywhere; }
+.md > :first-child { margin-top: 0; }
+.md :is(p, ul, ol, blockquote, pre, .md-table, h1, h2, h3, h4, h5, h6, hr) { margin: 0.6em 0 0; }
+.md :is(h1, h2, h3, h4, h5, h6) { font-size: 1em; font-weight: 600; }
+.md :is(h1, h2) { font-size: 1.1em; }
+.md :is(ul, ol) { padding-left: 1.5em; }
+.md li > :is(ul, ol) { margin-top: 0.2em; }
+.md blockquote { padding-left: 10px; border-left: 3px solid var(--rule); color: var(--quiet); }
+.md code { font-family: var(--mono); font-size: 0.9em; padding: 1px 4px; background: var(--ground);
+  border: 1px solid var(--rule); border-radius: 4px; }
+.md pre { padding: 10px 12px; overflow: auto; white-space: pre; background: var(--ground); border: 1px solid var(--rule);
+  border-radius: 6px; }
+.md pre code { padding: 0; border: 0; background: none; font-size: 12.5px; }
+.md-table { overflow-x: auto; }
+.md table { border-collapse: collapse; font-size: 13px; line-height: 1.45; }
+.md :is(th, td) { padding: 4px 10px; border: 1px solid var(--rule); text-align: left; vertical-align: top; }
+.md th { background: var(--surface); font-weight: 600; }
+.md hr { border: 0; border-top: 1px solid var(--rule); }
+.md-link { text-decoration: underline dotted var(--control); text-underline-offset: 3px; cursor: help; }
+
 /* Below the desktop layout, the rail sits above the main area. */
 @media (max-width: 1000px) {
   .layout { grid-template-columns: minmax(0, 1fr); }

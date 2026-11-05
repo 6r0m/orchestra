@@ -15,14 +15,14 @@ graph LR
     scripts -- "docker compose" --> temporal
     scripts -- "systemd-run: a scope of its own" --> wslworker
     scripts -- "powershell, WMI" --> winhost
-    operator -- "terminal WebSocket, token + origin" --> wslterm
+    operator -- "terminals and the run's change: WebSocket, token + origin" --> wslterm
     ui([Temporal web UI]) -- reads --> temporal
     temporal -- "workflow tasks, the policy's workflow queue" --> wslworker[WSL worker<br/>orchestration/workflow.py + routing.py]
     temporal -- "activities, target:wsl:host" --> wslhost[WSL worker<br/>application/activities.py]
     temporal -- "activities, target:windows:host" --> winhost[Windows worker<br/>application/activities.py]
     wslhost --- wslterm[WSL terminals<br/>agents/terminal.py]
     winhost --- winterm[Windows terminals<br/>agents/terminal.py]
-    operator -- "terminal WebSocket, token + origin" --> winterm
+    operator -- "terminals and the run's change: WebSocket, token + origin" --> winterm
     wslterm -- "argv + prompt, PTY, contained tree" --> wslagents([claude · codex on WSL])
     winterm -- "argv + prompt, ConPTY, contained tree" --> winagents([claude.exe · codex.exe])
     wslagents -. "turn hooks: events file" .-> wslterm

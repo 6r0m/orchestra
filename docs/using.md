@@ -125,7 +125,20 @@ answers are the stop's own, as buttons. The note is labelled with the answers it
 note typed for a stop stays while you look at other runs; an answer the workflow refuses is said
 beside what it concerns, and a merge or a discard asks first.
 
-The change is read as one snapshot: the commit of its base the run stands on and the tree the
+What an agent wrote reads as the Markdown it wrote — headings, lists, tables, code, emphasis — in a decision, in a
+turn's history and in the parts of its prompt. A link opens only on the web, in a tab of its own; a path on the
+agent's host stays its words, the path shown when you point at it; an image is its words, never loaded. Copy copies
+the text as written, and a failure, the exact prompt and the raw record stay as written too.
+
+The run's change is its result, so it comes first on its page, right under what the run is doing now —
+under the decision, when a decision judges it. While the run works it is live: its host's worker reads the
+worktree every few seconds — less often when a read is slow — and the page shows each new snapshot as it
+comes, how many files, lines added and removed and when it was read, with nothing to press; a file you opened
+stays open. Each turn's own change stays in the history. When the change cannot be read just now — its worker
+down, its status unanswered — the page says so and shows the last one as no longer current; once the run is
+closed, *Read the change* reads what its worktree still holds.
+
+Each read of it is one snapshot: the commit of its base the run stands on and the tree the
 worktree's files make, so that it shows what the run adds to that base and nothing the base brought in —
 and listed file by file, each by its whole path: a rename as its old path and its new one, a binary file
 said so; a very long list comes a part at a time, *List more files* reading the rest of the same snapshot. Open a file to see its diff as an editor shows one: both line numbers, added lines green,
