@@ -147,6 +147,21 @@ Both read the same git, through the same worker; they differ only in how the new
   none written; the exact snapshot, the control, 2.29 s and 15 loose objects written, the binaries among them.
   The pace now follows the whole look, the fingerprint included: a look takes at most a sixth of a watcher's
   time, between 2 and 60 seconds apart.
+- **Found while verifying, both fixed.** (1) A look ran on a pooled thread, which Python joins at exit: a look
+  still waiting — a status query to the worker's own loop, stopped, waits up to 15 s — held the worker open past
+  its stop's wait (measured: as long as the look, 12 s and 30 s). A look now runs on a daemon thread; the new
+  test, red at 30.3 s, ends in under one. (2) The demo's stack panel Stop of the worker failed 3 times in 4 with
+  *its scope still runs*: the worker had ended — the kernel's `cgroup.events` said `populated 0`, no process, no
+  child — but WSL's systemd had missed it and kept the scope active. `workers.sh` now stops a scope the kernel
+  says is empty, which collects it; run on the scope left behind, it said `stopped` and the scope went inactive.
+  Its pid read no longer prints `cat`'s error when the worker removes its file between the test and the read.
+- **After the review, `make demo`:** DEMO PASSED, 115 checks — the live change listing `draft.txt` and opening it;
+  as summaries came, *with b.txt come, ['a.txt'] open and a.txt read 1 time; with a.txt changed, ['a.txt'] open,
+  reads {'a.txt': 2}*; the run at its failed step watching no change; both stack panel Stops of the worker
+  *done … stopped*. Then on WSL `tests.agents.test_terminal`, `tests.application.test_stack`,
+  `tests.application.test_changes`, `tests.workspace.test_worktrees`, `tests.test_architecture`, `tests.test_demo`
+  — 38 classes, 216 tests, OK; on Windows `tests.agents.test_terminal` and `tests.application.test_changes` — 8
+  classes, 48 tests, OK.
 - **The touched modules on both hosts:** on WSL `tests.workspace.test_worktrees`, `tests.agents.test_terminal`,
   `tests.application.test_changes`, `tests.interfaces.test_workbench`, `tests.test_architecture` and
   `tests.test_demo` — 43 classes, 256 tests, OK; on Windows the first three — 21 classes, 129 tests, OK.

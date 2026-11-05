@@ -44,12 +44,20 @@ temporal() {
     esac
 }
 
+empty_scope() {
+    # Whether the kernel says the scope's cgroup holds no process, its descendants' included.
+    local group
+    group="$(systemctl --user show -p ControlGroup --value "$1" 2>/dev/null)" && [ -n "$group" ] || return 1
+    grep -qx "populated 0" "/sys/fs/cgroup$group/cgroup.events" 2>/dev/null
+}
+
 wsl_pid() {
     # The pid its file names while that process is still this worker: the file outlives a killed
     # worker, and pids are reused. A zombie's command line is empty.
     local file="$RUNTIME/$NAME.pid" pid
     [ -f "$file" ] || return 1
-    pid="$(cat "$file")"
+    # The worker removes its file as it ends, which may be between the test above and this read.
+    pid="$(cat "$file" 2>/dev/null)" && [ -n "$pid" ] || return 1
     tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | grep -q -- "-m app.interfaces.worker wsl" || return 1
     echo "$pid"
 }
@@ -83,6 +91,11 @@ wsl_worker() {
             fi
             # Its scope ends once the reapers it left have ended its agents' scopes.
             for _ in $(seq 20); do systemctl --user is-active --quiet "$scope" || break; sleep 0.5; done
+            # One the kernel says holds no process is over, whatever systemd says: WSL's systemd can miss a
+            # scope's cgroup emptying, and leave it active with nothing in it (measured). Stopping it collects it.
+            if systemctl --user is-active --quiet "$scope" && empty_scope "$scope"; then
+                systemctl --user stop "$scope" 2>/dev/null || true
+            fi
             if systemctl --user is-active --quiet "$scope"; then echo "its scope $scope still runs" >&2; exit 1; fi
             rm -f "$RUNTIME/$NAME.pid"
             echo "stopped" ;;

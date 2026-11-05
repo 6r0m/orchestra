@@ -568,6 +568,31 @@ class Socket(unittest.TestCase):
         self.assertEqual(self.refused(path="%s/change" % self.run_id, origin="http://evil.example"), 403)
         self.assertEqual(self.refused(path="%s/changes" % self.run_id), 404)
 
+    def test_a_look_in_flight_never_holds_the_worker_open_once_it_ends(self):
+        # A look is a read with nothing to finish: one still waiting — on a status query to the worker's own loop, which
+        # has stopped — must not keep the process alive past what its stop waits for.
+        script = textwrap.dedent("""\
+            import asyncio, sys, threading, time
+            sys.path.insert(0, %r)
+            from app.agents import terminal
+            started = threading.Event()
+            def feed(run_id, memo):
+                started.set()
+                time.sleep(30)
+                return None, 60
+            terminal.serve(%d, %d, feeds={"change": feed})
+            async def watch():
+                from websockets.asyncio.client import connect
+                async with connect("ws://127.0.0.1:%d/r1/change", origin="http://127.0.0.1:%d",
+                                   subprotocols=[terminal.PROTOCOL, terminal.TOKEN_PROTOCOL + terminal.token()]):
+                    await asyncio.sleep(60)
+            threading.Thread(target=lambda: asyncio.run(watch()), daemon=True).start()
+            started.wait(10)
+            """) % (PKG, self.PORT + 3, self.WORKBENCH, self.PORT + 3, self.WORKBENCH)
+        began = time.monotonic()
+        subprocess.run([sys.executable, "-c", script], check=True, timeout=60, capture_output=True)
+        self.assertLess(time.monotonic() - began, 8, "the process ended without waiting for the look")
+
     def test_a_feed_may_not_take_a_roles_name(self):
         with self.assertRaises(ValueError):
             terminal.serve(self.PORT + 2, self.WORKBENCH, feeds={"engineer": self.feed})

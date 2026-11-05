@@ -463,11 +463,32 @@ def serve(port, workbench_port, host="127.0.0.1", feeds=None):
             return connection.respond(HTTPStatus.NOT_FOUND, "no such terminal\n")
         return None
 
+    def look(name, run_id, memo):
+        """One look of a feed, in a daemon thread of its own: a look is a read with nothing to finish, so one still
+        waiting when the worker ends never keeps the process alive — a pooled thread would, until it returned
+        (measured: as long as the look took)."""
+        loop = asyncio.get_running_loop()
+        answer = loop.create_future()
+
+        def settle(how, value):
+            if not answer.done():
+                how(value)
+
+        def run():
+            try:
+                found = feeds[name](run_id, memo)
+            except BaseException as exc:            # noqa: BLE001 - handed to the watcher's own handler
+                loop.call_soon_threadsafe(settle, answer.set_exception, exc)
+            else:
+                loop.call_soon_threadsafe(settle, answer.set_result, found)
+        threading.Thread(target=run, name="feed-%s-%s" % (name, run_id), daemon=True).start()
+        return answer
+
     async def follow(connection, run_id, name):
         memo = {}
         while True:
             try:
-                message, wait = await asyncio.to_thread(feeds[name], run_id, memo)
+                message, wait = await look(name, run_id, memo)
             except Exception as exc:                 # noqa: BLE001 - told to its watcher, and logged here
                 print("the %s feed of run %s failed: %r" % (name, run_id, exc), file=sys.stderr, flush=True)
                 await connection.send(json.dumps({"error": "%s: %s" % (type(exc).__name__, exc)}))

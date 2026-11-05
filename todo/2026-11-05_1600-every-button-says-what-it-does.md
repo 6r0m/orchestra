@@ -1,7 +1,7 @@
 # Every button says what it does
 
-**Status:** BUILT 2026-11-05 — checked on the live Workbench's views; its check on a run's page waits for the
-demo, whose Temporal was down. It awaits the external reviewer's PASS and the operator's word to close it.
+**Status:** BUILT 2026-11-05 — checked on the live Workbench's views and, in `make demo`, on a run's page. It
+awaits the external reviewer's PASS and the operator's word to close it.
 **Scope:** the Workbench page's buttons ([index.html](../app/interfaces/workbench/static/index.html) and the
 scripts that make buttons), and their check ([demo_press.py](../tools/demo_press.py) `hints`).
 **Stable documentation owner:** [using.md](../docs/using.md), where a button's name is used.
@@ -31,4 +31,5 @@ A button whose name does not say what follows says it when the pointer rests on 
 
 - **On the live Workbench:** before the last fix, `hints` named the top bar's *New run* on both views; after it,
   *32 buttons shown across #new, #settings: each says what it does on hover*.
-- **Pending:** the run's page, in `make demo` — Temporal was down.
+- **`make demo`, at a run's approval:** *36 buttons shown across #new, #settings, #run=…: each says what it does
+  on hover*; DEMO PASSED, 115 checks.

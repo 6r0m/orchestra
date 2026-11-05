@@ -594,6 +594,8 @@ def main(url, run_id, label, said, note=None):
         with connect(target, max_size=None) as socket:
             page = Page(socket)
             if label in ("change-rows", "change-idle"):
+                # A script for documents to come is applied only once the Page domain is enabled (measured).
+                page.call("Page.enable")
                 page.call("Page.addScriptToEvaluateOnNewDocument", source=FEED_STAND_IN)
             page.call("Page.navigate", url=url)
             if label == "hints":
