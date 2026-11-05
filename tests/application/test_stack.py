@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 from unittest import mock
 
@@ -603,6 +604,89 @@ class RealWorker(unittest.TestCase):
         self.assertEqual(self.first(self.windows("status", name)), (0, "stopped"),
                          "a reused pid is never taken for the worker")
         self.assertEqual(self.windows("stop", name), (0, "stopped"), "and a stop never ends it")
+
+
+# A WSL worker stand-in in a scope of its own, named as `workers.sh` names it: it starts a read stand-in — a child
+# that sleeps, as a git read left running does — writes the child's pid and, given a path for it, its own, then
+# sleeps. Its command line is a worker's, as the stop reads it. Named apart from RealWorker's STAND_IN, which it
+# would otherwise replace for the whole module.
+SCOPED_STAND_IN = textwrap.dedent("""\
+    import os, subprocess, sys, time
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"])
+    open(sys.argv[1], "w").write(str(child.pid))
+    if sys.argv[2] != "-":
+        open(sys.argv[2], "w").write(str(os.getpid()))
+    time.sleep(300)
+    """)
+
+
+def running(pid):
+    """Whether `pid` still runs; a zombie, ended and not yet reaped, does not."""
+    try:
+        with open("/proc/%d/stat" % pid, encoding="utf-8") as fh:
+            return fh.read().rsplit(")", 1)[1].split()[0] != "Z"
+    except FileNotFoundError:
+        return False
+
+
+@unittest.skipIf(WINDOWS or not shutil.which("systemd-run"), "a WSL worker's systemd scope")
+class ForcedStop(unittest.TestCase):
+    """A WSL worker killed before it could end what it started: its stop ends what the worker's scope still holds — a
+    read left running — and collects the scope; and never ends a scope that still holds a worker."""
+
+    def setUp(self):
+        self.name = "worker-wsl-test-%s" % os.urandom(3).hex()
+        self.scope = "orchestra-%s.scope" % self.name
+        self.pidfile = os.path.join(PKG, "tmp", "orchestration", self.name + ".pid")
+        self.childfile = os.path.join(tempfile.mkdtemp(prefix="orchestra-stop-"), "child.pid")
+        self.addCleanup(shutil.rmtree, os.path.dirname(self.childfile), True)
+        self.addCleanup(lambda: os.path.exists(self.pidfile) and os.remove(self.pidfile))
+        self.addCleanup(self.end)
+
+    def end(self):
+        # Killed, then stopped: a stand-in may have inherited an ignored SIGTERM from the suite, which a plain stop
+        # would wait out for systemd's whole timeout.
+        subprocess.run(["systemctl", "--user", "kill", "--signal=KILL", self.scope], capture_output=True)
+        subprocess.run(["systemctl", "--user", "stop", self.scope], capture_output=True)
+
+    def start(self, own_pidfile):
+        """The stand-in started in its scope; the pid of the read it left running."""
+        process = subprocess.Popen(
+            ["systemd-run", "--user", "--scope", "--quiet", "--collect", "--unit=" + self.scope, sys.executable, "-c",
+             SCOPED_STAND_IN, self.childfile, self.pidfile if own_pidfile else "-", "-m", "app.interfaces.worker",
+             "wsl"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(lambda: process.poll() is None and process.kill())
+        for _ in range(200):
+            if os.path.exists(self.childfile) and open(self.childfile).read() and (
+                    not own_pidfile or os.path.exists(self.pidfile) and open(self.pidfile).read()):
+                return int(open(self.childfile).read())
+            time.sleep(0.05)
+        self.fail("the stand-in never started")
+
+    def stop(self):
+        done = subprocess.run(["bash", os.path.join(PKG, "workers.sh"), "wsl", "stop", self.name],
+                              capture_output=True, text=True, timeout=120)
+        return done.returncode, (done.stdout + done.stderr).strip()
+
+    def active(self):
+        return subprocess.run(["systemctl", "--user", "is-active", "--quiet", self.scope]).returncode == 0
+
+    def test_a_worker_killed_with_a_read_left_running_is_stopped_and_its_scope_collected(self):
+        child = self.start(own_pidfile=True)
+        os.kill(int(open(self.pidfile).read()), 9)
+        self.assertEqual(self.stop(), (0, "stopped"))
+        self.assertFalse(self.active(), "its scope is collected")
+        self.assertFalse(running(child), "the read it left running is ended")
+
+    def test_a_scope_that_still_holds_a_worker_is_never_ended(self):
+        # Its pid file is missing, so the stop reads no worker there: it must still not end the scope.
+        child = self.start(own_pidfile=False)
+        code, said = self.stop()
+        self.assertNotEqual(code, 0)
+        self.assertIn("still holds its worker", said)
+        self.assertTrue(self.active(), "the scope and its worker are left as they were")
+        self.assertTrue(running(child))
 
 
 if __name__ == "__main__":

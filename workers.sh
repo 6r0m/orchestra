@@ -51,6 +51,19 @@ empty_scope() {
     grep -qx "populated 0" "/sys/fs/cgroup$group/cgroup.events" 2>/dev/null
 }
 
+scope_worker() {
+    # The pid of a worker the scope still holds — whatever its pid file says — or nothing; any descendant cgroup's.
+    local group pid
+    group="$(systemctl --user show -p ControlGroup --value "$1" 2>/dev/null)" && [ -n "$group" ] || return 1
+    for pid in $(find "/sys/fs/cgroup$group" -name cgroup.procs -exec cat {} + 2>/dev/null); do
+        if tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | grep -q -- "-m app.interfaces.worker wsl"; then
+            echo "$pid"
+            return 0
+        fi
+    done
+    return 1
+}
+
 wsl_pid() {
     # The pid its file names while that process is still this worker: the file outlives a killed
     # worker, and pids are reused. A zombie's command line is empty.
@@ -91,6 +104,14 @@ wsl_worker() {
             fi
             # Its scope ends once the reapers it left have ended its agents' scopes.
             for _ in $(seq 20); do systemctl --user is-active --quiet "$scope" || break; sleep 0.5; done
+            # The worker is gone and its reapers have had their time: what its scope still holds is left over — a
+            # read it had running, which a worker killed could not end — and is ended through the scope. Never a
+            # scope that still holds a worker, whatever its pid file says.
+            if systemctl --user is-active --quiet "$scope" && ! empty_scope "$scope"; then
+                if held="$(scope_worker "$scope")"; then echo "its scope $scope still holds its worker $held" >&2; exit 1; fi
+                systemctl --user kill --signal=KILL "$scope" 2>/dev/null || true
+                for _ in $(seq 20); do empty_scope "$scope" && break; sleep 0.5; done
+            fi
             # One the kernel says holds no process is over, whatever systemd says: WSL's systemd can miss a
             # scope's cgroup emptying, and leave it active with nothing in it (measured). Stopping it collects it.
             if systemctl --user is-active --quiet "$scope" && empty_scope "$scope"; then

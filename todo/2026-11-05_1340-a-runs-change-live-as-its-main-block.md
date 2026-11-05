@@ -134,6 +134,12 @@ Both read the same git, through the same worker; they differ only in how the new
   ends — which is how a worker there is stopped. The feed's git goes through it; only reads do: a write — a merge,
   a commit — cut off mid-way could leave a lock or half a merge, so a worker's other git still runs to its end.
 
+- **External reviewer, 2026-11-05, third round — PATCH, one case, taken:** on WSL a worker its stop had to kill
+  with SIGKILL runs no `atexit`, so a read it had running stayed in its scope and the stop said *its scope still
+  runs*. `workers.sh` now, once the worker is gone and its reapers have had their wait, ends what the scope still
+  holds through the scope and collects it — and refuses, saying so, while the scope still holds a worker, its pid
+  file or not. Windows needed nothing: its reads die with the worker's job.
+
 ## Verification
 
 - **Red:** the new tests before the code — `tests.application.test_changes` could not import `changes`;
@@ -177,6 +183,18 @@ Both read the same git, through the same worker; they differ only in how the new
   command with it. The feed's git is seen to go through `launch.read`. On WSL `tests.agents.test_launch`,
   `tests.agents.test_terminal`, `tests.application.test_changes`, `tests.workspace.test_worktrees`,
   `tests.test_architecture` — 38 classes, 208 tests, OK; on Windows the first four — 30 classes, 166 tests, OK.
+  Then `make demo`: DEMO PASSED, 115 checks, both stack panel Stops of the worker *done … stopped*, no scope
+  left behind.
+- **The third round:** `tests.application.test_stack.ForcedStop`, on a real systemd scope — a worker stand-in
+  killed with SIGKILL, its sleeping read stand-in left in the scope: red, *(1, 'its scope … still runs')*; green,
+  *(0, 'stopped')*, the scope collected and the read ended; and a scope still holding a worker with no pid file:
+  red, no refusal; green, *still holds its worker*, the scope and the worker left as they were. The first green
+  run of the module hung `RealWorker` 600 s: the new stand-in's module-level name was `STAND_IN`, which
+  `RealWorker`'s already was, so it replaced it for the whole module — and wrote its pid files, named from
+  `RealWorker`'s arguments, into the checkout's root. Renamed `SCOPED_STAND_IN`, the two files removed; then
+  on WSL `tests.application.test_stack`, `tests.agents.test_launch`, `tests.agents.test_terminal`,
+  `tests.application.test_changes`, `tests.test_architecture` — 32 classes, 155 tests, OK, no scope left
+  behind; on Windows `tests.application.test_stack`, `tests.agents.test_launch` — 16 classes, 64 tests, OK.
 - **The touched modules on both hosts:** on WSL `tests.workspace.test_worktrees`, `tests.agents.test_terminal`,
   `tests.application.test_changes`, `tests.interfaces.test_workbench`, `tests.test_architecture` and
   `tests.test_demo` — 43 classes, 256 tests, OK; on Windows the first three — 21 classes, 129 tests, OK.

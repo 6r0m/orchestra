@@ -292,6 +292,12 @@ Without them a run behaves identically and records nothing — the trace is neve
 decision depends on it. What the rows promise is in
 [architecture/trace-contract.md](architecture/trace-contract.md).
 
+A self-hosted Langfuse keeps its traces in ClickHouse, whose own system logs can grow far past them — on one
+such stack 8 GB of them beside 38 MB of traces, and ClickHouse kept busy merging them. Langfuse reads none of
+`trace_log`, `text_log`, `metric_log`, `asynchronous_metric_log`, `opentelemetry_span_log` or `latency_log`;
+[its FAQ](https://langfuse.com/faq/all/reduce-clickhouse-disk-size) shows how to switch them off in ClickHouse's
+`config.d`. Turning a log off leaves its old table: drop that once the setting is seen to hold.
+
 ## The port
 
 The workbench's port is `workbench_port` in `.orchestra/settings.json`. It has to be free on *both* sides on a
