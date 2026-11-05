@@ -125,6 +125,7 @@ function yours(text, redraw, what) {
     const back = el("button", "Revert", "quiet");
     back.type = "button";
     back.setAttribute("aria-label", "Revert " + what + " to the shared settings");
+    back.title = "Drop your own value for " + what + ", back to the shared settings' one";
     back.onclick = () => {
       stage(text, { revert: true });
       redraw();
@@ -240,6 +241,7 @@ function drawRoles(settings) {
       const back = el("button", "Use ", "quiet");
       back.append(code(settings.roles[role].persona_file));
       back.type = "button";
+      back.title = "Give the " + role + " its persona file's text again, in place of the text written here";
       back.onclick = () => {
         stage(personaPointer, overridden(personaPointer) ? { revert: true } : { remove: true });
         draw();
@@ -258,6 +260,7 @@ function drawRoles(settings) {
       const choose = el("button", "+ Skill", "quiet");
       choose.type = "button";
       choose.setAttribute("aria-label", "Choose an installed skill for " + stage_);
+      choose.title = "Choose, from the skills installed for this agent, the one the " + stage_ + " stage starts with";
       choose.disabled = !(kinds()[profile.kind] || {}).skill;
       choose.onclick = () => openSkillPicker(input, profile.kind, stage_);
       row.append(input, choose);
@@ -288,6 +291,7 @@ function openSkillPicker(input, kind, stage_) {
     const option = el("button", name, "quiet skill-option");
     option.type = "button";
     option.translate = false;
+    option.title = "Start the stage with the skill " + name;
     option.onclick = () => {
       input.value = name;
       input.dispatchEvent(new Event("input"));
@@ -299,6 +303,7 @@ function openSkillPicker(input, kind, stage_) {
   }
   const clear = el("button", "No explicit skill", "quiet skill-option");
   clear.type = "button";
+  clear.title = "Start the stage with no skill named: the agent works from its instructions alone";
   clear.onclick = () => {
     input.value = "";
     input.dispatchEvent(new Event("input"));
@@ -350,6 +355,7 @@ function drawProfiles(settings) {
     const remove = el("button", "Remove", "danger quiet");
     remove.type = "button";
     remove.setAttribute("aria-label", "Remove the profile " + name);
+    remove.title = "Remove the profile " + name + "; Apply saves it";
     if (bound[name]) {
       remove.disabled = true;
       remove.title = "The " + bound[name] + " runs it";
@@ -376,6 +382,7 @@ function drawProfiles(settings) {
     const restore = el("button", "Restore", "quiet");
     restore.type = "button";
     restore.setAttribute("aria-label", "Restore the profile " + name);
+    restore.title = "Bring back the profile " + name + ", which your settings removed and the shared ones hold";
     restore.onclick = () => {
       stage(pointer("agents", name), { revert: true });
       draw();
@@ -540,6 +547,7 @@ function drawReviewPrompts(settings) {
         const add = el("button", "+ Add extra guidance", "quiet prompt-add");
         add.type = "button";
         add.setAttribute("aria-label", "Add extra guidance for " + role + " " + event.title.toLowerCase());
+        add.title = "Add words the " + role + " is given at " + event.title.toLowerCase() + ", beside its own";
         add.onclick = () => {
           promptEditors.add(text);
           drawReviewPrompts(pending());

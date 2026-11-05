@@ -958,6 +958,68 @@ class Fingerprint(Repo):
             W.change_fingerprint(self.path)
 
 
+class ChangeSummary(Repo):
+    """What a live view of a run's change lists at every look that finds the worktree moved: each changed file
+    against the base, with its lines — and nothing written, neither the worktree's index nor any object: an
+    exact snapshot, which writes the tree it names, is taken only when a file is opened."""
+
+    def setUp(self):
+        super().setUp()
+        write(os.path.join(self.repo, "gone.txt"), "about to go\n")
+        write(os.path.join(self.repo, "old name.md"), "".join("line %d\n" % n for n in range(1, 21)))
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "more files")
+        self.base = git(self.repo, "rev-parse", "HEAD").strip()
+        self.path = self.worktree("run1", change=False)
+        write(os.path.join(self.path, "app.txt"), "one\ntwo\n")
+        os.remove(os.path.join(self.path, "gone.txt"))
+        git(self.path, "mv", "old name.md", "new name.md")
+        write(os.path.join(self.path, "drafts", "new.txt"), "a\nb\nc\n")
+        with open(os.path.join(self.path, "image.bin"), "wb") as fh:
+            fh.write(b"\x00\x01binary\x00")
+
+    def objects(self):
+        """Every object git holds, loose or packed: what a read must not add to."""
+        return git(self.repo, "count-objects", "-v")
+
+    def test_each_changed_file_is_listed_with_its_lines(self):
+        read = W.change_summary(self.path, self.base)
+        listed = {each["path"]: (each["status"], each["old"], each["added"], each["removed"], each["binary"])
+                  for each in read["files"]}
+        self.assertEqual(listed, {
+            "app.txt": ("M", None, 1, 0, False),
+            "gone.txt": ("D", None, 0, 1, False),
+            "new name.md": ("R", "old name.md", 0, 0, False),
+            "drafts/new.txt": ("A", None, 3, 0, False),
+            "image.bin": ("A", None, None, None, True)})
+        self.assertEqual((read["base"], read["files_total"]), (self.base, 5))
+        self.assertNotIn("tree", read, "no tree is written for it, so none is named")
+        stamps = {each["path"]: each["stamp"] for each in read["files"]}
+        self.assertIsNone(stamps["gone.txt"], "a file that is gone has no stamp")
+        write(os.path.join(self.path, "app.txt"), "one\ntwo\nthree\n")
+        again = {each["path"]: each["stamp"] for each in W.change_summary(self.path, self.base)["files"]}
+        self.assertNotEqual(again["app.txt"], stamps["app.txt"], "a file written again is stamped anew")
+        self.assertEqual(again["drafts/new.txt"], stamps["drafts/new.txt"], "and only that one")
+
+    def test_it_writes_no_object_and_not_the_worktrees_index(self):
+        index = git(self.path, "rev-parse", "--path-format=absolute", "--git-path", "index").strip()
+        before = (self.objects(), os.stat(index).st_mtime_ns, open(index, "rb").read())
+        for _ in range(3):
+            W.change_summary(self.path, self.base)
+            write(os.path.join(self.path, "drafts", "new.txt"), "a\nb\nc\nd\n")
+        self.assertEqual((self.objects(), os.stat(index).st_mtime_ns, open(index, "rb").read()), before)
+
+    def test_the_control_an_exact_snapshot_writes_the_objects_it_names(self):
+        before = self.objects()
+        W.review_diff(self.path, base=self.base, files_from=0)
+        self.assertNotEqual(self.objects(), before, "which is why it is taken only when asked for")
+
+    def test_a_worktree_that_is_gone_is_refused(self):
+        folders.remove(self.path)
+        with self.assertRaises(W.ChangeRefused):
+            W.change_summary(self.path, self.base)
+
+
 class Cleanup(Repo):
     """Nothing a run owns is removed until the base is proven to hold its work."""
 

@@ -218,6 +218,48 @@ def render(parts):
     return "\n".join(part["text"] for part in parts) + "\n"
 
 
+# What a turn's prompt may take of the command line it is given on, its last argument: Windows takes a whole
+# command line of 32,767 characters, the agent's own options and paths among them, and Linux one argument of
+# 128 KiB. A prompt past this has its longest parts attached as files instead (`attach`).
+PROMPT_BUDGET = 24000
+# Parts never attached: the skill leads its prompt as itself, and the stage's ask says what the turn is for.
+INLINE = ("skill", "instructions")
+
+
+def cost(text):
+    """What `text` takes of a command line as either host counts it: the UTF-16 units Windows counts once it has
+    quoted the argument — every quote escaped — or the UTF-8 bytes Linux counts, whichever is more."""
+    quoted = subprocess.list2cmdline([text])
+    return max(len(quoted.encode("utf-16-le")) // 2, len(text.encode("utf-8")))
+
+
+def attach(parts, folder, name):
+    """`parts` as a prompt within PROMPT_BUDGET, and the files that takes. While the prompt is past it, its longest
+    part not in INLINE is written whole into `folder`, as `<name>-<part>.md`, and in its place the prompt says so
+    under that part's own heading, naming the file for the agent to read before it goes on. A prompt that fits is
+    given whole, attaching nothing; one that INLINE alone keeps past it is the launch's to refuse."""
+    kept, attached, done = [dict(part) for part in parts], [], set()
+    while cost(render(kept)) > PROMPT_BUDGET:
+        left = [index for index, part in enumerate(kept) if part["part"] not in INLINE and index not in done]
+        if not left:
+            break
+        index = max(left, key=lambda at: cost(kept[at]["text"]))
+        part = kept[index]
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, "%s-%s.md" % (name, part["part"]))
+        with open(path, "w", encoding="utf-8", newline="") as fh:
+            fh.write(part["text"])
+        heading = next((line for line in part["text"].splitlines() if line.strip()), "")
+        heading = heading if heading.startswith("#") else "# " + part["part"]
+        # In ASCII alone: a CLI started through a shell's shim reads its arguments in that console's code page.
+        part["text"] = ("\n%s\nThis part is %d characters long, too long to be given here, so it is attached as a "
+                        "file. Read the whole of it before you go on, and take it as if it stood here: %s"
+                        % (heading, len(part["text"]), path))
+        attached.append(path)
+        done.add(index)
+    return kept, attached
+
+
 def compose_prompt(stage, stage_cfg, is_review, state, session_first,
                    stage_first, logs="the run's logs", skills=None, review_rounds=None, review_prompts=None):
     """The prompt a turn is given: its parts (`compose_parts`), rendered."""

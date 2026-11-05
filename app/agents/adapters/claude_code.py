@@ -111,6 +111,12 @@ def host(argv, windows=WINDOWS, skills=None):
     return list(argv)
 
 
+def readable(argv, folders):
+    """The command with `folders` outside the worktree — a turn's attached prompt parts — readable unasked: each
+    added as a working directory, as the skills folder is."""
+    return list(argv) + [part for folder in folders for part in ("--add-dir", os.path.realpath(folder))]
+
+
 def session_in(argv):
     for flag in ("--session-id", "--resume"):
         if flag in argv:

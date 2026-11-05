@@ -152,6 +152,8 @@ export function stackButton(action, part, label, line) {
   const button = el("button", label || VERBS[action] + " " + (part ? PARTS[part] : "stack"),
     action === "stop" ? "danger" : "");
   button.type = "button";
+  button.title = { start: "Start ", stop: "Stop ", restart: "Stop and start again " }[action]
+    + (part ? "the " + PARTS[part] : "the whole stack") + (action === "start" ? "" : "; it asks you first");
   button.onclick = () => stackAction(action, part, line || $("stack-result"), button);
   return button;
 }

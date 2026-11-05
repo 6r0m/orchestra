@@ -235,7 +235,9 @@ still lands on a checkout.
   watch, press Esc and type at any time. A turn ends the agent process under the terminal,
   if any, and starts the vendor's interactive CLI again from an argv list — no shell, so no
   task text is ever parsed as shell syntax — with the role's session resumed by exact id and
-  the prompt as its last argument. It ends on the vendor's own completion, which the vendor's
+  the prompt as its last argument; a part too long for a command line — Windows takes 32,767
+  characters — is attached as a file in the run's own folder, which the prompt names and the
+  agent may read (`nodes.attach`). It ends on the vendor's own completion, which the vendor's
   hook writes into the turn's own events file. The file and the process are the turn's, so a
   prompt the operator types into the running agent — after an Esc, say — steers this turn, and
   its completion ends it: Claude's `Stop` for the prompt id its `UserPromptSubmit` reported for

@@ -62,6 +62,7 @@ function row(worktree) {
     const remove = el("button", "Remove", "danger");
     remove.type = "button";
     remove.setAttribute("aria-label", "Remove run " + worktree.branch + "'s worktree and branch");
+    remove.title = "Delete run " + worktree.branch + "'s worktree and branch, through its host's git";
     remove.onclick = () => removeKept(worktree.branch, $("worktrees-result"), loadWorktrees, remove);
     act.appendChild(remove);
   }

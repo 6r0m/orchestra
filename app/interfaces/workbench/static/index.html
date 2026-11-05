@@ -16,7 +16,7 @@
 <header class="top" id="top">
   <a class="brand" href="#" translate="no">Orchestra <span>Workbench</span></a>
   <button type="button" class="stack-button" id="stack-button" popovertarget="stack-panel"
-    aria-describedby="stack-button-hint"><span class="chips" id="stack-chips">Reading the stack…</span></button>
+    aria-describedby="stack-button-hint" title="Temporal and each host's worker: open to start, stop or restart them"><span class="chips" id="stack-chips">Reading the stack…</span></button>
   <span class="visually-hidden" id="stack-button-hint">Opens the stack's controls</span>
   <div class="panel" id="stack-panel" popover="auto" aria-labelledby="stack-panel-title">
     <h2 id="stack-panel-title">The stack</h2>
@@ -28,7 +28,7 @@
   <nav class="top-nav" aria-label="Views">
     <a href="#worktrees" id="nav-worktrees">Worktrees</a>
     <a href="#settings" id="nav-settings">Settings</a>
-    <a class="button primary" href="#new" id="nav-new">New run</a>
+    <a class="button primary" href="#new" id="nav-new" title="Open the form that starts a run">New run</a>
   </nav>
 </header>
 <div class="banners" id="banners">
@@ -53,7 +53,8 @@
       <h2 id="runs-rejected-title">Rejected <span class="count" id="runs-rejected-count"></span></h2>
       <ul class="runs" id="runs-rejected"></ul>
     </section>
-    <button type="button" class="quiet" id="runs-older" hidden>Load older runs</button>
+    <button type="button" class="quiet" id="runs-older" hidden
+          title="List closed runs older than these: Temporal keeps them, and the list shows the newest first">Load older runs</button>
   </nav>
   <main id="main" tabindex="-1">
     <section class="view empty" id="view-empty" hidden aria-labelledby="empty-title">
@@ -99,7 +100,8 @@
             step and the merge still wait for you.</p>
         </div>
         <div class="form-end">
-          <button type="submit" class="primary">Start run</button>
+          <button type="submit" class="primary"
+            title="Start this task as a new run on the chosen repository, in the chosen flow">Start run</button>
           <p class="result" id="start-result" role="status"></p>
         </div>
       </form>
@@ -123,7 +125,8 @@
           </div>
         </fieldset>
         <div class="form-end">
-          <button type="submit" id="worktrees-load">Show worktrees</button>
+          <button type="submit" id="worktrees-load"
+            title="List the chosen repository's worktrees and whether each is merged, as its host's git reads them">Show worktrees</button>
         </div>
       </form>
       <p class="hint" id="worktrees-base"></p>
@@ -143,7 +146,8 @@
         settings it started with: what you apply here reaches the runs started after it.</p>
       <div class="notice" id="settings-notice" hidden>
         <p id="settings-notice-said"></p>
-        <div class="actions"><button type="button" id="settings-reread">Read the settings again</button></div>
+        <div class="actions"><button type="button" id="settings-reread"
+          title="Read the settings from their files again; changes made here and not applied are dropped">Read the settings again</button></div>
       </div>
       <form class="settings-form" id="settings-form" autocomplete="off" novalidate hidden>
         <section class="settings-part" aria-labelledby="settings-roles-title">
@@ -188,7 +192,8 @@
               <label for="settings-add-kind">Kind</label>
               <select id="settings-add-kind" name="profile-kind"></select>
             </div>
-            <button type="button" id="settings-add">Add profile</button>
+            <button type="button" id="settings-add"
+            title="Add an agent profile of this name and kind; Apply saves it">Add profile</button>
             <p class="hint" id="settings-add-hint">Lowercase letters and digits, words joined by single hyphens.</p>
             <p class="alert" id="settings-add-alert" role="alert"></p>
           </div>
@@ -202,9 +207,12 @@
         <div class="apply-bar">
           <p id="settings-pending">No changes.</p>
           <div class="actions">
-            <button type="button" class="quiet" id="settings-reset">Reset visible settings to defaults</button>
-            <button type="button" class="quiet" id="settings-discard">Discard changes</button>
-            <button type="submit" class="primary" id="settings-apply">Apply</button>
+            <button type="button" class="quiet" id="settings-reset"
+              title="Drop your own values for the settings shown, back to the shared defaults; Apply saves it">Reset visible settings to defaults</button>
+            <button type="button" class="quiet" id="settings-discard"
+              title="Forget the changes made here and not applied; what is applied stays">Discard changes</button>
+            <button type="submit" class="primary" id="settings-apply"
+              title="Save these changes: runs started from now on take them, runs already started keep theirs">Apply</button>
           </div>
           <p class="result" id="settings-result" role="status"></p>
         </div>
@@ -212,7 +220,7 @@
       <dialog id="settings-skill-picker" aria-labelledby="settings-skill-picker-title">
         <div class="skill-picker-head">
           <h2 id="settings-skill-picker-title">Choose a skill</h2>
-          <button type="button" class="quiet" id="settings-skill-picker-close">Close</button>
+          <button type="button" class="quiet" id="settings-skill-picker-close" title="Close, choosing no skill">Close</button>
         </div>
         <p class="hint">Choose an available skill for this stage.</p>
         <div class="skill-options" id="settings-skill-options"></div>
@@ -224,16 +232,22 @@
         <code class="strip-run" id="run-strip-id" translate="no"></code>
         <div class="controls" id="run-controls" role="group" aria-label="This run's controls"
           aria-describedby="run-controls-hint" hidden>
-          <button type="button" id="run-pause" hidden>Pause</button>
-          <button type="button" id="run-stop">Stop run</button>
-          <button type="button" class="danger" id="run-reject">Reject</button>
-          <button type="button" class="danger quiet" id="run-terminate">Force terminate</button>
+          <button type="button" id="run-pause" hidden
+            title="Interrupt the agent at work, as Esc in its terminal does, and put your keyboard there">Pause</button>
+          <button type="button" id="run-stop"
+            title="End the run without merging; its worktree and branch stay as they are">Stop run</button>
+          <button type="button" class="danger" id="run-reject"
+            title="End the run and delete its worktree and branch, with any work in them; its history stays">Reject</button>
+          <button type="button" class="danger quiet" id="run-terminate"
+            title="Close the run at once, with no cleanup: for a run that a Stop cannot finish">Force terminate</button>
           <p class="result" id="run-control-result" role="status"></p>
         </div>
         <div class="controls" id="run-kept" role="group" aria-label="What it kept" aria-describedby="run-kept-text"
           hidden>
-          <a class="button" id="run-kept-show">Show in Worktrees</a>
-          <button type="button" class="danger" id="run-remove">Remove worktree and branch</button>
+          <a class="button" id="run-kept-show"
+            title="Open the Worktrees view on this run's repository">Show in Worktrees</a>
+          <button type="button" class="danger" id="run-remove"
+            title="Delete what this ended run kept — its worktree and its branch — through its host's git">Remove worktree and branch</button>
           <p class="result" id="run-kept-result" role="status"></p>
         </div>
       </div>
@@ -269,14 +283,16 @@
       <section class="change" id="change" hidden aria-labelledby="change-title">
         <div class="section-head">
           <h2 id="change-title">Change</h2>
-          <button type="button" id="diff-load">Read the change</button>
+          <button type="button" id="diff-load"
+            title="Read what the worktree holds now against the run's base: each file, and the whole patch">Read the change</button>
           <p class="result" id="change-result" role="status"></p>
         </div>
         <p class="hint" id="change-said"></p>
         <div id="diff-files"></div>
         <div class="raw-patch" id="diff-raw" hidden>
           <div class="evidence-label"><span>Patch</span><span class="hint" id="diff-size"></span>
-            <button type="button" class="copy" id="diff-copy">Copy patch</button></div>
+            <button type="button" class="copy" id="diff-copy"
+              title="Copy the whole patch of the change shown, however long">Copy patch</button></div>
           <pre class="patch-raw" id="diff-patch" tabindex="0" translate="no" aria-label="The change's patch"></pre>
         </div>
       </section>

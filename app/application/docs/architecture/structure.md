@@ -25,7 +25,7 @@ mechanism of its own: every concern this composes is owned by the package it cam
 | part | responsibility |
 |---|---|
 | `activities.py` | what a run does on its target host, one activity at a time |
-| `changes.py` | a run's change, live, for the page: its worktree on this host against the base its workflow says it stands on now, read again only when the worktree moved; the worker hands it to its socket |
+| `changes.py` | a run's change, live, for the page: its worktree on this host against the base its workflow says it stands on now, as a summary that writes nothing, read again only when the worktree moved; the worker hands it to its socket |
 | `client.py` | the one client of runs, for the page and the command line alike |
 | `settings.py` | adapter-aware settings validation, the sparse local patch and the policy snapshot for a new run |
 | `stack.py` | the stack's one reading and its one owner, for the Makefile, the command line and the page |

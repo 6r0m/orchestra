@@ -18,6 +18,13 @@ import { removeKept } from "./worktrees.js";
 const LABELS = { approve: "Approve", revise: "Revise", "revise:engineer": "Revise (engineer)",
   "revise:architect": "Revise (architect)", guide: "Guide", continue: "Continue", merge: "Merge",
   discard: "Discard" };
+// What each answer does, said when the pointer rests on its button.
+const HINTS = { approve: "Accept this, and the run goes on to its next step",
+  revise: "Send it back with your note, for another round of its author's work",
+  "revise:engineer": "Send it back to the engineer with your note", "revise:architect": "Send it back to the architect "
+    + "with your note", guide: "Answer with your note, and the run goes on as it says",
+  continue: "Run the step that stopped once more", merge: "Land the verified change on the base branch",
+  discard: "End the run and delete its worktree and branch, with the change in them" };
 // The answer that moves the run on is the primary one; discard is the dangerous one.
 const PRIMARY = new Set(["approve", "merge", "guide", "continue"]);
 const DANGER = new Set(["discard"]);
@@ -383,6 +390,7 @@ function renderStop(stop, timeline) {
     const button = el("button", LABELS[action] || action,
       PRIMARY.has(action) ? "primary" : DANGER.has(action) ? "danger" : "");
     button.type = "button";
+    button.title = HINTS[action] || "Answer the run: " + action;
     button.onclick = () => answer(stop, action, button);
     return button;
   }));
@@ -436,13 +444,14 @@ async function answer(stop, action, button) {
 
 // The change sits under the decision when the decision judges it — at a plan's or a build's approval and
 // at the final gate, read at once — after the history once a plan exists, and nowhere before.
-// The run's change, its result, first on its page: live while the run works, from its host's worker; the snapshot
-// a decision judges, under that decision; and once closed, what its kept worktree holds, read by the button.
+// The run's change, its result, first on its page: live from its host's worker while a role works on it — and only
+// then, since nothing else moves it; the snapshot a decision judges, under that decision; otherwise — waiting at a
+// blocker or a failed step, or closed — what was last seen, and what its worktree holds now by the button.
 function renderChange(view, stop) {
   const judged = stop && ((stop.reason === "approval" && ["plan", "build"].includes(stop.phase)) || stop.reason === "final");
   const exists = view.worktree && (view.state !== "closed" || view.kept);
   placeChange(exists ? "first" : "none");
-  if (exists && view.state !== "closed" && !judged) {
+  if (exists && view.state === "running" && view.role) {
     watchChange(selected, view.host);
     return;
   }
@@ -822,8 +831,9 @@ async function loadRoundChange(entry, runId, box, summary, body) {
 function readAgain(body, message, again) {
   const line = el("p", message, "alert");
   line.setAttribute("role", "alert");
-  const retry = el("button", "Read again");
+  const retry = el("button", "Try again");
   retry.type = "button";
+  retry.title = "Read it again: the read said above failed";
   retry.onclick = again;
   body.replaceChildren(line, retry);
 }

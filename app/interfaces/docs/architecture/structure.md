@@ -37,8 +37,9 @@ lifecycle, do not allow. Through `application.stack`: the stack's reading and ev
 and restart of it, so neither keeps a second copy of how the stack runs.
 
 Through the worker's WebSocket: the page attaches to a run's live terminals on whichever
-host is running them, and — while the run works — to its change, which that worker reads from the run's
-worktree and sends again whenever it moves: a snapshot, whose files open through the change's own reader.
+host is running them, and — while a role works on the run — to its change, which that worker reads from the
+run's worktree and sends again whenever it moves: a summary that writes nothing in git. A file opened is read
+through the change's own reader, as the change is now, and read again only when its row says it changed.
 Its Operator action list also projects a waiting vendor dialog from the active turn's local
 hook events — Claude's; Codex reports none — and the workflow still owns actual stops and their answers.
 

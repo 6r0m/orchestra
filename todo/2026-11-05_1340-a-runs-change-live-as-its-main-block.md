@@ -86,10 +86,10 @@ Both read the same git, through the same worker; they differ only in how the new
 - **workspace** — `change_fingerprint(path)`: the worktree's `git status` (no optional locks, so the index is
   never written), HEAD, and each listed file's size and time — cheap, and changed whenever the change is.
 - **application** — a change feed for this host: the run's worktree and the base it stands on now, from its
-  workflow's own status (a reconcile moves the base); the fingerprint every few seconds; the snapshot —
-  `review_diff(path, base, files_from=0)`, the same read a review takes — only when it moved, so what is sent
-  is a snapshot whose files open through the existing reader. Its pace follows its cost: a slow read is asked
-  less often. A run on another host, a worktree gone, or a status that cannot be read is said, never guessed.
+  workflow's own status (a reconcile moves the base); the fingerprint every few seconds; a summary that writes
+  nothing — `change_summary(path, base)` — only when it moved; a file's diff read when its row is opened, through
+  the existing reader. Its pace follows its cost: a slow read is asked less often. A run on another host, a
+  worktree gone, or a status that cannot be read is said, never guessed.
 - **agents** — the worker's socket serves a feed it is handed, by name, beside the terminals: same origin,
   same token; it knows nothing of git or Temporal (agents imports only foundation).
 - **interfaces** — the worker hands its socket the feed; the page's one *Change* section moves up and listens
@@ -100,12 +100,32 @@ Both read the same git, through the same worker; they differ only in how the new
 - [worktrees.py](../app/workspace/worktrees.py) `change_fingerprint`; [changes.py](../app/application/changes.py)
   `ChangeFeed`; [terminal.py](../app/agents/terminal.py) `serve(..., feeds=)`; [worker.py](../app/interfaces/worker.py)
   hands the feed over and binds it to its client.
-- [change.js](../app/interfaces/workbench/static/change.js): one section, first on the page; live while the run
-  works and no decision judges its change; the snapshot judged under such a decision; once closed, read by its
-  button. [run.js](../app/interfaces/workbench/static/run.js) decides which.
-- The demo's held engineer of the run stopped at work drafts a file; the driver's `change:` mode reads it.
+- [worktrees.py](../app/workspace/worktrees.py) `change_summary`, which the feed sends; the page's
+  [diff.js](../app/interfaces/workbench/static/diff.js) names no tree a list does not hold, and says a new file too
+  large to count while the run works.
+- [change.js](../app/interfaces/workbench/static/change.js): one section, first on the page; live while a role
+  works on the run, a row kept while its file is unchanged; the snapshot judged under a decision that judges it;
+  otherwise what was last seen, and its button. [run.js](../app/interfaces/workbench/static/run.js) decides which.
+- The demo's held engineer of the run stopped at work drafts a file; the driver's `change:` mode reads it, its
+  `change-rows` mode sends the page summaries in the worker's place, and its `change-idle` mode watches a waiting
+  run's page.
 - Docs: the agents', application's and interfaces' structure, the architecture's table and process diagram,
   using.md, tools/README.md.
+
+## Review record
+
+- **External reviewer, 2026-11-05 — PATCH, four findings, each taken, each verified against the code:**
+  1. *An automatic snapshot writes objects:* `review_diff` builds its tree with `git add -A` and `write-tree` on a
+     private index, so each look that found a change wrote blobs and a tree no ref holds until git prunes them.
+     The live look is now `worktrees.change_summary` — `git diff` against the base, untracked files counted here,
+     each file stamped with its size and time — which writes nothing; an exact snapshot is taken only when a file
+     is opened, as the change is then.
+  2. *An opened file was read again at every look:* the list was drawn anew and the open rows reopened, each
+     reading its diff through Temporal. A row whose file the summary says nothing new of is now kept as it is;
+     only a changed file's row is drawn anew, and read again only if it was open.
+  3. *It watched while the run waited:* now only while the run is running with a role at work.
+  4. *A look that read again stayed "not current":* a look that could not read now forgets its fingerprint, so the
+     first that reads again sends what it reads.
 
 ## Verification
 
@@ -121,6 +141,12 @@ Both read the same git, through the same worker; they differ only in how the new
   that scope was stopped by hand. The run after that: DEMO PASSED, 112 checks — the change first on the run's
   page, *1 file changed · +1 −0 · read now*, listing `draft.txt` with nothing pressed, its diff opened showing
   `+ drafted while at work`; the stack panel's Stop of the worker passing as before.
+- **A larger worktree, on Windows** (`tmp/agent/live-change/perf.py`, throwaway): 20,000 text files and ten
+  20 MB binaries committed; five edits, one binary rewritten, three new text files and a new 30 MB binary. The
+  fingerprint 0.23–0.27 s; the summary 0.54–0.65 s, objects loose and packed `(0, 20214)` before and after —
+  none written; the exact snapshot, the control, 2.29 s and 15 loose objects written, the binaries among them.
+  The pace now follows the whole look, the fingerprint included: a look takes at most a sixth of a watcher's
+  time, between 2 and 60 seconds apart.
 - **The touched modules on both hosts:** on WSL `tests.workspace.test_worktrees`, `tests.agents.test_terminal`,
   `tests.application.test_changes`, `tests.interfaces.test_workbench`, `tests.test_architecture` and
   `tests.test_demo` — 43 classes, 256 tests, OK; on Windows the first three — 21 classes, 129 tests, OK.

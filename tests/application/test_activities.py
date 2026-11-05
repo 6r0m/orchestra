@@ -22,6 +22,7 @@ sys.path[:0] = [PKG, HERE]
 from temporalio.exceptions import ApplicationError  # noqa: E402
 
 from app.agents import adapters, terminal  # noqa: E402
+from app.agents import nodes as N  # noqa: E402
 from app.agents.adapters import claude_code, codex  # noqa: E402
 from app.application import activities  # noqa: E402
 from app.observability import telemetry as T  # noqa: E402
@@ -365,6 +366,40 @@ class Closeout(unittest.TestCase):
         said = self.refused(lambda: ran.append(True), verified_tree=None)
         self.assertIn("closeout_violation", said)
         self.assertEqual(ran, [], "unknown is not unchanged: nothing is closed out against a tree nobody verified")
+
+
+class LongPrompt(unittest.TestCase):
+    """A turn given guidance longer than a command line takes — an audit pasted whole — still starts: the
+    guidance is attached as a file in the run's own folder, which the agent may read, and the prompt names it."""
+
+    def setUp(self):
+        self.run_id = "test-activities-%s" % os.urandom(4).hex()
+        self.addCleanup(shutil.rmtree, activities.run_dir(self.run_id), True)
+        self.addCleanup(terminal.close_run, self.run_id)
+
+    def test_each_kinds_turn_starts_with_the_long_guidance_attached(self):
+        guidance = "".join("line %d of an audit pasted whole, \"PATCH\" and all\n" % n for n in range(1500))
+        for kind in SHIPPED:
+            given = []
+            adapter = adapters.load(kind)
+
+            def runner(worktree, argv, rdir, name, prompt, timeout, env, *, kind):
+                given.append((argv, prompt))
+                return 0, adapter.output("planned", "s1")
+            with self.subTest(kind=kind):
+                host = activities.Activities(runner=runner, git=FakeWorktrees(), telemetry=None)
+                host.run_role({"stage": "plan", "state": dict(state(self.run_id), guidance=guidance),
+                               "policy": policy(kind)})
+                argv, prompt = given[0]
+                folder = os.path.join(activities.run_dir(self.run_id), "attachments")
+                path = os.path.join(folder, "plan-e1-1-guidance.md")
+                self.assertLessEqual(N.cost(prompt), N.PROMPT_BUDGET)
+                self.assertIn(path, prompt)
+                with open(path, encoding="utf-8", newline="") as fh:
+                    self.assertIn(guidance, fh.read(), "the guidance whole, in the file the prompt names")
+                if kind == "claude-code":
+                    self.assertEqual(argv[argv.index(os.path.realpath(folder)) - 1], "--add-dir",
+                                     "a folder Claude reads without approval")
 
 
 def stand_in_output():

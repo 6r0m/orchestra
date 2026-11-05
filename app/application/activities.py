@@ -285,13 +285,23 @@ class Activities:
         client = self.client()
 
         def compose(session_first, named):
-            """The turn's prompt, its parts kept beside it under the attempt's own name for whoever shows it."""
+            """The turn's prompt, its parts kept beside it under the attempt's own name for whoever shows it — a
+            part too long for the command line attached as a file in the run's folder (`N.attach`) — and the files
+            it attached."""
             parts = N.compose_parts(stage, role, is_review, state, session_first=session_first,
                                     stage_first=attempt == 1, logs=os.path.join(rdir, "logs"),
                                     skills=policy.get("stage_skills"), review_rounds=policy.get("review_rounds"),
                                     review_prompts=policy.get("review_prompts"))
+            parts, attached = N.attach(parts, os.path.join(rdir, "attachments"), named)
             terminal.record_parts(rdir, named, parts)
-            return N.render(parts)
+            return N.render(parts), attached
+
+        def hosted(argv, attached):
+            """The command as this host launches it, with the turn's attached parts readable to its agent."""
+            argv = adapter.host(argv)
+            if not attached:
+                return argv
+            return _answer(adapter, "readable", argv, [os.path.dirname(attached[0])]) or argv
 
         span = T.begin(client, state, stage, role_name, dict(adapters.view(role), kind=kind, agent=role.get("agent")),
                        log=os.path.relpath(os.path.join(rdir, "logs", name), paths.REPO))
@@ -325,8 +335,9 @@ class Activities:
             # a verdict must describe the plan or the change it actually read.
             judged = self.git.work_tree(worktree) if is_review else None
             argv, minted = N.build_argv(role, resume_id, traced)
-            rc, out = self.runner(worktree, adapter.host(argv), rdir, name, compose(resume_id is None, name),
-                                  policy["timeout_seconds"], env, kind=kind)
+            prompt, attached = compose(resume_id is None, name)
+            rc, out = self.runner(worktree, hosted(argv, attached), rdir, name, prompt, policy["timeout_seconds"], env,
+                                  kind=kind)
             effective_resume = resume_id
             if rc != 0 and N.classify_failure(role, resume_id, rc, out,
                                               _read(terminal.turn_files(rdir, name)["err"])) == "session_lost":
@@ -337,8 +348,9 @@ class Activities:
                        "given the whole task again" % role_name)
                 effective_resume = None
                 argv, minted = N.build_argv(role, None, traced)
-                rc, out = self.runner(worktree, adapter.host(argv), rdir, name + terminal.RETRIED,
-                                      compose(True, name + terminal.RETRIED), policy["timeout_seconds"], env, kind=kind)
+                prompt, attached = compose(True, name + terminal.RETRIED)
+                rc, out = self.runner(worktree, hosted(argv, attached), rdir, name + terminal.RETRIED, prompt,
+                                      policy["timeout_seconds"], env, kind=kind)
             if rc != 0:
                 raise N.TransportError("%s failed rc=%d — inspect %s/logs/%s.*" % (stage, rc, rdir, name))
             if self.git.guard(worktree, state["run_id"]) != before:

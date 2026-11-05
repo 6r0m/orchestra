@@ -789,6 +789,64 @@ def _files(numstat, status):
     return files
 
 
+# A file git does not track yet is counted line by line up to this size; a larger one is read only far enough to
+# say whether it is text, and its lines are not counted.
+COUNT_LIMIT = 1024 * 1024
+BINARY_PROBE = 8000
+
+
+def change_summary(path, base):
+    """What the worktree at `path` holds against the commit `base` now, listed as `review_diff` lists a snapshot's
+    files — each with a `stamp` of its size and time, None once it is gone — and read with nothing written: no
+    object, and not the worktree's index. Tracked files are read by `git diff` against `base`, which hashes in
+    memory; a file git does not track yet is counted here. `review_diff`, which writes the tree it names, is for an
+    exact snapshot, taken when one is asked for.
+
+    Raises ChangeRefused for a worktree that is gone; on any git failure, RuntimeError.
+    """
+    if not os.path.isdir(path):
+        raise ChangeRefused("the run's worktree is gone — merged, discarded or removed")
+
+    def read(*args):
+        done = git(path, "--no-optional-locks", *args, check=False)
+        if done.returncode:
+            raise RuntimeError("git %s in %s: rc=%d %s" % (args[0], path, done.returncode, done.stderr.strip()[:300]))
+        return done.stdout
+
+    base = read("rev-parse", "--verify", (base or "HEAD") + "^{commit}").strip()
+    files = _files(read("diff", *DIFF, "--numstat", "-z", base, "--"),
+                   read("diff", *DIFF, "--name-status", "-z", base, "--"))
+    for name in read("ls-files", "-z", "--others", "--exclude-standard").split("\0"):
+        if name:
+            files.append(dict({"path": name, "old": None, "status": "A"}, **_counted(os.path.join(path, name))))
+    files.sort(key=lambda each: each["path"])
+    for each in files:
+        try:
+            found = os.stat(os.path.join(path, each["path"]))
+            each["stamp"] = "%d:%d" % (found.st_size, found.st_mtime_ns)
+        except OSError:
+            each["stamp"] = None
+    return {"base": base, "files": files[:FILES_LIMIT], "files_total": len(files)}
+
+
+def _counted(path):
+    """A file git does not track yet, as a diff counts it: its lines added, or binary — or, past COUNT_LIMIT,
+    its lines not counted."""
+    uncounted = {"added": None, "removed": None, "binary": False}
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(BINARY_PROBE)
+            if b"\0" in head:
+                return {"added": None, "removed": None, "binary": True}
+            if os.fstat(fh.fileno()).st_size > COUNT_LIMIT:
+                return uncounted
+            data = head + fh.read()
+    except OSError:
+        return uncounted
+    return {"added": data.count(b"\n") + (1 if data and not data.endswith(b"\n") else 0), "removed": 0,
+            "binary": False}
+
+
 def review_diff(path, offset=0, base=None, tree=None, file=None, files_from=None, repo=None):
     """A run's change as a human reviews it: one snapshot, named by its base and its tree, and read from them.
 

@@ -3,9 +3,10 @@ base the run stands on now, read again only when something in the worktree moved
 
 The worker hands `ChangeFeed.poll` to its socket (`agents.terminal.serve`), which asks it on behalf of each
 watcher. It reads, and keeps nothing but each watcher's memo: git owns the files, the run's workflow owns its
-base and its worktree's path, and what it sends is the same snapshot a review reads (`worktrees.review_diff`),
-so a file of it opens through the change's own reader. A run on another host, a worktree not made yet or gone,
-and a status or a worktree that cannot be read now are each said as such, never guessed.
+base and its worktree's path. What it sends is a summary that writes nothing (`worktrees.change_summary`): an
+exact snapshot writes the tree it names, so it is taken only when a file is opened, through the change's own
+reader. A run on another host, a worktree not made yet or gone, and a status or a worktree that cannot be read
+now are each said as such, never guessed.
 """
 import asyncio
 import concurrent.futures
@@ -59,7 +60,7 @@ class ChangeFeed:
                 state = self.state(run_id)
             except (RPCError, WorkflowQueryFailedError, WorkflowQueryRejectedError, TimeoutError,
                     concurrent.futures.TimeoutError) as error:
-                return said(memo, {"error": "the run's status cannot be read now: %s" % error}), RETRY
+                return unread(memo, "the run's status cannot be read now: %s" % error), RETRY
             if state is None:
                 return {"gone": "Temporal holds no run %s" % run_id}, None
             if state.get("target") != self.target:
@@ -69,22 +70,36 @@ class ChangeFeed:
             # Asked again at the next look: the worktree is made in a moment.
             memo["asked"] = 0.0
             return said(memo, {"waiting": "the run has no worktree yet"}), FASTEST
+        # The whole look is timed, the fingerprint asked at every one among it: on a large worktree that alone paces it.
+        began = time.monotonic()
         try:
             moved = worktrees.change_fingerprint(memo["path"])
             if moved == memo.get("fingerprint") and memo["base"] == memo.get("read_base"):
-                return None, memo.get("pace", FASTEST)
-            began = time.monotonic()
-            read = worktrees.review_diff(memo["path"], base=memo["base"], files_from=0)
-            took = time.monotonic() - began
+                memo["pace"] = paced(time.monotonic() - began)
+                return None, memo["pace"]
+            # A summary, which writes nothing: the exact snapshot — a tree written — is taken when a file is opened.
+            read = worktrees.change_summary(memo["path"], memo["base"])
         except worktrees.ChangeRefused as error:
             return {"gone": str(error)}, None
         except (RuntimeError, OSError, subprocess.TimeoutExpired) as error:
-            return said(memo, {"error": "the change cannot be read now: %s" % error}), RETRY
-        memo.update(fingerprint=moved, read_base=memo["base"], pace=min(SLOWEST, max(FASTEST, PACE * took)))
-        sent = {"base": read["base"], "tree": read["tree"], "files": read["files"], "files_total": read["files_total"],
-                "read": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
+            return unread(memo, "the change cannot be read now: %s" % error), RETRY
+        memo.update(fingerprint=moved, read_base=memo["base"], pace=paced(time.monotonic() - began))
+        sent = dict(read, read=datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"))
         memo["said"] = None
         return sent, memo["pace"]
+
+
+def paced(took):
+    """How long until the next look, after one that took `took` seconds: PACE times as long, so looking takes at
+    most a sixth of a watcher's time, within FASTEST and SLOWEST."""
+    return min(SLOWEST, max(FASTEST, PACE * took))
+
+
+def unread(memo, why):
+    """What a look that could not read says — once — and what it forgets: what was last sent is no longer current
+    for its watcher, so the first look that reads again sends what it reads, though nothing moved."""
+    memo.pop("fingerprint", None)
+    return said(memo, {"error": why})
 
 
 def said(memo, message):

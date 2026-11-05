@@ -4,7 +4,7 @@
 
 import { api, CONFIG } from "./api.js";
 import { $, PARTS, clock, report } from "./ui.js";
-import { copyPatch, fileList } from "./diff.js";
+import { copyPatch, fileItem, fileList } from "./diff.js";
 import { stackReading } from "./stack.js";
 
 const size = new Intl.NumberFormat(undefined, { style: "unit", unit: "kilobyte", unitDisplay: "short",
@@ -27,6 +27,7 @@ export function showChangeFor(run) {
   $("diff-raw").hidden = true;
   $("diff-patch").textContent = "";
   $("diff-load").textContent = "Read the change";
+  $("diff-load").title = "Read what the worktree holds now against the run's base: each file, and the whole patch";
   $("diff-load").hidden = false;
 }
 
@@ -49,7 +50,7 @@ let watching = null;
 export function watchChange(run, target) {
   if (watching && watching.runId === run && watching.target === target) return;
   const was = watching;
-  watching = run ? { runId: run, target: target, socket: null, retry: null, seen: false } : null;
+  watching = run ? { runId: run, target: target, socket: null, retry: null, seen: false, rows: new Map() } : null;
   if (was) {
     clearTimeout(was.retry);
     if (was.socket) was.socket.close();
@@ -103,28 +104,46 @@ function listen(watch) {
   };
 }
 
-// One snapshot shown: its line — how many files, lines added and removed, and when it was read — then its files,
-// those the operator opened kept open, each read again from the new snapshot.
-function showLive(watch, snapshot) {
+// One summary shown: its line — how many files, lines added and removed, and when it was read — then its files. A
+// file the summary says nothing new of keeps its row as it was, open with its diff as read; a file that changed
+// gets a new row, open again, and so read again, when the operator had opened it. A diff is read only when its row
+// opens: as the change is now, since a live summary writes no snapshot.
+function showLive(watch, summary) {
   watch.seen = true;
-  shown = snapshot;
+  shown = summary;
   const said = $("change-said");
-  if (!snapshot.files_total) {
-    said.replaceChildren("No change yet: the worktree holds what its base does. Read ", clock(snapshot.read, "ago"),
+  if (!summary.files_total) {
+    said.replaceChildren("No change yet: the worktree holds what its base does. Read ", clock(summary.read, "ago"),
       ".");
     $("diff-files").replaceChildren();
+    watch.rows = new Map();
     return;
   }
-  const text = snapshot.files.filter((file) => !file.binary);
-  const added = text.reduce((sum, file) => sum + file.added, 0);
-  const removed = text.reduce((sum, file) => sum + file.removed, 0);
-  said.replaceChildren((snapshot.files_total === 1 ? "1 file" : snapshot.files_total + " files") + " changed · +"
-    + added + " −" + removed + " · read ", clock(snapshot.read, "ago"), ", and again as the worktree changes.");
-  const opened = [...$("diff-files").querySelectorAll("details.file[open]")].map((file) => file.dataset.path);
-  $("diff-files").replaceChildren(fileList(watch.runId, snapshot, snapshot.files, snapshot.files_total));
-  for (const file of $("diff-files").querySelectorAll("details.file")) {
-    if (opened.includes(file.dataset.path)) file.open = true;
+  const counted = summary.files.filter((file) => typeof file.added === "number");
+  const added = counted.reduce((sum, file) => sum + file.added, 0);
+  const removed = counted.reduce((sum, file) => sum + file.removed, 0);
+  said.replaceChildren((summary.files_total === 1 ? "1 file" : summary.files_total + " files") + " changed · +"
+    + added + " −" + removed + " · read ", clock(summary.read, "ago"), ", and again as the worktree changes.");
+  let list = $("diff-files").querySelector("ul.file-list");
+  if (!list) {
+    $("diff-files").replaceChildren(fileList(watch.runId, summary, [], 0));
+    list = $("diff-files").querySelector("ul.file-list");
   }
+  const rows = new Map();
+  list.replaceChildren(...summary.files.map((file) => {
+    const key = JSON.stringify([file.status, file.old, file.added, file.removed, file.binary, file.stamp]);
+    const had = watch.rows.get(file.path);
+    if (had && had.key === key) {
+      rows.set(file.path, had);
+      return had.item;
+    }
+    const item = fileItem(watch.runId, summary, file);
+    if (had && had.item.querySelector("details.file").open) item.querySelector("details.file").open = true;
+    rows.set(file.path, { key: key, item: item });
+    return item;
+  }));
+  watch.rows = rows;
+  if (summary.files.length < summary.files_total) said.append(" The first " + summary.files.length + " are listed.");
 }
 
 // At a stop that asks the operator to judge a change, the change is read once, on its own.
@@ -154,7 +173,9 @@ async function loadDiff(asked) {
     $("diff-size").textContent = read.next < read.total
       ? "the first " + size.format(Math.ceil(read.next / 1024)) + " of " + size.format(Math.ceil(read.total / 1024))
         + " shown; Copy patch copies all of it" : size.format(Math.ceil(read.total / 1024));
-    $("diff-load").textContent = "Read it again";
+    // What is listed is the change as it was when read: Refresh reads the worktree again.
+    $("diff-load").textContent = "Refresh";
+    $("diff-load").title = "What is listed is the change as it was when read; read the worktree again for the change now";
     if (asked) report($("change-result"), read.files_total ? counted : "The worktree holds no change.");
   } catch (error) {
     if (reading !== runId) return;

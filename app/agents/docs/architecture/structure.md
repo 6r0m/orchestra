@@ -42,7 +42,9 @@ This package's relationships are drawn once, in [the main view](diagrams/main.md
 
 Through the vendor CLI's own argv and its session store: a turn is that CLI started again
 with the role's session resumed by exact id and the prompt as its last argument. No shell
-sits between, so no task text is ever parsed as shell syntax.
+sits between, so no task text is ever parsed as shell syntax. A prompt past `nodes.PROMPT_BUDGET` has its
+longest parts — never the skill or the stage's ask — attached as files in the run's folder, each named in its
+place; a kind that reads outside the worktree only where it is told to is told that folder (`readable`).
 
 Through the run's settings snapshot: `nodes` appends an optional operator prompt addition for
 each role after the normal budget when extended rounds remain, and at the final budgeted

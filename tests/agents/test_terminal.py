@@ -99,6 +99,31 @@ class Turns(unittest.TestCase):
         for ext in ("prompt", "out", "err", "events"):
             self.assertTrue(os.path.exists(os.path.join(logs, "build-e1-1.%s" % ext)), ext)
 
+    def test_a_prompt_past_the_command_line_starts_once_its_long_part_is_attached(self):
+        # An operator's note as long as an audit pasted whole: given whole, it is past what Windows takes.
+        parts = [{"part": "instructions", "text": "complete this"},
+                 {"part": "guidance", "text": "\n# Operator guidance\n" + "an audit pasted whole, \"PATCH\" and all\n" * 1200}]
+        kept, attached = N.attach(parts, os.path.join(self.rdir, "attachments"), "plan-e4-1")
+        self.assertEqual(len(attached), 1)
+
+        def launched(prompt):
+            """A process given `prompt` as its last argument, through the launch every agent takes."""
+            tree = launch._Tree()
+            try:
+                return tree.start([sys.executable, "-c", "pass", prompt], self.worktree, subprocess.DEVNULL,
+                                  subprocess.DEVNULL, subprocess.DEVNULL, None).wait(60)
+            finally:
+                tree.kill()
+                tree.close()
+        if WINDOWS:
+            with self.assertRaises(OSError) as refused:
+                launched(N.render(parts))
+            self.assertEqual(refused.exception.errno, 206, "the control: Windows refuses the command line itself")
+        self.assertEqual(launched(N.render(kept)), 0, "the prompt with its long part attached is launched")
+        if WINDOWS:
+            self.skipTest("the fake runs through a .cmd wrapper, which cannot carry a newline in an argument")
+        self.assertEqual(self.turn(N.render(kept), name="plan-e4-1"), (0, "done complete"))
+
     def test_the_prompt_survives_an_option_that_takes_several_values(self):
         worktree_skills = tempfile.mkdtemp(prefix="orchestra-skills-")
         self.addCleanup(shutil.rmtree, worktree_skills, True)

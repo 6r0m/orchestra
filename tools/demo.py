@@ -450,6 +450,9 @@ class Demo:
         check(self.press("page", "markdown-safety", "none"),
               "the page's renderer, given hostile Markdown, makes only its own elements, links only to the web and "
               "loads nothing")
+        check(self.press(merged, "hints", "none"),
+              "every button shown — New run's, Settings', the stack's and this run's at its approval — says on hover "
+              "what it does")
 
         step("the plan approved by pressing the Workbench's own button")
         check(self.press(merged, "Approve", "answered: approve"), "the page sent the answer, and the workflow took it")
@@ -506,6 +509,9 @@ class Demo:
         check(self.press(working, "change:drafted while at work", "draft.txt"),
               "the run's change, first on its page, lists the file its engineer wrote while still at work — "
               "read by its host's worker with nothing pressed — and opens its diff")
+        check(self.press(working, "change-rows", "none"),
+              "as summaries come, a file opened stays open and is not read again while another file comes, and is "
+              "read once more, it alone, when it changes")
         check(self.press(working, "Stop run", "stopping") and self.asked("Stop this run?", "stay as they are"),
               "the page asked first, then sent the Stop")
         view = self.until(working, closed, 120, "the Stop")
@@ -594,6 +600,8 @@ class Demo:
         view = self.until(down, lambda view: view["state"] == "failed", 120, "the lost stage stopping for the operator")
         check(True, "its stage ended with the worker, and waits for the operator: %s"
               % (view["failure"] or "").splitlines()[0])
+        check(self.press(down, "change-idle", "none"),
+              "waiting at its failed step, with no role at work, its page watches no change and offers the read")
         check(self.press(down, "Continue", "answered: continue"), "Continue pressed: the stage runs once more")
         self.until(down, lambda view: view["state"] == "waiting" and view["stop"]["reason"] == "approval", 300,
                    "the plan's approval")

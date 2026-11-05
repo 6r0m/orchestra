@@ -1,6 +1,6 @@
 """Press one of the Workbench's own buttons in a headless browser, as the operator would.
 
-    python tools/demo_press.py <workbench url> <run id | stack | start | page> <button label | task | refused:repo:task | answered:status | markdown | markdown-safety | change:words | terminal:role | turn:stage | turn-then:stage:label | file:path | round:stage:path | history | hold:role:label | type-after:role:label:line | layout:WIDTHxHEIGHT | absent:label,...> <what the page should say> [note]
+    python tools/demo_press.py <workbench url> <run id | stack | start | page> <button label | task | refused:repo:task | answered:status | markdown | markdown-safety | change:words | change-rows | change-idle | hints | terminal:role | turn:stage | turn-then:stage:label | file:path | round:stage:path | history | hold:role:label | type-after:role:label:line | layout:WIDTHxHEIGHT | absent:label,...> <what the page should say> [note]
 
 The Windows side of `make demo` (WSL cannot reach Windows' loopback, and Windows reaches the
 Workbench's): headless Edge, driven over the DevTools protocol, opens the page, opens the run by its
@@ -22,7 +22,13 @@ Markdown text, hostile parts among it, and exits 0 when every part is drawn as i
 outside the renderer's own elements is made, no link leads off the web and nothing is loaded.
 Given `change:<words>`, it presses nothing but a file: it opens the run and waits for its change, live, to
 list the file expected, then opens that file: it exits 0 when the change comes before the terminals with
-nothing pressed to read it, lists that file, and its diff shows the words.
+nothing pressed to read it, lists that file, and its diff shows the words. Given `change-rows`, the page's
+socket for the run's change and its reads of a file's diff are stood in for before the page loads, and three
+summaries are sent: it exits 0 when a file opened stays open and is not read again while another file comes,
+and is read once more, and only it, when it changes. Given `change-idle`, the same stand-in watches the run's
+page: it exits 0 when the page, its run waiting with no role at work, opens no socket for the change. Given
+`hints`, it presses nothing but the stack's chips: it visits New run, Settings and — for a run other than `page`
+— that run's page, and exits 0 when every button shown outside a dialog says on hover what it does.
 Given `terminal:<role>`, it presses nothing: it opens that role's terminal, if it is
 closed, and reads its screen as the page shows it, live from its host. Given `turn:<stage>`, it presses
 nothing either: it opens the run's latest turn of that stage in its history and reads what the page shows it
@@ -56,6 +62,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 import urllib.request
 
 from websockets.sync.client import connect
@@ -463,6 +470,111 @@ def change(page, run_id, path, words):
     return 0 if shown["first"] and not shown["button"] else 1
 
 
+# Before the page loads: its socket for a run's change stood in for — the summaries a test sends it in place of the
+# worker's — and its reads of a file's diff answered here, each counted by the file it names; nothing else changed.
+FEED_STAND_IN = """(() => {
+  const Real = window.WebSocket, realFetch = window.fetch;
+  const feed = window.__feed = { socket: null, opened: 0, reads: {} };
+  window.WebSocket = function (url, protocols) {
+    if (!String(url).endsWith("/change")) return new Real(url, protocols);
+    feed.opened += 1;
+    feed.socket = { readyState: 1, close() { this.readyState = 3; }, send() {} };
+    return feed.socket;
+  };
+  Object.assign(window.WebSocket, { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 });
+  feed.say = (message) => feed.socket.onmessage({ data: JSON.stringify(message) });
+  window.fetch = (path, options) => {
+    const url = new URL(String(path), location.href);
+    const file = url.pathname.endsWith("/diff") && url.searchParams.get("file");
+    if (!file) return realFetch(path, options);
+    feed.reads[file] = (feed.reads[file] || 0) + 1;
+    return Promise.resolve(new Response(JSON.stringify({ base: "b", tree: "t", file: { path: file, status: "A" },
+      patch: "@@ -0,0 +1 @@\\n+read " + feed.reads[file] + "\\n", whole: true }),
+      { status: 200, headers: { "Content-Type": "application/json" } }));
+  };
+})();"""
+# Each row of the run's change, and which are open; and how many times each file's diff was read.
+ROWS = ("({ paths: [...document.querySelectorAll('#change details.file')].map((f) => f.dataset.path),"
+        " open: [...document.querySelectorAll('#change details.file[open]')].map((f) => f.dataset.path),"
+        " reads: window.__feed.reads })")
+
+
+def summary(*files):
+    """A summary as the worker sends one: each file `(path, added, stamp)`."""
+    return {"base": "b", "files_total": len(files), "read": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "files": [{"path": path, "old": None, "status": "A", "added": added, "removed": 0, "binary": False,
+                       "stamp": stamp} for path, added, stamp in files]}
+
+
+def change_rows(page, run_id):
+    """The run's change, live, as summaries come: 0 when a file opened stays open and is not read again while
+    another file comes, and is read once more — it alone — when it changes. Prints what it saw."""
+    page.value(OPEN % json.dumps(run_id))
+    wait(lambda: page.value(OPENED), 60, "the run")
+    wait(lambda: page.value("Boolean(window.__feed.socket && window.__feed.socket.onmessage)"), 60,
+         "the page watching the run's change")
+
+    def say(message, path):
+        page.value("window.__feed.say(%s); true" % json.dumps(message))
+        return wait(lambda: (lambda rows: rows if path in rows["paths"] else None)(page.value(ROWS)), 30,
+                    "the change to list %s" % path)
+    say(summary(("a.txt", 1, "1:1")), "a.txt")
+    wait(lambda: page.value(OPEN_FILE % (json.dumps("#change"), json.dumps("a.txt"))), 30, "a.txt opened")
+    wait(lambda: page.value(FILE_LINES % (json.dumps("#change"), json.dumps("a.txt"))), 30, "a.txt's diff")
+    say(summary(("a.txt", 1, "1:1"), ("b.txt", 2, "1:2")), "b.txt")
+    time.sleep(2)                                   # time for any read the new summary would start
+    came = page.value(ROWS)
+    say(summary(("a.txt", 2, "2:3"), ("b.txt", 2, "1:2")), "a.txt")
+    wait(lambda: page.value(ROWS)["reads"].get("a.txt") == 2, 30, "a.txt read again once it changed")
+    time.sleep(2)
+    changed = page.value(ROWS)
+    print("the run's change, live: with b.txt come, %s open and a.txt read %d time(s); with a.txt changed, %s open, "
+          "reads %s" % (came["open"], came["reads"].get("a.txt", 0), changed["open"], changed["reads"]))
+    return 0 if (came["open"] == ["a.txt"] and came["reads"] == {"a.txt": 1}
+                 and changed["open"] == ["a.txt"] and changed["reads"] == {"a.txt": 2}) else 1
+
+
+def change_idle(page, run_id):
+    """The run's page while it waits with no role at work: 0 when it opens no socket for the change and offers its
+    button to read it. Prints what it saw."""
+    page.value(OPEN % json.dumps(run_id))
+    wait(lambda: page.value(OPENED), 60, "the run")
+    time.sleep(6)                                   # two of the page's reads of the run
+    opened = page.value("window.__feed.opened")
+    button = page.value("(b => Boolean(b && !b.hidden && b.offsetParent))(document.getElementById('diff-load'))")
+    print("the waiting run's page opened %d socket(s) for its change, %s its button to read it"
+          % (opened, "and offers" if button else "and does NOT offer"))
+    return 0 if opened == 0 and button else 1
+
+
+# Every button shown outside a dialog — a dialog's own say what it asks — that says nothing on hover; and how many
+# there are in all.
+UNHINTED = ("(() => { const shown = [...document.querySelectorAll('button, a.button')].filter((b) => b.offsetParent"
+            " !== null && !b.closest('dialog')); return { shown: shown.length, bare: shown.filter((b) =>"
+            " !b.title.trim()).map((b) => b.textContent.trim().replace(/\\s+/g, ' ')) }; })()")
+
+
+def hints(page, run_id):
+    """New run, Settings, the stack's panel and — unless `run_id` is `page` — that run's page: 0 when every button
+    shown outside a dialog says on hover what it does. Prints what it saw."""
+    views = ["#new", "#settings"] + ([] if run_id == "page" else ["#run=" + urllib.parse.quote(run_id)])
+    shown, bare = 0, []
+    for view in views:
+        page.value("location.hash = %s; true" % json.dumps(view))
+        time.sleep(4)                               # the view's reads
+        if view == "#new":
+            page.value("document.getElementById('stack-button').click(); true")
+            time.sleep(1)
+        seen = page.value(UNHINTED)
+        shown += seen["shown"]
+        bare += ["%s %r" % (view, label) for label in seen["bare"]]
+        if view == "#new":
+            page.value("document.getElementById('stack-button').click(); true")
+    print("%d buttons shown across %s: %s" % (shown, ", ".join(views), "each says what it does on hover" if not bare
+                                              else "these say nothing: " + "; ".join(bare)))
+    return 0 if shown and not bare else 1
+
+
 def main(url, run_id, label, said, note=None):
     profile = tempfile.mkdtemp(prefix="orchestra-demo-edge-")
     # A layout is read at the window size it names; every press at the browser's own.
@@ -481,7 +593,13 @@ def main(url, run_id, label, said, note=None):
             "http://127.0.0.1:%s/json/list" % port)) if page.get("type") == "page"), 30, "a page to drive")
         with connect(target, max_size=None) as socket:
             page = Page(socket)
+            if label in ("change-rows", "change-idle"):
+                page.call("Page.addScriptToEvaluateOnNewDocument", source=FEED_STAND_IN)
             page.call("Page.navigate", url=url)
+            if label == "hints":
+                # Its views read no run, so neither does it wait for the list of runs.
+                wait(lambda: page.value("document.readyState === 'complete'"), 30, "the Workbench page")
+                return hints(page, run_id)
             wait(lambda: page.value("document.readyState === 'complete' && "
                                     "document.querySelector('#runs-finished li') !== null"), 30, "the Workbench page")
             if size:
@@ -497,6 +615,10 @@ def main(url, run_id, label, said, note=None):
                 return markdown(page, run_id, said)
             if label.startswith("change:"):
                 return change(page, run_id, said, label.split(":", 1)[1])
+            if label == "change-rows":
+                return change_rows(page, run_id)
+            if label == "change-idle":
+                return change_idle(page, run_id)
             if label.startswith("terminal:"):
                 role = label.split(":", 1)[1]
                 page.value(OPEN % json.dumps(run_id))

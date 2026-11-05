@@ -35,7 +35,9 @@ What a kind's module holds, each named below by what it answers:
 - optional — `trust_ensure(repo, home)`, `trust_forget(repo, home)`; `trace_env(context)`,
   `trace_settings(context, private)`, `reasoning(session)`, `upload(session, context)`;
   `waiting(events)`: whether its turn's events end on a dialog waiting in its terminal, for a kind that
-  reports one.
+  reports one; `readable(argv, folders)`: the command with folders outside the worktree readable to it
+  unasked — a turn's prompt parts attached as files (`nodes.attach`) — for a kind that must name them; a kind
+  without it reads them as it reads anything.
 
 Importing a kind's module only defines it: anything that touches the host happens in its answers,
 so the kinds can be listed on a host that has none of their CLIs.
@@ -53,7 +55,8 @@ REQUIRED = ("NAME", "EXECUTABLE", "ACCESS", "BOUNDARY", "OPTIONS", "SKILL", "SES
             "skill_roots")
 CALLABLE = ("validate", "command", "host", "session_in", "wire", "completion", "output", "session",
             "final_message", "message_of", "skill_folders", "skill_roots")
-OPTIONAL = ("trust_ensure", "trust_forget", "trace_env", "trace_settings", "reasoning", "upload", "waiting")
+OPTIONAL = ("trust_ensure", "trust_forget", "trace_env", "trace_settings", "reasoning", "upload", "waiting",
+            "readable")
 
 
 class Refused(ValueError):

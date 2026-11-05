@@ -131,12 +131,14 @@ agent's host stays its words, the path shown when you point at it; an image is i
 the text as written, and a failure, the exact prompt and the raw record stay as written too.
 
 The run's change is its result, so it comes first on its page, right under what the run is doing now —
-under the decision, when a decision judges it. While the run works it is live: its host's worker reads the
-worktree every few seconds — less often when a read is slow — and the page shows each new snapshot as it
-comes, how many files, lines added and removed and when it was read, with nothing to press; a file you opened
-stays open. Each turn's own change stays in the history. When the change cannot be read just now — its worker
-down, its status unanswered — the page says so and shows the last one as no longer current; once the run is
-closed, *Read the change* reads what its worktree still holds.
+under the decision, when a decision judges it. While a role works on the run it is live: its host's worker
+looks at the worktree every few seconds — less often when a look is slow — and, when something moved, the page
+shows how many files, lines added and removed and when it was read, with nothing to press. That look writes
+nothing in git; a file's diff is read when you open it, as the file is then, and a file you opened stays open,
+read again only when it changes. Each turn's own change stays in the history. When the change cannot be read
+just now — its worker down, its status unanswered — the page says so and shows the last one as no longer
+current. While the run waits at a blocker or a failed step, or once it is closed, nothing moves it: the page
+shows what was last seen, and *Read the change* reads what its worktree holds now.
 
 Each read of it is one snapshot: the commit of its base the run stands on and the tree the
 worktree's files make, so that it shows what the run adds to that base and nothing the base brought in —
@@ -144,7 +146,7 @@ and listed file by file, each by its whole path: a rename as its old path and it
 said so; a very long list comes a part at a time, *List more files* reading the rest of the same snapshot. Open a file to see its diff as an editor shows one: both line numbers, added lines green,
 removed red, long unchanged runs folded a click away. A file too large to show whole shows its changes
 alone, and says so. The patch sits below in a small box; *Copy patch* copies all of it, however large,
-from the same snapshot, and *Read it again* reads a new one.
+from the same snapshot, and *Refresh* reads a new one.
 
 Both roles' terminals follow, the one at work open and an idle one closed until you open it. Each is the
 vendor's own CLI: press Esc to interrupt a working agent — or *Pause*, at the top, which presses it for you —

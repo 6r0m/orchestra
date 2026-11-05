@@ -28,6 +28,7 @@ function repoMenu(node, choose) {
     const item = el("li", null, "owner");
     const button = el("button", name);
     button.type = "button";
+    button.title = "The repositories under " + name;
     item.append(button, repoMenu(owned, choose));
     list.appendChild(item);
   }
@@ -51,6 +52,7 @@ function picker(select) {
   const box = el("div", null, "picker");
   const button = el("button", "none", "picker-button");
   button.type = "button";
+  button.title = "Choose the repository, from .orchestra/repos.json";
   // Opening reads repos.json again, so an entry added to it shows without reloading the page.
   button.onclick = () => {
     const menu = box.querySelector(".menu");

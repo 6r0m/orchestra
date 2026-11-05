@@ -12,8 +12,10 @@ const CONTEXT = 3;
 const FOLD_AT = 4;
 const SIGN = { add: "+", del: "-", ctx: " " };
 
+// A query names only what it has: a live list's files name no tree, and are read as the change now.
 function diffPath(runId, query) {
-  return "/api/runs/" + encodeURIComponent(runId) + "/diff?" + new URLSearchParams(query);
+  const named = Object.entries(query).filter(([, value]) => value !== undefined && value !== null);
+  return "/api/runs/" + encodeURIComponent(runId) + "/diff?" + new URLSearchParams(named);
 }
 
 // A snapshot's files, each a disclosure whose diff is read when it first opens.
@@ -31,6 +33,7 @@ function listMore(runId, snapshot, list, listed, total) {
   const box = el("div", null, "actions");
   const button = el("button", "List more files");
   button.type = "button";
+  button.title = "List the next files of the same change; the list is too long to read at once";
   const said = el("p", null, "hint");
   said.setAttribute("role", "status");
   const left = () => { said.textContent = listed + " of " + total + " listed"; };
@@ -55,7 +58,9 @@ function listMore(runId, snapshot, list, listed, total) {
   return box;
 }
 
-function fileItem(runId, snapshot, file) {
+// One file's row: a disclosure whose diff is read when it first opens, from `snapshot` — or, for a live list that
+// names no tree, as the change is now.
+export function fileItem(runId, snapshot, file) {
   const item = el("li");
   const box = el("details", null, "file");
   box.dataset.path = file.path;
@@ -100,6 +105,9 @@ function counts(file) {
   const box = el("span", null, "counts");
   if (file.binary) {
     box.append(el("span", "binary", "hint"));
+  } else if (file.added === null || file.added === undefined) {
+    // A new file too large to count while the run works: its lines are counted when it is opened.
+    box.append(el("span", "large, lines not counted", "hint"));
   } else {
     box.append(el("span", "+" + file.added, "added"), el("span", "−" + file.removed, "removed"));
   }
@@ -128,8 +136,9 @@ async function loadFile(runId, snapshot, file, box, body) {
     delete box.dataset.loaded;
     const line = el("p", "The file cannot be read: " + error.message, "alert");
     line.setAttribute("role", "alert");
-    const again = el("button", "Read again");
+    const again = el("button", "Try again");
     again.type = "button";
+    again.title = "Read this file's diff again: the read said above failed";
     again.onclick = () => loadFile(runId, snapshot, file, box, body);
     body.replaceChildren(line, again);
   }
@@ -212,6 +221,7 @@ function fold(rows) {
   const button = el("button", "Show " + rows.length + " unchanged lines (" + rows[0].newer + "–"
     + rows[rows.length - 1].newer + ")", "fold");
   button.type = "button";
+  button.title = "Unfold the unchanged lines between these changes";
   button.onclick = () => button.replaceWith(...rows.map(line));
   return button;
 }

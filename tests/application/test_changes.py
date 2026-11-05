@@ -65,8 +65,7 @@ class Feed(unittest.TestCase):
         sent, wait = self.look(memo)
         self.assertEqual([(each["path"], each["status"]) for each in sent["files"]], [("new.txt", "A")])
         self.assertEqual((sent["base"], sent["files_total"]), (self.base, 1), "against the base the run stands on")
-        self.assertEqual(git(self.path, "cat-file", "-t", sent["tree"]).strip(), "tree",
-                         "a snapshot the change's reader opens a file of")
+        self.assertNotIn("tree", sent, "a summary, which writes no tree: a file opened is read as the change now")
         self.assertGreaterEqual(wait, changes.FASTEST)
         self.assertEqual(self.look(memo)[0], None, "nothing moved, so nothing is sent")
         write(os.path.join(self.path, "app.txt"), "one\ntwo\n")
@@ -116,6 +115,26 @@ class Feed(unittest.TestCase):
         self.assertEqual(wait, changes.RETRY)
         self.state = {"target": TARGET, "worktree_path": self.path, "base_tip": self.base}
         self.assertIn("files", self.look(memo)[0], "asked again at the next look, not after the usual while")
+
+    def test_a_look_that_reads_again_after_one_that_could_not_says_so_though_nothing_moved(self):
+        # The watcher was told it is not current: the first look that reads again must say what it read.
+        memo = {}
+        self.assertIn("files", self.look(memo)[0])
+        self.state = TimeoutError("no worker answered")
+        memo["asked"] = 0
+        self.assertIn("error", self.look(memo)[0])
+        self.state = {"target": TARGET, "worktree_path": self.path, "base_tip": self.base}
+        self.assertIn("files", self.look(memo)[0], "after a status that could not be read")
+        broken = dict(memo, path=os.path.join(self.tmp, "not-a-worktree"))
+        os.makedirs(broken["path"])
+        self.assertIn("error", self.look(broken)[0])
+        broken["path"] = self.path
+        self.assertIn("files", self.look(broken)[0], "after a worktree that could not be read")
+
+    def test_a_slow_look_is_asked_less_often_within_its_bounds(self):
+        self.assertEqual(changes.paced(0.1), changes.FASTEST)
+        self.assertEqual(changes.paced(1.0), 5.0, "a look takes at most a sixth of the time")
+        self.assertEqual(changes.paced(60), changes.SLOWEST)
 
     def test_the_status_is_asked_now_and_then_not_at_every_look(self):
         memo = {}

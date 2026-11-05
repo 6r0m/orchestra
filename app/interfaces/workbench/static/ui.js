@@ -117,6 +117,7 @@ export function copyButton(text, what) {
   const button = el("button", "Copy", "copy");
   button.type = "button";
   button.setAttribute("aria-label", "Copy " + what);
+  button.title = "Copy " + what;
   button.onclick = async () => {
     try {
       await navigator.clipboard.writeText(text);
