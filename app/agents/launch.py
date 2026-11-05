@@ -26,10 +26,12 @@ because killing the direct child leaves its tool processes running:
 Whichever way the run ends — its exit, a timeout, a Stop raised by `on_tick`, or our
 death — the tree is gone afterwards.
 """
+import atexit
 import os
 import select
 import subprocess
 import sys
+import threading
 import time
 import uuid
 
@@ -41,6 +43,81 @@ TICK_SECONDS = 1.0
 # one systemctl call: a hung user manager must not hang the worker.
 SCOPE_SECONDS = 30.0
 SYSTEMCTL_SECONDS = 10.0
+
+
+# The reads running now on POSIX, ended as this process ends (`_end_reads`).
+_reads = set()
+_reads_lock = threading.Lock()
+
+
+def read(argv, timeout):
+    """A short read-only command — a live view's git — as `subprocess.run(argv, capture_output=True, text=True)`
+    answers it, its output decoded as UTF-8 with what is not replaced, that never outlives this process: a read
+    is never worth keeping a worker, or its scope, alive for. On Windows it is created inside a job our death
+    closes, so it ends even when this process is killed; elsewhere it is ended as this process ends, which is how
+    a worker there is stopped. Raises subprocess.TimeoutExpired past `timeout`, the command ended.
+
+    Only for a command whose cut-off leaves nothing half-done: a write — a merge, a commit — runs to its end.
+    """
+    if WINDOWS:
+        return _read_windows(argv, timeout)
+    proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    with _reads_lock:
+        _reads.add(proc)
+    try:
+        try:
+            out, err = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()
+            raise
+    finally:
+        with _reads_lock:
+            _reads.discard(proc)
+    return subprocess.CompletedProcess(argv, proc.returncode, _decoded(out), _decoded(err))
+
+
+def _read_windows(argv, timeout):
+    tree = _WindowsTree()
+    try:
+        proc = tree.start(argv, None, subprocess.DEVNULL, subprocess.PIPE, subprocess.PIPE, None)
+        found = {}
+
+        def drain(name, stream):
+            found[name] = stream.read()
+        readers = [threading.Thread(target=drain, args=pair, daemon=True)
+                   for pair in (("out", proc.stdout), ("err", proc.stderr))]
+        for reader in readers:
+            reader.start()
+        try:
+            proc.wait(timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            raise
+        for reader in readers:
+            reader.join(SYSTEMCTL_SECONDS)
+        return subprocess.CompletedProcess(argv, proc.returncode, _decoded(found.get("out", b"")),
+                                           _decoded(found.get("err", b"")))
+    finally:
+        # Closing the job ends anything of the read still in it.
+        tree.close()
+
+
+def _decoded(data):
+    return (data or b"").decode("utf-8", "replace")
+
+
+@atexit.register
+def _end_reads():
+    """End every read still running: this process is ending, and nothing of a read needs finishing."""
+    with _reads_lock:
+        left = list(_reads)
+    for proc in left:
+        try:
+            proc.kill()
+        except OSError:
+            pass
 
 
 class RoleTimeout(TimeoutError):

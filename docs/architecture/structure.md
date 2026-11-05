@@ -95,7 +95,7 @@ Do not re-derive a `states/` layer here.
 | [stack.py](../../app/application/stack.py) | the stack's one reading and its one owner: Temporal and each host's worker, started, stopped and restarted for the Makefile, the command line and the page |
 | [app/agents/](../../app/agents/README.md) — [nodes.py](../../app/agents/nodes.py) | prompt composition, the agent argv, session identity, verdict parsing, failure classes |
 | [terminal.py](../../app/agents/terminal.py) · [ptyhost.py](../../app/agents/ptyhost.py) · [turn_hook.py](../../app/agents/turn_hook.py) | each role's live terminal on its host — its record, its WebSocket, a role turn run in it and that turn's completion; the same socket serves the run's change, live, from [changes.py](../../app/application/changes.py) |
-| [launch.py](../../app/agents/launch.py) | one agent process from an argv list, with its whole descendant tree contained |
+| [launch.py](../../app/agents/launch.py) | one agent process from an argv list, with its whole descendant tree contained; and a short read-only command — a live view's git — that ends with the process that started it |
 | [trust.py](../../app/agents/trust.py) | telling this host's agent CLIs that a run's repository is one the operator works in, so no turn stops at their trust dialog |
 | [app/workspace/](../../app/workspace/README.md) — [worktrees.py](../../app/workspace/worktrees.py) | the run's worktree through the target's own git: create, guard, merge, discard, the view |
 | [repos.py](../../app/workspace/repos.py) · [.orchestra/repos.example.json](../../.orchestra/repos.example.json) | which repository, target, base branch and worktree root a run uses |

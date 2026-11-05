@@ -9,7 +9,7 @@ the turn's explicit result back out.
 ## Owns
 
 - `terminal` — each role's live terminal on this host: its record, its WebSocket — which also serves the feeds the worker hands it — a role turn run in it, and that turn's completion.
-- `launch` — one agent process from an argv list, with its whole descendant tree contained.
+- `launch` — one agent process from an argv list, with its whole descendant tree contained; and `read`, a short read-only command that ends with the process that started it — on Windows even when that process is killed.
 - `ptyhost` — the pseudo-terminal the agent draws in; launched by path, inside the containment.
 - `turn_hook` — the vendors' own completion wiring, writing a turn's events into that turn's file; launched by path, by the vendor.
 - `nodes` — the prompt a turn is given, built as labelled parts it is rendered from byte for byte, the agent argv, session identity, verdict parsing and the failure classes.
@@ -29,7 +29,7 @@ runs when, which is [orchestration](../../../orchestration/README.md). Any repos
 | part | responsibility |
 |---|---|
 | `terminal.py` | the role's live terminal, its WebSocket, and a turn run in it |
-| `launch.py` | one contained process tree per agent |
+| `launch.py` | one contained process tree per agent, and a read that never outlives its process |
 | `ptyhost.py` | the pseudo-terminal the agent draws in — launched by path |
 | `turn_hook.py` | the vendor's completion, written into the turn's events file — launched by path |
 | `nodes.py` | prompt rendering, agent argv, session identity, verdict parsing |

@@ -569,16 +569,17 @@ class Socket(unittest.TestCase):
         self.assertEqual(self.refused(path="%s/changes" % self.run_id), 404)
 
     def test_a_look_in_flight_never_holds_the_worker_open_once_it_ends(self):
-        # A look is a read with nothing to finish: one still waiting — on a status query to the worker's own loop, which
-        # has stopped — must not keep the process alive past what its stop waits for.
+        # A look is a read with nothing to finish: one still running a command — git, here a child that sleeps — must
+        # neither keep the process alive past what its stop waits for, nor leave that command running after it.
+        pidfile = os.path.join(tempfile.mkdtemp(prefix="orchestra-look-"), "child.pid")
+        self.addCleanup(shutil.rmtree, os.path.dirname(pidfile), True)
         script = textwrap.dedent("""\
-            import asyncio, sys, threading, time
+            import asyncio, os, sys, threading, time
             sys.path.insert(0, %r)
-            from app.agents import terminal
-            started = threading.Event()
+            from app.agents import launch, terminal
+            child = "import os, sys, time; open(sys.argv[1], 'w').write(str(os.getpid())); time.sleep(60)"
             def feed(run_id, memo):
-                started.set()
-                time.sleep(30)
+                launch.read([sys.executable, "-c", child, %r], 120)
                 return None, 60
             terminal.serve(%d, %d, feeds={"change": feed})
             async def watch():
@@ -587,11 +588,13 @@ class Socket(unittest.TestCase):
                                    subprotocols=[terminal.PROTOCOL, terminal.TOKEN_PROTOCOL + terminal.token()]):
                     await asyncio.sleep(60)
             threading.Thread(target=lambda: asyncio.run(watch()), daemon=True).start()
-            started.wait(10)
-            """) % (PKG, self.PORT + 3, self.WORKBENCH, self.PORT + 3, self.WORKBENCH)
+            while not (os.path.exists(%r) and open(%r).read()):
+                time.sleep(0.05)
+            """) % (PKG, pidfile, self.PORT + 3, self.WORKBENCH, self.PORT + 3, self.WORKBENCH, pidfile, pidfile)
         began = time.monotonic()
         subprocess.run([sys.executable, "-c", script], check=True, timeout=60, capture_output=True)
         self.assertLess(time.monotonic() - began, 8, "the process ended without waiting for the look")
+        self.assertTrue(gone_within(int(open(pidfile).read()), 5), "the look's command ended with the process")
 
     def test_a_feed_may_not_take_a_roles_name(self):
         with self.assertRaises(ValueError):

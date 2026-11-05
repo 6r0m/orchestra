@@ -131,6 +131,21 @@ class Feed(unittest.TestCase):
         broken["path"] = self.path
         self.assertIn("files", self.look(broken)[0], "after a worktree that could not be read")
 
+    def test_its_git_runs_as_a_read_that_ends_with_the_worker(self):
+        # A look's git must never outlive the worker: it runs through `launch.read`, which ends it with the worker.
+        seen = []
+        real = changes.launch.read
+
+        def read(argv, timeout):
+            seen.append(argv[3:5])
+            return real(argv, timeout)
+        changes.launch.read = read
+        self.addCleanup(setattr, changes.launch, "read", real)
+        write(os.path.join(self.path, "new.txt"), "drafted\n")
+        self.assertIn("files", self.look({})[0])
+        self.assertIn(["--no-optional-locks", "status"], seen, "the fingerprint")
+        self.assertIn(["--no-optional-locks", "diff"], seen, "the summary")
+
     def test_a_slow_look_is_asked_less_often_within_its_bounds(self):
         self.assertEqual(changes.paced(0.1), changes.FASTEST)
         self.assertEqual(changes.paced(1.0), 5.0, "a look takes at most a sixth of the time")

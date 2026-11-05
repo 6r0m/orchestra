@@ -237,19 +237,33 @@ def guard(path, run_id):
     return hashlib.sha256("\0".join(parts).encode("utf-8")).hexdigest()
 
 
-def change_fingerprint(path):
+# How long one git command of a live read may take.
+READ_SECONDS = 300
+
+
+def _reading(run):
+    """git as a live read runs it: through `run(argv, timeout)` — the caller's, which can end it with the caller —
+    or, given none, as any git here."""
+    if run is None:
+        return lambda path, *args: git(path, *args, check=False)
+    return lambda path, *args: run(["git", "-C", path] + list(args), READ_SECONDS)
+
+
+def change_fingerprint(path, run=None):
     """Whether anything in the worktree at `path` moved, cheaply: its HEAD, what `git status` lists — every
     untracked file by name — and each listed file's size and time. Equal while nothing moved, and different
-    once a file is added, removed or written again, so the change is read again only then.
+    once a file is added, removed or written again, so the change is read again only then. Its git runs through
+    `run`, when given (`_reading`).
 
     Read with no optional lock, so the worktree's index — the controller's — is never written. Raises
     ChangeRefused for a worktree that is gone; on any git failure, RuntimeError.
     """
     if not os.path.isdir(path):
         raise ChangeRefused("the run's worktree is gone — merged, discarded or removed")
-    listed = git(path, "--no-optional-locks", "status", "--porcelain=v1", "-z", "--untracked-files=all",
-                 "--ignore-submodules=all", check=False)
-    head = git(path, "rev-parse", "--verify", "--quiet", "HEAD", check=False)
+    read = _reading(run)
+    listed = read(path, "--no-optional-locks", "status", "--porcelain=v1", "-z", "--untracked-files=all",
+                  "--ignore-submodules=all")
+    head = read(path, "--no-optional-locks", "rev-parse", "--verify", "--quiet", "HEAD")
     if listed.returncode or head.returncode:
         raise RuntimeError("git status in %s: rc=%d %s" % (path, listed.returncode or head.returncode,
                                                              (listed.stderr or head.stderr).strip()[:300]))
@@ -795,20 +809,21 @@ COUNT_LIMIT = 1024 * 1024
 BINARY_PROBE = 8000
 
 
-def change_summary(path, base):
+def change_summary(path, base, run=None):
     """What the worktree at `path` holds against the commit `base` now, listed as `review_diff` lists a snapshot's
     files — each with a `stamp` of its size and time, None once it is gone — and read with nothing written: no
     object, and not the worktree's index. Tracked files are read by `git diff` against `base`, which hashes in
     memory; a file git does not track yet is counted here. `review_diff`, which writes the tree it names, is for an
-    exact snapshot, taken when one is asked for.
+    exact snapshot, taken when one is asked for. Its git runs through `run`, when given (`_reading`).
 
     Raises ChangeRefused for a worktree that is gone; on any git failure, RuntimeError.
     """
     if not os.path.isdir(path):
         raise ChangeRefused("the run's worktree is gone — merged, discarded or removed")
+    reading = _reading(run)
 
     def read(*args):
-        done = git(path, "--no-optional-locks", *args, check=False)
+        done = reading(path, "--no-optional-locks", *args)
         if done.returncode:
             raise RuntimeError("git %s in %s: rc=%d %s" % (args[0], path, done.returncode, done.stderr.strip()[:300]))
         return done.stdout

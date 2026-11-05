@@ -302,6 +302,61 @@ EARLY_CHILD = textwrap.dedent("""
 """)
 
 
+# A process whose daemon thread has a read in flight — a child that writes its pid, then sleeps a minute — and that
+# then ends: by itself, or, given `wait`, by being killed.
+READER = textwrap.dedent("""\
+    import os, sys, threading, time
+    sys.path.insert(0, %r)
+    from app.agents import launch
+    pidfile, how = sys.argv[1], sys.argv[2]
+    child = "import os, sys, time; open(sys.argv[1], 'w').write(str(os.getpid())); time.sleep(60)"
+    threading.Thread(target=lambda: launch.read([sys.executable, "-c", child, pidfile], 120), daemon=True).start()
+    while not (os.path.exists(pidfile) and open(pidfile).read()):
+        time.sleep(0.05)
+    if how == "wait":
+        time.sleep(60)
+    """) % PKG
+
+
+class Read(unittest.TestCase):
+    """A short read-only command — the live change's git — that ends with the process that started it: a read is
+    never worth keeping a worker, or its scope, alive for."""
+
+    def setUp(self):
+        self.pidfile = os.path.join(tempfile.mkdtemp(prefix="orchestra-read-"), "child.pid")
+        self.addCleanup(lambda: os.path.exists(self.pidfile) and os.remove(self.pidfile))
+
+    def child(self):
+        for _ in range(200):
+            if os.path.exists(self.pidfile) and open(self.pidfile).read():
+                return int(open(self.pidfile).read())
+            time.sleep(0.05)
+        self.fail("the read never started")
+
+    def gone(self, pid):
+        return gone_within(pid, 5)
+
+    def test_it_answers_as_subprocess_run_does(self):
+        done = launch.read([sys.executable, "-c", "import sys; print('out'); print('err', file=sys.stderr); "
+                                                  "sys.exit(3)"], 30)
+        self.assertEqual((done.returncode, done.stdout.strip(), done.stderr.strip()), (3, "out", "err"))
+        with self.assertRaises(subprocess.TimeoutExpired):
+            launch.read([sys.executable, "-c", "import time; time.sleep(30)"], 1)
+
+    def test_a_read_still_running_ends_with_the_process_that_ends_by_itself(self):
+        subprocess.run([sys.executable, "-c", READER, self.pidfile, "end"], check=True, timeout=60)
+        self.assertTrue(self.gone(self.child()), "the read outlived the process that started it")
+
+    @unittest.skipUnless(WINDOWS, "a worker on Windows is stopped by being killed; on WSL it is asked to end")
+    def test_a_read_still_running_ends_with_the_process_that_is_killed(self):
+        parent = subprocess.Popen([sys.executable, "-c", READER, self.pidfile, "wait"])
+        self.addCleanup(lambda: parent.poll() is None and parent.kill())
+        pid = self.child()
+        parent.kill()
+        parent.wait(30)
+        self.assertTrue(self.gone(pid), "the read outlived the process that was killed")
+
+
 class StartupDeath(unittest.TestCase):
     """The owner killed while the agent is still being launched leaves nothing running.
 

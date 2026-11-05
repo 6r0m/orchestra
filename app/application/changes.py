@@ -17,6 +17,7 @@ import time
 from temporalio.client import WorkflowQueryFailedError, WorkflowQueryRejectedError
 from temporalio.service import RPCError
 
+from app.agents import launch
 from app.application import client as runs
 from app.workspace import worktrees
 
@@ -73,12 +74,14 @@ class ChangeFeed:
         # The whole look is timed, the fingerprint asked at every one among it: on a large worktree that alone paces it.
         began = time.monotonic()
         try:
-            moved = worktrees.change_fingerprint(memo["path"])
+            # Its git as reads that end with this worker (`launch.read`): one still running when the worker stops
+            # would hold its scope, and on Windows outlive it.
+            moved = worktrees.change_fingerprint(memo["path"], run=launch.read)
             if moved == memo.get("fingerprint") and memo["base"] == memo.get("read_base"):
                 memo["pace"] = paced(time.monotonic() - began)
                 return None, memo["pace"]
             # A summary, which writes nothing: the exact snapshot — a tree written — is taken when a file is opened.
-            read = worktrees.change_summary(memo["path"], memo["base"])
+            read = worktrees.change_summary(memo["path"], memo["base"], run=launch.read)
         except worktrees.ChangeRefused as error:
             return {"gone": str(error)}, None
         except (RuntimeError, OSError, subprocess.TimeoutExpired) as error:

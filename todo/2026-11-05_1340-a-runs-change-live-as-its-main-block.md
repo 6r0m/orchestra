@@ -127,6 +127,13 @@ Both read the same git, through the same worker; they differ only in how the new
   4. *A look that read again stayed "not current":* a look that could not read now forgets its fingerprint, so the
      first that reads again sends what it reads.
 
+- **External reviewer, 2026-11-05, second round — PATCH, one finding, taken:** a look's git, started from its
+  daemon thread, outlived the worker — on WSL holding its scope populated, so a Stop still failed; on Windows,
+  whose Stop kills the worker, never ended with it. `launch.read` now runs a live read's command so that it ends
+  with the process that started it: on Windows inside a job that process's death closes, elsewhere ended as it
+  ends — which is how a worker there is stopped. The feed's git goes through it; only reads do: a write — a merge,
+  a commit — cut off mid-way could leave a lock or half a merge, so a worker's other git still runs to its end.
+
 ## Verification
 
 - **Red:** the new tests before the code — `tests.application.test_changes` could not import `changes`;
@@ -162,6 +169,14 @@ Both read the same git, through the same worker; they differ only in how the new
   `tests.application.test_changes`, `tests.workspace.test_worktrees`, `tests.test_architecture`, `tests.test_demo`
   — 38 classes, 216 tests, OK; on Windows `tests.agents.test_terminal` and `tests.application.test_changes` — 8
   classes, 48 tests, OK.
+- **The second round:** `tests.agents.test_launch.Read` — a read answers as `subprocess.run` does; one in flight
+  ends with a process that ends by itself, on both hosts, and with one that is killed, on Windows. Mutation
+  control: `read` made a plain `subprocess.run`, those failed — *the read outlived the process that started it*,
+  on WSL and on Windows, and *… that was killed* on Windows — and `launch.py` was restored byte for byte. The
+  socket's test now runs a look whose command still sleeps as its process ends: the process ends at once and the
+  command with it. The feed's git is seen to go through `launch.read`. On WSL `tests.agents.test_launch`,
+  `tests.agents.test_terminal`, `tests.application.test_changes`, `tests.workspace.test_worktrees`,
+  `tests.test_architecture` — 38 classes, 208 tests, OK; on Windows the first four — 30 classes, 166 tests, OK.
 - **The touched modules on both hosts:** on WSL `tests.workspace.test_worktrees`, `tests.agents.test_terminal`,
   `tests.application.test_changes`, `tests.interfaces.test_workbench`, `tests.test_architecture` and
   `tests.test_demo` — 43 classes, 256 tests, OK; on Windows the first three — 21 classes, 129 tests, OK.
