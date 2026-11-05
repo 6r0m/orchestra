@@ -512,6 +512,10 @@ summary:hover { color: var(--ink); }
 .confirm form { display: grid; gap: 14px; }
 .confirm p { color: var(--quiet); line-height: 1.55; }
 .confirm .actions { justify-content: flex-end; }
+/* The page's word that something was refused, which stays until it is closed. */
+.refusal { width: min(560px, calc(100vw - 32px)); border-top: 4px solid var(--bad); }
+.refusal h2 { color: var(--bad); }
+.refusal pre { max-height: 40vh; overflow: auto; color: var(--ink); }
 
 /* Below the desktop layout, the rail sits above the main area. */
 @media (max-width: 1000px) {

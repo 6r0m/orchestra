@@ -153,6 +153,39 @@ export function confirmAction({ title, body, confirm, danger, returnTo }) {
   });
 }
 
+// The page's own word that something the operator did was refused: `title` says what, `said` what came of it,
+// `reason` the refusal's own words, whole, and `what` names what it concerns. It stays whatever the page does
+// meanwhile, until the operator closes it — Close, or Escape; one refused while it is shown waits behind it.
+// Focus then goes back to what had it.
+const refusals = [];
+let beforeRefusals = null;
+
+export function sayRefused(refusal) {
+  refusals.push(refusal);
+  if ($("refusal").open) return;
+  beforeRefusals = document.activeElement;
+  showRefusal();
+}
+
+function showRefusal() {
+  const { title, said, reason, what } = refusals.shift();
+  $("refusal-title").textContent = title;
+  $("refusal-reason").textContent = reason;
+  for (const [id, text] of [["refusal-said", said], ["refusal-what", what]]) {
+    $(id).textContent = text || "";
+    $(id).hidden = !text;
+  }
+  $("refusal").showModal();
+  $("refusal-close").focus();
+}
+
+$("refusal").addEventListener("close", () => {
+  if (refusals.length) return showRefusal();
+  const back = beforeRefusals;
+  beforeRefusals = null;
+  if (back && back.isConnected && back.offsetParent !== null) back.focus();
+});
+
 // ---- a run in words ---------------------------------------------------------------------------
 
 const DOING = { research: "researching", plan: "planning", assess: "assessing the plan", build: "building",

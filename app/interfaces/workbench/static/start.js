@@ -2,10 +2,36 @@
 // it skips the flow's approvals.
 
 import { api } from "./api.js";
-import { $, el, report, score, wrote } from "./ui.js";
+import { $, el, report, sayRefused, score, wrote } from "./ui.js";
 import { sourceChoice } from "./picker.js";
 
 const chosenRepo = sourceChoice("start");
+// The runs started from this page, by id, with the repository each was started on, until the list reads them
+// closed. Kept in memory, as an unsent note is: a reload forgets them.
+const starting = new Map();
+
+// Each run started here that the list now reads closed, its ending known: one refused — before any work, which
+// is the only place a run is refused — says so in the page's window, in the refusal's own words, read from the
+// run. One whose ending cannot be read yet is looked at again at the next read.
+export async function noteStarts(runs) {
+  for (const run of runs) {
+    const started = starting.get(run.run_id);
+    if (!started || run.state !== "closed" || !run.status) continue;
+    starting.delete(run.run_id);
+    if (run.status !== "REFUSED") continue;
+    let reason = null;
+    try {
+      const status = await api("/api/runs/" + encodeURIComponent(run.run_id));
+      reason = status.state && status.state.refusal;
+    } catch (error) {
+      reason = null;
+    }
+    sayRefused({ title: "The run was refused",
+      said: "It was refused before any work: no worktree was made and no agent started.",
+      reason: reason || "Its reason cannot be read now; the run's own page says it once it can.",
+      what: (run.repo || started.repo) + " · " + run.run_id });
+  }
+}
 // The flows as last shown, so an unchanged answer leaves an open list as it is.
 let shownFlows = "";
 let listedFlows = [];
@@ -81,11 +107,19 @@ $("start").onsubmit = async (event) => {
     const started = await api("/api/runs", { task: $("start-task").value, repo: repo,
       flow: $("start-flow").value, auto_proceed: $("start-auto").checked });
     report($("start-result"), "started " + started.run_id);
+    starting.set(started.run_id, { repo: repo });
     $("start-task").value = "";
     wrote();
     if (location.hash === from) location.hash = "#run=" + encodeURIComponent(started.run_id);
   } catch (error) {
     report($("start-result"), "refused: " + error.message, true);
+    // A refusal is the Workbench's answer, and no run was made. With no answer at all, whether one was is not
+    // known here: the list says.
+    sayRefused(error.status
+      ? { title: "The run was not started", said: "The Workbench refused it: no run was made.", reason: error.message,
+        what: repo }
+      : { title: "The start was not confirmed", said: "The Workbench did not answer. A run it started all the same " +
+        "shows in the list of runs.", reason: error.message, what: repo });
   } finally {
     button.disabled = false;
   }

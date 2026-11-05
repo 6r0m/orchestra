@@ -9,7 +9,8 @@ through the stack's one owner — on queues of its own, sharing only the live Te
 One run goes the whole way: the engineer plans, the architect sends the plan back once and passes it,
 the plan is approved, the engineer builds, the architect verifies, the engineer closes the todo out, its
 changed file is read in the page's viewer — in the change, and in the build's turn — and the change is
-merged, the todo in the done folder inside the merge. One is
+merged, the todo in the done folder inside the merge. One, first, is refused at its start, on a listed folder
+that is no repository: the page says why in a window that stays until its Close. One is
 stopped while its engineer works, and one while it waits for approval — sent back first with a note
 typed into the page, which reaches the engineer's next plan; each ends stopped with its worktree and
 branch as they were. One is force-terminated when its Stop cannot finish, because its
@@ -74,7 +75,8 @@ TASKS = {"merged": "Add a greeting to the repository, with the test that proves 
          "stuck": "Hold my merge, then terminate me: add a greeting to the repository",
          "down": "Lose my worker at work: add a greeting to the repository",
          "discarded": "Restart my worker, then discard me: add a greeting to the repository",
-         "rejected": "Pause me, then reject me at work: add a greeting to the repository"}
+         "rejected": "Pause me, then reject me at work: add a greeting to the repository",
+         "refused": "Refuse me at my start: a folder that is no repository"}
 
 # The demo's agents, speaking the turn contract the runner expects through `fake_cli`, as the
 # acceptance's do — and taking a few seconds a turn so that a person can watch them work.
@@ -225,6 +227,8 @@ class Demo:
     def __init__(self):
         self.tmp = tempfile.mkdtemp(prefix="orchestra-demo-")
         self.repo = os.path.join(self.tmp, "demo-repository")
+        # A folder listed as a repository that is none, which a run's host refuses at its start.
+        self.plain = os.path.join(self.tmp, "no-repository")
         self.bin = os.path.join(self.tmp, "bin")
         self.state = os.path.join(self.tmp, "state")
         self.hooks = os.path.join(self.tmp, "hooks")
@@ -236,8 +240,11 @@ class Demo:
 
     def setup(self):
         worktrees = os.path.join(self.tmp, "worktrees")
-        for folder in (self.repo, self.bin, self.state, self.hooks, os.path.join(worktrees, "demo")):
+        for folder in (self.repo, self.plain, self.bin, self.state, self.hooks, os.path.join(worktrees, "demo")):
             os.makedirs(folder)
+        # Inside a repository's tree its git would find that one, and a run would start on it.
+        check(subprocess.run(["git", "-C", self.plain, "rev-parse", "--git-dir"], capture_output=True).returncode != 0,
+              "the folder listed as a repository is in no repository's tree")
         git(self.repo, "init", "-q", "-b", "develop")
         for key, value in (("user.name", "demo"), ("user.email", "demo@localhost"), ("commit.gpgsign", "false"),
                            ("core.hooksPath", self.hooks)):
@@ -274,11 +281,12 @@ class Demo:
             json.dump(policy, fh)
         self.policy_path, self.policy = path, P.load(path)
         self.port = policy["workbench_port"]
-        # The repositories the demo's Workbench offers: only its own, by name, with its worktrees' folder.
+        # The repositories the demo's Workbench offers, by name: its own first, with its worktrees' folder, and
+        # the folder that is none.
         self.descriptors = os.path.join(self.tmp, "repos.json")
         with open(self.descriptors, "w", encoding="utf-8") as fh:
-            json.dump({"demo": {"path": self.repo, "target": "wsl", "worktree_root": os.path.join(worktrees, "demo")}},
-                      fh)
+            json.dump({"demo": {"path": self.repo, "target": "wsl", "worktree_root": os.path.join(worktrees, "demo")},
+                       "no-repository": {"path": self.plain, "target": "wsl"}}, fh)
 
     def env(self):
         # The Workbench's environment is the one the worker it starts inherits: the fakes first on its PATH.
@@ -406,6 +414,17 @@ class Demo:
         with open("/proc/%d/cgroup" % pid) as fh:
             check(scope in fh.read(), "in a systemd scope of its own, %s, which no restart of a Workbench takes"
                   % scope[1:])
+
+        step("a run refused at its start: the page says why in a window, which stays until it is closed")
+        pressed = self.press("start", "refused:no-repository:" + TASKS["refused"], "is not a git repository")
+        started = re.search(r"started ([\w-]+)", self.said)
+        if started:
+            self.runs.append(started.group(1))
+        check(pressed and started, "started from the form on a listed folder that is no git repository; a window "
+              "said why, stayed through the page's reads and a move to another view, and closed on its Close")
+        view = self.view(started.group(1))
+        check(closed(view) and view["status"] == "REFUSED" and not view["worktree"],
+              "the run ended refused, before any work: %s, no worktree" % view["status"])
 
         step("a run started from the Workbench, its agents working in live terminals")
         merged = self.start("merged")
@@ -755,7 +774,7 @@ def main():
             left = forget_environment()
     if left:
         raise SystemExit("demo failed: it left behind %s" % "; ".join(left))
-    print("\nDEMO PASSED: runs %s — watched in the Workbench, answered, stopped, force-terminated, blocked by a "
+    print("\nDEMO PASSED: runs %s — watched in the Workbench, refused, answered, stopped, force-terminated, blocked by a "
           "worker brought back, discarded, paused, rejected and their kept work removed, all from its buttons, "
           "and removed" % ", ".join(demo.runs))
     return 0

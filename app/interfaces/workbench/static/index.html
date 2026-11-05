@@ -329,6 +329,18 @@
     </div>
   </form>
 </dialog>
+<dialog class="confirm refusal" id="refusal" role="alertdialog" aria-labelledby="refusal-title"
+  aria-describedby="refusal-said refusal-reason">
+  <form method="dialog">
+    <h2 id="refusal-title"></h2>
+    <p id="refusal-said"></p>
+    <pre class="code" id="refusal-reason" translate="no"></pre>
+    <p class="hint" id="refusal-what" translate="no"></p>
+    <div class="actions">
+      <button type="submit" class="primary" id="refusal-close" value="close">Close</button>
+    </div>
+  </form>
+</dialog>
 <script src="/vendor/xterm.js"></script>
 <script type="module" src="/app.js"></script>
 </body>

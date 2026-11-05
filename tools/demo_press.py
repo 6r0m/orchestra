@@ -1,6 +1,6 @@
 """Press one of the Workbench's own buttons in a headless browser, as the operator would.
 
-    python tools/demo_press.py <workbench url> <run id | stack | start> <button label | task | terminal:role | turn:stage | turn-then:stage:label | file:path | round:stage:path | history | hold:role:label | type-after:role:label:line | layout:WIDTHxHEIGHT | absent:label,...> <what the page should say> [note]
+    python tools/demo_press.py <workbench url> <run id | stack | start> <button label | task | refused:repo:task | terminal:role | turn:stage | turn-then:stage:label | file:path | round:stage:path | history | hold:role:label | type-after:role:label:line | layout:WIDTHxHEIGHT | absent:label,...> <what the page should say> [note]
 
 The Windows side of `make demo` (WSL cannot reach Windows' loopback, and Windows reaches the
 Workbench's): headless Edge, driven over the DevTools protocol, opens the page, opens the run by its
@@ -9,7 +9,10 @@ start of the worker it is blocked by — or, given `stack` for the run, the one 
 opened from its chips; the page's own confirmation answered yes, and each question it asked printed;
 given a note, it types it into the stop's own note first, as an answer's words are. Given `start`, it
 opens New run and types the task into the page's own form, with the first repository it offers, and
-presses Start run. Given `terminal:<role>`, it presses nothing: it opens that role's terminal, if it is
+presses Start run; given `refused:<repo>:<task>` for it, it starts the run on that listed repository and
+reads the window the page opens once the run is refused: its exit code says whether the window says the
+words expected, stays open through the page's reads and a move to another view, and closes on its Close.
+Given `terminal:<role>`, it presses nothing: it opens that role's terminal, if it is
 closed, and reads its screen as the page shows it, live from its host. Given `turn:<stage>`, it presses
 nothing either: it opens the run's latest turn of that stage in its history and reads what the page shows it
 produced, from that turn's record. Given `file:<path>`, it opens that file of the run's change and reads the
@@ -206,6 +209,10 @@ RAIL = ("(() => { const rail = document.querySelector('.rail');"
         " return { scrolls: rail.scrollHeight - rail.clientHeight, shown: Math.max(0, ...tall),"
         " least: Math.min(...tall) }; })()")
 
+# The page's window saying a run was refused, while it is open: what it says, its parts in order.
+REFUSAL = ("(d => d && d.open ? [...d.querySelectorAll('h2, p, pre')].filter((n) => !n.hidden)"
+           ".map((n) => n.textContent.trim()).filter(Boolean).join(' | ') : '')(document.getElementById('refusal'))")
+
 # The page's own confirmation, when it asks one: its question, and its yes.
 ASKED = ("(d => d.open ? [document.getElementById('confirm-title').textContent,"
          " document.getElementById('confirm-body').textContent].filter(Boolean).join(' ') : '')"
@@ -266,6 +273,36 @@ def laid_out(page, run_id, size, said):
     return 1 if wrong else 0
 
 
+def refused(page, repo, task, said):
+    """A run started as the operator starts one, on the listed repository `repo`, which its host refuses: the
+    window the page then opens — whether it says `said`, stays open through the page's reads and a move to
+    another view, and closes on its own Close. Prints what it saw; 0 when all of it holds."""
+    page.value("location.hash = '#new'; true")
+    wait(lambda: page.value("[...document.getElementById('start-repo').options].some((o) => o.value === %s)"
+                            % json.dumps(repo)), 30, "the page offering the repository %s" % repo)
+    page.value("document.getElementById('start-repo').value = %s; document.getElementById('start-task').value = %s;"
+               " true" % (json.dumps(repo), json.dumps(task)))
+    pressed = button("#start", "Start run")
+    wait(lambda: page.value(pressed + " !== undefined"), 60, "the 'Start run' button")
+    region = page.value(REGION % pressed)
+    page.value(pressed + ".click(); true")
+    started = wait(lambda: page.value(SAID % json.dumps(region)), 60, "the page's word on the start")
+    print("pressed 'Start run' on %s in the Workbench: the page said %r" % (repo, started))
+    window = wait(lambda: page.value(REFUSAL), 120, "the page's window saying why the run was refused")
+    print("a window opened: %r" % window)
+    time.sleep(6)                                   # two of the page's reads of the runs and of the run it opened
+    stayed = page.value(REFUSAL) == window
+    page.value("location.hash = '#worktrees'; true")
+    time.sleep(1)
+    moved = page.value(REFUSAL) == window
+    page.value("document.getElementById('refusal-close').click(); true")
+    shut = not page.value(REFUSAL)
+    print("it %s open through the page's reads, %s open once the page moved to Worktrees, and %s on its Close"
+          % ("stayed" if stayed else "did NOT stay", "stayed" if moved else "did NOT stay",
+             "closed" if shut else "did NOT close"))
+    return 0 if started.startswith("started ") and said in window and stayed and moved and shut else 1
+
+
 def main(url, run_id, label, said, note=None):
     profile = tempfile.mkdtemp(prefix="orchestra-demo-edge-")
     # A layout is read at the window size it names; every press at the browser's own.
@@ -289,6 +326,9 @@ def main(url, run_id, label, said, note=None):
                                     "document.querySelector('#runs-finished li') !== null"), 30, "the Workbench page")
             if size:
                 return laid_out(page, run_id, size, said)
+            if run_id == "start" and label.startswith("refused:"):
+                repo, task = label.split(":", 2)[1:]
+                return refused(page, repo, task, said)
             if label.startswith("terminal:"):
                 role = label.split(":", 1)[1]
                 page.value(OPEN % json.dumps(run_id))

@@ -86,6 +86,11 @@ missing — so Start answers with the reason rather than starting another flow. 
 started with. *Skip approvals* skips every approval the flow schedules, never a blocker, an exhausted
 budget, a failed stage or the final gate.
 
+A start that is refused says why in a window that stays until you close it: refused by the Workbench at
+once, or by the run's host before any work — its repository no git repository there, say, or an agent's
+program or a stage's skill missing — when the run is listed under Closed as refused, its reason on its
+page. The window comes to the tab the run was started from, while that tab stays open.
+
 A run shows what it is — its repository, host, flow, run and branch, worktree, its plan once it has
 one, when it started, and links to its Temporal and (if configured) Langfuse pages — its flow drawn
 step by step with the one it is at, and what it is doing now and for how long: the agent at work and

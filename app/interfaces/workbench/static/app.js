@@ -4,7 +4,7 @@
 import { $, tick } from "./ui.js";
 import { noteRuns, refreshStack } from "./stack.js";
 import { reloadRepos } from "./picker.js";
-import { reloadFlows } from "./start.js";
+import { noteStarts, reloadFlows } from "./start.js";
 import { refreshRuns, runsListed, runsRead, select } from "./rail.js";
 import { refreshRun, show, unsent } from "./run.js";
 import { openWorktrees } from "./worktrees.js";
@@ -90,6 +90,7 @@ document.addEventListener("workbench:wrote", () => {
 });
 document.addEventListener("workbench:runs", () => {
   noteRuns(runsListed());
+  noteStarts(runsListed());
   showEmpty();
 });
 
