@@ -129,14 +129,16 @@ def role_reply(status, rdir):
             if found]
     if not said:
         return None
-    _, role, text = max(said)
+    *_, role, text = max(said)
     return {"role": role, "text": text}
 
 
 def _said(rdir, role, session):
-    """(when, role, text): `role`'s last answer to the operator in its newest turn record, read by the kind whose
-    events they are — a reply to words they typed, in its own session, never its turn's own answer — or None.
-    `when` is the time its hook recorded it; a record older than the hook's time has only its file's."""
+    """(stamped, when, role, text): `role`'s last answer to the operator in its newest turn record, read by the kind
+    whose events they are — a reply to words they typed, in its own session, never its turn's own answer — or None.
+    `when` is the time its hook recorded it. An answer recorded before the hook stamped events has only its file's
+    time, and comes before any stamped one — every agent's hook runs the one script of this checkout — so a stamped
+    answer ranks first, and files' times decide only between two unstamped answers."""
     if not session:
         return None
     logs = os.path.join(rdir, "logs")
@@ -170,7 +172,7 @@ def _said(rdir, role, session):
     if not said:
         return None
     text, at = said
-    return (at if at is not None else when, role, text)
+    return (at is not None, at if at is not None else when, role, text)
 
 
 def turn_parts(path, prompt):

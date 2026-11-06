@@ -242,9 +242,10 @@ still lands on a checkout.
   prompt the operator types into the running agent — after an Esc, say — steers this turn, and
   its completion ends it: Claude's `Stop` for the prompt id its `UserPromptSubmit` reported for
   that prompt or any submitted after it in the role's session, while no background task of it
-  still runs; Codex's `agent-turn-complete` in the role's thread whose inputs, the thread's
-  prompts so far, include the controller's. Codex's title turn runs in a thread of its own and
-  never ends it; an interrupt completes nothing. `StopFailure`, any check of the result failing,
+  still runs; Codex's `Stop` for the turn its `UserPromptSubmit` began with that prompt or any
+  submitted after it in the role's thread. Each vendor gives its hook the event on stdin, never on
+  a command line, which a long session's event would outgrow. Codex's own work in threads of its
+  own never ends it; an interrupt completes nothing. `StopFailure`, any check of the result failing,
   the agent exiting first, or the timeout fails the step and ends the agent. A successful turn
   leaves the agent running, live. The verified tree is the worktree as the architect's verify
   turn began, and a change during that turn fails the step. The merge and the discard end the

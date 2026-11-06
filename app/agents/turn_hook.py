@@ -4,7 +4,8 @@
     python app/agents/turn_hook.py <events-file> <label> argument <payload>  (the payload its last argument)
 
 The label is recorded with the payload, as `_hook`: which of an agent's events it was. Where the payload
-comes from is the agent's own way of calling a program, which its kind's adapter wires.
+comes from is the agent's own way of calling a program, which its kind's adapter wires. An events file given as
+`-` is the one `ORCHESTRA_TURN_EVENTS` names in the environment the agent passes on.
 
 It always exits 0 and prints nothing, so it can never block, fail or steer the agent's turn.
 """
@@ -16,7 +17,8 @@ import time
 
 def main(args):
     try:
-        events, label, source = args[0], args[1], args[2]
+        # `-`: the turn's file as its environment names it, so one hook definition serves every turn.
+        events, label, source = os.environ["ORCHESTRA_TURN_EVENTS"] if args[0] == "-" else args[0], args[1], args[2]
         # The payload is UTF-8 whatever this process's locale would decode stdin as.
         payload = json.loads(args[-1]) if source == "argument" else json.loads(sys.stdin.buffer.read().decode("utf-8"))
         # What a dialog says and what a tool read or wrote stay out of the record: only its session and a

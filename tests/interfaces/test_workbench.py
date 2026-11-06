@@ -115,6 +115,23 @@ class RoleReply(unittest.TestCase):
         self.turn("plan-e5-1", *engineer, at=2500)
         self.assertEqual(self.reply(), {"role": "engineer", "text": "Yes, dropped."})
 
+    def test_a_stamped_answer_comes_after_any_recorded_before_the_hook_stamped_them(self):
+        # The architect answered before the hook stamped events, the engineer after; then the architect's record
+        # gains an event that answers no one. Every hook runs the one script, so an unstamped answer came before
+        # any stamped one: the engineer answered last, whatever the architect's file says of when it changed.
+        verdict = self.said([self.PROMPT], '{"verdict":"BLOCKER"}')
+        legacy = self.said([self.PROMPT, "what now?"], "The architect's answer.")
+        summary = dict(self.said(["catch up"], '{"summary":""}', thread="t2"), _at=300.0)
+        self.turn("assess-e5-1", verdict, legacy, summary, at=300)
+        engineer = [{"_hook": "UserPromptSubmit", "session_id": "s1", "prompt_id": "p1", "prompt": self.PROMPT},
+                    {"_hook": "Stop", "session_id": "s1", "prompt_id": "p1", "last_assistant_message": "Planned.",
+                     "background_tasks": []},
+                    {"_hook": "UserPromptSubmit", "session_id": "s1", "prompt_id": "p2", "prompt": "drop the shim?"},
+                    {"_hook": "Stop", "session_id": "s1", "prompt_id": "p2", "last_assistant_message": "Yes, dropped.",
+                     "background_tasks": [], "_at": 200.0}]
+        self.turn("plan-e5-1", *engineer, at=250)
+        self.assertEqual(self.reply(), {"role": "engineer", "text": "Yes, dropped."})
+
     def test_the_engineer_talked_with_last_is_offered_and_the_architect_when_talked_with_after(self):
         def asked(prompt_id, prompt):
             return {"_hook": "UserPromptSubmit", "session_id": "s1", "prompt_id": prompt_id, "prompt": prompt}

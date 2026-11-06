@@ -40,6 +40,11 @@ from app.foundation import stages
 HERE = os.path.dirname(os.path.abspath(__file__))
 PTYHOST = os.path.join(HERE, "ptyhost.py")
 TURN_HOOK = os.path.join(HERE, "turn_hook.py")
+# Where a turn's events file is named in its agent's environment; turn_hook.py, which imports nothing of ours,
+# reads the same name.
+TURN_EVENTS = "ORCHESTRA_TURN_EVENTS"
+# The hook definitions a kind trusted on this host, each with what the kind recorded for it (`hooks_trust`).
+HOOK_TRUST = os.path.join(paths.RUNTIME_ROOT, "hook-trust.json")
 # The page's token, shared by the workbench and both workers through the one checkout.
 TOKEN_FILE = os.path.join(paths.SECRETS, "workbench.token")
 COLS, ROWS = 160, 48
@@ -183,6 +188,27 @@ class _Agent:
                 self.proc.stdin.close()
             except OSError:
                 pass
+
+
+class _Nowhere:
+    """A terminal that keeps nothing: what a CLI started for a moment draws stays with that CLI."""
+
+    def emit(self, data):
+        pass
+
+    def agent_gone(self, agent):
+        pass
+
+
+class _Briefly(_Agent):
+    """A kind's CLI started for a moment in a terminal of its own, outside any role's — to answer its own dialog —
+    contained as an agent is, what it draws read as text."""
+
+    def __init__(self, argv, cwd, env):
+        super().__init__(_Nowhere(), argv, cwd, env)
+
+    def text(self):
+        return plain(bytes(self.output))
 
 
 class Terminal:
@@ -380,7 +406,19 @@ def run_turn(worktree, argv, rdir, name, prompt, timeout, env, on_tick=None, *, 
         os.remove(paths["events"])
     argv = [executable] + list(argv[1:])
     session = adapter.session_in(argv)
-    argv = adapter.wire(argv, paths["events"], lambda label, source: sink(paths["events"], label, source))
+    # The turn's events file is also in the agent's environment, for a kind whose hook names it as `-`: one hook
+    # definition on every turn, which a vendor that trusts a hook by its exact definition trusts once.
+    env = dict(os.environ if env is None else env, **{TURN_EVENTS: paths["events"]})
+    turn_sink = lambda label, source, events=paths["events"]: sink(events, label, source)  # noqa: E731
+    argv = adapter.wire(argv, paths["events"], turn_sink)
+    # A kind that runs a hook only once it has trusted it has its hooks trusted before the turn — its own dialog,
+    # started for a moment with no prompt — so the dialog never holds the turn; what it cannot trust safely fails
+    # the step, saying why.
+    if hasattr(adapter, "hooks_trust"):
+        try:
+            adapter.hooks_trust(turn_sink, lambda extra: _Briefly([executable] + extra, worktree, env), HOOK_TRUST)
+        except adapter.HooksRefused as exc:
+            raise launch.ExecutorError(str(exc)) from exc
     # Options such as `--add-dir` take several values; `--` keeps the prompt from becoming one of them.
     argv += ["--", prompt]
 

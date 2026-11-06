@@ -69,6 +69,11 @@ agent questions are denied and real blockers reach the normal workflow stop. Onl
 reports such a dialog, through its hooks, and in practice a Claude architect: a Claude engineer is
 denied what it may not do rather than asked, and a Codex role never asks.
 
+Codex runs a hook only once it has been trusted, so the first Codex turn on a host has the orchestra's own hooks
+trusted through Codex's review, and every turn after needs nothing. Only the orchestra's own hooks are ever
+trusted this way: if other hooks wait for review on that host — yours, or the repository's — the turn fails at
+once and says so. Review them with `/hooks` in Codex there, then Continue.
+
 *New run* opens the form that starts one — and with no runs at all, the page opens on it: on a
 repository named in `.orchestra/repos.json` or in the file named by `ORCHESTRA_REPOS` — its menu
 reads the file again each time it is opened, and a name that
@@ -159,7 +164,9 @@ and listed file by file, each by its whole path: a rename as its old path and it
 said so; a very long list comes a part at a time, *List more files* reading the rest of the same snapshot. Open a file to see its diff as an editor shows one: both line numbers, added lines green,
 removed red, long unchanged runs folded a click away. A file too large to show whole shows its changes
 alone, and says so. The patch sits below in a small box; *Copy patch* copies all of it, however large,
-from the same snapshot, and *Refresh* reads a new one.
+from the same snapshot, and *Refresh* reads a new one. *Copy all changes*, beside the heading, copies the whole
+change as the worktree holds it at that moment — every file, however long — whenever you press it, the run at
+work, waiting or closed.
 
 Both roles' terminals follow, the one at work open and an idle one closed until you open it. Each is the
 vendor's own CLI: press Esc to interrupt a working agent — or *Pause*, at the top, which presses it for you —
@@ -178,7 +185,9 @@ terminal.
 
 The history is the run as a transcript, phase by phase: each completed turn a row — its role, stage,
 round, verdict, how long it ran from when a worker took it, and when — and your answers rows of their own
-between them, in the phase of the step they answered, with your words and when the run took them. Open a turn to see what it received and what it produced. *Received*
+between them, in the phase of the step they answered, with your words and when the run took them — an answer
+with words folded to their first line, as a turn is, and opened with a click. Open a turn to see what it received
+and what it produced. *Received*
 is the turn's own new prompt — the vendor keeps the conversation before it in its session — in the parts
 it was built from: the stage's skill, the task and the role's persona as the run started on a session's
 first turn, the stage's instructions, and what it was handed, such as the research brief to check, the

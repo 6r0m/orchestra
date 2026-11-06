@@ -45,7 +45,9 @@ hook events — Claude's; Codex reports none — and the workflow still owns act
 At a stop that takes guidance, the run's view also carries what the role the operator talked with last
 answered them in its terminal since its turn (`role_reply`), read from each role's newest turn's hook events by
 its kind (`adapters.reply`): a reply, in the role's own session, to words the operator typed — never its turn's
-own answer — the one given last, by when its hook recorded it, being the role talked with last. The page offers it to be sent on as the
+own answer — the one given last, by when its hook recorded it, being the role talked with last; an answer
+recorded before the hook stamped events comes before any stamped one, since every agent's hook runs the one
+script of the checkout, and files' times order only two such answers. The page offers it to be sent on as the
 operator's guidance, through either of the stop's own guidance answers and only by their press. Whom plain
 guidance goes to is the run's view's (`client.recipient`, from the workflow's stages), never the page's;
 `guide:architect` names its role, as `revise:architect` does.

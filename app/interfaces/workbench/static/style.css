@@ -375,6 +375,14 @@ body.terminal-maximized { overflow: hidden; }
 .answer .turn-what { color: var(--ink); }
 .answer-words { max-width: 80ch; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink);
   padding-left: 10px; border-left: 2px solid var(--rule); }
+/* An answer with words folds as a turn does: its head and its words' first line, the rest one click away. */
+details.answer { display: block; padding: 0; }
+details.answer > summary { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; padding: 5px 0 5px 10px;
+  cursor: pointer; list-style: none; }
+details.answer > summary::-webkit-details-marker { display: none; }
+details.answer > summary:hover { background: var(--surface); }
+details.answer[open] > summary .turn-preview { display: none; }
+details.answer > .answer-words { margin: 4px 0 10px calc(10px + 1em + 6px); }
 .turn-field { display: grid; gap: 6px; min-width: 0; }
 .turn-prose { max-width: 80ch; max-height: 30rem; overflow: auto; overscroll-behavior: contain;
   padding: 10px 12px; border-left: 2px solid var(--control); background: var(--surface);

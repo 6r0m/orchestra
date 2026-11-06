@@ -65,7 +65,14 @@ runs with — the vendor's sandbox, or the vendor's own rules alone — is each 
 Settings shows a role the words of the kind chosen for it.
 
 Through the vendor's own completion hook: a turn ends on Claude's `Stop` for its own
-prompt id, or Codex's `agent-turn-complete` in its own thread — never on a first event.
+prompt id, or Codex's `Stop` for the turn its `UserPromptSubmit` began with our prompt, in its own thread —
+never on a first event. Every hook is given its event on stdin: one carried on a command line grows with the
+session and outgrows Windows' (Codex's `notify`, measured). Codex runs a hook only once it has trusted that exact
+definition, so its hooks are one definition on every turn — the turn's events file named in the environment
+(`ORCHESTRA_TURN_EVENTS`), which both vendors pass on to their hooks — and before a turn the kind has them
+trusted (`hooks_trust`): by Codex's own review dialog, started for a moment with no prompt, accepted only while no
+hook but ours waits, what Codex then records remembered in `tmp/orchestration/hook-trust.json`. A hook of the
+operator's or a repository's waiting for review fails the turn, saying so, rather than being trusted for them.
 Claude's notification and tool-finish hooks also record their events, keeping only the session and a
 notification's kind — never what a dialog says or what a tool read or wrote. Every event is stamped with when
 its hook recorded it (`_at`), so answers in two roles' records are ordered by when each came, never by when a

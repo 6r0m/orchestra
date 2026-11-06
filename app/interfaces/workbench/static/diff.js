@@ -226,13 +226,16 @@ function fold(rows) {
   return button;
 }
 
-// The snapshot's whole patch, every part of it read from the same snapshot, and put on the clipboard.
-export async function copyPatch(runId, snapshot, first, button) {
+// A snapshot's whole patch, every part of it read from the same snapshot, and put on the clipboard. `read` is the
+// snapshot's first part, or the read that will give it — the press's own read of the change now — so the clipboard
+// is written as the click's own however long the reads take.
+export async function copyPatch(runId, read, button, label = "Copy patch") {
   const whole = (async () => {
+    const first = await read;
     let patch = first.patch;
     let next = first.next;
     while (next < first.total) {
-      const part = await api(diffPath(runId, { base: snapshot.base, tree: snapshot.tree, offset: next }));
+      const part = await api(diffPath(runId, { base: first.base, tree: first.tree, offset: next }));
       patch += part.patch;
       next = part.next;
     }
@@ -253,5 +256,5 @@ export async function copyPatch(runId, snapshot, first, button) {
     button.title = error.message;
   }
   button.disabled = false;
-  setTimeout(() => { button.textContent = "Copy patch"; }, 1500);
+  setTimeout(() => { button.textContent = label; }, 1500);
 }

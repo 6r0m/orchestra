@@ -22,7 +22,8 @@ Markdown text, hostile parts among it, and exits 0 when every part is drawn as i
 outside the renderer's own elements is made, no link leads off the web and nothing is loaded.
 Given `change:<words>`, it presses nothing but a file: it opens the run and waits for its change, live, to
 list the file expected, then opens that file: it exits 0 when the change comes before the terminals with
-nothing pressed to read it, lists that file, and its diff shows the words. Given `change-rows`, the page's
+nothing pressed to read it, lists that file, and its diff shows the words — and then presses *Copy all changes*,
+the clipboard stood in for, until what it copied names that file with those words. Given `change-rows`, the page's
 socket for the run's change and its reads of a file's diff are stood in for before the page loads, and three
 summaries are sent: it exits 0 when a file opened stays open and is not read again while another file comes,
 and is read once more, and only it, when it changes. Given `change-idle`, the same stand-in watches the run's
@@ -472,10 +473,27 @@ def change(page, run_id, path, words):
     wait(lambda: page.value(OPEN_FILE % (json.dumps("#change"), json.dumps(path))), 30, "the file %s" % path)
     lines = wait(lambda: [line for line in page.value(FILE_LINES % (json.dumps("#change"), json.dumps(path)))
                           if words in line], 60, "the diff of %s to show %r" % (path, words))
-    print("the run's change in the Workbench, %s: %r, listing %s, nothing pressed to read it%s; %s opened: %r"
+    # The whole change copied by its own button, read by the press itself, while the run works.
+    page.value(button("#change", "Copy all changes") + ".click(); true")
+    copied = wait(lambda: next((text for text in page.value("window.__copied") or [] if path in text and words in text),
+                               None), 60, "Copy all changes to copy the patch of %s" % path)
+    print("the run's change in the Workbench, %s: %r, listing %s, nothing pressed to read it%s; %s opened: %r; Copy all "
+          "changes copied a patch of %d characters naming it"
           % ("first on its page" if shown["first"] else "NOT before its terminals", " ".join(shown["said"].split()),
-             shown["paths"], " — yet its button is shown" if shown["button"] else "", path, lines[0]))
+             shown["paths"], " — yet its button is shown" if shown["button"] else "", path, lines[0], len(copied)))
     return 0 if shown["first"] and not shown["button"] else 1
+
+
+# Before the page loads: what it puts on the clipboard recorded in place of the clipboard, written whole or as an
+# item whose text comes later.
+CLIPBOARD_STAND_IN = """(() => {
+  const copied = window.__copied = [];
+  if (!navigator.clipboard) return;
+  navigator.clipboard.writeText = (text) => { copied.push(text); return Promise.resolve(); };
+  navigator.clipboard.write = async (items) => {
+    for (const item of items) copied.push(await (await item.getType("text/plain")).text());
+  };
+})();"""
 
 
 # Before the page loads: its socket for a run's change stood in for — the summaries a test sends it in place of the
@@ -814,6 +832,9 @@ def main(url, run_id, label, said, note=None):
             if label == "handoff":
                 page.call("Page.enable")
                 page.call("Page.addScriptToEvaluateOnNewDocument", source=HANDOFF_STAND_IN)
+            if label.startswith("change:"):
+                page.call("Page.enable")
+                page.call("Page.addScriptToEvaluateOnNewDocument", source=CLIPBOARD_STAND_IN)
             page.call("Page.navigate", url=url)
             if label == "hints":
                 # Its views read no run, so neither does it wait for the list of runs.

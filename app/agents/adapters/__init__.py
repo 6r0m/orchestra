@@ -38,7 +38,10 @@ What a kind's module holds, each named below by what it answers:
   reports one; `readable(argv, folders)`: the command with folders outside the worktree readable to it
   unasked — a turn's prompt parts attached as files (`nodes.attach`) — for a kind that must name them; a kind
   without it reads them as it reads anything; `reply(events, prompt, session)`: its last answer in `session`
-  to words typed into its terminal after the turn's prompt, as (text, when its hook recorded it), or None.
+  to words typed into its terminal after the turn's prompt, as (text, when its hook recorded it), or None;
+  `hooks_trust(sink, start, record)`: its turn's hooks trusted before the turn, for a kind that runs a hook
+  only once trusted — `start(args)` starts its CLI for a moment to answer its own dialog — raising the kind's
+  `HooksRefused` when it cannot be done safely.
 
 Importing a kind's module only defines it: anything that touches the host happens in its answers,
 so the kinds can be listed on a host that has none of their CLIs.
@@ -57,7 +60,7 @@ REQUIRED = ("NAME", "EXECUTABLE", "ACCESS", "BOUNDARY", "OPTIONS", "SKILL", "SES
 CALLABLE = ("validate", "command", "host", "session_in", "wire", "completion", "output", "session",
             "final_message", "message_of", "skill_folders", "skill_roots")
 OPTIONAL = ("trust_ensure", "trust_forget", "trace_env", "trace_settings", "reasoning", "upload", "waiting",
-            "readable", "reply")
+            "readable", "reply", "hooks_trust")
 
 
 class Refused(ValueError):

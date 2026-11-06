@@ -586,7 +586,7 @@ function drawHistory() {
     }
     box.appendChild(item.entry
       ? turnRow(item.entry, roleOf(item.entry.stage), turns.get(turnKey(item.entry)), openDetails, bodies)
-      : answerRow(item.answer, phase));
+      : answerRow(item.answer, phase, openDetails));
   }
   if (!items.length) shown.push(el("p", "No step has finished yet.", "hint"));
   root.replaceChildren(...shown);
@@ -658,15 +658,27 @@ function answerSaid(answer, phase) {
   }
 }
 
-function answerRow(answer, phase) {
-  const row = el("div", null, "answer");
-  const head = el("div", null, "turn-head");
+// Your answer, a row of its own. One with words folds to their first line, as a turn does — a note as long as an
+// audit pasted whole is one click from read, never a page to scroll past — and stays open once opened, across the
+// page's reads. Your words are kept as written.
+function answerRow(answer, phase, openDetails) {
+  const head = el("span", null, "turn-head");
+  if (answer.text) head.appendChild(chevron());
   head.append(el("span", "you", "role you"), el("span", answerSaid(answer, phase), "turn-what"));
   const time = el("time", at(answer.at));
   time.dateTime = answer.at || "";
   head.appendChild(time);
-  row.appendChild(head);
-  if (answer.text) row.appendChild(el("div", answer.text, "answer-words"));
+  if (!answer.text) {
+    const row = el("div", null, "answer");
+    row.appendChild(head);
+    return row;
+  }
+  const row = el("details", null, "answer");
+  row.dataset.historyDetail = "answer:" + (answer.stop || answer.at || "");
+  const summary = el("summary", null);
+  summary.append(head, el("span", firstLine(answer.text), "turn-preview"));
+  row.append(summary, el("div", answer.text, "answer-words"));
+  row.open = openDetails.has(row.dataset.historyDetail);
   return row;
 }
 

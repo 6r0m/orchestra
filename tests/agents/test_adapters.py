@@ -111,12 +111,126 @@ class Finding(unittest.TestCase):
         self.assertIn("no program", found["probing"])
 
 
+class CodexHooks(unittest.TestCase):
+    """Codex's turn ends on its own hooks, their event on stdin — never `notify`, whose event carries every input
+    of the thread on the hook's command line and outgrew Windows' (os error 206: the turn never ended) — with one
+    definition on every turn, since Codex runs a hook only once it has trusted that exact definition."""
+
+    @staticmethod
+    def wired(events):
+        from app.agents.adapters import codex
+        # As the terminal's sink: a turn's events file, unless the kind names it otherwise.
+        return codex.wire(["codex"], events, lambda label, source, events=events:
+                          ["/py/python", "/repo/app/agents/turn_hook.py", events, label, source])
+
+    @staticmethod
+    def hooks(argv):
+        import tomllib
+        found = {}
+        for index, value in enumerate(argv):
+            if value == "-c" and argv[index + 1].startswith("hooks."):
+                key, _, toml = argv[index + 1].partition("=")
+                found[key[len("hooks."):]] = tomllib.loads("v = " + toml)["v"][0]["hooks"][0]
+        return found
+
+    OURS = {"C:\\<session-flags>\\config.toml:user_prompt_submit:0:0": "sha256:aa",
+            "C:\\<session-flags>\\config.toml:stop:0:0": "sha256:bb"}
+
+    class Started:
+        """Codex started for its dialog: draws `screen`; told to trust, records `written` in its config."""
+
+        def __init__(self, screen, config, written):
+            self.screen, self.config, self.written, self.sent, self.ended = screen, config, written, [], False
+
+        def text(self):
+            return self.screen
+
+        def write(self, data):
+            self.sent.append(data)
+            os.makedirs(os.path.dirname(self.config), exist_ok=True)
+            with open(self.config, "a", encoding="utf-8") as fh:
+                for key, value in self.written.items():
+                    fh.write("\n[hooks.state.'%s']\ntrusted_hash = \"%s\"\n" % (key, value))
+
+        def end(self):
+            self.ended = True
+
+    def trusting(self, screen):
+        from app.agents.adapters import codex
+        home = self.home = tempfile.mkdtemp(prefix="orchestra-codex-home-")
+        self.addCleanup(lambda: __import__("shutil").rmtree(home, True))
+        self.record = os.path.join(home, "hook-trust.json")
+        started = []
+
+        def start(args):
+            started.append(self.Started(screen, codex.config_path(home), self.OURS))
+            return started[-1]
+
+        def trust():
+            return codex.hooks_trust(lambda label, source, events="e": ["/py", "/hook.py", events, label, source],
+                                     start, self.record, home=home)
+        return codex, started, trust
+
+    def test_its_hooks_are_trusted_once_by_its_own_dialog_and_then_need_none(self):
+        codex, started, trust = self.trusting("Hooks need review 2 hooks are new or changed. 1. Review hooks "
+                                              "2. Trust all and continue Ask Codex to do anything")
+        self.assertTrue(trust())
+        self.assertEqual((started[0].sent, started[0].ended), ([codex.TRUST_ALL], True))
+        self.assertFalse(trust(), "remembered with what Codex wrote: no dialog again")
+        self.assertEqual(len(started), 1)
+
+    def test_what_it_remembers_of_a_config_that_is_gone_is_dropped(self):
+        # A demo's own Codex home goes with the demo: its entry is not kept, demo after demo.
+        codex, started, trust = self.trusting("Hooks need review 2 hooks are new or changed. Ask Codex to do anything")
+        gone = os.path.join(self.home, "vanished", "config.toml") + "\n[]"
+        with open(self.record, "w", encoding="utf-8") as fh:
+            json.dump({gone: {"key": "sha256:old"}}, fh)
+        self.assertTrue(trust())
+        with open(self.record, encoding="utf-8") as fh:
+            kept = json.load(fh)
+        self.assertNotIn(gone, kept)
+        self.assertEqual(len(kept), 1, "what it trusted now")
+
+    def test_other_hooks_waiting_for_review_are_never_trusted_for_the_operator(self):
+        codex, started, trust = self.trusting("Hooks need review 3 hooks are new or changed.")
+        with self.assertRaises(codex.HooksRefused) as refused:
+            trust()
+        self.assertIn("/hooks", str(refused.exception))
+        self.assertEqual((started[0].sent, started[0].ended), ([], True), "nothing answered; ended")
+
+    def test_one_definition_on_every_turn_its_file_in_the_environment_and_no_notify(self):
+        first, second = self.wired("one/turn.events"), self.wired("two/turn.events")
+        self.assertEqual(first, second, "the same definition whatever the turn's file")
+        self.assertNotIn("notify", " ".join(first))
+        hooks = self.hooks(first)
+        self.assertEqual(sorted(hooks), ["Stop", "UserPromptSubmit"])
+        for label, hook in hooks.items():
+            self.assertEqual(hook["type"], "command")
+            self.assertEqual(hook["command"].split(), ["/py/python", "/repo/app/agents/turn_hook.py", "-", label,
+                                                       "stdin"])
+
+
 class Reply(unittest.TestCase):
     """What a role last answered the operator in its terminal after its turn — words they settled with it at a
     stop, for the page to send on — read from the turn's events by the kind whose events they are."""
     PROMPT = "$architect\n\n# Task\nassess the plan"
 
-    def test_codex_answers_the_last_words_typed_in_its_own_thread_never_a_side_thread_or_its_turn(self):
+    def test_codex_answers_the_last_prompt_typed_in_its_own_thread_never_a_side_thread_or_its_turn(self):
+        def asked(turn, prompt, thread="t1"):
+            return {"_hook": "UserPromptSubmit", "session_id": thread, "turn_id": turn, "prompt": prompt}
+
+        def stopped(turn, said, thread="t1", at=None):
+            return {"_hook": "Stop", "session_id": thread, "turn_id": turn, "last_assistant_message": said, "_at": at}
+        turn = [asked("u1", self.PROMPT), stopped("u1", '{"verdict":"BLOCKER","feedback":"answer Q1"}')]
+        side = [asked("x1", "Write a brief catch-up", thread="t2"), stopped("x1", '{"summary":"..."}', thread="t2")]
+        self.assertIsNone(adapters.reply(turn + side, self.PROMPT, "t1"), "its turn's own answer is the stop's already")
+        talk = [asked("u2", "which plugins for q1?"), stopped("u2", "The private one."),
+                asked("u3", "guide the engineer"), stopped("u3", "Engineer: revise the todo.", at=1700.5)]
+        self.assertEqual(adapters.reply(turn + talk + side, self.PROMPT, "t1"), ("Engineer: revise the todo.", 1700.5))
+        self.assertIsNone(adapters.reply(turn + talk, self.PROMPT, "t9"), "another thread's")
+
+    def test_codex_reads_a_record_its_notify_wrote(self):
+        # Turns recorded before its hooks were wired, its notify's events: still read, for the stop they wait at.
         def done(thread, inputs, said, at=None):
             return {"_hook": "notify", "type": "agent-turn-complete", "thread-id": thread, "input-messages": inputs,
                     "last-assistant-message": said, "_at": at}

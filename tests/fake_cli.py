@@ -23,6 +23,7 @@ After completing it stays running, echoing typed lines, as a live CLI does.
 """
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -49,11 +50,22 @@ def claude_emit(hooks, event, payload):
             subprocess.run(hook["command"], shell=True, input=json.dumps(payload).encode("utf-8"))
 
 
-def codex_notify(argv, payload):
-    for index, value in enumerate(argv):
-        if value == "-c" and argv[index + 1].startswith("notify="):
-            command = json.loads(argv[index + 1][len("notify="):])
-            subprocess.run(command + [json.dumps(payload)])
+def codex_hooks(argv):
+    """Codex's hooks as its `-c hooks.<event>=<TOML>` overrides give them: event -> its matcher groups."""
+    import tomllib
+    hooks = {}
+    for index, value in enumerate(argv[:-1]):
+        if value == "-c" and argv[index + 1].startswith("hooks."):
+            key, _, toml = argv[index + 1].partition("=")
+            hooks[key[len("hooks."):]] = tomllib.loads("v = " + toml)["v"]
+    return hooks
+
+
+def codex_emit(hooks, event, payload):
+    # As Codex runs a hook: its command through the shell, the event on stdin.
+    for group in hooks.get(event, []):
+        for hook in group["hooks"]:
+            subprocess.run(hook["command"], shell=True, input=json.dumps(payload).encode("utf-8"))
 
 
 def on_finish(argv, payload):
@@ -140,28 +152,68 @@ def completer(brain, argv, prompt, foreign=False):
     else:
         resumed = len(argv) > 1 and argv[0] == "resume"
         thread = argv[1] if resumed else str(uuid.uuid4())
-        # A resumed thread's inputs start with the prompts of its earlier turns.
-        inputs = (["an earlier turn's prompt"] if resumed else []) + [prompt]
+        hooks = codex_hooks(argv)
+        state = {"turn": str(uuid.uuid4())}
 
         def complete(message, failure=False, typed=None, running=False):
             if typed is not None:
-                inputs.append(typed)
-            codex_notify(argv, {"type": "agent-turn-complete", "thread-id": thread, "turn-id": str(uuid.uuid4()),
-                                "input-messages": list(inputs), "last-assistant-message": message})
+                # A prompt the operator typed begins a turn of its own.
+                state["turn"] = str(uuid.uuid4())
+                codex_emit(hooks, "UserPromptSubmit", {"session_id": thread, "turn_id": state["turn"],
+                                                       "prompt": typed})
+            codex_emit(hooks, "Stop", {"session_id": thread, "turn_id": state["turn"], "hook_event_name": "Stop",
+                                       "stop_hook_active": False, "last_assistant_message": message})
 
-        # Codex's own title turn, in a thread of its own, always comes first.
-        codex_notify(argv, {"type": "agent-turn-complete", "thread-id": str(uuid.uuid4()),
-                            "turn-id": str(uuid.uuid4()), "input-messages": ["Generate a title for: " + prompt],
-                            "last-assistant-message": '{"title":"x"}'})
+        # Codex's own work — a catch-up summary — runs in a thread of its own and comes first.
+        side, side_turn = str(uuid.uuid4()), str(uuid.uuid4())
+        codex_emit(hooks, "UserPromptSubmit", {"session_id": side, "turn_id": side_turn,
+                                               "prompt": "Write a brief catch-up for: " + prompt})
+        codex_emit(hooks, "Stop", {"session_id": side, "turn_id": side_turn, "last_assistant_message": '{"x":1}'})
         if foreign:
-            codex_notify(argv, {"type": "agent-turn-complete", "thread-id": thread, "turn-id": str(uuid.uuid4()),
-                                "input-messages": ["something the operator typed"],
-                                "last-assistant-message": "someone else's turn"})
+            codex_emit(hooks, "Stop", {"session_id": thread, "turn_id": str(uuid.uuid4()),
+                                       "last_assistant_message": "someone else's turn"})
+        codex_emit(hooks, "UserPromptSubmit", {"session_id": thread, "turn_id": state["turn"], "prompt": prompt})
         return complete
+
+
+def codex_review(argv):
+    """Codex started with no prompt, as measured on 0.159: the hooks given with `-c` that its config does not
+    trust with their present definition drawn as its review dialog — how many — and, on its second choice,
+    trusted, each recorded in `[hooks.state]` with a hash of its definition; then its composer, until it is ended.
+    A hook named `refuse` in its definition stands for one of the operator's own, also new."""
+    import hashlib
+    import tomllib
+    home = os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
+    config = os.path.join(home, "config.toml")
+    try:
+        with open(config, encoding="utf-8") as fh:
+            state = (tomllib.loads(fh.read()).get("hooks") or {}).get("state") or {}
+    except FileNotFoundError:
+        state = {}
+    snake = lambda event: re.sub(r"(?<!^)(?=[A-Z])", "_", event).lower()   # noqa: E731
+    root = "C:\\<session-flags>\\config.toml" if WINDOWS else "/<session-flags>/config.toml"
+    wanted = {"%s:%s:0:0" % (root, snake(event)):
+              "sha256:" + hashlib.sha256(json.dumps(groups, sort_keys=True).encode("utf-8")).hexdigest()
+              for event, groups in codex_hooks(argv).items()}
+    new = {key: value for key, value in wanted.items() if (state.get(key) or {}).get("trusted_hash") != value}
+    if new:
+        count = len(new) + (1 if "refuse" in " ".join(argv) else 0)
+        draw("Hooks need review %d %s new or changed." % (count, "hook is" if count == 1 else "hooks are"))
+        draw("1. Review hooks 2. Trust all and continue 3. Continue without trusting")
+        if read_key() == "2":
+            os.makedirs(home, exist_ok=True)
+            with open(config, "a", encoding="utf-8") as fh:
+                for key, value in new.items():
+                    fh.write("\n[hooks.state.'%s']\ntrusted_hash = \"%s\"\n" % (key, value))
+    draw("Ask Codex to do anything")
+    while True:
+        read_key()
 
 
 def main():
     brain, argv = sys.argv[1], sys.argv[2:]
+    if brain == "codex" and "--" not in argv:
+        return codex_review(argv)
     # As both CLIs parse it: `--add-dir` takes every value up to the next option or `--`.
     if "--add-dir" in argv and "--" not in argv:
         sys.exit("no prompt: --add-dir took it as a directory")

@@ -81,6 +81,11 @@ on with one press, nothing copied by hand.
   other's same words kept the old name and order — now in the key. The checks: guidance to the architect at
   rounds run out, and a browser check that presses each destination and reads what it sends (`demo_press.py
   handoff`, in `make demo`).
+- **External reviewer, 2026-11-06, second round — PATCH, one finding, taken:** the CLI, the card's key, the
+  rounds-run-out route and the browser check passed. An answer recorded before the hook stamped events took its
+  file's time, which an event answering no one can move past a stamped answer given after it. Every agent's hook
+  runs the one script of this checkout, so an unstamped answer came before any stamped one: a stamped answer now
+  ranks first, and files' times order only two unstamped ones.
 
 ## Verification
 
@@ -119,6 +124,9 @@ on with one press, nothing copied by hand.
   Workbench. Mutation control: with who answered taken out of the card's key, it failed — *gave up waiting for the
   card to name the engineer* — and `run.js` was restored byte for byte.
 - **`make demo`, the handoff check among its own:** DEMO PASSED, 117 checks, none failed.
+- **The second round, red then green:** `tests.interfaces.test_workbench.RoleReply` — the architect's unstamped
+  answer, its file moved to 300 by a later catch-up event, offered over the engineer's stamped at 200; green once a
+  stamped answer ranks first — 4 tests, OK.
 - **Live as saved, without a restart:** the hook (`turn_hook.py` is run afresh for every event) and the page's
   files. The Workbench orders answers by their stamps once restarted, which waits for the operator's deployment.
 - **Not yet seen live:** the two routes on a real blocker. Temporal remembers a patch's answer for the whole run,

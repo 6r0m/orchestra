@@ -8,17 +8,21 @@ a vendor rename fails loudly. On Windows it runs its unelevated sandbox: the ele
 through an administrator prompt, which a worker outside the interactive desktop can never show, and every
 command the agent ran would fail with error 1223.
 
-Its turn ends on its `notify` program: the first `agent-turn-complete` in the expected thread whose inputs —
-the thread's prompts so far — include ours. Its title turn runs in a thread of its own, whose input only
-quotes the prompt, and never ends the turn. Its answer is the turn's last agent message.
+Its turn ends on its own hooks, each given its event on stdin: the `Stop` of a turn that its `UserPromptSubmit`
+began with our prompt, or with any prompt submitted after it, in the expected thread. Its catch-up summaries
+and other turns of its own run in threads of their own and never end the turn. Its answer is the turn's last
+agent message. Never its `notify`: that event carries every input of the thread so far and is given as the
+program's last argument, which on a long thread outgrew Windows' command line — measured, `os error 206`, the
+event never written and the turn never ended. The hooks are one definition on every turn — the turn's events
+file named in the environment, which Codex passes on to them (measured) — since Codex runs a hook only once it
+has trusted that exact definition (`hooks_trust`).
 
 Its trust record: `[projects.'<repo>'] trust_level = "trusted"` in `~/.codex/config.toml`, or in the root
 `CODEX_HOME` names — only ever appended, never with a key it already holds, since two tables of one key are
 not valid TOML and would break the CLI; an explicit `untrusted` is the operator's own decision and left alone.
 
-Its tracing: its own uploader, the Langfuse plugin's, run after a turn with the turn's rollout — Codex's Stop
-hook cannot do it (measured: it does not pass its environment to hook subprocesses), and a hook that did
-would upload every turn a second time. The uploader built with the parent-trace and turn-lifecycle changes
+Its tracing: its own uploader, the Langfuse plugin's, run after a turn with the turn's rollout — not a Stop
+hook: a hook that uploaded would upload every turn a second time, beside the plugin's own. The uploader built with the parent-trace and turn-lifecycle changes
 nests its turns under their step; a build lacking either is reported. Its reasoning summaries
 are read from the rollout, after the last `task_started`.
 """
@@ -27,6 +31,7 @@ import json
 import os
 import re
 import sys
+import time
 
 from app.agents.adapters import _files
 
@@ -53,6 +58,22 @@ OLD_BRAIN = "codex"
 WINDOWS = sys.platform.startswith("win")
 WINDOWS_FLAGS = ["-c", 'windows.sandbox="unelevated"']
 PLAIN_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]*")
+# Its hooks, the events a turn's end is read from; and a part of a hook's command that needs no quoting in the
+# shell Codex runs it with, on either host.
+HOOK_EVENTS = ("UserPromptSubmit", "Stop")
+PLAIN_PART = re.compile(r"[A-Za-z0-9_./:@%+=,-]+")
+# Its review of hooks new or changed, as its interface draws it (measured, 0.159): how many wait, its answer that
+# trusts them — the second of its choices — and its composer, drawn once it is ready; a dialog comes within a
+# moment of the composer. Its config keys a hook's trust by the event in snake case.
+HOOK_DIALOG = re.compile(r"(\d+)\s*hooks?\b.{0,16}?new\s*or\s*changed", re.I | re.S)
+HOOK_READY = re.compile(r"Ask Codex to do anything|for shortcuts", re.I)
+# Its question whether to trust the folder it starts in, drawn before anything else where the folder's repository
+# is not trusted (measured, 0.166) — words run together as its interface draws them.
+FOLDER_DIALOG = re.compile(r"Trust\s*this\s*folder\?", re.I)
+TRUST_ALL = b"2\r"
+HOOK_KEYS = {"UserPromptSubmit": "user_prompt_submit", "Stop": "stop"}
+TRUST_SECONDS = 45
+DIALOG_SECONDS = 4
 CONFIG_FILE = os.path.join(".codex", "config.toml")
 TRUSTED = 'trust_level = "trusted"'
 # Where a table begins: a header at the start of a line. Only removal uses this; what the config already
@@ -111,36 +132,158 @@ def session_in(argv):
     return argv[argv.index("resume") + 1] if "resume" in argv[1:2] else None
 
 
+def hook_flags(sink):
+    """Its hooks for a turn, as `-c` overrides: each event given on stdin to `turn_hook.py`, whose events file is
+    `-` — the turn's, named in the environment — so the definition is the same on every turn."""
+    flags = []
+    for label in HOOK_EVENTS:
+        command = " ".join(part if PLAIN_PART.fullmatch(part) else json.dumps(part)
+                           for part in sink(label, "stdin", events="-"))
+        flags += ["-c", "hooks.%s=[{hooks=[{type=\"command\",command=%s}]}]" % (label, json.dumps(command))]
+    return flags
+
+
 def wire(argv, events, sink):
-    return list(argv) + ["-c", "notify=%s" % json.dumps(sink("notify", "argument"))]
+    return list(argv) + hook_flags(sink)
+
+
+class HooksRefused(RuntimeError):
+    """Its hooks could not be trusted here without trusting others: the operator reviews those first."""
+
+
+def hooks_trust(sink, start, record, home=None):
+    """Its hooks trusted on this host before a turn, so its review dialog never holds a turn: Codex runs a hook only
+    once it has trusted that exact definition (`[hooks.state]` in its config, a hash only it computes). The
+    definition is remembered in `record` with the hashes Codex wrote for it; while Codex still holds those, they
+    are trusted. Otherwise its interface is started for a moment — `start(args)`, no prompt, no model — and its own
+    dialog is accepted, but only while no more hooks are new or changed than ours; then its hashes are
+    remembered. Raises HooksRefused when other hooks wait for review, or when no trust can be read. True when it
+    trusted them now."""
+    flags = hook_flags(sink)
+    definition = json.dumps(flags)
+    # Keyed by the config the trust lives in too: two homes of Codex on one host — a demo's own — never share it.
+    definition = config_path(home) + "\n" + definition
+    remembered = _remembered(record).get(definition)
+    if remembered and _hook_hashes(home) == remembered:
+        return False
+    before = _all_hooks(home)
+    cli = start(["-c", "check_for_update_on_startup=false"] + flags)
+    try:
+        answered, ready_at = False, None
+        deadline = time.monotonic() + TRUST_SECONDS
+        while time.monotonic() < deadline:
+            seen = cli.text()
+            if FOLDER_DIALOG.search(seen):
+                raise HooksRefused("Codex asks whether to trust this folder on this host, which a turn's repository "
+                                   "is trusted for before it starts: start codex in it and answer, or check its "
+                                   "trust record")
+            dialog = HOOK_DIALOG.search(seen)
+            if dialog and not answered:
+                waiting = int(dialog.group(1))
+                if waiting > len(HOOK_EVENTS):
+                    raise HooksRefused("Codex asks for %d hooks to be reviewed on this host, more than the orchestra's "
+                                       "%d: review them with /hooks in Codex here, then continue the run"
+                                       % (waiting, len(HOOK_EVENTS)))
+                cli.write(TRUST_ALL)
+                answered = True
+            hashes = _hook_hashes(home)
+            whole = len(hashes) == len(HOOK_EVENTS) and all(hashes.values())
+            if answered and whole and hashes != _ours(before):
+                break
+            if not answered and whole and HOOK_READY.search(seen):
+                # Ready with no dialog: Codex trusts them already. A dialog drawn after the composer comes within
+                # a moment of it, so ready is believed only once that moment has passed.
+                ready_at = ready_at or time.monotonic()
+                if time.monotonic() - ready_at >= DIALOG_SECONDS:
+                    break
+            time.sleep(0.2)
+        else:
+            raise HooksRefused("Codex's trust of the orchestra's hooks could not be read on this host within %ds: "
+                               "start codex here and review its hooks with /hooks" % TRUST_SECONDS)
+    finally:
+        cli.end()
+    others = {key: value for key, value in _all_hooks(home).items() if key not in hashes and before.get(key) != value}
+    if others:
+        raise HooksRefused("trusting the orchestra's hooks also trusted %s on this host: review them with /hooks in "
+                           "Codex" % ", ".join(sorted(others)))
+    # What it remembers of a config that is gone — a demo's own home, removed with it — goes too.
+    kept = {key: value for key, value in _remembered(record).items() if os.path.exists(key.split("\n", 1)[0])}
+    _files.replace(record, json.dumps(dict(kept, **{definition: hashes}), indent=1) + "\n")
+    return answered
+
+
+def _remembered(record):
+    """The definitions trusted before, each with the hashes Codex wrote for it; empty when there are none."""
+    try:
+        known = json.loads(_files.read(record) or "{}")
+    except ValueError:
+        return {}
+    return known if isinstance(known, dict) else {}
+
+
+def _all_hooks(home=None):
+    """Every hook its config records trust for: key -> trusted hash; empty when the config cannot be read."""
+    try:
+        import tomllib
+        state = ((tomllib.loads(_files.read(config_path(home))).get("hooks") or {}).get("state") or {})
+    except Exception:                               # noqa: BLE001 - unreadable: nothing is trusted
+        return {}
+    return {key: (value or {}).get("trusted_hash") for key, value in state.items() if isinstance(value, dict)}
+
+
+def _ours(hooks):
+    """Of a config's hook trust, what it holds for ours: given with `-c`, one per event, each the first of its
+    group, keyed `<root>\\<session-flags>\\config.toml:<event>:0:0` (measured)."""
+    wanted = {"%s:0:0" % HOOK_KEYS[label] for label in HOOK_EVENTS}
+    return {key: value for key, value in hooks.items()
+            if "<session-flags>" in key and ":".join(key.rsplit(":", 3)[1:]) in wanted}
+
+
+def _hook_hashes(home=None):
+    return _ours(_all_hooks(home))
 
 
 def completion(events, prompt, session):
+    """The `Stop` of a turn its `UserPromptSubmit` began with our prompt — or with a prompt submitted after it in
+    this turn, the operator steering it — in the expected thread, or the thread our prompt began a turn in."""
     wanted = prompt.strip()
+    thread, turns = session, set()
     for event in events:
-        if event.get("_hook") != "notify" or event.get("type") != "agent-turn-complete":
+        if thread and event.get("session_id") != thread:
             continue
-        if wanted not in [text.strip() for text in event.get("input-messages") or []]:
-            continue
-        if session and event.get("thread-id") != session:
-            continue
-        return True, event.get("last-assistant-message") or "", event.get("thread-id")
+        hook = event.get("_hook")
+        if hook == "UserPromptSubmit":
+            if turns or (event.get("prompt") or "").strip() == wanted:
+                thread = thread or event.get("session_id")
+                turns.add(event.get("turn_id"))
+        elif hook == "Stop" and event.get("turn_id") in turns:
+            return True, event.get("last_assistant_message") or "", thread
     return None
 
 
 def reply(events, prompt, session):
-    """Its last answer in its thread `session` to words typed into its terminal after the turn's prompt: a
-    completion whose newest input is not the prompt, with when its hook recorded it (`_at`, None in a record older
-    than that). Its own catch-up summaries run in threads of their own."""
+    """Its last answer in its thread `session` to a prompt typed into its terminal other than the turn's, never the
+    turn's own answer, with when its hook recorded it (`_at`, None in a record older than that). Its own
+    catch-up summaries run in threads of their own. A turn recorded before its hooks were wired is read from its
+    `notify` events: a completion whose newest input is not the prompt."""
     wanted = prompt.strip()
-    said = None
+    done = completion(events, prompt, session)
+    turn = done[1] if done and done[0] else None
+    asked, said = {}, None
     for event in events:
-        if (event.get("_hook") != "notify" or event.get("type") != "agent-turn-complete"
-                or event.get("thread-id") != session):
+        hook = event.get("_hook")
+        if hook == "notify" and event.get("type") == "agent-turn-complete" and event.get("thread-id") == session:
+            inputs = [text.strip() for text in event.get("input-messages") or [] if isinstance(text, str)]
+            if inputs and inputs[-1] != wanted and event.get("last-assistant-message"):
+                said = (event["last-assistant-message"], event.get("_at"))
+        elif event.get("session_id") != session:
             continue
-        inputs = [text.strip() for text in event.get("input-messages") or [] if isinstance(text, str)]
-        if inputs and inputs[-1] != wanted and event.get("last-assistant-message"):
-            said = (event["last-assistant-message"], event.get("_at"))
+        elif hook == "UserPromptSubmit":
+            asked[event.get("turn_id")] = (event.get("prompt") or "").strip()
+        elif hook == "Stop":
+            message = event.get("last_assistant_message") or ""
+            if asked.get(event.get("turn_id"), wanted) != wanted and message and message != turn:
+                said = (message, event.get("_at"))
     return said
 
 

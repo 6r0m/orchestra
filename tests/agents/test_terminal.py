@@ -72,6 +72,14 @@ class Turns(unittest.TestCase):
         self.addCleanup(folders.remove, self.worktree)
         self.addCleanup(shutil.rmtree, self.rdir, True)
         self.addCleanup(terminal.close_run, self.run_id)
+        # Codex's config, where it records the hooks it trusts, and the record of what was trusted: this test's own.
+        home = tempfile.mkdtemp(prefix="orchestra-codex-home-")
+        self.addCleanup(shutil.rmtree, home, True)
+        saved = os.environ.get("CODEX_HOME")
+        os.environ["CODEX_HOME"] = home
+        self.addCleanup(lambda: os.environ.pop("CODEX_HOME") if saved is None else os.environ.update(CODEX_HOME=saved))
+        trusted, terminal.HOOK_TRUST = terminal.HOOK_TRUST, os.path.join(home, "hook-trust.json")
+        self.addCleanup(setattr, terminal, "HOOK_TRUST", trusted)
 
     def turn(self, prompt, kind="claude-code", stage="build", resume=None, timeout=60, name=None):
         if kind == "claude-code":
@@ -180,15 +188,24 @@ class Turns(unittest.TestCase):
         self.assertEqual(claude_code.completion(redirected, "p", session), (True, "steered", session),
                          "a prompt submitted after ours in this turn completes it")
         self.assertIsNone(claude_code.completion(redirected[1:], "p", session), "not before ours")
-        title = {"_hook": "notify", "type": "agent-turn-complete", "thread-id": "t1",
-                 "input-messages": ["Generate a title: p"], "last-assistant-message": "{}"}
-        self.assertIsNone(codex.completion([title], "p", None))
-        resumed = dict(title, **{"thread-id": "t2", "input-messages": ["p"], "last-assistant-message": "ok"})
-        self.assertIsNone(codex.completion([resumed], "p", "t1"), "another thread when resuming")
-        self.assertEqual(codex.completion([title, resumed], "p", None), (True, "ok", "t2"))
-        later = dict(resumed, **{"input-messages": ["earlier", "p", "steer"]})
-        self.assertEqual(codex.completion([later], "p", "t2"), (True, "ok", "t2"),
-                         "a thread's inputs are cumulative")
+        # Codex: its UserPromptSubmit names the turn our prompt began in its thread; that turn's Stop ends ours.
+        def asked(thread, turn, prompt):
+            return {"_hook": "UserPromptSubmit", "session_id": thread, "turn_id": turn, "prompt": prompt}
+
+        def stopped(thread, turn, said):
+            return {"_hook": "Stop", "session_id": thread, "turn_id": turn, "last_assistant_message": said}
+        side = [asked("t9", "x1", "Write a brief catch-up"), stopped("t9", "x1", "{}")]
+        self.assertIsNone(codex.completion(side, "p", None), "a thread of its own")
+        ours = [asked("t2", "u1", "p"), stopped("t2", "u1", "ok")]
+        self.assertIsNone(codex.completion(ours, "p", "t1"), "another thread when resuming")
+        self.assertEqual(codex.completion(side + ours, "p", None), (True, "ok", "t2"))
+        self.assertEqual(codex.completion(ours, "p", "t2"), (True, "ok", "t2"))
+        self.assertIsNone(codex.completion([stopped("t2", "u0", "earlier"), ours[0]], "p", "t2"),
+                          "a turn not begun by our prompt")
+        steered = [ours[0], asked("t2", "u2", "do this instead"), stopped("t2", "u2", "steered")]
+        self.assertEqual(codex.completion(steered, "p", "t2"), (True, "steered", "t2"),
+                         "a prompt submitted after ours in this turn completes it")
+        self.assertIsNone(codex.completion(steered[1:], "p", "t2"), "not before ours")
 
     def test_the_codex_thread_comes_from_its_turn_and_resumes_by_it(self):
         rc, out = self.turn("complete first", kind="codex", stage="assess")
@@ -780,6 +797,18 @@ class Hook(unittest.TestCase):
         self.assertEqual((done.returncode, done.stdout, done.stderr), (0, b"", b""))
         with open(events, encoding="utf-8") as fh:
             self.assertEqual(unstamped(json.loads(fh.readline())), dict(payload, _hook="notify"))
+
+    def test_the_events_file_may_be_named_by_the_environment(self):
+        # One hook definition on every turn — the turn's file comes in the environment — so Codex, which trusts a
+        # hook by its exact definition, trusts it once.
+        events = os.path.join(tempfile.mkdtemp(prefix="orchestra-hook-"), "turn.events")
+        self.addCleanup(shutil.rmtree, os.path.dirname(events), True)
+        done = subprocess.run([sys.executable, terminal.TURN_HOOK, "-", "Stop", "stdin"],
+                              input=json.dumps({"session_id": "s"}).encode("utf-8"), capture_output=True,
+                              env=dict(os.environ, **{terminal.TURN_EVENTS: events}))
+        self.assertEqual(done.returncode, 0)
+        with open(events, encoding="utf-8") as fh:
+            self.assertEqual(unstamped(json.loads(fh.readline())), {"session_id": "s", "_hook": "Stop"})
 
     def test_each_event_is_stamped_with_when_it_was_recorded(self):
         # Two roles' records are compared by when each answered, never by when their files last changed.

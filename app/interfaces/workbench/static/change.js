@@ -186,4 +186,8 @@ async function loadDiff(asked) {
 
 // A read the operator asked for is said in its status line; one the page makes at a stop is not.
 $("diff-load").onclick = () => loadDiff(true);
-$("diff-copy").onclick = () => shown && copyPatch(runId, shown, shown, $("diff-copy"));
+$("diff-copy").onclick = () => shown && copyPatch(runId, shown, $("diff-copy"));
+// The whole change as the worktree holds it now — every file, however long — read by the press itself, at any time:
+// while the run works, at a stop, or once it is closed.
+$("change-copy").onclick = () => runId && copyPatch(runId, api("/api/runs/" + encodeURIComponent(runId) + "/diff"),
+  $("change-copy"), "Copy all changes");

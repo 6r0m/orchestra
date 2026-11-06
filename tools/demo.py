@@ -89,6 +89,9 @@ FAKE = textwrap.dedent("""\
     argv = sys.argv[1:]
     prompt = argv[-1]
     brain = "codex" if "codex" in os.path.basename(sys.argv[0]) else "claude"
+    if brain == "codex" and "--" not in argv:
+        # Started with no prompt, to have its hooks trusted: its review dialog, as Codex draws it.
+        fake_cli.codex_review(argv)
     complete = fake_cli.completer(brain, argv, prompt)
     state = os.environ["DEMO_STATE"]
     # The prompt it was given, shown first, as a vendor's CLI shows it: a session then fills more than one
@@ -270,6 +273,11 @@ class Demo:
             with open(path, "w") as fh:
                 fh.write(body)
             os.chmod(path, 0o755)
+        # Codex's home is the demo's own, for what it records; its skills are still the host's, as a run finds them.
+        os.makedirs(os.path.join(self.tmp, "codex-home"), exist_ok=True)
+        skills = os.path.join(os.path.expanduser("~"), ".codex", "skills")
+        if os.path.isdir(skills):
+            os.symlink(skills, os.path.join(self.tmp, "codex-home", "skills"))
         # The deployment's own settings, with a host and a workflow queue of the demo's own: its queues are
         # polled by no worker but the demo's, and its ports are free now.
         policy = json.load(open(P.SETTINGS_FILE, encoding="utf-8"))
@@ -299,8 +307,10 @@ class Demo:
 
     def env(self):
         # The Workbench's environment is the one the worker it starts inherits: the fakes first on its PATH.
+        # Codex's home, where it records what it trusts, is the demo's own: its fakes never touch the operator's.
         return dict(os.environ, PATH=self.bin + os.pathsep + os.environ["PATH"], ORCHESTRA_SETTINGS=self.policy_path,
-                    ORCHESTRA_REPOS=self.descriptors, DEMO_STATE=self.state, LANGFUSE_TRACING_ENVIRONMENT="fixture")
+                    ORCHESTRA_REPOS=self.descriptors, DEMO_STATE=self.state, LANGFUSE_TRACING_ENVIRONMENT="fixture",
+                    CODEX_HOME=os.path.join(self.tmp, "codex-home"))
 
     def spawn(self, *argv):
         log = open(os.path.join(self.tmp, "%s.log" % len(self.processes)), "a")
@@ -519,7 +529,7 @@ class Demo:
               "the page's own terminal shows the engineer at work, live from its host")
         check(self.press(working, "change:drafted while at work", "draft.txt"),
               "the run's change, first on its page, lists the file its engineer wrote while still at work — "
-              "read by its host's worker with nothing pressed — and opens its diff")
+              "read by its host's worker with nothing pressed — and opens its diff; Copy all changes copies it whole")
         check(self.press(working, "change-rows", "none"),
               "as summaries come, a file opened stays open and is not read again while another file comes, and is "
               "read once more, it alone, when it changes")
