@@ -1,9 +1,11 @@
 # Codex turns end on its stdin hooks
 
 **Status:** BUILT 2026-11-06 — red, then green on both hosts; real Codex turns, fresh and resumed, ended on both;
-the workers restarted on the first version, and the operator's run, continued, ended the turn that had hung. After
-two review rounds the orchestra no longer answers Codex's review of hooks at all; the workers do not run that yet.
-It awaits the external reviewer and the operator's word to close it.
+the operator's run, continued, ended the turn that had hung. After two review rounds the orchestra no longer
+answers Codex's review of hooks at all — the reviewer's PASS; the full suite passed on both hosts. The Windows
+worker, which runs the architect's Codex turns, restarted on it; the WSL worker, by the operator's choice, still
+runs the first version, whose preflight answers Codex's review — a Codex turn on WSL would meet it. It awaits the
+operator's word to close it.
 **Scope:** how a Codex turn's end is wired and read ([codex.py](../app/agents/adapters/codex.py) `hook_flags`,
 `wire`, `completion`, `reply`, `held`), the turn's events file in its environment and a start held for the
 operator ([terminal.py](../app/agents/terminal.py) `run_turn`, `BEGIN_SECONDS`;

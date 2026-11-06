@@ -1,7 +1,9 @@
 # Approve with a note
 
 **Status:** BUILT 2026-11-06 — red, then green; the reviewer's PATCH for page and worker of different versions
-taken. It awaits the full suite, the workers' restart, and the operator's word to close it.
+taken, and its final review PASS; the full suite passed on both hosts; the Workbench restarted on it. The WSL
+worker, which runs the workflow, is not restarted, by the operator's choice: until it is, no stop says it takes a
+note, and the page offers none. It awaits the operator's word to close it.
 **Scope:** an approval's answer ([workflow.py](../app/orchestration/workflow.py) `_loop`, `_approval`, `_stop`,
 the answer's validator), the answer's one path for both surfaces ([client.py](../app/application/client.py)
 `answer`), the command line's `yes` ([cli.py](../app/interfaces/cli.py) `parse_answer`, `answer_line`), the
@@ -66,4 +68,16 @@ agents who do it, with no round of the approved work first — and a note is nev
   `tests.orchestration.test_workflow.Routing` — the note to the build and its verification, `noted` on the stop,
   none at the run's end, refused there by the workflow itself; `tests.interfaces.test_cli`.
 - **The history:** `approval_with_a_note_stop` recorded again — 106 events, the `approve-with-a-note` marker as the
-  approval is drawn, before its answer — and every recorded history replays.
+  approval is drawn, before its answer — and every recorded history replays. The first recording, its marker
+  after the answer, was never run by a worker of the live stack, so no run recorded it.
+- **Full suite, once:** WSL `make test` — 153 classes, 765 tests, one failure:
+  `tests.observability.test_observability.ApprovalSummary` expected the trace to record `yes`, the word the command
+  line used to send as an approval's text; it now records the action, `approve`. Expectation changed, the module
+  run again — 18 classes, 69 tests, OK. Windows `run-tests.ps1` — 104 classes, 532 tests, OK.
+- **`make demo`:** DEMO PASSED, 120 checks, none failed — among them `approval-notes`: at an approval stood in for,
+  a stop that takes a note has *Approve with note* send it; one that does not keeps *Approve*, sends nothing while
+  a note is written, says why, and sends Approve alone once it is cleared. `make public-check` passed.
+- **Live, the Workbench restarted on it** (`tmp/agent/approve-note/live_stop_check.py`, throwaway, read-only — every
+  answer caught in the browser): the operator's run, waiting at a plan's approval drawn by the WSL worker from
+  before notes, shows *Approve*, and with a note typed still *Approve* and *Your note, sent with Revise*; nothing
+  sent.
