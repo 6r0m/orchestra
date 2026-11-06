@@ -41,7 +41,9 @@ What a kind's module holds, each named below by what it answers:
   to words typed into its terminal after the turn's prompt, as (text, when its hook recorded it), or None;
   `hooks_trust(sink, start, record)`: its turn's hooks trusted before the turn, for a kind that runs a hook
   only once trusted — `start(args)` starts its CLI for a moment to answer its own dialog — raising the kind's
-  `HooksRefused` when it cannot be done safely.
+  `HooksRefused` when it cannot be done safely; `held(text)`: why what its CLI drew holds a turn that has recorded
+  no event long after it should have begun — a dialog for the operator — or None, for a kind whose first hook
+  fires as its turn begins.
 
 Importing a kind's module only defines it: anything that touches the host happens in its answers,
 so the kinds can be listed on a host that has none of their CLIs.
@@ -60,7 +62,7 @@ REQUIRED = ("NAME", "EXECUTABLE", "ACCESS", "BOUNDARY", "OPTIONS", "SKILL", "SES
 CALLABLE = ("validate", "command", "host", "session_in", "wire", "completion", "output", "session",
             "final_message", "message_of", "skill_folders", "skill_roots")
 OPTIONAL = ("trust_ensure", "trust_forget", "trace_env", "trace_settings", "reasoning", "upload", "waiting",
-            "readable", "reply", "hooks_trust")
+            "readable", "reply", "hooks_trust", "held")
 
 
 class Refused(ValueError):

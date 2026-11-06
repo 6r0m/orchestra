@@ -514,8 +514,9 @@ class Demo:
         check(plan not in landed and done in landed
               and git(self.repo, "show", "develop:" + done).startswith("**Status:** PASS"),
               "and the todo as the engineer's closeout left it, in the merge itself: %s" % done)
-        check(self.press(merged, "absent:Stop run,Force terminate", "absent"),
-              "the page offers the closed run neither Stop run nor Force terminate")
+        check(self.press(merged, "absent:Stop run,Force terminate,Copy all changes,Read the change", "absent"),
+              "the page offers the closed run neither Stop run nor Force terminate — nor, its worktree gone with the "
+              "merge, its change to read or copy")
         check(self.press(merged, "turn:verify", "The change is the approved plan.") and "PASS" in self.said,
               "the page opens the verify turn and shows its verdict and feedback, read from the record its host "
               "wrote")

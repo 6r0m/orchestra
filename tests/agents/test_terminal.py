@@ -80,6 +80,9 @@ class Turns(unittest.TestCase):
         self.addCleanup(lambda: os.environ.pop("CODEX_HOME") if saved is None else os.environ.update(CODEX_HOME=saved))
         trusted, terminal.HOOK_TRUST = terminal.HOOK_TRUST, os.path.join(home, "hook-trust.json")
         self.addCleanup(setattr, terminal, "HOOK_TRUST", trusted)
+        # Its dialog comes within a moment of its composer; the fake draws both at once.
+        quiet, codex.DIALOG_SECONDS = codex.DIALOG_SECONDS, 0.5
+        self.addCleanup(setattr, codex, "DIALOG_SECONDS", quiet)
 
     def turn(self, prompt, kind="claude-code", stage="build", resume=None, timeout=60, name=None):
         if kind == "claude-code":
@@ -214,6 +217,34 @@ class Turns(unittest.TestCase):
         rc, out = self.turn("complete again", kind="codex", stage="verify", resume=thread, name="verify-e2-1")
         self.assertEqual(rc, 0)
         self.assertIn("done complete", out)
+
+    def test_a_start_held_by_codexs_review_of_anothers_hook_fails_at_once_and_trusts_nothing(self):
+        def turn(name, timeout=20):
+            return self.turn("complete this", kind="codex", stage="verify", name=name, timeout=timeout)
+        self.assertEqual(turn("verify-e1-1")[0], 0, "the orchestra's hooks trusted, as after a host's first turn")
+        self.assertTrue(os.path.exists(terminal.HOOK_TRUST))
+        # A repository's hook, new since: Codex asks for its review before the next turn, whatever was trusted.
+        os.makedirs(os.path.join(self.worktree, ".codex"))
+        with open(os.path.join(self.worktree, ".codex", "hooks.json"), "w", encoding="utf-8") as fh:
+            json.dump({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo theirs"}]}]}}, fh)
+        saved, terminal.BEGIN_SECONDS = terminal.BEGIN_SECONDS, 2
+        self.addCleanup(setattr, terminal, "BEGIN_SECONDS", saved)
+        began = time.monotonic()
+        with self.assertRaises(launch.ExecutorError) as held:
+            turn("verify-e1-2")
+        self.assertLess(time.monotonic() - began, 12, "failed once it should have begun, not at the turn's limit")
+        self.assertIn("/hooks", str(held.exception))
+        self.assertFalse(terminal.get(self.run_id, "architect").live())
+        self.assertFalse(os.path.exists(terminal.HOOK_TRUST), "what was remembered as trusted is checked afresh")
+        # Continued with it still waiting: refused before the turn starts, its hook never trusted for the operator.
+        with self.assertRaises(launch.ExecutorError) as refused:
+            turn("verify-e1-3")
+        self.assertIn("/hooks", str(refused.exception))
+        with open(codex.config_path(), encoding="utf-8") as fh:
+            self.assertNotIn("hooks.json", fh.read())
+        # Reviewed — here, removed — and continued: the turn runs.
+        shutil.rmtree(os.path.join(self.worktree, ".codex"))
+        self.assertEqual(turn("verify-e1-4")[0], 0)
 
     def test_stop_failure_and_exit_without_completion_fail_and_leave_no_agent(self):
         rc, _ = self.turn("failure please")

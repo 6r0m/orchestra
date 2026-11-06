@@ -49,6 +49,11 @@ HOOK_TRUST = os.path.join(paths.RUNTIME_ROOT, "hook-trust.json")
 TOKEN_FILE = os.path.join(paths.SECRETS, "workbench.token")
 COLS, ROWS = 160, 48
 TICK_SECONDS = 1.0
+# How long a turn whose kind reads a held start (`held`) may go without an event before what its screen shows is
+# read, and how much of the screen: its CLI starts and submits the prompt within seconds (measured, both hosts),
+# and a dialog that holds it is drawn last.
+BEGIN_SECONDS = 60
+HELD_TAIL = 64 * 1024
 # The page's subprotocol. The token is offered beside it, in the handshake's own header, so it
 # never appears in a URL the browser prints to its console or a proxy writes to a log.
 PROTOCOL = "workbench.v1"
@@ -440,11 +445,27 @@ def run_turn(worktree, argv, rdir, name, prompt, timeout, env, on_tick=None, *, 
 
     try:
         deadline = time.monotonic() + timeout
+        begun_by = time.monotonic() + BEGIN_SECONDS
         while True:
-            done = adapter.completion(_events(paths["events"]), prompt, session)
+            events = _events(paths["events"])
+            done = adapter.completion(events, prompt, session)
             if done is not None:
                 ok, message, session = done
                 return finish(0 if ok else 1, adapter.output(message, session))
+            # A start its CLI holds on a dialog for the operator fails the step saying why, rather than waiting out
+            # the turn's limit. Read only once the turn should long have begun: before, the screen may show the
+            # prompt itself, which can quote any dialog.
+            if not events and hasattr(adapter, "held") and time.monotonic() >= begun_by:
+                why = adapter.held(plain(bytes(agent.output[-HELD_TAIL:])))
+                if why:
+                    finish(1, "")
+                    # What was remembered as trusted did not keep this start from being held: the next turn has
+                    # the kind check its hooks afresh.
+                    try:
+                        os.remove(HOOK_TRUST)
+                    except FileNotFoundError:
+                        pass
+                    raise launch.ExecutorError("the turn did not begin within %ds: %s" % (BEGIN_SECONDS, why))
             rc = agent.returncode()
             if rc is not None:
                 agent.pump.join(timeout=launch.GRACE_SECONDS)

@@ -27,8 +27,15 @@ One press copies the run's whole change — every file, however long — wheneve
 
 ## What changed
 
-- *Copy all changes*, beside the heading, at any state of the run: the press reads the change as the worktree
-  holds it then (`/api/runs/<id>/diff`, the exact snapshot a file's diff is read from) and copies every part.
+- *Copy all changes*, beside the heading, wherever the Change section is — the run at work, waiting, or closed
+  keeping its worktree: the press reads the change as the worktree holds it then (`/api/runs/<id>/diff`, the exact
+  snapshot a file's diff is read from) and copies every part. A run merged or discarded has no worktree and no
+  Change section (`renderChange`, as before); its turns' changes stay in its history. A press racing the merge
+  that removes the worktree says *Copy failed*, git's refusal on hover.
+- Reviewer, 2026-11-06, PATCH: *the documentation promises the button after closure, and the read is refused once
+  the worktree is gone*. The wording was loose — [using.md](../docs/using.md) now says closed keeping its
+  worktree — but no press reaches that refusal from the page; copying a merged run's last judged snapshot is a
+  capability not asked for, and a merged change is in git.
 - `copyPatch` takes the snapshot's first part or the read that will give it, so that read is part of the press.
 
 ## Verification
@@ -38,4 +45,5 @@ One press copies the run's whole change — every file, however long — wheneve
   naming the file with its words.
 - **`make demo`:** DEMO PASSED, 117 checks, none failed — its run stopped at work had *Copy all changes* copy the
   patch of the file its engineer drafted (146 characters, naming `draft.txt` with its words); the new button among
-  the 39 that say on hover what they do.
+  the 39 that say on hover what they do. Run again after the review: DEMO PASSED, 117 checks, none failed, its
+  merged run offering neither *Copy all changes* nor *Read the change*, its worktree gone with the merge (`absent:`).

@@ -1,11 +1,13 @@
 # Codex turns end on its stdin hooks
 
 **Status:** BUILT 2026-11-06 — red, then green on both hosts; real Codex turns, fresh and resumed, ended on both;
-the workers restarted on it, and the operator's run, continued, ended the turn that had hung. It awaits the
-external reviewer and the operator's word to close it.
+the workers restarted on it, and the operator's run, continued, ended the turn that had hung. The reviewer's
+BLOCKER on its trust gate is fixed, red then green; the workers do not run that fix yet. It awaits the external
+reviewer and the operator's word to close it.
 **Scope:** how a Codex turn's end is wired and read ([codex.py](../app/agents/adapters/codex.py) `hook_flags`,
-`wire`, `completion`, `reply`, `hooks_trust`), the turn's events file in its environment and the hooks trusted
-before it ([terminal.py](../app/agents/terminal.py) `run_turn`, `_Briefly`; [turn_hook.py](../app/agents/turn_hook.py)
+`wire`, `completion`, `reply`, `hooks_trust`, `held`), the turn's events file in its environment, the hooks
+trusted before it and a start still held ([terminal.py](../app/agents/terminal.py) `run_turn`, `_Briefly`,
+`BEGIN_SECONDS`; [turn_hook.py](../app/agents/turn_hook.py)
 `-`), the adapter contract ([adapters](../app/agents/adapters/__init__.py)), and the stand-ins
 ([fake_cli.py](../tests/fake_cli.py), [demo.py](../tools/demo.py)).
 **Stable documentation owner:** D17 in the [architecture](../docs/architecture/structure.md); the agents'
@@ -34,8 +36,13 @@ Codex's review of hooks.
   both hosts (measured), so one definition serves every turn.
 - **Trusted by Codex's own dialog, for our hooks only:** never `--dangerously-bypass-hook-trust`, which would also
   run a repository's hooks unreviewed, outside the sandbox; never a hash computed here, whose inputs change between
-  Codex releases. Its dialog is accepted only while no more hooks wait than ours; anything else fails the turn,
-  saying to review them.
+  Codex releases. Its *Trust all* trusts every hook waiting, so it is answered only once Codex, started a moment
+  before without ours, asked to review nothing — never on a count of the hooks waiting, which one of ours trusted
+  and another's new can match (the reviewer's BLOCKER). Anything else fails the turn, saying to review it.
+- **A start still held fails, saying why:** what the record remembers cannot see a hook new since, nor Codex no
+  longer trusting ours; such a start records no event, so the turn's screen is read once it should long have begun
+  (`BEGIN_SECONDS`, 60 s; before, it may show the prompt, which can quote any dialog), the step failed, and the
+  record dropped for the next turn to check afresh.
 
 ## Verified evidence
 
@@ -60,9 +67,12 @@ Codex's review of hooks.
   `notify` still.
 - `turn_hook.py` takes `-` for the events file `ORCHESTRA_TURN_EVENTS` names; `run_turn` puts the turn's file there.
 - Before each Codex turn, `hooks_trust`: while Codex still holds the hashes remembered for this definition and
-  config (`tmp/orchestration/hook-trust.json`), nothing; otherwise Codex started for a moment, no prompt, its dialog
-  accepted while no more than ours wait, what it records remembered. A folder it asks to trust, or other hooks,
-  fail the turn saying so.
+  config (`tmp/orchestration/hook-trust.json`), nothing; otherwise Codex started for a moment twice, no prompt —
+  without ours, refused at any review it asks; then with ours, its dialog answered — and what it records
+  remembered. A folder it asks to trust, or other hooks, fail the turn saying so.
+- A Codex turn with no event after `BEGIN_SECONDS` whose screen shows its review of hooks or of the folder
+  (`codex.held`, an optional part of the adapter contract) fails as an executor error naming what to review, and
+  drops the record.
 - The demo's Codex home is its own, its skills linked to the host's; the fake Codex draws the review as Codex does.
 
 ## Verification
@@ -89,3 +99,20 @@ Codex's review of hooks.
 - **Found on WSL:** resuming a session on the Windows drive it mounts, Codex named the repository in lower case and
   asked to trust it again — a scratch folder's artifact, a run's worktree on WSL being WSL's own; the trust step now
   fails at once on that question rather than waiting.
+- **The reviewer's BLOCKER, both halves confirmed red:** with the staged gate swapped in
+  (`tmp/agent/codex-hooks/red_old_gate.py`, throwaway), one of ours trusted and another's waiting — two, as many as
+  ours — had *Trust all* answered (`[b'2\r']`), refused only after it;
+  `CodexHooks.test_one_of_ours_trusted_and_anothers_waiting_never_answers_trust_all`. With `codex.held` taken away
+  (`red_no_held.py`), a turn whose start Codex held at its review of a repository's hook new since waited out its
+  limit (`RoleTimeout`, 20 s); `Turns.test_a_start_held_by_codexs_review_of_anothers_hook_fails_at_once_and_trusts_nothing`.
+- **Green:** WSL `tests.agents.test_adapters`, `tests.agents.test_terminal`, `tests.test_architecture`,
+  `tests.application.test_activities` — 25 classes, 117 tests, OK; Windows `tests.agents.test_adapters`,
+  `tests.agents.test_terminal` — 11 classes, 56 tests, OK.
+- **Real Codex, no prompt submitted, no model** (`real_probe.py`, `real_held.py`, throwaway, each config compared
+  before and after — unchanged on both hosts): the trust step, its record a temporary one, started Codex alone and
+  then with ours, neither drawing a dialog, ours trusted already — 14.7 s on Windows, 9.6 s on WSL. In a scratch
+  repository whose `.codex/hooks.json` held a hook of its own, the step refused at the first start — *1 hook is
+  new or changed* — in 4.3 s on Windows and 2.3 s on WSL, nothing answered; a turn's start there, prompt given,
+  held at that review with no event, and `held` read it off the real screen.
+- **`make demo`, after the fix:** DEMO PASSED, 117 checks, none failed, its Codex turns trusting the fake's hooks by
+  the two starts; `make public-check` passed.

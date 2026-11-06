@@ -71,8 +71,10 @@ denied what it may not do rather than asked, and a Codex role never asks.
 
 Codex runs a hook only once it has been trusted, so the first Codex turn on a host has the orchestra's own hooks
 trusted through Codex's review, and every turn after needs nothing. Only the orchestra's own hooks are ever
-trusted this way: if other hooks wait for review on that host — yours, or the repository's — the turn fails at
-once and says so. Review them with `/hooks` in Codex there, then Continue.
+trusted this way: if other hooks wait for review on that host — yours, a plugin's or the repository's — the turn
+fails and says so, at once before it starts, or within a minute when they appear later and Codex stops at its
+review in the role's terminal, which you can answer there meanwhile. Review them with `/hooks` in Codex started in
+the run's worktree, then Continue.
 
 *New run* opens the form that starts one — and with no runs at all, the page opens on it: on a
 repository named in `.orchestra/repos.json` or in the file named by `ORCHESTRA_REPOS` — its menu
@@ -155,8 +157,8 @@ shows how many files, lines added and removed and when it was read, with nothing
 nothing in git; a file's diff is read when you open it, as the file is then, and a file you opened stays open,
 read again only when it changes. Each turn's own change stays in the history. When the change cannot be read
 just now — its worker down, its status unanswered — the page says so and shows the last one as no longer
-current. While the run waits at a blocker or a failed step, or once it is closed, nothing moves it: the page
-shows what was last seen, and *Read the change* reads what its worktree holds now.
+current. While the run waits at a blocker or a failed step, or once it is closed keeping its worktree, nothing
+moves it: the page shows what was last seen, and *Read the change* reads what its worktree holds now.
 
 Each read of it is one snapshot: the commit of its base the run stands on and the tree the
 worktree's files make, so that it shows what the run adds to that base and nothing the base brought in —
@@ -166,7 +168,8 @@ removed red, long unchanged runs folded a click away. A file too large to show w
 alone, and says so. The patch sits below in a small box; *Copy patch* copies all of it, however large,
 from the same snapshot, and *Refresh* reads a new one. *Copy all changes*, beside the heading, copies the whole
 change as the worktree holds it at that moment — every file, however long — whenever you press it, the run at
-work, waiting or closed.
+work, waiting, or closed keeping its worktree. A run merged or discarded has no worktree, and so no Change
+section: a merged change is in git, and each turn's change stays in the history.
 
 Both roles' terminals follow, the one at work open and an idle one closed until you open it. Each is the
 vendor's own CLI: press Esc to interrupt a working agent — or *Pause*, at the top, which presses it for you —
