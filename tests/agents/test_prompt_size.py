@@ -63,13 +63,24 @@ class Attach(unittest.TestCase):
 
 
 class Readable(unittest.TestCase):
-    """The attachments' folder is outside the worktree: the agent must be able to read it there, unasked."""
+    """The attachments' folder is outside the worktree: the agent must be able to read it there, unasked — and
+    only read it. A working directory would also keep the agent's `cd` into it, moving the turn out of its
+    worktree for every later command and every edit judged by where its shell stands."""
 
-    def test_claude_is_given_the_folder_as_one_it_reads_without_approval(self):
+    def test_claude_is_allowed_to_read_the_folder_never_given_it_as_a_working_directory(self):
         folder = tempfile.mkdtemp(prefix="orchestra-attach-")
         self.addCleanup(folders.remove, folder)
-        self.assertEqual(claude_code.readable(["claude", "--resume", "s"], [folder]),
-                         ["claude", "--resume", "s", "--add-dir", os.path.realpath(folder)])
+        argv = claude_code.readable(["claude", "--resume", "s"], [folder])
+        self.assertNotIn("--add-dir", argv)
+        self.assertEqual(argv, ["claude", "--resume", "s", "--allowedTools",
+                                claude_code.read_rule(os.path.realpath(folder))])
+
+    def test_the_rule_names_the_folder_as_claude_matches_an_absolute_path(self):
+        # `//` is an absolute path in Claude's rules; on Windows it matches a path in POSIX form, `C:\Users\alice`
+        # as `/c/Users/alice`.
+        self.assertEqual(claude_code.read_rule("/home/you/run/attachments"), "Read(//home/you/run/attachments/**)")
+        self.assertEqual(claude_code.read_rule("E:\\path\\to\\run\\attachments"),
+                         "Read(//e/path/to/run/attachments/**)")
 
     def test_codex_needs_none_its_sandbox_bounds_writes_not_reads(self):
         self.assertFalse(hasattr(codex, "readable"))

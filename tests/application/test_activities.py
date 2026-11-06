@@ -398,8 +398,11 @@ class LongPrompt(unittest.TestCase):
                 with open(path, encoding="utf-8", newline="") as fh:
                     self.assertIn(guidance, fh.read(), "the guidance whole, in the file the prompt names")
                 if kind == "claude-code":
-                    self.assertEqual(argv[argv.index(os.path.realpath(folder)) - 1], "--add-dir",
+                    rule = adapter.read_rule(os.path.realpath(folder))
+                    self.assertEqual(argv[argv.index(rule) - 1], "--allowedTools",
                                      "a folder Claude reads without approval")
+                    self.assertNotIn(os.path.realpath(folder), argv,
+                                     "never a working directory, which would keep the agent's cd into it")
 
 
 def stand_in_output():

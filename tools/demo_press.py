@@ -1,6 +1,6 @@
 """Press one of the Workbench's own buttons in a headless browser, as the operator would.
 
-    python tools/demo_press.py <workbench url> <run id | stack | start | page> <button label | task | refused:repo:task | answered:status | markdown | markdown-safety | change:words | change-rows | change-idle | hints | terminal:role | turn:stage | turn-then:stage:label | file:path | round:stage:path | history | hold:role:label | type-after:role:label:line | layout:WIDTHxHEIGHT | absent:label,...> <what the page should say> [note]
+    python tools/demo_press.py <workbench url> <run id | stack | start | page> <button label | task | refused:repo:task | answered:status | markdown | markdown-safety | change:words | change-rows | change-idle | terminal-fit:role | hints | terminal:role | turn:stage | turn-then:stage:label | file:path | round:stage:path | history | hold:role:label | type-after:role:label:line | layout:WIDTHxHEIGHT | absent:label,...> <what the page should say> [note]
 
 The Windows side of `make demo` (WSL cannot reach Windows' loopback, and Windows reaches the
 Workbench's): headless Edge, driven over the DevTools protocol, opens the page, opens the run by its
@@ -27,6 +27,10 @@ socket for the run's change and its reads of a file's diff are stood in for befo
 summaries are sent: it exits 0 when a file opened stays open and is not read again while another file comes,
 and is read once more, and only it, when it changes. Given `change-idle`, the same stand-in watches the run's
 page: it exits 0 when the page, its run waiting with no role at work, opens no socket for the change. Given
+`terminal-fit:<role>`, in a window as narrow as an operator's, what the page sends that role's agent is recorded and
+dropped from before it loads, and its terminal read: it exits 0 when its text and scrollbar fit its box, a drag of
+the scrollbar's thumb scrolls it back and selects nothing, Maximize fills the window drawn larger and Restore puts it
+back, and Ctrl+C on a selection copies it and sends nothing — with nothing selected, a live agent's still. Given
 `hints`, it presses nothing but the stack's chips: it visits New run, Settings and — for a run other than `page`
 — that run's page, and exits 0 when every button shown outside a dialog says on hover what it does.
 Given `terminal:<role>`, it presses nothing: it opens that role's terminal, if it is
@@ -547,6 +551,126 @@ def change_idle(page, run_id):
     return 0 if opened == 0 and button else 1
 
 
+# Before the page loads: what it sends a role's terminal — the agent's keys — recorded and dropped, so a check made
+# on a live run reaches no agent; and what it copies recorded in place of the clipboard.
+TERMINAL_STAND_IN = """(() => {
+  const sent = window.__sent = [], copied = window.__copied = [];
+  const send = WebSocket.prototype.send;
+  WebSocket.prototype.send = function (data) {
+    if (/\\/(engineer|architect)$/.test(new URL(this.url).pathname)) { sent.push(String(data)); return; }
+    return send.call(this, data);
+  };
+  if (navigator.clipboard) navigator.clipboard.writeText = (text) => { copied.push(text); return Promise.resolve(); };
+})();"""
+# A role's terminal as laid out: its box, the text drawn and the viewport that scrolls it — and its scrollbar's
+# width — where it is scrolled to, what is selected, its font, and whether its agent is live.
+TERMINAL_LAYOUT = """(role => {
+  const details = document.getElementById('terminal-' + role), box = document.getElementById('term-' + role);
+  const view = box.querySelector('.xterm-viewport'), screen = box.querySelector('.xterm-screen');
+  if (!view || !screen) return null;
+  const d = details.getBoundingClientRect(), v = view.getBoundingClientRect(), s = screen.getBoundingClientRect();
+  return { window: [innerWidth, innerHeight], details: [d.left, d.top, d.width, d.height].map(Math.round),
+    clientWidth: box.clientWidth, scrollWidth: box.scrollWidth, clientHeight: box.clientHeight,
+    scrollHeight: box.scrollHeight, screen: [s.left, s.right, s.top, s.bottom].map(Math.round),
+    viewport: [v.left, v.right, v.top, v.bottom].map(Math.round), bar: view.offsetWidth - view.clientWidth,
+    scrollTop: view.scrollTop, scrollMax: view.scrollHeight - view.clientHeight,
+    selected: box.querySelectorAll('.xterm-selection div').length,
+    font: parseFloat(getComputedStyle(box.querySelector('.xterm-rows')).fontSize),
+    live: /live/.test(document.getElementById('state-' + role).textContent),
+    mouse: box.querySelector('.xterm').classList.contains('enable-mouse-events'),
+    room: box.clientWidth - parseFloat(getComputedStyle(box).paddingLeft) - parseFloat(getComputedStyle(box).paddingRight) - (view.offsetWidth - view.clientWidth) };
+})(%s)"""
+
+
+def fitted(seen, tall=False):
+    """Whether the terminal's text, its scrollbar beside it, lies within its box across — and, maximized, its rows
+    within the window's height; in its place the box grows with its rows."""
+    across = seen["screen"][1] <= seen["viewport"][1] - seen["bar"] + 1 and seen["scrollWidth"] <= seen["clientWidth"] + 1
+    return across and (not tall or seen["screen"][3] <= seen["details"][1] + seen["details"][3] + 1)
+
+
+def terminal_fit(page, run_id, role):
+    """`role`'s terminal on the run's page, in a window as narrow as an operator's: 0 when its text and scrollbar
+    fit its box; a drag of the thumb up its track scrolls it back, selecting nothing; Maximize fills the window,
+    drawn larger and still fitting, and Restore puts it back; Ctrl+C on a selection copies it and sends the agent
+    nothing — and, its agent live, Ctrl+C with nothing selected is the agent's still. Prints what it saw."""
+    layout = lambda: page.value(TERMINAL_LAYOUT % json.dumps(role))   # noqa: E731
+    page.value(OPEN % json.dumps(run_id))
+    wait(lambda: page.value(OPENED), 60, "the run")
+    page.value(OPEN_TERMINAL % json.dumps(role))
+    wait(lambda: (layout() or {}).get("scrollMax", 0) > 0, 90, "the %s terminal to hold more than a screen" % role)
+    time.sleep(2)
+    page.value("document.getElementById('term-%s').scrollIntoView({ block: 'start' }); true" % role)
+    time.sleep(1)
+    rest = layout()
+    failures = [] if fitted(rest) else ["its text and scrollbar do not fit its box: %s" % rest]
+    # The thumb, at the foot of its track with the terminal at its end, dragged halfway up, as a hand drags it.
+    page.value("(v => { v.scrollTop = v.scrollHeight; })(document.querySelector('#term-%s .xterm-viewport'))" % role)
+    time.sleep(1)
+    rest = layout()
+    x, top, bottom = rest["viewport"][1] - max(rest["bar"], 2) / 2, rest["viewport"][2], rest["viewport"][3]
+    grab, to = bottom - rest["bar"] - 4, (top + bottom) // 2
+    page.call("Input.dispatchMouseEvent", type="mouseMoved", x=x, y=grab)
+    page.call("Input.dispatchMouseEvent", type="mousePressed", x=x, y=grab, button="left", buttons=1, clickCount=1)
+    for step in range(1, 11):
+        page.call("Input.dispatchMouseEvent", type="mouseMoved", x=x, y=grab + (to - grab) * step / 10,
+                  button="left", buttons=1)
+        time.sleep(0.05)
+    page.call("Input.dispatchMouseEvent", type="mouseReleased", x=x, y=to, button="left", clickCount=1)
+    time.sleep(1)
+    dragged = layout()
+    if not dragged["scrollTop"] < rest["scrollMax"] * 0.8 or dragged["selected"]:
+        failures.append("a drag of its thumb scrolled it from %d of %d to %d, %d piece(s) of text selected"
+                        % (rest["scrollTop"], rest["scrollMax"], dragged["scrollTop"], dragged["selected"]))
+    # Maximize, then Restore.
+    page.value(button("#terminal-%s summary" % role, "Maximize") + ".click(); true")
+    time.sleep(2)
+    big = layout()
+    if not (fitted(big, tall=True) and big["details"][2] >= big["window"][0] - 40 and big["details"][3] >= big["window"][1] - 40
+            and big["font"] > rest["font"]):
+        failures.append("maximized, it is %s at font %s (in its place, %s): %s"
+                        % (big["details"][2:], big["font"], rest["font"], big))
+    page.value(button("#terminal-%s summary" % role, "Restore") + ".click(); true")
+    time.sleep(2)
+    back = layout()
+    if not (fitted(back) and abs(back["details"][2] - rest["details"][2]) <= 2
+            and abs(back["font"] - rest["font"]) <= 0.2):
+        failures.append("restored, it is %s at font %s, not %s at %s: %s"
+                        % (back["details"][2:], back["font"], rest["details"][2:], rest["font"], back))
+    # Text selected down its screen — with Shift where the agent takes the mouse, which then selects all the same;
+    # elsewhere Shift would extend a selection rather than start one — then Ctrl+C.
+    page.value("document.getElementById('term-%s').scrollIntoView({ block: 'start' }); true" % role)
+    time.sleep(1)
+    back = layout()
+    left, top, right, bottom = back["screen"][0] + 4, back["screen"][2] + 20, back["screen"][1] - 20, back["screen"][3] - 20
+    for kind, x, y in (("mousePressed", left, top), ("mouseMoved", (left + right) / 2, (top + bottom) / 2),
+                       ("mouseReleased", right, bottom)):
+        page.call("Input.dispatchMouseEvent", type=kind, x=x, y=y, button="left", buttons=1 if kind != "mouseReleased"
+                  else 0, clickCount=1, modifiers=8 if back["mouse"] else 0)
+    time.sleep(0.5)
+    ctrl_c = dict(modifiers=2, key="c", code="KeyC", windowsVirtualKeyCode=67, nativeVirtualKeyCode=67)
+    page.call("Input.dispatchKeyEvent", type="rawKeyDown", **ctrl_c)
+    page.call("Input.dispatchKeyEvent", type="keyUp", **ctrl_c)
+    time.sleep(0.5)
+    copied, sent = page.value("window.__copied"), page.value("window.__sent")
+    if not (copied and copied[-1].strip()) or "\x03" in sent:
+        failures.append("Ctrl+C on a selection copied %r and sent the agent %r" % (copied, sent))
+    if back["live"]:
+        page.call("Input.dispatchKeyEvent", type="rawKeyDown", **ctrl_c)
+        page.call("Input.dispatchKeyEvent", type="keyUp", **ctrl_c)
+        time.sleep(0.5)
+        if "\x03" not in page.value("window.__sent"):
+            failures.append("Ctrl+C with nothing selected did not reach its live agent")
+    print("the %s terminal in a %dx%d window: its box %d px, its text %d px and scrollbar %d px within it at font %s; "
+          "its thumb dragged from %d to %d of %d; maximized %s at font %s, restored at %s; Ctrl+C on a selection "
+          "copied %r, sent the agent %r%s"
+          % (role, rest["window"][0], rest["window"][1], rest["clientWidth"], rest["screen"][1] - rest["screen"][0],
+             rest["bar"], rest["font"], rest["scrollTop"], dragged["scrollTop"], rest["scrollMax"], big["details"][2:],
+             big["font"], back["font"], (copied or [""])[-1][:40], sent,
+             "" if not failures else "\nFAILED: " + "\nFAILED: ".join(failures)))
+    return 0 if not failures else 1
+
+
 # Every button shown outside a dialog — a dialog's own say what it asks — that says nothing on hover; and how many
 # there are in all.
 UNHINTED = ("(() => { const shown = [...document.querySelectorAll('button, a.button')].filter((b) => b.offsetParent"
@@ -579,6 +703,8 @@ def main(url, run_id, label, said, note=None):
     profile = tempfile.mkdtemp(prefix="orchestra-demo-edge-")
     # A layout is read at the window size it names; every press at the browser's own.
     size = label.split(":", 1)[1] if label.startswith("layout:") else None
+    # A terminal is fitted in a window as narrow as an operator's, where 160 columns at the page's font do not fit.
+    size = "1032x1100" if label.startswith("terminal-fit:") else size
     edge = subprocess.Popen([EDGE, "--headless=new", "--disable-gpu", "--no-first-run", "--remote-debugging-port=0",
                              "--user-data-dir=" + profile]
                             + (["--window-size=" + size.replace("x", ",")] if size else []) + ["about:blank"],
@@ -597,6 +723,9 @@ def main(url, run_id, label, said, note=None):
                 # A script for documents to come is applied only once the Page domain is enabled (measured).
                 page.call("Page.enable")
                 page.call("Page.addScriptToEvaluateOnNewDocument", source=FEED_STAND_IN)
+            if label.startswith("terminal-fit:"):
+                page.call("Page.enable")
+                page.call("Page.addScriptToEvaluateOnNewDocument", source=TERMINAL_STAND_IN)
             page.call("Page.navigate", url=url)
             if label == "hints":
                 # Its views read no run, so neither does it wait for the list of runs.
@@ -604,7 +733,7 @@ def main(url, run_id, label, said, note=None):
                 return hints(page, run_id)
             wait(lambda: page.value("document.readyState === 'complete' && "
                                     "document.querySelector('#runs-finished li') !== null"), 30, "the Workbench page")
-            if size:
+            if label.startswith("layout:"):
                 return laid_out(page, run_id, size, said)
             if run_id == "start" and label.startswith("refused:"):
                 repo, task = label.split(":", 2)[1:]
@@ -621,6 +750,8 @@ def main(url, run_id, label, said, note=None):
                 return change_rows(page, run_id)
             if label == "change-idle":
                 return change_idle(page, run_id)
+            if label.startswith("terminal-fit:"):
+                return terminal_fit(page, run_id, label.split(":", 1)[1])
             if label.startswith("terminal:"):
                 role = label.split(":", 1)[1]
                 page.value(OPEN % json.dumps(run_id))

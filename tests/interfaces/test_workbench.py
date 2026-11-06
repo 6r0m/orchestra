@@ -55,6 +55,70 @@ def configured_first_message(message):
 DIALOG = {"_hook": "Notification", "notification_type": "permission_prompt"}
 
 
+class RoleReply(unittest.TestCase):
+    """What the role the operator talked with last answered them in its terminal after its turn, while the run waits
+    at a stop that takes guidance: the page offers it, to be sent on with one press."""
+    PROMPT = "$architect\n\n# Task\nassess the plan"
+
+    def setUp(self):
+        self.rdir = tempfile.mkdtemp(prefix="orchestra-reply-")
+        self.addCleanup(shutil.rmtree, self.rdir, True)
+        os.mkdir(os.path.join(self.rdir, "logs"))
+        self.status = {"stop": {"reason": "blocker", "phase": "plan", "actions": ["guide", "abort"]},
+                       "state": {"agent_sessions": {"architect": "t1", "engineer": "s1"}}}
+
+    def turn(self, name, *events, at):
+        files = terminal.turn_files(self.rdir, name)
+        with open(files["prompt"], "w", encoding="utf-8") as fh:
+            fh.write(self.PROMPT)
+        with open(files["events"], "w", encoding="utf-8") as fh:
+            for event in events:
+                fh.write(json.dumps(event) + "\n")
+        os.utime(files["events"], (at, at))
+
+    def said(self, inputs, text, thread="t1"):
+        return {"_hook": "notify", "type": "agent-turn-complete", "thread-id": thread, "input-messages": inputs,
+                "last-assistant-message": text}
+
+    def reply(self, **status):
+        return workbench.role_reply(dict(self.status, **status), self.rdir)
+
+    def test_the_architects_last_answer_to_the_operator_is_offered_at_a_stop_that_takes_guidance(self):
+        verdict = self.said([self.PROMPT], '{"verdict":"BLOCKER"}')
+        self.turn("assess-e5-1", verdict, at=2000)
+        self.assertIsNone(self.reply(), "its turn's own answer is the stop's already")
+        handoff = self.said([self.PROMPT, "guide the engineer"], "Engineer: revise the todo.")
+        self.turn("assess-e5-1", verdict, handoff, self.said(["catch up"], '{"summary":""}', thread="t2"), at=2000)
+        self.assertEqual(self.reply(), {"role": "architect", "text": "Engineer: revise the todo."})
+        # An older turn of the architect's, and a newer one of the engineer's, are not where it talked last.
+        self.turn("assess-e4-1", verdict, self.said([self.PROMPT, "earlier"], "An earlier answer."), at=1000)
+        self.turn("plan-e6-1", {"_hook": "Stop", "session_id": "s1", "prompt_id": "p",
+                                "last_assistant_message": "the engineer's"}, at=3000)
+        self.assertEqual(self.reply()["text"], "Engineer: revise the todo.")
+        for stop in (None, {"reason": "approval", "actions": ["approve", "revise"]}):
+            self.assertIsNone(self.reply(stop=stop), "nothing to send it on with")
+        self.assertIsNone(self.reply(state={"agent_sessions": {}}), "no session of its yet")
+
+    def test_the_engineer_talked_with_last_is_offered_and_the_architect_when_talked_with_after(self):
+        def asked(prompt_id, prompt):
+            return {"_hook": "UserPromptSubmit", "session_id": "s1", "prompt_id": prompt_id, "prompt": prompt}
+
+        def stopped(prompt_id, said):
+            return {"_hook": "Stop", "session_id": "s1", "prompt_id": prompt_id, "last_assistant_message": said,
+                    "background_tasks": []}
+        verdict = self.said([self.PROMPT], '{"verdict":"BLOCKER"}')
+        talked = self.said([self.PROMPT, "what now?"], "The architect's answer.")
+        self.turn("assess-e5-1", verdict, talked, at=2000)
+        engineer = [asked("p1", self.PROMPT), stopped("p1", "Planned."), asked("p2", "so we drop the shim?"),
+                    stopped("p2", "Yes: no shim, a clean break, documented.")]
+        self.turn("plan-e5-1", *engineer, at=3000)
+        self.assertEqual(self.reply(), {"role": "engineer", "text": "Yes: no shim, a clean break, documented."})
+        self.turn("assess-e5-1", verdict, talked, at=4000)
+        self.assertEqual(self.reply(), {"role": "architect", "text": "The architect's answer."})
+        self.turn("plan-e5-1", *engineer[:2], at=5000)
+        self.assertEqual(self.reply()["role"], "architect", "an engineer's turn with no talk after it offers nothing")
+
+
 class AgentPrompt(unittest.TestCase):
     """A vendor dialog waiting in the active turn's terminal, as the page is told of it."""
     view = {"state": "running", "stage": "assess", "episode": 2, "round": 0}
@@ -346,6 +410,8 @@ class Access(unittest.TestCase):
         self.assertEqual(config["token"], terminal.token())
         self.assertEqual(config["terminal_ports"], {name: target["terminal_port"]
                                                     for name, target in E.SETTINGS["targets"].items()})
+        # The size every worker gives an agent's terminal, from its one owner: the page draws that grid.
+        self.assertEqual(config["terminal_size"], {"cols": terminal.COLS, "rows": terminal.ROWS})
         connection = http.client.HTTPConnection("127.0.0.1", port())
         connection.request("GET", "/", headers={"Host": "127.0.0.1:%d" % port()})
         response = connection.getresponse()
@@ -997,6 +1063,7 @@ class Runs(Scenario):
         view = self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "approval")["view"]
         self.assertEqual((view["state"], view["goal"], view["host"]), ("waiting", "a run that waits", "wsl"))
         self.assertEqual(view["stop"]["reason"], "approval")
+        self.assertEqual(view["stop"]["to"], "engineer", "a plan's words go to the engineer, whose work it is")
         self.assertEqual(view["actions"], ["approve", "revise"])
         self.assertTrue(datetime.datetime.fromisoformat(view["since"]), "since when it waits")
         self.assertEqual(view["blocked_by"], [])
@@ -1104,6 +1171,7 @@ class Runs(Scenario):
         view = self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "approval")["view"]
         self.assertEqual((view["flow"]["name"], view["step"]), ("architect-research", 1))
         self.assertEqual(view["stop"]["feedback"], "Brief: the scheduler.", "the approval shows the brief")
+        self.assertEqual(view["stop"]["to"], "architect", "a research's words go to the architect, whose work it is")
 
     def test_each_completed_turn_opens_the_prompt_it_was_sent_and_what_it_answered(self):
         """A history entry names its turn by stage, episode and round; the route reads what the host recorded

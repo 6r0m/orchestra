@@ -1,13 +1,13 @@
 # A long prompt is attached as files
 
-**Status:** DONE 2026-11-05 — the goal met: the reviewer passed the implementation; green in the full suite on
-both hosts; the operator's stopped run continued on the restarted Windows worker, its agent reading the
-attached guidance whole and its turn ending normally — the check the reviewer set; closed on the operator's
-word.
-**Scope:** how a role turn's prompt reaches the agent's CLI ([nodes.py](../../app/agents/nodes.py) `attach`,
-[activities.py](../../app/application/activities.py) `run_role`, the Claude adapter's `readable`).
-**Stable documentation owner:** D17 in the [architecture](../../docs/architecture/structure.md) and the agents'
-[structure](../../app/agents/docs/architecture/structure.md).
+**Status:** REOPENED 2026-11-06, FIXED — closed too early: the operator's run continued and read its
+attachment, but its next engineer turn could write nothing to its worktree because of how the attachment was
+made readable (*Defect found after closing*, below). Fixed red first, proven with a real Claude on both hosts;
+it awaits the external reviewer, and the Windows worker's restart once no turn of it runs.
+**Scope:** how a role turn's prompt reaches the agent's CLI ([nodes.py](../app/agents/nodes.py) `attach`,
+[activities.py](../app/application/activities.py) `run_role`, the Claude adapter's `readable`).
+**Stable documentation owner:** D17 in the [architecture](../docs/architecture/structure.md) and the agents'
+[structure](../app/agents/docs/architecture/structure.md).
 
 ## Goal
 
@@ -33,6 +33,15 @@ file the agent reads, and a step stopped on such a prompt goes on with Continue.
   (`compose_parts`) and recorded beside the turn. Claude reads outside its worktree only where it is told
   (`--add-dir`, as for the skills folder); Codex's sandbox bounds writes, not reads.
 
+- **Defect found after closing.** The run's next engineer turn, its guidance attached again, ran `cd` into the
+  attachments folder to compare that guidance with the last. Claude keeps a `cd` that ends inside one of its
+  working directories, and `--add-dir` had made the folder one: the shell stayed there for the rest of the
+  turn. The operator's own edit guard judges a write by the shell's directory, so it then refused every edit
+  of the worktree's todo — eight in a row; Claude's own edit rule, `Edit(./**)`, refuses it too once the
+  shell has moved (measured, below). The engineer wrote its round to its scratch folder instead; the
+  architect found the todo unchanged and raised a blocker. The next turn starts in the worktree again, but any
+  turn that entered the folder would repeat it.
+
 ## What changed
 
 - `nodes.attach`: while the rendered prompt is past `PROMPT_BUDGET` (24,000, as either host counts it — Windows'
@@ -42,6 +51,9 @@ file the agent reads, and a step stopped on such a prompt goes on with Continue.
 - `run_role` attaches as it composes, records the parts as sent, and has the kind make the folder readable —
   `readable(argv, folders)`, optional in the adapter contract, Claude's an `--add-dir`.
 - D17's sentence, in the architecture and the agents' structure.
+- **The defect's fix:** Claude is given the folder as a rule allowing reads under it — `--allowedTools
+  "Read(//<folder>/**)"`, its path in the POSIX form Claude matches on Windows (`E:\x` as `/e/x`) — never as a
+  working directory, so a `cd` into it is not kept. The agents' structure says so.
 
 ## Review record
 
@@ -68,5 +80,19 @@ file the agent reads, and a step stopped on such a prompt goes on with Continue.
   to its attachments and named under its own heading. Claude's own session shows the turn's first act was to
   read that file, whole — its 297 lines, nothing cut; the turn ended normally, its answer a plan that follows
   the guidance, and the run went on to the architect's assessment, whose prompt fits and attaches nothing.
+- **The defect, red then green.** Tests first: `tests.agents.test_prompt_size.Readable` and
+  `tests.application.test_activities.LongPrompt` failed — `--add-dir` given, no `read_rule`. Then a real Claude
+  (haiku), launched with the adapter's own permission flags in a throwaway worktree, told to `cd` into the
+  folder, run `pwd` in a separate command, read the attachment and write a file in the worktree: with
+  `--add-dir`, `pwd` printed the folder and the write was refused; with the rule, Claude said *Shell cwd was
+  reset to* the worktree, read the file and wrote; with neither — the control — the read was refused. On
+  Windows, with Read and Write only (its shell hangs when started from an agent's own), the rule built by
+  `read_rule` from the Windows path let the read through, and the control was refused. Green: on WSL
+  `tests.agents.test_prompt_size`, `tests.application.test_activities`, `tests.agents.test_adapters`,
+  `tests.test_architecture` — 74 tests, OK; on Windows the first three's long-prompt and adapter classes — 5
+  classes, 14 tests, OK.
+- **Left as is, for the reviewer:** the host's skills folder is still a working directory (`host`), so a `cd`
+  into it would be kept the same way; its skills read their references through it, links included, so moving it
+  to a rule is its own change.
 - **Not seen live:** a Codex turn given an attachment. Its sandbox bounds writes, not reads (as measured
   without a model), so it reads the file as Claude does through `--add-dir`.

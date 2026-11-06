@@ -566,7 +566,9 @@ still lands on a checkout.
 - **D6** **A stop waits in the workflow and nowhere else.** Each stop publishes
   the actions it takes — approve or revise at an approval the run's flow
   schedules, after a review or after research, whose brief it shows;
-  guide at a blocker or an exhausted budget; continue after a failed stage; merge,
+  guide at a blocker or an exhausted budget — to the engineer, whose work goes on,
+  or `guide:architect`, the architect then judging the work as it stands again, with
+  no work turn first; continue after a failed stage; merge,
   `revise:engineer`, `revise:architect` or discard at the final gate, where a
   revise names the role it goes to — and the page and the command line offer
   exactly those, owning only how each is labelled and typed. Its answer arrives

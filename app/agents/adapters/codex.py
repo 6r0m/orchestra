@@ -92,6 +92,9 @@ def command(role, resume_id, traced=None):
     # roles prefer current practice over folklore and the architect may challenge the task itself (D15).
     parts += ["-c", 'model_reasoning_summary="detailed"']
     parts += ["-c", 'web_search="live"', "--sandbox", sandbox, "--ask-for-approval", "never"]
+    # Drawn inline, as Claude is: on its default alternate screen it keeps no scrollback and takes every mouse
+    # event, so its terminal on the page could not be scrolled back through the session (measured on both hosts).
+    parts += ["--no-alt-screen"]
     if role.get("model"):
         parts += ["--model", role["model"]]
     if role.get("effort"):
@@ -123,6 +126,21 @@ def completion(events, prompt, session):
             continue
         return True, event.get("last-assistant-message") or "", event.get("thread-id")
     return None
+
+
+def reply(events, prompt, session):
+    """Its last answer in its thread `session` to words typed into its terminal after the turn's prompt: a
+    completion whose newest input is not the prompt. Its own catch-up summaries run in threads of their own."""
+    wanted = prompt.strip()
+    said = None
+    for event in events:
+        if (event.get("_hook") != "notify" or event.get("type") != "agent-turn-complete"
+                or event.get("thread-id") != session):
+            continue
+        inputs = [text.strip() for text in event.get("input-messages") or [] if isinstance(text, str)]
+        if inputs and inputs[-1] != wanted and event.get("last-assistant-message"):
+            said = event["last-assistant-message"]
+    return said
 
 
 def output(message, session):

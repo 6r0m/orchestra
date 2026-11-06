@@ -184,6 +184,12 @@ async def started(client, run_id):
     return None
 
 
+def recipient(stop):
+    """The role a stop's words go on to when its answer names none: the one whose work the stop's phase is — the
+    architect then judging what it does with them. None for a stop naming no phase of work."""
+    return stages.STAGE_ROLE.get((stop or {}).get("phase"))
+
+
 def view(listed, status, health):
     """What a run is now — the one reading every surface shows, derived from facts that exist.
 
@@ -216,7 +222,8 @@ def view(listed, status, health):
             "episode": state.get("episode"), "stage": working.get("stage"), "role": working.get("role"),
             "flow": state.get("flow"), "step": state.get("step"),
             "since": stop.get("since") if stop else working.get("since"),
-            "stop": stop and {key: stop.get(key) for key in ("id", "reason", "hint", "feedback", "todo")},
+            "stop": stop and dict({key: stop.get(key) for key in ("id", "reason", "hint", "feedback", "todo")},
+                                  to=recipient(stop)),
             "failure": stop["feedback"] if kind == "failed" else None,
             "blocked_by": [] if closed else sorted({stack_hosts[queue] for queue in needed
                                                     if health["hosts"].get(stack_hosts[queue]) == "down"}),

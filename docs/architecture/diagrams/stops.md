@@ -19,12 +19,14 @@ graph TD
     assess -. "approval · blocker · exhausted" .-> stop1{{stop}}
     stop1 -. approve .-> build
     stop1 -. "revise · guide" .-> plan
+    stop1 -. "guide architect" .-> assess
     assess -. "PASS, a flow with no build" .-> done([DONE])
     stop1 -. "approve, a flow with no build" .-> done
     build --> verify
     verify -. PATCH / UNVERIFIED .-> build
     verify -. "blocker · exhausted" .-> stop2{{stop}}
     stop2 -. guide .-> build
+    stop2 -. "guide architect" .-> verify
     verify -. "PASS · the base stands" .-> closeout
     verify -. "PASS · the base moved, merged in cleanly" .-> verify
     verify -. "PASS · the base moved, in conflict" .-> build

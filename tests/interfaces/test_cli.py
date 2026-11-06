@@ -57,6 +57,14 @@ class ParsesWhatAStopPublishes(unittest.TestCase):
         listed = cli.answer_line(stop("merge", "revise:engineer", "pause"))
         self.assertEqual(listed, '"merge" | "revise engineer <feedback>" | "pause"')
 
+    def test_guidance_goes_to_the_engineer_unless_it_names_the_architect(self):
+        blocker = stop("guide", "guide:architect")
+        self.assertEqual(cli.parse_answer(blocker, "guide architect the premise holds"),
+                         {"action": "guide:architect", "text": "the premise holds"})
+        self.assertEqual(cli.parse_answer(blocker, "the premise holds, revise the plan"),
+                         {"action": "guide", "text": "the premise holds, revise the plan"})
+        self.assertEqual(cli.answer_line(blocker), '"<your guidance>" | "guide architect <your guidance>"')
+
 
 class TheStack(unittest.TestCase):
     """`--stack`: what `make up`, `make down` and `make check` run, through the stack's one owner."""

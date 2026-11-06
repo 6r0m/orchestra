@@ -112,9 +112,21 @@ def host(argv, windows=WINDOWS, skills=None):
 
 
 def readable(argv, folders):
-    """The command with `folders` outside the worktree — a turn's attached prompt parts — readable unasked: each
-    added as a working directory, as the skills folder is."""
-    return list(argv) + [part for folder in folders for part in ("--add-dir", os.path.realpath(folder))]
+    """The command with `folders` outside the worktree — a turn's attached prompt parts — readable unasked, and
+    only readable: a rule allowing reads under each, never a working directory. Measured with `--add-dir`: a
+    `cd` into a working directory is kept, so the agent's shell stayed in the folder, and its edit rule, `./**`,
+    then refused the worktree; with the rule, its shell went back to the worktree after the command."""
+    return list(argv) + [part for folder in folders
+                         for part in ("--allowedTools", read_rule(os.path.realpath(folder)))]
+
+
+def read_rule(path):
+    """Claude's rule allowing reads under the absolute `path`. `//` starts an absolute path in its rules, and on
+    Windows it matches a path in POSIX form: `C:\\Users\\alice` as `/c/Users/alice`."""
+    drive = re.match(r"([A-Za-z]):[\\/]", path)
+    if drive:
+        path = "/%s/%s" % (drive.group(1).lower(), path[3:])
+    return "Read(/%s/**)" % path.replace("\\", "/").rstrip("/")
 
 
 def session_in(argv):
@@ -177,6 +189,26 @@ def completion(events, prompt, session):
                 return False, json.dumps({key: value for key, value in event.items()
                                           if key not in ("transcript_path", "_hook")}), session
     return None
+
+
+def reply(events, prompt, session):
+    """Its last answer in `session` to a prompt typed into its terminal other than the turn's — never the turn's
+    own answer, which words typed during the turn may also have led to."""
+    wanted = prompt.strip()
+    done = completion(events, prompt, session)
+    turn = done[1] if done and done[0] else None
+    asked = {}
+    said = None
+    for event in events:
+        if event.get("session_id") != session:
+            continue
+        if event.get("_hook") == "UserPromptSubmit":
+            asked[event.get("prompt_id")] = (event.get("prompt") or "").strip()
+        elif event.get("_hook") == "Stop":
+            message = event.get("last_assistant_message") or ""
+            if asked.get(event.get("prompt_id"), wanted) != wanted and message and message != turn:
+                said = message
+    return said
 
 
 def output(message, session):

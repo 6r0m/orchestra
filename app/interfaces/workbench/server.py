@@ -114,6 +114,60 @@ def agent_prompt(view, rdir=None):
     return adapters.waiting(events)
 
 
+def role_reply(status, rdir):
+    """What the role the operator talked with last answered them in its terminal since its turn — what they settled
+    there — while the run waits at a stop that takes guidance, for the page to send on as the operator's guidance
+    with one press: {"role", "text"}, or None. That role remembers the talk in its own session, and the page sends
+    its words to whichever role the operator picks. Each role's newest turn record is where its talk lands, and the
+    newer of the two is the one talked with last."""
+    stop = status.get("stop") or {}
+    sessions = (status.get("state") or {}).get("agent_sessions") or {}
+    if "guide" not in (stop.get("actions") or []):
+        return None
+    said = [found for found in (_said(rdir, role, sessions.get(role)) for role in ("architect", "engineer"))
+            if found]
+    if not said:
+        return None
+    _, role, text = max(said)
+    return {"role": role, "text": text}
+
+
+def _said(rdir, role, session):
+    """(when, role, text): `role`'s last answer to the operator in its newest turn record, read by the kind whose
+    events they are — a reply to words they typed, in its own session, never its turn's own answer — or None."""
+    if not session:
+        return None
+    logs = os.path.join(rdir, "logs")
+    try:
+        if os.path.islink(rdir) or os.path.islink(logs):
+            return None
+        names = [name[:-len(".events")] for name in os.listdir(logs) if name.endswith(".events")
+                 and stages.STAGE_ROLE.get(name.split("-", 1)[0]) == role]
+        files = terminal.turn_files(rdir, max(names, key=lambda name: os.path.getmtime(
+            terminal.turn_files(rdir, name)["events"])))
+        if os.path.islink(files["events"]) or os.path.islink(files["prompt"]):
+            return None
+        when = os.path.getmtime(files["events"])
+        with open(files["prompt"], "rb") as fh:
+            prompt = fh.read(MAX_TURN_FILE + 1).decode("utf-8")
+        with open(files["events"], "rb") as stream:
+            # Each of its events carries the talk's inputs so far: its tail holds the newest whole.
+            stream.seek(max(0, os.fstat(stream.fileno()).st_size - MAX_TURN_FILE))
+            lines = stream.read().splitlines()
+    except (OSError, ValueError):
+        return None
+    events = []
+    for line in lines:
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(event, dict):
+            events.append(event)
+    text = adapters.reply(events, prompt, session)
+    return (when, role, text) if text else None
+
+
 def turn_parts(path, prompt):
     """The parts a turn's prompt was built from, as recorded beside it — only while each is a part a prompt has
     and they render to that prompt, byte for byte; None for a turn with none, or with parts that are unreadable or
@@ -193,7 +247,8 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
     hosts = {"127.0.0.1:%d" % port, "localhost:%d" % port}
     origins = terminal.allowed_origins(port)
     config = {"token": token, "temporal_ui": TEMPORAL_UI,
-              "terminal_ports": {name: target["terminal_port"] for name, target in policy["targets"].items()}}
+              "terminal_ports": {name: target["terminal_port"] for name, target in policy["targets"].items()},
+              "terminal_size": {"cols": terminal.COLS, "rows": terminal.ROWS}}
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "workbench"
@@ -465,6 +520,7 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
                                                      "closed": None, "task_queue": None},
                                        None if unreadable else status, health)
             status["view"]["agent_prompt"] = agent_prompt(status["view"])
+            status["view"]["reply"] = None if unreadable else role_reply(status, terminal.run_dir(run_id))
             status["view"]["kept"] = not unreadable and runs.not_kept(execution, status, removal) is None
             status["view"]["cleanup"] = None if unreadable else runs.cleanup(execution, status, removal)
             if status["view"]["kept"]:

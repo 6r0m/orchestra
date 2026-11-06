@@ -111,5 +111,40 @@ class Finding(unittest.TestCase):
         self.assertIn("no program", found["probing"])
 
 
+class Reply(unittest.TestCase):
+    """What a role last answered the operator in its terminal after its turn — words they settled with it at a
+    stop, for the page to send on — read from the turn's events by the kind whose events they are."""
+    PROMPT = "$architect\n\n# Task\nassess the plan"
+
+    def test_codex_answers_the_last_words_typed_in_its_own_thread_never_a_side_thread_or_its_turn(self):
+        def done(thread, inputs, said):
+            return {"_hook": "notify", "type": "agent-turn-complete", "thread-id": thread, "input-messages": inputs,
+                    "last-assistant-message": said}
+        turn = done("t1", [self.PROMPT], '{"verdict":"BLOCKER","feedback":"answer Q1"}')
+        # Its own catch-up summaries come from threads of their own.
+        summary = done("t2", ["Write a brief catch-up for a user returning to this task."], '{"summary":"..."}')
+        asked = done("t1", [self.PROMPT, "which plugins for q1?"], "The private one.")
+        handoff = done("t1", [self.PROMPT, "which plugins for q1?", "guide the engineer"], "Engineer: revise the todo.")
+        self.assertIsNone(adapters.reply([turn], self.PROMPT, "t1"), "its turn's own answer is the stop's already")
+        self.assertIsNone(adapters.reply([turn, summary], self.PROMPT, "t1"))
+        self.assertEqual(adapters.reply([turn, asked, summary, handoff, summary], self.PROMPT, "t1"),
+                         "Engineer: revise the todo.")
+        self.assertIsNone(adapters.reply([turn, asked, handoff], self.PROMPT, "t9"), "another session's")
+
+    def test_claude_answers_the_last_prompt_typed_after_its_turns_never_its_turns_own(self):
+        def asked(prompt_id, prompt, session="s1"):
+            return {"_hook": "UserPromptSubmit", "session_id": session, "prompt_id": prompt_id, "prompt": prompt}
+
+        def stopped(prompt_id, said, session="s1"):
+            return {"_hook": "Stop", "session_id": session, "prompt_id": prompt_id, "last_assistant_message": said,
+                    "background_tasks": []}
+        turn = [asked("p1", self.PROMPT), stopped("p1", "BLOCKER: answer Q1")]
+        self.assertIsNone(adapters.reply(turn, self.PROMPT, "s1"))
+        chat = turn + [asked("p2", "which plugins?"), stopped("p2", "The private one."),
+                       asked("p3", "guide the engineer"), stopped("p3", "Engineer: revise the todo.")]
+        self.assertEqual(adapters.reply(chat, self.PROMPT, "s1"), "Engineer: revise the todo.")
+        self.assertIsNone(adapters.reply(chat, self.PROMPT, "s2"), "another session's")
+
+
 if __name__ == "__main__":
     unittest.main()

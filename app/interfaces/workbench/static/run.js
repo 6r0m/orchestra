@@ -30,7 +30,25 @@ const PRIMARY = new Set(["approve", "merge", "guide", "continue"]);
 const DANGER = new Set(["discard"]);
 // The answers the operator's note is sent with — its label names them, and a refusal of one is shown at
 // the note. Whether an answer needs words is the workflow's to refuse, never the page's.
-const WORDED = { revise: "Revise", "revise:engineer": "Revise", "revise:architect": "Revise", guide: "Guide" };
+const WORDED = { revise: "Revise", "revise:engineer": "Revise", "revise:architect": "Revise", guide: "Guide",
+  "guide:architect": "Guide" };
+
+// Whom guidance goes to: `guide` to the role whose work the stop's phase is — `to`, the run's view's to say —
+// which goes on with it, the architect then judging what it does; `guide:architect` to the architect, which judges
+// the work as it stands again with it, the engineer taking no turn first. Null for any other answer.
+function guided(action, to) {
+  return action === "guide:architect" ? "architect" : action === "guide" ? to || null : null;
+}
+
+function guidedHint(action, to, what) {
+  const role = guided(action, to);
+  if (action === "guide:architect") {
+    return "Send " + what + " to the architect: it judges the work as it stands again with it, the engineer " +
+      "taking no turn first";
+  }
+  return "Send " + what + " to the " + role + ": it goes on with it" +
+    (role === "architect" ? "" : ", and the architect then judges what it does");
+}
 const WORDLESS = new Set(["approve", "continue", "merge", "discard"]);
 // A second look before an answer that lands or removes the work.
 const ASK = {
@@ -122,7 +140,9 @@ export async function refreshRun() {
   renderBlocked(view);
   renderControls(view);
   if (status.unreadable) return;
-  renderStop(status.stop, status.timeline);
+  const to = view.stop && view.stop.to;
+  renderStop(status.stop, status.timeline, to);
+  renderReply(status.stop, view.reply, to);
   renderKept(runId, view);
   renderChange(view, status.stop);
   renderHistory(view, status.timeline, status.stop);
@@ -355,7 +375,7 @@ function evidencePart(part) {
   return box;
 }
 
-function renderStop(stop, timeline) {
+function renderStop(stop, timeline, to) {
   const card = $("stop");
   // A stop the run has left takes its draft with it.
   for (const key of [...drafts.keys()]) {
@@ -381,25 +401,53 @@ function renderStop(stop, timeline) {
   const worded = [...new Set(actions.filter((action) => WORDED[action]).map((action) => WORDED[action]))];
   $("stop-note-field").hidden = actions.every((action) => WORDLESS.has(action));
   $("stop-note-label").textContent = worded.length
-    ? (worded.includes("Guide") ? "Your guidance, sent with Guide" : "Your note, sent with Revise") : "Your note";
+    ? (worded.includes("Guide") ? "Your guidance, to the role you press it to" : "Your note, sent with Revise")
+    : "Your note";
   $("stop-note").placeholder = worded.includes("Guide") ? "How should the run go on…"
     : worded.length ? "What should change, and why…" : "";
   $("stop-note").value = drafts.get(stop.id) || "";
   for (const id of ["stop-note-alert", "stop-alert", "stop-result"]) $(id).textContent = "";
   $("stop-actions").replaceChildren(...actions.map((action) => {
-    const button = el("button", LABELS[action] || action,
+    const role = guided(action, to);
+    const button = el("button", role ? "Guide the " + role : LABELS[action] || action,
       PRIMARY.has(action) ? "primary" : DANGER.has(action) ? "danger" : "");
     button.type = "button";
-    button.title = HINTS[action] || "Answer the run: " + action;
+    button.title = role ? guidedHint(action, to, "your note") : HINTS[action] || "Answer the run: " + action;
     button.onclick = () => answer(stop, action, button);
     return button;
   }));
 }
 
-// The action as the stop published it, and the note: what an answer needs is the workflow's to refuse.
-async function answer(stop, action, button) {
+// What the role you talked with last answered you in its terminal since its turn — what you settled with it there —
+// offered at a stop that takes guidance, to be sent as yours with one press, copied by no one, to either role the
+// stop's guidance goes to; the one you did not talk with comes first, since the other remembers the talk in its own
+// session. Drawn again only when it or the stop changes, so a press never sends words other than those shown.
+function renderReply(stop, reply, to) {
+  const box = $("stop-reply");
+  const routes = (stop && stop.actions || []).filter((action) => guided(action, to));
+  const shown = Boolean(reply && reply.text && routes.length);
+  box.hidden = !shown;
+  const key = shown ? stop.id + "\n" + to + "\n" + reply.text : "";
+  if (box.dataset.key === key) return;
+  box.dataset.key = key;
+  if (!shown) return;
+  $("stop-reply-label").textContent = "The " + reply.role + "'s last answer to you, in its terminal";
+  $("stop-reply-text").replaceChildren(markdown(reply.text, "prose"));
+  const first = routes.find((action) => guided(action, to) !== reply.role) || routes[0];
+  $("stop-reply-actions").replaceChildren(...[first, ...routes.filter((action) => action !== first)].map((action) => {
+    const button = el("button", "Send to the " + guided(action, to), action === first ? "primary" : "");
+    button.type = "button";
+    button.title = guidedHint(action, to, "the " + reply.role + "'s answer above, as your guidance,");
+    button.onclick = () => answer(stop, action, button, reply.text);
+    return button;
+  }));
+}
+
+// The action as the stop published it, and the note — or the words given, as an agent's answer sent on: what an
+// answer needs is the workflow's to refuse.
+async function answer(stop, action, button, words) {
   const runId = selected;
-  const text = $("stop-note").value.trim();
+  const text = words === undefined ? $("stop-note").value.trim() : words.trim();
   const body = { stop: stop.id, action: action };
   // Only words you wrote: an empty note must reach the workflow empty, for it to refuse.
   if (text) body.text = text;
@@ -416,6 +464,7 @@ async function answer(stop, action, button) {
   }
   for (const id of ["stop-note-alert", "stop-alert"]) $(id).textContent = "";
   for (const each of $("stop-actions").children) each.disabled = true;
+  for (const each of $("stop-reply-actions").children) each.disabled = true;
   $("stop-result").textContent = "sending…";
   // What came of it is said only where it was asked — this run, at this stop — never on whatever the page
   // shows when the answer comes back.
@@ -433,6 +482,7 @@ async function answer(stop, action, button) {
       $("stop-alert").textContent = "not accepted: " + error.message;
     }
     for (const each of $("stop-actions").children) each.disabled = false;
+    for (const each of $("stop-reply-actions").children) each.disabled = false;
     return;
   }
   drafts.delete(stop.id);
@@ -599,7 +649,7 @@ function answerSaid(answer, phase) {
   switch (answer.action) {
     case "approve": return APPROVED[phase] || "approved";
     case "revise": return answer.role ? "sent it back to the " + answer.role : "asked for a revision";
-    case "guide": return "guided the run";
+    case "guide": return answer.role ? "guided the " + answer.role : "guided the run";
     case "continue": return "continued after the failure";
     case "merge": return "merged";
     case "discard": return "discarded the run's work";

@@ -270,6 +270,11 @@
         <h2 id="stop-title"></h2>
         <p class="hint" id="stop-hint"></p>
         <div class="evidence" id="stop-evidence"></div>
+        <div class="evidence-part reply" id="stop-reply" hidden>
+          <div class="evidence-label"><span id="stop-reply-label">The architect's last answer to you, in its terminal</span></div>
+          <div id="stop-reply-text"></div>
+          <div class="actions" id="stop-reply-actions"></div>
+        </div>
         <div class="field" id="stop-note-field">
           <label for="stop-note" id="stop-note-label">Your note</label>
           <textarea id="stop-note" name="note" rows="3" autocomplete="off"></textarea>
@@ -300,11 +305,11 @@
       <section class="agents" id="agents" aria-labelledby="agents-title">
         <h2 id="agents-title">Terminals</h2>
         <details class="terminal" id="terminal-engineer" data-role="engineer">
-          <summary><span class="role engineer">engineer</span><span class="term-state" id="state-engineer"></span></summary>
+          <summary><span class="role engineer">engineer</span><span class="term-state" id="state-engineer"></span><button type="button" class="term-size" id="size-engineer">Maximize</button></summary>
           <div class="term" id="term-engineer"></div>
         </details>
         <details class="terminal" id="terminal-architect" data-role="architect">
-          <summary><span class="role architect">architect</span><span class="term-state" id="state-architect"></span></summary>
+          <summary><span class="role architect">architect</span><span class="term-state" id="state-architect"></span><button type="button" class="term-size" id="size-architect">Maximize</button></summary>
           <div class="term" id="term-architect"></div>
         </details>
       </section>

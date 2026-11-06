@@ -91,6 +91,10 @@ FAKE = textwrap.dedent("""\
     brain = "codex" if "codex" in os.path.basename(sys.argv[0]) else "claude"
     complete = fake_cli.completer(brain, argv, prompt)
     state = os.environ["DEMO_STATE"]
+    # The prompt it was given, shown first, as a vendor's CLI shows it: a session then fills more than one
+    # screen, as a real one does, and the page's terminal has a history to scroll back through.
+    for line in prompt.splitlines():
+        fake_cli.draw(line)
 
     def say(*lines):
         for line in lines:
@@ -453,6 +457,10 @@ class Demo:
         check(self.press(merged, "hints", "none"),
               "every button shown — New run's, Settings', the stack's and this run's at its approval — says on hover "
               "what it does")
+        check(self.press(merged, "terminal-fit:engineer", "none"),
+              "the engineer's terminal, in a narrow window, fits its box; a drag of its scrollbar scrolls back and "
+              "selects nothing; Maximize fills the window larger and Restore puts it back; Ctrl+C on a selection "
+              "copies it and sends the agent nothing")
 
         step("the plan approved by pressing the Workbench's own button")
         check(self.press(merged, "Approve", "answered: approve"), "the page sent the answer, and the workflow took it")

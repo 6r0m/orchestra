@@ -44,7 +44,11 @@ Through the vendor CLI's own argv and its session store: a turn is that CLI star
 with the role's session resumed by exact id and the prompt as its last argument. No shell
 sits between, so no task text is ever parsed as shell syntax. A prompt past `nodes.PROMPT_BUDGET` has its
 longest parts — never the skill or the stage's ask — attached as files in the run's folder, each named in its
-place; a kind that reads outside the worktree only where it is told to is told that folder (`readable`).
+place; a kind that reads outside the worktree only where it is told to is told that folder (`readable`) — Claude
+by a rule allowing reads there, never as a working directory, which would keep its shell's `cd` into the folder
+and move the turn out of its worktree. Every kind draws on its terminal's normal screen, so the session stays in
+the terminal's scrollback: Codex is started with `--no-alt-screen`, since its default alternate screen keeps no
+scrollback and takes every mouse event.
 
 Through the run's settings snapshot: `nodes` appends an optional operator prompt addition for
 each role after the normal budget when extended rounds remain, and at the final budgeted
@@ -64,7 +68,8 @@ Through the vendor's own completion hook: a turn ends on Claude's `Stop` for its
 prompt id, or Codex's `agent-turn-complete` in its own thread — never on a first event.
 Claude's notification and tool-finish hooks also record their events, keeping only the session and a
 notification's kind — never what a dialog says or what a tool read or wrote. The adapter reads a waiting
-dialog from them for the Workbench (`waiting`); they never decide a turn's result.
+dialog from them for the Workbench (`waiting`), and a role's answer to words the operator typed into its
+terminal after its turn (`reply`); they never decide a turn's result.
 
 Through a host containment primitive: a transient systemd user scope on POSIX, a job object
 on Windows. A launch no scope can hold is refused before the agent runs.

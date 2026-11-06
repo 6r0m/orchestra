@@ -23,11 +23,74 @@ let active = false;
 let lastShown;
 let lastSince;
 
+// The host's terminal has one size for every viewer, its worker's, and the agent lays its screen out for that, so
+// the page never changes the columns — only how large they are drawn. A terminal's font is sized so its columns
+// and its scrollbar fit its box: wider than its box, its text would lie over the scrollbar, which no drag could
+// then reach. Maximized, the terminal fills the page's window and is drawn larger, as far as both of its sides
+// allow, up to the largest font a reader needs.
+const { cols: COLS, rows: ROWS } = CONFIG.terminal_size;
+const LARGEST = 18;
+const MAXIMIZE = "Fill the window with this terminal, drawn larger, up to " + LARGEST + " px";
+const RESTORE = "Put this terminal back in its place on the page";
+
 for (const role of ROLES) {
   const box = $("terminal-" + role);
   box.addEventListener("toggle", () => {
     if (box.open) make(role);
+    else maximize(role, false);
   });
+  // A button in a summary is its own control: pressing it neither opens nor closes the terminal.
+  $("size-" + role).title = MAXIMIZE;
+  $("size-" + role).addEventListener("click", (event) => {
+    event.preventDefault();
+    maximize(role, !box.classList.contains("maximized"));
+  });
+  new ResizeObserver(() => fit(role)).observe($("term-" + role));
+  // A press on the scrollbar is the scrollbar's. xterm takes any press in its element as the start of a selection
+  // — or, where the agent takes the mouse, as a click for the agent — so a drag of the thumb would also select
+  // text: the press is kept from xterm, and the browser still drags the thumb.
+  $("term-" + role).addEventListener("mousedown", (event) => {
+    const view = $("term-" + role).querySelector(".xterm-viewport");
+    if (view && event.clientX >= view.getBoundingClientRect().left + view.clientWidth) event.stopPropagation();
+  }, true);
+}
+
+// `role`'s terminal filling the page's window, inside the page — not the browser's full screen, where Esc, the
+// key that interrupts an agent, would leave full screen instead — or back in its place.
+function maximize(role, on) {
+  const box = $("terminal-" + role);
+  const button = $("size-" + role);
+  box.classList.toggle("maximized", on);
+  document.body.classList.toggle("terminal-maximized", ROLES.some((each) =>
+    $("terminal-" + each).classList.contains("maximized")));
+  button.textContent = on ? "Restore" : "Maximize";
+  button.title = on ? RESTORE : MAXIMIZE;
+  if (on && !box.open) box.open = true;
+  fit(role);
+}
+
+// The font that fits `role`'s 160 columns and its scrollbar across its box — and, maximized, its 48 rows down it.
+// A cell's size follows the font closely but not exactly, so the size is measured again once set.
+function fit(role) {
+  const entry = terminals[role];
+  const mount = $("term-" + role);
+  const screen = mount.querySelector(".xterm-screen");
+  const view = mount.querySelector(".xterm-viewport");
+  if (!entry || !screen || !view || !mount.clientWidth) return;
+  const style = getComputedStyle(mount);
+  const width = mount.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+    - (view.offsetWidth - view.clientWidth);
+  const tall = $("terminal-" + role).classList.contains("maximized");
+  const height = mount.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+  for (let tries = 0; tries < 4; tries++) {
+    const drawn = screen.getBoundingClientRect();
+    const font = entry.term.options.fontSize;
+    const scale = Math.min(width / drawn.width, tall ? height / drawn.height : Infinity);
+    const next = Math.min(LARGEST, Math.floor(font * scale * 10) / 10);
+    const fits = drawn.width <= width + 0.5 && (!tall || drawn.height <= height + 0.5);
+    if (fits && next - font < 0.2) return;
+    entry.term.options.fontSize = next;
+  }
 }
 
 // The terminals of run `runId` on host `target`; another run's are disposed of, the same run's kept.
@@ -38,6 +101,7 @@ export function showTerminals(runId, target) {
   lastShown = undefined;
   lastSince = undefined;
   for (const role of ROLES) {
+    maximize(role, false);
     $("terminal-" + role).open = false;
     $("state-" + role).textContent = "";
   }
@@ -93,13 +157,24 @@ function make(role) {
   if (!run || terminals[role]) return;
   const mount = $("term-" + role);
   mount.replaceChildren();
-  const term = new Terminal({ cols: 160, rows: 48, fontSize: 12, scrollback: 5000, convertEol: false,
+  const term = new Terminal({ cols: COLS, rows: ROWS, fontSize: 12, scrollback: 5000, convertEol: false,
     fontFamily: '"Cascadia Mono", Consolas, "Courier New", monospace' });
+  // Ctrl+C with text selected copies it, and the agent is sent nothing; with nothing selected it is the
+  // agent's, as in any terminal. The key is the page's then, so the browser's own copy — of xterm's hidden
+  // input, not of the selection — never runs beside it. A copy the browser refuses leaves the text selected.
+  term.attachCustomKeyEventHandler((event) => {
+    if (event.type !== "keydown" || !(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey ||
+        event.code !== "KeyC" || !term.hasSelection()) return true;
+    event.preventDefault();
+    navigator.clipboard.writeText(term.getSelection()).then(() => term.clearSelection(), () => {});
+    return false;
+  });
   term.open(mount);
   // `shown` counts the record's bytes on screen: every connection streams the record from its start, and
   // the record only grows, so a connection made again skips what is shown and adds only what is new.
   const entry = { runId: run.id, term: term, socket: null, timer: null, live: false, shown: 0, skip: 0 };
   terminals[role] = entry;
+  fit(role);
   // The agent is sent what the operator types and presses, and never this terminal's own answers.
   term.onData((data) => {
     if (REPORT.test(data)) return;

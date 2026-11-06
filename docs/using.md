@@ -101,7 +101,20 @@ it, with that worker's Start beside it. A run whose worker is down is still show
 
 When a run waits for you, its decision comes first, with what to judge it by: the brief at a research's
 approval, the architect's assessment and the plan at a plan's, the architect's verification and the
-change at the final gate, the blocker or the last finding, or the failure, whole, to copy. At the
+change at the final gate, the blocker or the last finding, or the failure, whole, to copy.
+
+A blocker, or rounds run out, comes from the architect's review of the engineer's work, and only you can say
+whom your guidance is for, so it takes it either way. *Guide the engineer* sends your note to the engineer, whose
+work goes on with it, and the architect then judges what it does with it. *Guide the architect* sends it to the
+architect, which judges the work as it stands again with it — say, when it misread the work, or the engineer
+has already changed it while you talked — and the engineer takes no turn first.
+
+You may settle such a stop in a terminal first, with either agent. What the one you talked with last answered
+you there is then shown on the stop, to be sent with one press, as your guidance, to either of them — *Send to
+the engineer* or *Send to the architect*, the one you did not talk with first: the one you talked with keeps the
+talk in its own session. Nothing moves until you press, and a press sends exactly the words shown.
+
+At the
 final gate the change is the one the engineer's closeout left — the todo cut to its record and in the
 repository's done folder — and it is exactly what Merge commits. The architect did not judge the
 closeout, which may touch only the todo and the documents the repository names (`closeout_docs` in
@@ -155,6 +168,13 @@ given up for that is F3 held with Shift, Alt or Ctrl, which a terminal spells ex
 answers and the page therefore does not send. What you read in one is
 never drawn again under you: after its worker restarts it keeps its record until its role's next turn,
 which it then adds to. A terminal holds the whole session, including whatever you typed during a turn.
+
+A terminal is drawn to fit its box, all 160 columns of it, so in a narrow window its text is small. *Maximize*,
+beside its name, fills the window with it, drawn larger, and *Restore* puts it back; Esc
+still reaches the agent. Scroll back through the session with the wheel or by dragging its scrollbar — Codex too,
+which draws inline as Claude does, and shows its session's history again each time a turn resumes it. Select text
+and press Ctrl+C to copy it, say into your guidance; with nothing selected, Ctrl+C goes to the agent, as in any
+terminal.
 
 The history is the run as a transcript, phase by phase: each completed turn a row — its role, stage,
 round, verdict, how long it ran from when a worker took it, and when — and your answers rows of their own
@@ -265,7 +285,8 @@ $O --worktrees --repo work/webapp  # every worktree, and whether its work is mer
 
 Each stop prints what it asks and the answers it takes: `yes` or `revise <feedback>` at an approval —
 the plan's, with its summary, or the research's, with its brief; your guidance at a blocker or an
-exhausted budget; `continue` after a failed stage. A build that could not meet one of its plan's
+exhausted budget — for the engineer, or `guide architect <your guidance>` for the architect; `continue` after a
+failed stage. A build that could not meet one of its plan's
 completion criteria comes to you as such a blocker, naming the criterion: only your guidance sets one
 aside, the engineer writes it into the todo as your decision, and the final gate shows it there. `--auto-proceed` skips the approvals, as the page's
 *skip approvals* does. A run whose flow has no build ends `DONE`, keeping its worktree. At

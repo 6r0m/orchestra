@@ -39,9 +39,10 @@ SHORT_TIMEOUT = timedelta(minutes=10)
 
 # What each stop takes, published with it, so a client shows the stop's own actions. A revise at
 # the final gate goes to the role the operator names, and each role is an action of its own:
-# `revise:<role>` arrives as the answer's action and role. Ending a run is no stop's answer: a Stop
-# ends it from any state. No stop offers `abort`; a run that took one ended `ABORTED`, and its handling
-# stays so those runs still replay.
+# `revise:<role>` arrives as the answer's action and role. Guidance goes to the engineer's work, or — as
+# `guide:architect`, offered beside it (`GUIDED`) — to the architect, who judges the work as it stands again.
+# Ending a run is no stop's answer: a Stop ends it from any state. No stop offers `abort`; a run that took
+# one ended `ABORTED`, and its handling stays so those runs still replay.
 ACTIONS = {
     "approval": ("approve", "revise"),
     "blocker": ("guide",),
@@ -49,6 +50,9 @@ ACTIONS = {
     "failed": ("continue",),
     "final": ("merge", "revise:engineer", "revise:architect", "discard"),
 }
+# The stops whose guidance may go to the architect instead; a run recorded before it offered the one route.
+GUIDED = ("blocker", "exhausted")
+GUIDE_THE_ARCHITECT = "guide-the-architect"
 HINTS = {
     "approval": "approve to start implementation, or revise with feedback for a new plan",
     "blocker": "guide with your decision to continue",
@@ -198,10 +202,12 @@ class FeatureRun:
                     review_next = not stands      # the plan changed: the architect judges it again
                     continue
                 # Guidance, or a revised plan or research: a new bounded episode. The operator's words
-                # survive the worker and are consumed by the architect that judges next.
+                # survive the worker and are consumed by the architect that judges next — at once, with no
+                # work turn first, when they were sent to it.
                 s.update(guidance=answer["text"], round=0, gate_reason="", episode=s["episode"] + 1)
                 if self.review_rounds:
                     s.update(convergence=None, convergence_seen=[])
+                review_next = bool(review) and answer.get("role") == "architect"
                 continue
             if review and s["verdict"] != "PASS":
                 continue
@@ -494,9 +500,12 @@ class FeatureRun:
         self.stops += 1
         feedback = text if text is not None else {"failed": s.get("error"), "final": s.get("merge_refusal")}.get(
             reason, s.get("feedback"))
+        actions = list(ACTIONS[reason])
+        if reason in GUIDED and workflow.patched(GUIDE_THE_ARCHITECT):
+            actions.append("guide:architect")
         self.stop = {"id": "%s:%d" % (s["run_id"], self.stops), "reason": reason, "phase": s.get("phase"),
                      "todo": s.get("todo_path"), "feedback": feedback or "", "hint": hint or HINTS[reason],
-                     "actions": list(ACTIONS[reason]), "since": workflow.now().isoformat()}
+                     "actions": actions, "since": workflow.now().isoformat()}
         self._line("stopped: %s" % reason)
         if reason in TRACED_STOPS:
             await self._trace("record_stop", {"state": s, "stop": self.stop})

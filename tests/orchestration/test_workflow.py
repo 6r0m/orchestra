@@ -177,6 +177,18 @@ class Routing(Scenario):
         run = self.drive([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)])
         self.assertEqual(run.stop["reason"], "blocker")
 
+    def test_guidance_to_the_architect_has_it_judge_the_work_as_it_stands_again(self):
+        """The operator's words at a blocker go to the engineer, whose work goes on and is judged again — or to the
+        architect, who judges the work as it stands again with them, the engineer taking no turn first."""
+        a1, _ = codex_review_first("BLOCKER", "premise wrong")
+        run = self.drive([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1),
+                          ("assess-e2-1", 0, codex_review_resumed("PASS", "Direction: A."))])
+        self.assertEqual((run.stop["reason"], run.stop["actions"]), ("blocker", ["guide", "guide:architect"]))
+        run.answer("guide architect the premise holds: the shim stays")
+        self.assertEqual(self.names(), ["plan-e1-1", "assess-e1-1", "assess-e2-1"], "no engineer turn first")
+        self.assertIn("the premise holds: the shim stays", self.agent.calls[-1]["prompt"])
+        self.assertEqual(run.stop["reason"], "approval", "the architect passed the plan it judged again")
+
     def test_pass_without_auto_proceed_asks_approval(self):
         a1, _ = codex_review_first("PASS")
         run = self.drive([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)])
@@ -249,7 +261,7 @@ class Routing(Scenario):
         """Ending a run is a Stop, from any state; no stop's answers include ending it."""
         a1, _ = codex_review_first("BLOCKER")
         run = self.drive([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)])
-        self.assertEqual((run.stop["reason"], run.stop["actions"]), ("blocker", ["guide"]))
+        self.assertEqual((run.stop["reason"], run.stop["actions"]), ("blocker", ["guide", "guide:architect"]))
         with self.assertRaises(runs.NotAccepted):
             temporal_env.run(runs.answer(client(), run.run_id, {"stop": run.stop["id"], "action": "abort"},
                                          check=False))
@@ -292,6 +304,9 @@ class Sessions(Scenario):
                 self.assertEqual(argv[argv.index("--sandbox") + 1], "read-only")
                 self.assertEqual(argv[argv.index("--ask-for-approval") + 1], "never")
                 self.assertIn('web_search="live"', argv)
+                # Drawn inline, never on the alternate screen, which keeps no scrollback and takes the mouse:
+                # its terminal on the page scrolls through the session.
+                self.assertIn("--no-alt-screen", argv)
             else:
                 # Never waits on a prompt, and may edit only inside its worktree.
                 self.assertEqual(argv[argv.index("--permission-mode") + 1], "dontAsk")

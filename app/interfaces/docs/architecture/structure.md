@@ -42,6 +42,13 @@ run's worktree and sends again whenever it moves: a summary that writes nothing 
 through the change's own reader, as the change is now, and read again only when its row says it changed.
 Its Operator action list also projects a waiting vendor dialog from the active turn's local
 hook events — Claude's; Codex reports none — and the workflow still owns actual stops and their answers.
+At a stop that takes guidance, the run's view also carries what the role the operator talked with last
+answered them in its terminal since its turn (`role_reply`), read from each role's newest turn's hook events by
+its kind (`adapters.reply`): a reply, in the role's own session, to words the operator typed — never its turn's
+own answer — the newer record being the role talked with last. The page offers it to be sent on as the
+operator's guidance, through either of the stop's own guidance answers and only by their press. Whom plain
+guidance goes to is the run's view's (`client.recipient`, from the workflow's stages), never the page's;
+`guide:architect` names its role, as `revise:architect` does.
 
 There is no facade here: the CLI reads a repository descriptor and the page reads a
 terminal record directly. A completed turn's prompt, the parts it was built from and its final

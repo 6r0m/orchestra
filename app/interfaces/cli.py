@@ -80,7 +80,7 @@ def answer_line(stop):
             return '"<your guidance>"'
         spelled = action.replace(":", " ")
         if action.partition(":")[0] in TAKES_WORDS:
-            spelled += " <feedback>"
+            spelled += " <your guidance>" if action.startswith("guide:") else " <feedback>"
         return '"%s"%s' % (spelled, " --confirm" if action in CONFIRMED else "")
     return " | ".join(typed(action) for action in stop["actions"])
 
