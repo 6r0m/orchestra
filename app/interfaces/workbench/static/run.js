@@ -33,7 +33,8 @@ const DANGER = new Set(["discard"]);
 const WORDED = { revise: "Revise", "revise:engineer": "Revise", "revise:architect": "Revise", guide: "Guide",
   "guide:architect": "Guide", approve: "Approve" };
 // Approve with your note: the run goes on, and the note is guidance to the stage approved into — its work and the
-// review that judges it. An approval that ends the run (`stop.ends`) has no stage to read one.
+// review that judges it — where the stop says it takes one (`stop.noted`): never at the run's end, nor from a worker
+// that predates notes, which would take one and drop it unsaid.
 const APPROVE_NOTED = "Accept this, and the run goes on to its next step — with your note, if you wrote one, as "
   + "guidance to that step's work and to the review that judges it";
 
@@ -409,7 +410,7 @@ function renderStop(stop, timeline, to) {
   shownAbove = new Set(evidence.map((part) => part.text));
   $("stop-evidence").replaceChildren(...evidence.map(evidencePart));
   const actions = stop.actions || [];
-  const noted = actions.includes("approve") && !stop.ends;
+  const noted = actions.includes("approve") && stop.noted === true;
   const worded = [...new Set(actions.filter((action) => WORDED[action] && (action !== "approve" || noted))
     .map((action) => WORDED[action]))];
   $("stop-note-field").hidden = actions.every((action) => WORDLESS.has(action) || (action === "approve" && !noted));
@@ -463,10 +464,17 @@ function renderReply(stop, reply, to) {
 }
 
 // The action as the stop published it, and the note — or the words given, as an agent's answer sent on: what an
-// answer needs is the workflow's to refuse.
+// answer needs is the workflow's to refuse. One thing the page refuses itself, before sending: a note with an
+// approval whose stop does not say it takes one, which a worker from before notes would take and drop unsaid.
 async function answer(stop, action, button, words) {
   const runId = selected;
   const text = words === undefined ? $("stop-note").value.trim() : words.trim();
+  if (action === "approve" && text && stop.noted !== true) {
+    $("stop-note-alert").textContent = "not sent: this approval takes no note — it ends the run, or it was offered "
+      + "before approvals took one. Approve with the note cleared, or Revise with it.";
+    $("stop-note").focus();
+    return;
+  }
   const body = { stop: stop.id, action: action };
   // Only words you wrote: an empty note must reach the workflow empty, for it to refuse.
   if (text) body.text = text;

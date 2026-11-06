@@ -116,7 +116,8 @@ At an approval your note goes with either answer. With *Revise*, it is what shou
 the same work. With *Approve* — the button then reads *Approve with note* — the run goes on, and the note goes
 with it to the next step: the engineer building an approved plan reads it as your guidance, and so does the
 architect verifying that build; the review after that no longer carries it. An approval that ends the run has
-no next step, so it takes no note.
+no next step, so it takes no note; nor does one in a run started before approvals took notes. There Approve
+stays *Approve*, and a note written beside it is not sent: the page says so, and you clear it or Revise with it.
 
 A blocker, or rounds run out, comes from the architect's review of the engineer's work, and only you can say
 whom your guidance is for, so it takes it either way. *Guide the engineer* sends your note to the engineer, whose

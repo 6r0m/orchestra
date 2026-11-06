@@ -47,20 +47,23 @@ class ParsesWhatAStopPublishes(unittest.TestCase):
         self.assertIsNone(cli.parse_answer(stop("approve", "revise"), "maybe later"))
 
     def test_yes_approves_and_a_confirmation_travels_with_the_answer(self):
-        self.assertEqual(cli.parse_answer(stop("approve", "revise"), "Yes"), {"action": "approve", "text": ""},
-                         "`yes` itself is no note")
-        self.assertEqual(cli.parse_answer(stop("approve", "revise"), "yes keep the API as it is"),
+        noted = dict(stop("approve", "revise"), noted=True)
+        self.assertEqual(cli.parse_answer(noted, "Yes"), {"action": "approve", "text": ""}, "`yes` itself is no note")
+        self.assertEqual(cli.parse_answer(noted, "yes keep the API as it is"),
                          {"action": "approve", "text": "keep the API as it is"}, "the words after it are")
+        self.assertIsNone(cli.parse_answer(stop("approve", "revise"), "yes keep the API as it is"),
+                          "a stop that does not say it takes a note is never sent one")
+        self.assertEqual(cli.parse_answer(stop("approve", "revise"), "yes"), {"action": "approve", "text": ""})
         self.assertEqual(cli.parse_answer(stop("discard"), "discard", confirm=True),
                          {"action": "discard", "text": "discard", "confirm": True})
         self.assertEqual(cli.parse_answer(stop("discard"), "discard"), {"action": "discard", "text": "discard"},
                          "whether a discard is confirmed is the workflow's to refuse")
 
     def test_the_answers_it_lists_are_the_stops_own(self):
-        self.assertEqual(cli.answer_line(stop("approve", "revise")),
+        self.assertEqual(cli.answer_line(dict(stop("approve", "revise"), noted=True)),
                          '"yes [<note for the next stage>]" | "revise <feedback>"')
-        self.assertEqual(cli.answer_line(dict(stop("approve", "revise"), ends=True)), '"yes" | "revise <feedback>"',
-                         "approving the run's end takes no note")
+        self.assertEqual(cli.answer_line(stop("approve", "revise")), '"yes" | "revise <feedback>"',
+                         "a stop that does not say it takes a note offers none")
         listed = cli.answer_line(stop("merge", "revise:engineer", "pause"))
         self.assertEqual(listed, '"merge" | "revise engineer <feedback>" | "pause"')
 

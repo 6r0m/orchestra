@@ -1183,7 +1183,8 @@ class ApprovalSummary(Scenario):
         answers = {e["metadata"]["gate_reason"]: e for e in client.events if e["name"] == "human-answer"}
         self.assertEqual(answers["blocker"]["output"], {"answer": "use approach B"})
         self.assertEqual(answers["blocker"]["trace_context"]["parent_span_id"], "b" * 16)
-        self.assertEqual(answers["approval"]["output"], {"answer": "yes"})
+        # `yes` carries no words of its own: the answer recorded is its action.
+        self.assertEqual(answers["approval"]["output"], {"answer": "approve"})
         self.assertEqual(answers["approval"]["trace_context"]["parent_span_id"], "a" * 16)
         self.assertEqual(answers["approval"]["trace_context"]["trace_id"], "%032x" % 1)
 

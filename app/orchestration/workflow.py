@@ -54,8 +54,11 @@ ACTIONS = {
 GUIDED = ("blocker", "exhausted")
 GUIDE_THE_ARCHITECT = "guide-the-architect"
 # A note given with an approval goes on with it, as guidance to the stage approved into; a run recorded before
-# kept no note an approval carried — words the command line sent with every answer, `yes` among them.
+# kept no note an approval carried — words the command line sent with every answer, `yes` among them. The stop
+# says whether it takes one (`noted`), and one sent where it does not is refused, saying so.
 APPROVE_WITH_A_NOTE = "approve-with-a-note"
+NO_NOTE = ("this approval takes no note — it ends the run, or its run was recorded before approvals took one: "
+           "approve without it, or revise with it")
 HINTS = {
     "approval": "approve to start implementation, or revise with feedback for a new plan",
     "blocker": "guide with your decision to continue",
@@ -255,14 +258,16 @@ class FeatureRun:
         """What an approval shows besides the run's own feedback — after research, its brief — and where
         approving goes: on to `onward`, or to the run's end."""
         going = "end the run" if last else "go on to the %s" % onward
-        # Approving the run's end leaves no stage to read a note.
-        ends = {"ends": True} if last else {}
+        # Whether approving takes a note, the stop says: never at the run's end, which leaves no stage to read
+        # one, nor in a run recorded before notes — and a stop that does not say so is sent none, so no client
+        # hands a note to a worker that would drop it unsaid.
+        noted = {} if last or not workflow.patched(APPROVE_WITH_A_NOTE) else {"noted": True}
         if work in stages.ANSWERS:
-            return dict(ends, text=self.state.get("brief") or "",
+            return dict(noted, text=self.state.get("brief") or "",
                         hint="approve to %s, or revise with feedback for new research" % going)
         if work == "plan" and onward == "build":
-            return ends                   # HINTS["approval"], as a plan's approval has always read
-        return dict(ends, hint="approve to %s, or revise with feedback for a new %s" % (going, work))
+            return noted                  # HINTS["approval"], as a plan's approval has always read
+        return dict(noted, hint="approve to %s, or revise with feedback for a new %s" % (going, work))
 
     async def _stage(self, stage, gate=None, onward=None):
         """Run one stage to a result, stopping for the operator on each failure. False when aborted.
@@ -505,7 +510,7 @@ class FeatureRun:
                        % ", ".join(reopened["kept"]))
         return True
 
-    async def _stop(self, reason, text=None, hint=None, ends=False):
+    async def _stop(self, reason, text=None, hint=None, noted=False):
         s = self.state
         self._unless_stopping()
         self.stops += 1
@@ -517,8 +522,8 @@ class FeatureRun:
         self.stop = {"id": "%s:%d" % (s["run_id"], self.stops), "reason": reason, "phase": s.get("phase"),
                      "todo": s.get("todo_path"), "feedback": feedback or "", "hint": hint or HINTS[reason],
                      "actions": actions, "since": workflow.now().isoformat()}
-        if ends:
-            self.stop["ends"] = True
+        if noted:
+            self.stop["noted"] = True
         self._line("stopped: %s" % reason)
         if reason in TRACED_STOPS:
             await self._trace("record_stop", {"state": s, "stop": self.stop})
@@ -631,9 +636,8 @@ class FeatureRun:
                              % (named, ", ".join(stop["actions"])))
         if action in ("guide", "revise") and not (answer.get("text") or "").strip():
             raise ValueError("%s needs the feedback to act on" % action)
-        if action == "approve" and stop.get("ends") and (answer.get("text") or "").strip():
-            raise ValueError("approving ends the run, so no stage after it would read your note: approve without "
-                             "one, or revise with it")
+        if action == "approve" and not stop.get("noted") and (answer.get("text") or "").strip():
+            raise ValueError(NO_NOTE)
         if action == "discard" and answer.get("confirm") is not True:
             raise ValueError("discard deletes the worktree and its branch, so it must be confirmed")
 

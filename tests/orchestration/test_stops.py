@@ -111,6 +111,32 @@ class NamedAnswers(Scenario):
         self.assertEqual(len(answers), 2, "the unrecognised answer was written, and a fresh id applied it again")
         self.assertEqual([e.event_type for e in history(handle)].count(ACCEPTED), 2)
 
+    def test_a_note_never_reaches_a_worker_that_would_drop_it(self):
+        """A run on a worker from before notes on approvals takes an approve with words and drops them, saying
+        nothing: a note is sent only to a stop that says it takes one, from the page and the command line alike."""
+        run_id = uuid.uuid4().hex[:12]
+        handle = E.run(E.client().start_workflow(control_workflows.NoteDroppingRun.run, {}, id=run_id,
+                                                 task_queue=E.WORKFLOW_QUEUE))
+        for _ in range(50):
+            stop = E.run(E.cli.runs.status(E.client(), run_id))["stop"]
+            if stop:
+                break
+            time.sleep(0.1)
+        noted = {"stop": stop["id"], "action": "approve", "text": "keep the API as it is"}
+        with self.assertRaises(E.cli.runs.NotAccepted) as refused:
+            E.run(E.cli.runs.answer(E.client(), run_id, noted, check=False))
+        self.assertIn("takes no note", str(refused.exception))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            code = E.run(E.cli._answer(E.client(), run_id, "yes keep the API as it is", False, None, False))
+        self.assertEqual(code, 2, out.getvalue())
+        self.assertIn('answer "yes" | "revise <feedback>"', out.getvalue(), "the answers it does take")
+        # Control: the same stop takes an approve with no note, and it is written.
+        E.run(E.cli.runs.answer(E.client(), run_id, {"stop": stop["id"], "action": "approve"}, check=False))
+        E.run(handle.signal("finish"))
+        self.assertEqual([(a["action"], a.get("text")) for a in E.run(handle.result())], [("approve", None)],
+                         "no note was ever sent to it")
+
 
 class AnswersAsPublished(unittest.TestCase):
     """The validator checks an answer against the actions its stop published, the role included."""

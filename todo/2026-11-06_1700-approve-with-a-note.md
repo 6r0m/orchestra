@@ -1,11 +1,12 @@
 # Approve with a note
 
-**Status:** BUILT 2026-11-06 — red, then green on WSL; a history recorded with its marker. It awaits the external
-reviewer and the operator's word to close it.
+**Status:** BUILT 2026-11-06 — red, then green; the reviewer's PATCH for page and worker of different versions
+taken. It awaits the full suite, the workers' restart, and the operator's word to close it.
 **Scope:** an approval's answer ([workflow.py](../app/orchestration/workflow.py) `_loop`, `_approval`, `_stop`,
-the answer's validator), the command line's `yes` ([cli.py](../app/interfaces/cli.py) `parse_answer`,
-`answer_line`), the stop's note and Approve on the page ([run.js](../app/interfaces/workbench/static/run.js)), and
-the recorded history ([record_histories.py](../tests/record_histories.py)).
+the answer's validator), the answer's one path for both surfaces ([client.py](../app/application/client.py)
+`answer`), the command line's `yes` ([cli.py](../app/interfaces/cli.py) `parse_answer`, `answer_line`), the
+stop's note and Approve on the page ([run.js](../app/interfaces/workbench/static/run.js)), and the recorded
+history ([record_histories.py](../tests/record_histories.py)).
 **Stable documentation owner:** D6 in the [architecture](../docs/architecture/structure.md) and its
 [stops diagram](../docs/architecture/diagrams/stops.md); [using.md](../docs/using.md), the decision's paragraph
 and the command line's answers.
@@ -13,7 +14,7 @@ and the command line's answers.
 ## Goal
 
 At an approval the operator can approve and add a note: the run goes on to the next step, and the note reaches the
-agents who do it, with no round of the approved work first.
+agents who do it, with no round of the approved work first — and a note is never lost unsaid.
 
 ## Authority register
 
@@ -31,35 +32,38 @@ agents who do it, with no round of the approved work first.
   an approved plan reads it, and the architect verifying that build judges with it. No new prompt part, no
   architect turn to relay it: both read the operator's words themselves. It says what it is: *The plan was
   approved, with this note for the work after it.*
-- **Behind `workflow.patched("approve-with-a-note")`** (D25): the page sent a note typed before Approve already,
-  and the command line sent `yes` itself as words, both dropped; a run recorded so replays as it ran.
+- **The stop says whether it takes one (`noted`), and nothing else does** (the reviewer's PATCH): a worker from
+  before notes takes an approve with words and drops them, saying nothing, while the page — served from disk —
+  already offers the note. So `noted` is set only where `workflow.patched("approve-with-a-note")` holds and the
+  approval does not end the run; the validator refuses a note elsewhere, the answer's one path refuses it before
+  sending — whatever worker holds the run — and the page and the command line offer the note only there. A run
+  recorded before replays as it ran (D25); which stop takes a note is read from the stop, never from the run's age.
 - **`yes` itself is no note:** the command line sends only the words after it.
-- **An approval that ends the run takes no note:** no stage would read it, so the workflow refuses one there,
-  saying so (`stop.ends`), and the page and the command line offer none.
 
 ## What changed
 
-- The workflow: an approve's words, once on to the next stage, become its guidance; a stop that ends the run says
-  `ends`, and its validator refuses a note there; the trace records the answer as `approve: <note>`.
-- The command line: `yes <note>` approves with it; `yes` alone carries no words; the answers listed say
-  `yes [<note for the next stage>]`.
-- The page: the note's label names both answers it goes with, Approve reads *Approve with note* while one is
-  written, and its hover says where the note goes.
+- The workflow: an approval's stop says `noted`, the patch's marker recorded as it is drawn; an approve's words,
+  once on to the next stage, become its guidance; a note at a stop that does not say `noted` is refused, saying
+  why; the trace records the answer as `approve: <note>`.
+- The answer's path (`client.answer`): a note with an approve to a stop that does not say `noted` is refused before
+  anything is sent.
+- The command line: `yes <note>` approves with it where the stop takes one, is refused elsewhere, listing the
+  answers the stop takes; `yes` alone carries no words.
+- The page: where the stop takes a note, the note's label names both answers and Approve reads *Approve with note*
+  while one is written; elsewhere Approve stays *Approve*, and a note written beside it is not sent — the page says
+  why at the note.
 
 ## Verification
 
-- **Red** (the new tests against the staged code, `tmp/agent/approve-note/red.sh`, throwaway):
-  `test_workflow.Routing.test_a_note_given_with_an_approval_is_guidance_to_the_stage_approved_into` — the old
-  command line could not send `yes <note>`; `…test_an_approval_that_ends_the_run_takes_no_note` — no `ends`;
-  `test_cli` — `yes` sent as words, no note listed. `…test_yes_alone_approves_with_no_note` passed on both, as it
-  should.
-- **Green:** WSL — 63 classes, 338 tests, OK, the workflow's, the command line's, the Workbench's and the replay
-  of every recorded history among them.
-- **The history:** `approval_with_a_note_stop` recorded — 106 events, the `approve-with-a-note` marker among them,
-  the build's and the verify's inputs carrying the note — and it replays.
-- **Windows:** `tests.orchestration.test_workflow`, `tests.orchestration.test_replay` among 118 tests, OK.
-- **`make demo`:** DEMO PASSED, 119 checks, none failed — its merged run's plan approved from the page with a note
-  typed beside it, *Approve with note* pressed by that name, and the note in the build's and the verification's
-  prompts. A run before it stopped once short of its build, waiting for an approved run to reach it (300 s): not
-  seen again, its cause unread — the demo now prints the run's own lines when such a wait runs out.
-- **Not yet:** the workers do not run it, so the operator's run still drops a note given with Approve.
+- **Red, first round** (the new tests against the staged code, `tmp/agent/approve-note/red.sh`, throwaway): the old
+  command line could not send `yes <note>`; `yes` was sent as words.
+- **Red, the reviewer's PATCH** (the changed tests against the first round's code): against
+  `control_workflows.NoteDroppingRun` — an approval stop as a worker from before notes publishes it, recording
+  every answer — the note was sent (`NotAccepted not raised`); no stop said `noted`; `yes <note>` was parsed at a
+  stop that does not say it takes one.
+- **Green:** `tests.orchestration.test_stops.NamedAnswers.test_a_note_never_reaches_a_worker_that_would_drop_it` —
+  refused through the shared client and the command line, nothing sent, the approve alone taken;
+  `tests.orchestration.test_workflow.Routing` — the note to the build and its verification, `noted` on the stop,
+  none at the run's end, refused there by the workflow itself; `tests.interfaces.test_cli`.
+- **The history:** `approval_with_a_note_stop` recorded again — 106 events, the `approve-with-a-note` marker as the
+  approval is drawn, before its answer — and every recorded history replays.

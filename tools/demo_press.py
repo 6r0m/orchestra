@@ -1,6 +1,6 @@
 """Press one of the Workbench's own buttons in a headless browser, as the operator would.
 
-    python tools/demo_press.py <workbench url> <run id | stack | start | page> <button label | task | refused:repo:task | answered:status | markdown | markdown-safety | change:words | change-rows | change-idle | terminal-fit:role | handoff | hints | terminal:role | turn:stage | turn-then:stage:label | file:path | round:stage:path | history | hold:role:label | type-after:role:label:line | layout:WIDTHxHEIGHT | absent:label,...> <what the page should say> [note]
+    python tools/demo_press.py <workbench url> <run id | stack | start | page> <button label | task | refused:repo:task | answered:status | markdown | markdown-safety | change:words | change-rows | change-idle | terminal-fit:role | handoff | approval-notes | hints | terminal:role | turn:stage | turn-then:stage:label | file:path | round:stage:path | history | hold:role:label | type-after:role:label:line | layout:WIDTHxHEIGHT | absent:label,...> <what the page should say> [note]
 
 The Windows side of `make demo` (WSL cannot reach Windows' loopback, and Windows reaches the
 Workbench's): headless Edge, driven over the DevTools protocol, opens the page, opens the run by its
@@ -37,7 +37,11 @@ back, and Ctrl+C on a selection copies it and sends nothing — with nothing sel
 with what an agent last answered the operator — and the page's answers caught, none reaching the Workbench: it
 exits 0 when the card names the agent that answered and offers the other first, is drawn anew when the other
 answers the same words, and each of its four presses — the answer sent to either role, a note guiding either —
-sends exactly its action with exactly its words. Given `hints`, it presses nothing but the stack's chips: it visits New run, Settings and — for a run other than `page`
+sends exactly its action with exactly its words. Given `approval-notes`, the same stands in an approval, first one
+whose stop says it takes a note, then one that does not, as a worker from before notes publishes it: it exits 0
+when Approve says the note goes with it and sends it at the first, and at the second keeps Approve, sends nothing
+while a note is written — saying why at the note — and sends Approve alone once the note is cleared. Given
+`hints`, it presses nothing but the stack's chips: it visits New run, Settings and — for a run other than `page`
 — that run's page, and exits 0 when every button shown outside a dialog says on hover what it does.
 Given `terminal:<role>`, it presses nothing: it opens that role's terminal, if it is
 closed, and reads its screen as the page shows it, live from its host. Given `turn:<stage>`, it presses
@@ -775,6 +779,86 @@ def handoff(page, run_id):
     return 0 if not failures else 1
 
 
+# An approval stood in for, and the answers to it caught: the first stop says it takes a note, the next — as a worker
+# from before notes publishes it — does not.
+APPROVAL_STAND_IN = """(() => {
+  const real = window.fetch;
+  const hand = window.__approval = { stop: 1, answers: [] };
+  const reply = (body) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+  window.fetch = async (path, options) => {
+    const at = new URL(String(path), location.href).pathname;
+    if (/^\\/api\\/runs\\/[^/]+\\/answer$/.test(at)) {
+      const body = JSON.parse(options.body);
+      hand.answers.push(body);
+      hand.stop += 1;
+      return reply({ stop: body.stop, action: body.action });
+    }
+    const response = await real(path, options);
+    if (!/^\\/api\\/runs\\/[^/]+$/.test(at)) return response;
+    const status = await response.json();
+    const id = "stand-in:" + hand.stop;
+    status.unreadable = null;
+    status.stop = Object.assign({ id: id, reason: "approval", phase: "plan", feedback: "PASS: the plan holds.",
+      hint: "approve to start implementation, or revise with feedback for a new plan", actions: ["approve", "revise"],
+      since: new Date().toISOString() }, hand.stop === 1 ? { noted: true } : {});
+    status.view = Object.assign(status.view, { state: "waiting", stop: { id: id, reason: "approval", to: "engineer" },
+      reply: null });
+    return reply(status);
+  };
+})();"""
+APPROVAL_CARD = """(() => {
+  const approve = [...document.querySelectorAll('#stop-actions button')].find((b) => b.textContent.startsWith('Approve'));
+  return { stop: window.__approval.stop, shown: document.getElementById('stop-title').textContent.length > 0,
+    label: document.getElementById('stop-note-label').textContent, approve: approve ? approve.textContent : null,
+    alert: document.getElementById('stop-note-alert').textContent, answers: window.__approval.answers }; })()"""
+NOTE_TYPED = ("(n => { n.value = %s; n.dispatchEvent(new Event('input')); return true; })"
+              "(document.getElementById('stop-note'))")
+
+
+def approval_notes(page, run_id):
+    """A note at an approval, its run's status and answers stood in for: 0 when a stop that says it takes a note has
+    Approve say so and send it, and one that does not — as a worker from before notes publishes it — keeps Approve,
+    sends nothing while a note is written, saying why, and sends Approve alone once it is cleared. Prints what it
+    saw."""
+    card = lambda: page.value(APPROVAL_CARD)   # noqa: E731
+    page.value(OPEN % json.dumps(run_id))
+    wait(lambda: page.value(OPENED), 60, "the run")
+    wait(lambda: card()["approve"], 30, "the approval's Approve")
+    failures = []
+    note = "Keep greeting.txt to one line."
+    page.value(NOTE_TYPED % json.dumps(note))
+    noted = wait(lambda: (lambda seen: seen if seen["approve"] == "Approve with note" else None)(card()), 10,
+                 "Approve to say the note goes with it")
+    page.value(button("#stop-actions", "Approve with note") + ".click(); true")
+    first = wait(lambda: (lambda answers: answers[0] if answers else None)(card()["answers"]), 30,
+                 "what Approve with note sent")
+    if first != {"stop": "stand-in:1", "action": "approve", "text": note}:
+        failures.append("Approve with note sent %s" % first)
+    legacy = wait(lambda: (lambda seen: seen if seen["approve"] and "Revise" in seen["label"]
+                           and "Approve" not in seen["label"] else None)(card()), 30,
+                  "the next stop, which says nothing of a note, drawn")
+    page.value(NOTE_TYPED % json.dumps(note))
+    time.sleep(0.5)
+    if card()["approve"] != "Approve":
+        failures.append("at a stop that takes no note, Approve read %r" % card()["approve"])
+    page.value(button("#stop-actions", "Approve") + ".click(); true")
+    said = wait(lambda: card()["alert"], 10, "the page to say why the note is not sent")
+    time.sleep(1)
+    if len(card()["answers"]) != 1:
+        failures.append("a note at a stop that takes none was sent: %s" % card()["answers"][1:])
+    page.value(NOTE_TYPED % json.dumps(""))
+    page.value(button("#stop-actions", "Approve") + ".click(); true")
+    second = wait(lambda: (lambda answers: answers[1] if len(answers) > 1 else None)(card()["answers"]), 30,
+                  "what Approve sent once the note was cleared")
+    if second != {"stop": "stand-in:2", "action": "approve"}:
+        failures.append("Approve, the note cleared, sent %s" % second)
+    print("an approval's note, its run's status stood in for: where the stop takes one, the label %r and %r sent %s; "
+          "where it does not, the label %r, the note refused — %r — and Approve alone sent %s%s"
+          % (noted["label"], noted["approve"], first, legacy["label"], said, second,
+             "" if not failures else "\nFAILED: " + "\nFAILED: ".join(failures)))
+    return 0 if not failures else 1
+
+
 # Every button shown outside a dialog — a dialog's own say what it asks — that says nothing on hover; and how many
 # there are in all.
 UNHINTED = ("(() => { const shown = [...document.querySelectorAll('button, a.button')].filter((b) => b.offsetParent"
@@ -833,6 +917,9 @@ def main(url, run_id, label, said, note=None):
             if label == "handoff":
                 page.call("Page.enable")
                 page.call("Page.addScriptToEvaluateOnNewDocument", source=HANDOFF_STAND_IN)
+            if label == "approval-notes":
+                page.call("Page.enable")
+                page.call("Page.addScriptToEvaluateOnNewDocument", source=APPROVAL_STAND_IN)
             if label.startswith("change:"):
                 page.call("Page.enable")
                 page.call("Page.addScriptToEvaluateOnNewDocument", source=CLIPBOARD_STAND_IN)
@@ -864,6 +951,8 @@ def main(url, run_id, label, said, note=None):
                 return terminal_fit(page, run_id, label.split(":", 1)[1])
             if label == "handoff":
                 return handoff(page, run_id)
+            if label == "approval-notes":
+                return approval_notes(page, run_id)
             if label.startswith("terminal:"):
                 role = label.split(":", 1)[1]
                 page.value(OPEN % json.dumps(run_id))

@@ -50,7 +50,8 @@ CONFIRMED = ("discard",)
 def parse_answer(stop, text, confirm=False):
     """The operator's typed answer as one of the stop's published actions; None when it names none.
 
-    `yes` approves, and words after it are a note the approval carries to the next stage; an action
+    `yes` approves, and words after it are a note the approval carries to the next stage, where the
+    stop says it takes one (`noted`); an action
     that takes your words is followed by them, a revise's role first when the stop publishes one per
     role; any other action is typed alone. At a stop that takes guidance, anything else typed is that
     guidance.
@@ -69,8 +70,8 @@ def parse_answer(stop, text, confirm=False):
     elif name in offered and name in TAKES_WORDS:
         answer = {"action": name, "text": rest.strip()} if rest.strip() else None
     elif name in offered and name in MAY_TAKE_WORDS:
-        # Only the words after it: `yes` itself is no note.
-        answer = {"action": name, "text": rest.strip()}
+        # Only the words after it — `yes` itself is no note — and only to a stop that says it takes one.
+        answer = {"action": name, "text": rest.strip()} if stop.get("noted") or not rest.strip() else None
     elif name in offered and not rest.strip():
         answer = {"action": name, "text": words}
     elif "guide" in offered and words:
@@ -84,7 +85,7 @@ def answer_line(stop):
     """The stop's answers as they are typed here."""
     def typed(action):
         if action == "approve":
-            return '"yes"' if stop.get("ends") else '"yes [<note for the next stage>]"'
+            return '"yes [<note for the next stage>]"' if stop.get("noted") else '"yes"'
         if action == "guide":
             return '"<your guidance>"'
         spelled = action.replace(":", " ")

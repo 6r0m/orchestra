@@ -478,6 +478,10 @@ class Demo:
         check(self.press(merged, "handoff", "none"),
               "at a blocker, stood in for, the card names the agent that answered and offers the other first, is "
               "drawn anew when the other answers the same words, and each press sends exactly its action and words")
+        check(self.press(merged, "approval-notes", "none"),
+              "at an approval, stood in for, Approve says a note goes with it and sends it where the stop takes one; "
+              "where it does not — a worker from before notes — the note is never sent, the page says why, and "
+              "Approve alone goes once it is cleared")
 
         step("the plan approved by pressing the Workbench's own button, with a note for the build")
         note = "Keep greeting.txt to one line."

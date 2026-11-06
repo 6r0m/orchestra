@@ -576,8 +576,10 @@ still lands on a checkout.
   as an Update carrying one of them, and a validator rejects anything else before
   it reaches history, so no unrecognised answer is ever read as a discard; guide
   and revise carry the operator's words, an approve may — a note that goes on as guidance to the
-  work approved into and the review that judges it, refused where approving ends the run — and a
-  discard must be confirmed. The
+  work approved into and the review that judges it, only where its stop says it takes one
+  (`noted`): never at the run's end, nor in a run recorded before notes. Elsewhere a note is
+  refused, by the validator and before it by the answer's path, so a worker from before notes,
+  which would take one and drop it unsaid, is never sent one — and a discard must be confirmed. The
   Update's id is `answer:<stop-id>`, so an answer sent twice is applied once. No
   activity ever waits for a human. *Skip approvals* (`auto_proceed`) skips every
   approval a flow schedules and nothing else: a blocker, an exhausted budget, a

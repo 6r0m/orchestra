@@ -202,7 +202,7 @@ class Routing(Scenario):
                           ("build-e2-1", 0, "built\n"), ("verify-e2-1", 0, codex_review_resumed("PATCH", "fix B")),
                           ("build-e2-2", 0, "fixed\n"), ("verify-e2-2", 0, codex_review_resumed("PASS"))])
         self.assertEqual(run.stop["reason"], "approval")
-        self.assertNotIn("ends", run.stop, "approving goes on to the build")
+        self.assertIs(run.stop.get("noted"), True, "approving goes on to the build, and the stop says it takes a note")
         run.answer("yes keep the public API unchanged")
         self.assertEqual(self.names(), ["plan-e1-1", "assess-e1-1", "build-e2-1", "verify-e2-1", "build-e2-2",
                                         "verify-e2-2"], "on to the build, no plan round first")
@@ -225,11 +225,16 @@ class Routing(Scenario):
         a1, _ = codex_review_first("PASS")
         run = self.drive([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)],
                          flow=["engineer:plan", "architect:assess", "you:approve"])
-        self.assertTrue(run.stop["ends"])
+        self.assertNotIn("noted", run.stop, "approving ends the run: no stage would read a note")
         waiting = run.stop["id"]
         code, said = run.answer("yes and then build it")
         self.assertNotEqual(code, 0, said)
-        self.assertIn("ends the run", said)
+        self.assertIn('answer "yes" | "revise <feedback>"', said)
+        # Sent past the command line, as any client can: the workflow refuses it too.
+        with self.assertRaises(runs.NotAccepted) as refused:
+            temporal_env.run(runs.answer(client(), run.run_id, {"stop": waiting, "action": "approve",
+                                                                 "text": "and then build it"}, check=False))
+        self.assertIn("takes no note", str(refused.exception))
         self.assertEqual(run.stop["id"], waiting, "the run waits on")
         self.assertEqual(run.answer("yes")[0], 0)
         self.assertEqual(run.state["status"], "DONE")

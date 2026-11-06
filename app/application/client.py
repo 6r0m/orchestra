@@ -280,6 +280,10 @@ async def answer(client, run_id, answer, check=True, only=None):
         raise NotWaiting("run %s is not waiting for %s" % (run_id, "a %s answer" % only if only else "an answer"))
     if answer.get("stop") not in (None, stop["id"]):
         raise NotWaiting("run %s no longer waits at stop %s" % (run_id, answer["stop"]))
+    # A note goes only to a stop that says it takes one: a worker from before notes on approvals would take it
+    # and drop it, saying nothing, so it is refused here, whatever the worker.
+    if answer.get("action") == "approve" and (answer.get("text") or "").strip() and not stop.get("noted"):
+        raise NotAccepted(WF.NO_NOTE)
     if check:
         await preflight(client, queues(current["workflow_queue"], current["queue"]))
     answer = dict(answer, stop=stop["id"])
