@@ -38,7 +38,7 @@ What a kind's module holds, each named below by what it answers:
   reports one; `readable(argv, folders)`: the command with folders outside the worktree readable to it
   unasked — a turn's prompt parts attached as files (`nodes.attach`) — for a kind that must name them; a kind
   without it reads them as it reads anything; `reply(events, prompt, session)`: its last answer in `session`
-  to words typed into its terminal after the turn's prompt, or None.
+  to words typed into its terminal after the turn's prompt, as (text, when its hook recorded it), or None.
 
 Importing a kind's module only defines it: anything that touches the host happens in its answers,
 so the kinds can be listed on a host that has none of their CLIs.
@@ -203,7 +203,8 @@ def waiting(events):
 
 def reply(events, prompt, session):
     """What a role last answered, in `session`, to words the operator typed into its terminal after its turn's
-    prompt — by the kind whose events these are, each reading only its own; None when there is none."""
+    prompt, and when its hook recorded it: (text, at), `at` None in a record older than the hook's time — by the
+    kind whose events these are, each reading only its own; None when there is none."""
     for module in usable():
         said = module.reply(events, prompt, session) if hasattr(module, "reply") else None
         if said:

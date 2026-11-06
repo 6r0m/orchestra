@@ -752,7 +752,7 @@ class Hook(unittest.TestCase):
                                   input=json.dumps(payload).encode("utf-8"), capture_output=True)
             self.assertEqual(done.returncode, 0)
         with open(events, encoding="utf-8") as stream:
-            self.assertEqual([json.loads(line) for line in stream],
+            self.assertEqual([unstamped(json.loads(line)) for line in stream],
                              [{"_hook": "Notification", "session_id": "s1", "notification_type": "permission_prompt"},
                               {"_hook": "PostToolUse", "session_id": "s1"},
                               {"_hook": "PostToolUseFailure"}])
@@ -779,7 +779,26 @@ class Hook(unittest.TestCase):
                               capture_output=True)
         self.assertEqual((done.returncode, done.stdout, done.stderr), (0, b"", b""))
         with open(events, encoding="utf-8") as fh:
-            self.assertEqual(json.loads(fh.readline()), dict(payload, _hook="notify"))
+            self.assertEqual(unstamped(json.loads(fh.readline())), dict(payload, _hook="notify"))
+
+    def test_each_event_is_stamped_with_when_it_was_recorded(self):
+        # Two roles' records are compared by when each answered, never by when their files last changed.
+        events = os.path.join(tempfile.mkdtemp(prefix="orchestra-hook-"), "turn.events")
+        self.addCleanup(shutil.rmtree, os.path.dirname(events), True)
+        before = time.time()
+        for label in ("UserPromptSubmit", "Stop"):
+            subprocess.run([sys.executable, terminal.TURN_HOOK, events, label, "stdin"],
+                           input=json.dumps({"session_id": "s"}).encode("utf-8"), capture_output=True, check=True)
+        after = time.time()
+        with open(events, encoding="utf-8") as fh:
+            stamps = [json.loads(line)["_at"] for line in fh]
+        self.assertEqual(len(stamps), 2)
+        self.assertTrue(before <= stamps[0] <= stamps[1] <= after, (before, stamps, after))
+
+
+def unstamped(event):
+    """An event as its agent gave it and labelled, without the time its hook recorded it."""
+    return {key: value for key, value in event.items() if key != "_at"}
 
 
 class Environment(unittest.TestCase):

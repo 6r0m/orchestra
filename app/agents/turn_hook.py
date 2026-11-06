@@ -11,6 +11,7 @@ It always exits 0 and prints nothing, so it can never block, fail or steer the a
 import json
 import os
 import sys
+import time
 
 
 def main(args):
@@ -22,7 +23,9 @@ def main(args):
         # notification's kind are kept.
         if label in ("Notification", "PostToolUse", "PostToolUseFailure"):
             payload = {key: payload[key] for key in ("session_id", "notification_type") if key in payload}
-        payload["_hook"] = label
+        # When it was recorded, as `_at`: two roles' answers are told apart by when each came, never by when
+        # their records last changed — a record gains events that answer no one.
+        payload["_hook"], payload["_at"] = label, time.time()
         line = (json.dumps(payload) + "\n").encode("utf-8")
         # One write in append mode: concurrent hooks never interleave inside a line.
         fd = os.open(events, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)

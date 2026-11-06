@@ -3,7 +3,8 @@
 **Status:** REOPENED 2026-11-06, FIXED — closed too early: the operator's run continued and read its
 attachment, but its next engineer turn could write nothing to its worktree because of how the attachment was
 made readable (*Defect found after closing*, below). Fixed red first, proven with a real Claude on both hosts;
-it awaits the external reviewer, and the Windows worker's restart once no turn of it runs.
+the reviewer passed the fix. It awaits the full suite at the final pass, the Windows worker's restart in the
+operator's deployment, and their word to close it.
 **Scope:** how a role turn's prompt reaches the agent's CLI ([nodes.py](../app/agents/nodes.py) `attach`,
 [activities.py](../app/application/activities.py) `run_role`, the Claude adapter's `readable`).
 **Stable documentation owner:** D17 in the [architecture](../docs/architecture/structure.md) and the agents'
@@ -60,6 +61,8 @@ file the agent reads, and a step stopped on such a prompt goes on with Continue.
 - **External reviewer, 2026-11-05:** the implementation passed its tests; a real agent's reading of an attachment
   stays UNVERIFIED until the operator's blocked run is continued on a restarted Windows worker and its turn is
   seen to read the attached guidance and end normally.
+- **External reviewer, 2026-11-06 — PASS** for the defect's fix: a rule allowing reads in place of `--add-dir`,
+  on the real-Claude evidence of both hosts.
 
 ## Verification
 

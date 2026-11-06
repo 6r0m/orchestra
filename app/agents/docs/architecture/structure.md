@@ -67,7 +67,9 @@ Settings shows a role the words of the kind chosen for it.
 Through the vendor's own completion hook: a turn ends on Claude's `Stop` for its own
 prompt id, or Codex's `agent-turn-complete` in its own thread — never on a first event.
 Claude's notification and tool-finish hooks also record their events, keeping only the session and a
-notification's kind — never what a dialog says or what a tool read or wrote. The adapter reads a waiting
+notification's kind — never what a dialog says or what a tool read or wrote. Every event is stamped with when
+its hook recorded it (`_at`), so answers in two roles' records are ordered by when each came, never by when a
+record last changed. The adapter reads a waiting
 dialog from them for the Workbench (`waiting`), and a role's answer to words the operator typed into its
 terminal after its turn (`reply`); they never decide a turn's result.
 

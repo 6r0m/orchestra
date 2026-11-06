@@ -119,7 +119,8 @@ def role_reply(status, rdir):
     there — while the run waits at a stop that takes guidance, for the page to send on as the operator's guidance
     with one press: {"role", "text"}, or None. That role remembers the talk in its own session, and the page sends
     its words to whichever role the operator picks. Each role's newest turn record is where its talk lands, and the
-    newer of the two is the one talked with last."""
+    answer given last decides: by when its hook recorded it, never by when its record last changed, since a record
+    gains events that answer no one."""
     stop = status.get("stop") or {}
     sessions = (status.get("state") or {}).get("agent_sessions") or {}
     if "guide" not in (stop.get("actions") or []):
@@ -134,7 +135,8 @@ def role_reply(status, rdir):
 
 def _said(rdir, role, session):
     """(when, role, text): `role`'s last answer to the operator in its newest turn record, read by the kind whose
-    events they are — a reply to words they typed, in its own session, never its turn's own answer — or None."""
+    events they are — a reply to words they typed, in its own session, never its turn's own answer — or None.
+    `when` is the time its hook recorded it; a record older than the hook's time has only its file's."""
     if not session:
         return None
     logs = os.path.join(rdir, "logs")
@@ -164,8 +166,11 @@ def _said(rdir, role, session):
             continue
         if isinstance(event, dict):
             events.append(event)
-    text = adapters.reply(events, prompt, session)
-    return (when, role, text) if text else None
+    said = adapters.reply(events, prompt, session)
+    if not said:
+        return None
+    text, at = said
+    return (at if at is not None else when, role, text)
 
 
 def turn_parts(path, prompt):

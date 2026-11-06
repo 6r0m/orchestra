@@ -1,6 +1,6 @@
 """Press one of the Workbench's own buttons in a headless browser, as the operator would.
 
-    python tools/demo_press.py <workbench url> <run id | stack | start | page> <button label | task | refused:repo:task | answered:status | markdown | markdown-safety | change:words | change-rows | change-idle | terminal-fit:role | hints | terminal:role | turn:stage | turn-then:stage:label | file:path | round:stage:path | history | hold:role:label | type-after:role:label:line | layout:WIDTHxHEIGHT | absent:label,...> <what the page should say> [note]
+    python tools/demo_press.py <workbench url> <run id | stack | start | page> <button label | task | refused:repo:task | answered:status | markdown | markdown-safety | change:words | change-rows | change-idle | terminal-fit:role | handoff | hints | terminal:role | turn:stage | turn-then:stage:label | file:path | round:stage:path | history | hold:role:label | type-after:role:label:line | layout:WIDTHxHEIGHT | absent:label,...> <what the page should say> [note]
 
 The Windows side of `make demo` (WSL cannot reach Windows' loopback, and Windows reaches the
 Workbench's): headless Edge, driven over the DevTools protocol, opens the page, opens the run by its
@@ -31,7 +31,11 @@ page: it exits 0 when the page, its run waiting with no role at work, opens no s
 dropped from before it loads, and its terminal read: it exits 0 when its text and scrollbar fit its box, a drag of
 the scrollbar's thumb scrolls it back and selects nothing, Maximize fills the window drawn larger and Restore puts it
 back, and Ctrl+C on a selection copies it and sends nothing — with nothing selected, a live agent's still. Given
-`hints`, it presses nothing but the stack's chips: it visits New run, Settings and — for a run other than `page`
+`handoff`, the run's status is stood in for from before the page loads — a blocker taking guidance to either role,
+with what an agent last answered the operator — and the page's answers caught, none reaching the Workbench: it
+exits 0 when the card names the agent that answered and offers the other first, is drawn anew when the other
+answers the same words, and each of its four presses — the answer sent to either role, a note guiding either —
+sends exactly its action with exactly its words. Given `hints`, it presses nothing but the stack's chips: it visits New run, Settings and — for a run other than `page`
 — that run's page, and exits 0 when every button shown outside a dialog says on hover what it does.
 Given `terminal:<role>`, it presses nothing: it opens that role's terminal, if it is
 closed, and reads its screen as the page shows it, live from its host. Given `turn:<stage>`, it presses
@@ -648,16 +652,20 @@ def terminal_fit(page, run_id, role):
         page.call("Input.dispatchMouseEvent", type=kind, x=x, y=y, button="left", buttons=1 if kind != "mouseReleased"
                   else 0, clickCount=1, modifiers=8 if back["mouse"] else 0)
     time.sleep(0.5)
-    ctrl_c = dict(modifiers=2, key="c", code="KeyC", windowsVirtualKeyCode=67, nativeVirtualKeyCode=67)
-    page.call("Input.dispatchKeyEvent", type="rawKeyDown", **ctrl_c)
-    page.call("Input.dispatchKeyEvent", type="keyUp", **ctrl_c)
+    # Ctrl+C as the page receives it, at the terminal's own input: headless Edge's browser process breaks on a
+    # real one now and then, in its own clipboard component — measured from its crash dump, a check that fails
+    # before the page is told of the key — so the key goes to the page alone; the selection above is the mouse's.
+    # xterm reads a control key's character from its legacy `keyCode`, which a key built here leaves at 0 unless set.
+    ctrl_c = ("(t => { t.focus(); t.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', code: 'KeyC', "
+              "keyCode: 67, which: 67, ctrlKey: true, bubbles: true, cancelable: true })); return true; })"
+              "(document.querySelector('#term-%s .xterm-helper-textarea'))" % role)
+    page.value(ctrl_c)
     time.sleep(0.5)
     copied, sent = page.value("window.__copied"), page.value("window.__sent")
     if not (copied and copied[-1].strip()) or "\x03" in sent:
         failures.append("Ctrl+C on a selection copied %r and sent the agent %r" % (copied, sent))
     if back["live"]:
-        page.call("Input.dispatchKeyEvent", type="rawKeyDown", **ctrl_c)
-        page.call("Input.dispatchKeyEvent", type="keyUp", **ctrl_c)
+        page.value(ctrl_c)
         time.sleep(0.5)
         if "\x03" not in page.value("window.__sent"):
             failures.append("Ctrl+C with nothing selected did not reach its live agent")
@@ -668,6 +676,83 @@ def terminal_fit(page, run_id, role):
              rest["bar"], rest["font"], rest["scrollTop"], dragged["scrollTop"], rest["scrollMax"], big["details"][2:],
              big["font"], back["font"], (copied or [""])[-1][:40], sent,
              "" if not failures else "\nFAILED: " + "\nFAILED: ".join(failures)))
+    return 0 if not failures else 1
+
+
+# Before the page loads: the run's status stood in for — a blocker taking guidance to either role, and what an agent
+# last answered the operator — and the page's answers to it caught: each recorded as sent, none reaching the
+# Workbench, and the next stop shown after it, so the card is drawn anew.
+HANDOFF_STAND_IN = """(() => {
+  const real = window.fetch;
+  const hand = window.__handoff = { stop: 1, answers: [], reply: { role: "architect", text: "Yes, proceed." } };
+  const reply = (body) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+  window.fetch = async (path, options) => {
+    const at = new URL(String(path), location.href).pathname;
+    if (/^\\/api\\/runs\\/[^/]+\\/answer$/.test(at)) {
+      const body = JSON.parse(options.body);
+      hand.answers.push(body);
+      hand.stop += 1;
+      return reply({ stop: body.stop, action: body.action });
+    }
+    const response = await real(path, options);
+    if (!/^\\/api\\/runs\\/[^/]+$/.test(at)) return response;
+    const status = await response.json();
+    const id = "stand-in:" + hand.stop;
+    status.unreadable = null;
+    status.stop = { id: id, reason: "blocker", phase: "plan", feedback: "The plan bans the engine's own names.",
+      hint: "guide with your decision to continue", actions: ["guide", "guide:architect"], since: new Date().toISOString() };
+    status.view = Object.assign(status.view, { state: "waiting", stop: { id: id, reason: "blocker", to: "engineer" },
+      reply: hand.reply });
+    return reply(status);
+  };
+})();"""
+HANDOFF_CARD = """(() => {
+  const buttons = (id) => [...document.querySelectorAll('#' + id + ' button')].map((b) => ({ label: b.textContent,
+    primary: b.classList.contains('primary'), enabled: !b.disabled }));
+  return { stop: window.__handoff.stop, label: document.getElementById('stop-reply-label').textContent,
+    reply: buttons('stop-reply-actions'), guide: buttons('stop-actions'), answers: window.__handoff.answers }; })()"""
+
+
+def handoff(page, run_id):
+    """A blocker's guidance and an agent's answer handed on, its run's status and answers stood in for: 0 when the
+    card names the agent that answered and offers the other first — drawn anew when the other answers the same
+    words — and each of its four presses sends exactly its action with exactly its words. Prints what it saw."""
+    card = lambda: page.value(HANDOFF_CARD)   # noqa: E731
+    page.value(OPEN % json.dumps(run_id))
+    wait(lambda: page.value(OPENED), 60, "the run")
+    wait(lambda: card()["reply"], 30, "the agent's answer offered on the stop")
+    failures = []
+    first = card()
+    if not (first["label"].startswith("The architect's") and [b["label"] for b in first["reply"]] ==
+            ["Send to the engineer", "Send to the architect"] and first["reply"][0]["primary"]):
+        failures.append("the architect's answer offered as %s" % first)
+    # The same words, now the engineer's: the card is drawn anew for who said them.
+    page.value("window.__handoff.reply = { role: 'engineer', text: 'Yes, proceed.' }; true")
+    switched = wait(lambda: (lambda seen: seen if seen["label"].startswith("The engineer's") else None)(card()), 30,
+                    "the card to name the engineer, who said the same words")
+    if [b["label"] for b in switched["reply"]][:1] != ["Send to the architect"] or not switched["reply"][0]["primary"]:
+        failures.append("the engineer's answer offered as %s" % switched)
+    presses = [("stop-reply-actions", "Send to the architect", None, {"action": "guide:architect", "text": "Yes, proceed."}),
+               ("stop-reply-actions", "Send to the engineer", None, {"action": "guide", "text": "Yes, proceed."}),
+               ("stop-actions", "Guide the engineer", "Revise the plan.", {"action": "guide", "text": "Revise the plan."}),
+               ("stop-actions", "Guide the architect", "Judge it again.", {"action": "guide:architect",
+                                                                            "text": "Judge it again."})]
+    for number, (where, label, note, wanted) in enumerate(presses, 1):
+        wait(lambda: card()["stop"] == number and any(b["label"] == label and b["enabled"]
+                                                       for b in card()["reply" if where == "stop-reply-actions"
+                                                                       else "guide"]), 30, "%s, enabled" % label)
+        if note is not None:
+            page.value("(n => { n.value = %s; n.dispatchEvent(new Event('input')); })(document.getElementById('stop-note'))"
+                       % json.dumps(note))
+        page.value(button("#" + where, label) + ".click(); true")
+        sent = wait(lambda: (lambda answers: answers[number - 1] if len(answers) >= number else None)(
+            page.value("window.__handoff.answers")), 30, "what %s sent" % label)
+        if sent != dict(wanted, stop="stand-in:%d" % number):
+            failures.append("%s sent %s" % (label, sent))
+    print("a blocker's card, its run's status stood in for: the architect's answer offered %s; the same words, the "
+          "engineer's, offered %s; sent %s%s"
+          % ([b["label"] for b in first["reply"]], [b["label"] for b in switched["reply"]],
+             page.value("window.__handoff.answers"), "" if not failures else "\nFAILED: " + "\nFAILED: ".join(failures)))
     return 0 if not failures else 1
 
 
@@ -726,6 +811,9 @@ def main(url, run_id, label, said, note=None):
             if label.startswith("terminal-fit:"):
                 page.call("Page.enable")
                 page.call("Page.addScriptToEvaluateOnNewDocument", source=TERMINAL_STAND_IN)
+            if label == "handoff":
+                page.call("Page.enable")
+                page.call("Page.addScriptToEvaluateOnNewDocument", source=HANDOFF_STAND_IN)
             page.call("Page.navigate", url=url)
             if label == "hints":
                 # Its views read no run, so neither does it wait for the list of runs.
@@ -752,6 +840,8 @@ def main(url, run_id, label, said, note=None):
                 return change_idle(page, run_id)
             if label.startswith("terminal-fit:"):
                 return terminal_fit(page, run_id, label.split(":", 1)[1])
+            if label == "handoff":
+                return handoff(page, run_id)
             if label.startswith("terminal:"):
                 role = label.split(":", 1)[1]
                 page.value(OPEN % json.dumps(run_id))

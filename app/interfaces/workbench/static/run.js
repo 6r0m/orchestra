@@ -427,7 +427,8 @@ function renderReply(stop, reply, to) {
   const routes = (stop && stop.actions || []).filter((action) => guided(action, to));
   const shown = Boolean(reply && reply.text && routes.length);
   box.hidden = !shown;
-  const key = shown ? stop.id + "\n" + to + "\n" + reply.text : "";
+  // Who said it is part of what is shown: two roles' answers may be the same words.
+  const key = shown ? [stop.id, to, reply.role, reply.text].join("\n") : "";
   if (box.dataset.key === key) return;
   box.dataset.key = key;
   if (!shown) return;

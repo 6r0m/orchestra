@@ -130,7 +130,8 @@ def completion(events, prompt, session):
 
 def reply(events, prompt, session):
     """Its last answer in its thread `session` to words typed into its terminal after the turn's prompt: a
-    completion whose newest input is not the prompt. Its own catch-up summaries run in threads of their own."""
+    completion whose newest input is not the prompt, with when its hook recorded it (`_at`, None in a record older
+    than that). Its own catch-up summaries run in threads of their own."""
     wanted = prompt.strip()
     said = None
     for event in events:
@@ -139,7 +140,7 @@ def reply(events, prompt, session):
             continue
         inputs = [text.strip() for text in event.get("input-messages") or [] if isinstance(text, str)]
         if inputs and inputs[-1] != wanted and event.get("last-assistant-message"):
-            said = event["last-assistant-message"]
+            said = (event["last-assistant-message"], event.get("_at"))
     return said
 
 

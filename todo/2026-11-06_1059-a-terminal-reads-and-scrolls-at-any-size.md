@@ -1,7 +1,8 @@
 # A terminal reads and scrolls at any size
 
 **Status:** BUILT 2026-11-06 — proven on the live Workbench and in `make demo`, with mutation controls; green on
-both hosts. It awaits the external reviewer, the Windows worker's restart, and the operator's word to close it.
+both hosts; the reviewer passed it. It awaits the full suite at the final pass, the Windows worker's restart in
+the operator's deployment, and their word to close it.
 **Scope:** a role's terminal on the run's page — its size, a way to read it large, its scrollbar, its copy
 ([terminals.js](../app/interfaces/workbench/static/terminals.js), [index.html](../app/interfaces/workbench/static/index.html),
 [style.css](../app/interfaces/workbench/static/style.css), and the size the page's config gives it in
@@ -68,6 +69,11 @@ scrolls through its whole session by wheel or by dragging its scrollbar — whic
   Maximize filling the window with a larger font, Restore, and Ctrl+C on a selection copying with nothing
   sent; `make demo` runs it. The workflow's test of Codex's arguments asks for the flag.
 
+## Review record
+
+- **External reviewer, 2026-11-06 — PASS:** the fixed grid, the fitted font, Maximize and Restore inside the page,
+  the scrollbar's guard and Codex drawn inline, on browser checks that exercise layout, dragging and copying.
+
 ## Verification
 
 - **Live, before the change** (`tmp/agent/terminal-scroll/drag.py`, throwaway): the measurements above, and a drag
@@ -99,10 +105,14 @@ scrolls through its whole session by wheel or by dragging its scrollbar — whic
   given, so their terminals hold more than a screen.
 - **The size from its owner, after the architect's review:** `tests.interfaces.test_workbench.Access` asked the
   page's config for `terminal_size` — red, `KeyError`; green once the server serves `terminal.COLS` and `ROWS`.
-- **A crash in `make demo`, then the key cancelled:** one demo's check lost its browser at the first Ctrl+C on a
-  selection — headless Edge 156 crashed (a Crashpad dump in its throwaway profile), where two demos and three live
-  checks had passed. The handler gave xterm the key but left it to the browser too, whose own copy of xterm's
-  hidden input ran beside the page's; it now cancels the key it handles. Then the live check passed again, and
-  `make demo` on the final code: DEMO PASSED, 116 checks, none failed.
+- **Headless Edge's own crash at Ctrl+C, in `make demo`:** the check lost its browser at the first Ctrl+C on a
+  selection in two demos of five, never in eleven live runs. Its Crashpad dump: exception `0x80000003` — a
+  breakpoint, a check of Edge's own failing — in `msedge.dll`, in the browser process (its own `--headless=new`
+  command line), with Edge's *Microsoft Clipboard Extension* among its strings: the browser breaks in its own
+  clipboard handling before the page is told of the key, so the page's handler has no part in it. The handler now
+  also cancels the key it handles — the browser's own copy of xterm's hidden input never runs beside it — but the
+  crash came again after that, so the check gives the page its Ctrl+C at the terminal's input, the selection still
+  made by the mouse. Mutation control: with the copy switched off it failed — *copied []* — and `terminals.js` was
+  restored byte for byte. Then `make demo`: DEMO PASSED, 117 checks, none failed.
 - **Not yet seen live:** a Codex turn drawn inline through the Windows worker — it runs this code once restarted,
   with no turn of the operator's run at work.

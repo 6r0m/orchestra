@@ -58,7 +58,10 @@ def parse_answer(stop, text, confirm=False):
     name = SHORTHANDS.get(head.lower(), head.lower())
     role, _, after = rest.strip().partition(" ")
     answer = None
-    if "%s:%s" % (name, role.lower()) in offered and after.strip():
+    if "%s:%s" % (name, role.lower()) in offered:
+        # A role named with no words answers nothing: never the role's name taken as words for another.
+        if not after.strip():
+            return None
         answer = {"action": "%s:%s" % (name, role.lower()), "text": after.strip()}
     elif name in offered and name in TAKES_WORDS:
         answer = {"action": name, "text": rest.strip()} if rest.strip() else None

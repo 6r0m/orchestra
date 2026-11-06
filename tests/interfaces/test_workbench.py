@@ -99,6 +99,22 @@ class RoleReply(unittest.TestCase):
             self.assertIsNone(self.reply(stop=stop), "nothing to send it on with")
         self.assertIsNone(self.reply(state={"agent_sessions": {}}), "no session of its yet")
 
+    def test_the_answer_given_last_decides_never_an_event_recorded_after_it(self):
+        # The architect answers, then the engineer; then the architect's record gains an event that answers no one —
+        # a catch-up summary from a thread of its own — and is the newer file. The engineer still answered last.
+        verdict = self.said([self.PROMPT], '{"verdict":"BLOCKER"}')
+        answered = dict(self.said([self.PROMPT, "what now?"], "The architect's answer."), _at=100.0)
+        summary = dict(self.said(["catch up"], '{"summary":""}', thread="t2"), _at=300.0)
+        self.turn("assess-e5-1", verdict, answered, summary, at=3000)
+        engineer = [{"_hook": "UserPromptSubmit", "session_id": "s1", "prompt_id": "p1", "prompt": self.PROMPT},
+                    {"_hook": "Stop", "session_id": "s1", "prompt_id": "p1", "last_assistant_message": "Planned.",
+                     "background_tasks": [], "_at": 50.0},
+                    {"_hook": "UserPromptSubmit", "session_id": "s1", "prompt_id": "p2", "prompt": "drop the shim?"},
+                    {"_hook": "Stop", "session_id": "s1", "prompt_id": "p2", "last_assistant_message": "Yes, dropped.",
+                     "background_tasks": [], "_at": 200.0}]
+        self.turn("plan-e5-1", *engineer, at=2500)
+        self.assertEqual(self.reply(), {"role": "engineer", "text": "Yes, dropped."})
+
     def test_the_engineer_talked_with_last_is_offered_and_the_architect_when_talked_with_after(self):
         def asked(prompt_id, prompt):
             return {"_hook": "UserPromptSubmit", "session_id": "s1", "prompt_id": prompt_id, "prompt": prompt}

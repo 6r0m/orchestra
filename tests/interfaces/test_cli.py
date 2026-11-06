@@ -64,6 +64,8 @@ class ParsesWhatAStopPublishes(unittest.TestCase):
         self.assertEqual(cli.parse_answer(blocker, "the premise holds, revise the plan"),
                          {"action": "guide", "text": "the premise holds, revise the plan"})
         self.assertEqual(cli.answer_line(blocker), '"<your guidance>" | "guide architect <your guidance>"')
+        for text in ("guide architect", "guide architect   "):
+            self.assertIsNone(cli.parse_answer(blocker, text), "a role named with no words is no answer at all")
 
 
 class TheStack(unittest.TestCase):

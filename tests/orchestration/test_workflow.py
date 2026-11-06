@@ -184,10 +184,30 @@ class Routing(Scenario):
         run = self.drive([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1),
                           ("assess-e2-1", 0, codex_review_resumed("PASS", "Direction: A."))])
         self.assertEqual((run.stop["reason"], run.stop["actions"]), ("blocker", ["guide", "guide:architect"]))
+        # Naming the architect with no words is no answer: never guidance "architect" for the engineer.
+        waiting = run.stop["id"]
+        code, said = run.answer("guide architect")
+        self.assertNotEqual(code, 0, said)
+        self.assertEqual((run.stop["id"], self.names()), (waiting, ["plan-e1-1", "assess-e1-1"]), "the run waits on")
         run.answer("guide architect the premise holds: the shim stays")
         self.assertEqual(self.names(), ["plan-e1-1", "assess-e1-1", "assess-e2-1"], "no engineer turn first")
         self.assertIn("the premise holds: the shim stays", self.agent.calls[-1]["prompt"])
         self.assertEqual(run.stop["reason"], "approval", "the architect passed the plan it judged again")
+
+    def test_guidance_to_the_architect_at_rounds_run_out_has_it_judge_again(self):
+        legacy = dict(POLICY)
+        legacy.pop("review_rounds", None)
+        legacy["max_rounds"] = {"plan": 2, "build": 2}
+        a1, _ = codex_review_first("PATCH", "fix A")
+        run = self.drive([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1),
+                          ("plan-e1-2", 0, "revised\n"), ("assess-e1-2", 0, codex_review_resumed("PATCH", "fix B")),
+                          ("assess-e2-1", 0, codex_review_resumed("PASS"))], policy=legacy)
+        self.assertEqual((run.stop["reason"], run.stop["actions"]), ("exhausted", ["guide", "guide:architect"]))
+        run.answer("guide architect B is out of scope: judge the plan without it")
+        self.assertEqual(self.names()[-1], "assess-e2-1", "judged again with no plan turn first")
+        self.assertNotIn("plan-e2-1", self.names())
+        self.assertIn("B is out of scope", self.agent.calls[-1]["prompt"])
+        self.assertEqual(run.stop["reason"], "approval")
 
     def test_pass_without_auto_proceed_asks_approval(self):
         a1, _ = codex_review_first("PASS")

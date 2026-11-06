@@ -1,8 +1,8 @@
 # Guidance goes to the role you choose, an agent's answer in one press
 
-**Status:** BUILT 2026-11-06 — red, then green; its first form used on the operator's run, whose engineer took
-the architect's handoff as its guidance; the Workbench and the WSL worker run the rest. It awaits the external
-reviewer and the operator's word to close it.
+**Status:** BUILT 2026-11-06 — the reviewer's PATCH taken: red, then green. It awaits the reviewer's final pass,
+the full suite then, the operator's deployment — the Workbench's restart for the answers' order — and their word
+to close it.
 **Scope:** a stop's guidance answers ([workflow.py](../app/orchestration/workflow.py) `GUIDED`, the loop's
 `review_next`), whom a stop's words go to ([client.py](../app/application/client.py) `recipient`), what the run's
 view carries at a stop that takes guidance ([server.py](../app/interfaces/workbench/server.py) `role_reply`), how a
@@ -70,6 +70,18 @@ on with one press, nothing copied by hand.
 - Docs: D6 and the stops diagram; using.md; the interfaces', agents' and application's structure; the tests'
   and tools' READMEs.
 
+## Review record
+
+- **External reviewer, 2026-11-06 — PATCH, three findings and two checks, each taken:** the workflow's route to
+  the architect passed on its logic. (1) `guide architect` with no words became guidance *architect* for the
+  engineer — now no answer at all, and the run waits on. (2) The role talked with last was taken from which record
+  changed last, and a record gains events that answer no one — Codex's catch-up summaries among them, seen on the
+  operator's run — so the hook stamps each event with when it recorded it (`_at`), and the answer given last
+  decides; a record older than the stamp keeps its file's time. (3) The card's key left out who answered, so the
+  other's same words kept the old name and order — now in the key. The checks: guidance to the architect at
+  rounds run out, and a browser check that presses each destination and reads what it sends (`demo_press.py
+  handoff`, in `make demo`).
+
 ## Verification
 
 - **Red:** `tests.agents.test_adapters.Reply`, `tests.interfaces.test_workbench.RoleReply` — no `adapters.reply`,
@@ -92,6 +104,23 @@ on with one press, nothing copied by hand.
   pressed): at a blocker, *Guide the engineer* first and *Guide the architect*, each saying on hover what
   follows; with the architect's answer offered, *Send to the engineer* first; with the engineer's, *Send to the
   architect* first.
+- **The review's fixes, red then green:** `tests.interfaces.test_cli` — `guide architect` parsed as guidance
+  *architect*; `tests.orchestration.test_workflow.Routing` — that answer started `plan-e2-1`, the run moved on;
+  `tests.agents.test_adapters.Reply` — an answer without its time; `tests.interfaces.test_workbench.RoleReply` —
+  the reviewer's sequence offered the architect's older answer; `tests.agents.test_terminal.Hook` — no `_at`. The
+  rounds-run-out route passed at once: it is the blocker's branch. Green on WSL: `tests.interfaces.test_cli`,
+  `tests.agents.test_terminal.Hook`, `tests.agents.test_adapters`, `tests.interfaces.test_workbench`,
+  `tests.orchestration.test_workflow`, `tests.orchestration.test_replay`, `tests.test_architecture`,
+  `tests.test_demo` — 217 tests, OK; on Windows `tests.agents.test_terminal.Hook`, `tests.agents.test_adapters`,
+  `tests.interfaces.test_cli`, `tests.orchestration.test_workflow.Routing` — 9 classes, 40 tests, OK.
+- **`demo_press.py handoff`, on the live Workbench:** the architect's answer offered *Send to the engineer* first;
+  the same words, the engineer's, drawn anew with *Send to the architect* first; the four presses sent
+  `guide:architect`, `guide`, `guide` and `guide:architect`, each with exactly its words, none reaching the
+  Workbench. Mutation control: with who answered taken out of the card's key, it failed — *gave up waiting for the
+  card to name the engineer* — and `run.js` was restored byte for byte.
+- **`make demo`, the handoff check among its own:** DEMO PASSED, 117 checks, none failed.
+- **Live as saved, without a restart:** the hook (`turn_hook.py` is run afresh for every event) and the page's
+  files. The Workbench orders answers by their stamps once restarted, which waits for the operator's deployment.
 - **Not yet seen live:** the two routes on a real blocker. Temporal remembers a patch's answer for the whole run,
   so a run that met a blocker before the WSL worker's restart replays it without the marker and keeps the one
   route for its life — the operator's run among them; a run that meets its first blocker after the restart

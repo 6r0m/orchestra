@@ -193,7 +193,8 @@ def completion(events, prompt, session):
 
 def reply(events, prompt, session):
     """Its last answer in `session` to a prompt typed into its terminal other than the turn's — never the turn's
-    own answer, which words typed during the turn may also have led to."""
+    own answer, which words typed during the turn may also have led to — with when its hook recorded it (`_at`,
+    None in a record older than that)."""
     wanted = prompt.strip()
     done = completion(events, prompt, session)
     turn = done[1] if done and done[0] else None
@@ -207,7 +208,7 @@ def reply(events, prompt, session):
         elif event.get("_hook") == "Stop":
             message = event.get("last_assistant_message") or ""
             if asked.get(event.get("prompt_id"), wanted) != wanted and message and message != turn:
-                said = message
+                said = (message, event.get("_at"))
     return said
 
 
