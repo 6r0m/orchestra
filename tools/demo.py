@@ -89,9 +89,6 @@ FAKE = textwrap.dedent("""\
     argv = sys.argv[1:]
     prompt = argv[-1]
     brain = "codex" if "codex" in os.path.basename(sys.argv[0]) else "claude"
-    if brain == "codex" and "--" not in argv:
-        # Started with no prompt, to have its hooks trusted: its review dialog, as Codex draws it.
-        fake_cli.codex_review(argv)
     complete = fake_cli.completer(brain, argv, prompt)
     state = os.environ["DEMO_STATE"]
     # The prompt it was given, shown first, as a vendor's CLI shows it: a session then fills more than one
@@ -359,7 +356,8 @@ class Demo:
 
     def until(self, run_id, reached, seconds, what):
         """The run's view once `reached` holds of it, read once a second; a run that failed or
-        ended instead fails the demo at once, with the run's own lines."""
+        ended instead fails the demo at once, with the run's own lines — as one still short of it when the
+        time is up does."""
         def probe():
             view = self.view(run_id)
             if reached(view):
@@ -369,7 +367,13 @@ class Demo:
                 raise SystemExit("demo failed: waiting for %s, the run is %s: %s\n  %s" % (
                     what, view["state"], view["failure"] or view["status"], "\n  ".join(lines[-12:])))
             return None
-        return wait(probe, seconds, what)
+        try:
+            return wait(probe, seconds, what)
+        except SystemExit as gave_up:
+            view, lines = self.view(run_id), self.api("/api/runs/%s" % run_id)["lines"]
+            raise SystemExit("%s; the run is %s, at %s:\n  %s" % (
+                gave_up, view["state"], view["stage"] or (view["stop"] or {}).get("reason"),
+                "\n  ".join(lines[-12:])))
 
     def press(self, run_id, label, said, note=""):
         """Press the button labelled `label` in headless Edge on Windows, as the operator would — the run's,
@@ -475,10 +479,16 @@ class Demo:
               "at a blocker, stood in for, the card names the agent that answered and offers the other first, is "
               "drawn anew when the other answers the same words, and each press sends exactly its action and words")
 
-        step("the plan approved by pressing the Workbench's own button")
-        check(self.press(merged, "Approve", "answered: approve"), "the page sent the answer, and the workflow took it")
+        step("the plan approved by pressing the Workbench's own button, with a note for the build")
+        note = "Keep greeting.txt to one line."
+        check(self.press(merged, "Approve with note", "answered: approve", note),
+              "a note typed beside it, Approve said it goes with it; the page sent both, and the workflow took them")
         self.until(merged, lambda view: view["state"] == "waiting" and view["stop"]["reason"] == "final", 300,
                    "the final gate")
+        logs = os.path.join(paths.RUNTIME_ROOT, merged, "logs")
+        for stage, who in (("build", "the engineer's build"), ("verify", "the architect's verification of it")):
+            with open(sorted(glob.glob(os.path.join(logs, "%s-*.prompt" % stage)))[0], encoding="utf-8") as fh:
+                check(note in fh.read(), "the note reached %s, as your guidance, with no plan round first" % who)
         turns = [entry["stage"] for entry in self.api("/api/runs/%s" % merged)["timeline"]]
         check(turns[-3:] == ["build", "verify", "closeout"],
               "the engineer built, the architect verified, and the engineer closed the todo out: %s" % turns[-3:])

@@ -31,7 +31,11 @@ const DANGER = new Set(["discard"]);
 // The answers the operator's note is sent with — its label names them, and a refusal of one is shown at
 // the note. Whether an answer needs words is the workflow's to refuse, never the page's.
 const WORDED = { revise: "Revise", "revise:engineer": "Revise", "revise:architect": "Revise", guide: "Guide",
-  "guide:architect": "Guide" };
+  "guide:architect": "Guide", approve: "Approve" };
+// Approve with your note: the run goes on, and the note is guidance to the stage approved into — its work and the
+// review that judges it. An approval that ends the run (`stop.ends`) has no stage to read one.
+const APPROVE_NOTED = "Accept this, and the run goes on to its next step — with your note, if you wrote one, as "
+  + "guidance to that step's work and to the review that judges it";
 
 // Whom guidance goes to: `guide` to the role whose work the stop's phase is — `to`, the run's view's to say —
 // which goes on with it, the architect then judging what it does; `guide:architect` to the architect, which judges
@@ -49,7 +53,7 @@ function guidedHint(action, to, what) {
   return "Send " + what + " to the " + role + ": it goes on with it" +
     (role === "architect" ? "" : ", and the architect then judges what it does");
 }
-const WORDLESS = new Set(["approve", "continue", "merge", "discard"]);
+const WORDLESS = new Set(["continue", "merge", "discard"]);
 // A second look before an answer that lands or removes the work.
 const ASK = {
   merge: { title: "Merge the verified change into the base branch?", confirm: "Merge" },
@@ -83,7 +87,14 @@ let landsOn = null;
 const drafts = new Map();
 $("stop-note").addEventListener("input", () => {
   if (shownStop) drafts.set(shownStop, $("stop-note").value);
+  approveSays();
 });
+
+// Approve says when your note goes with it.
+function approveSays() {
+  const button = $("stop-actions").querySelector("button[data-noted]");
+  if (button) button.textContent = $("stop-note").value.trim() ? "Approve with note" : LABELS.approve;
+}
 
 // Whether words the operator typed for a stop have not been sent.
 export const unsent = () => [...drafts.values()].some((text) => text.trim());
@@ -398,13 +409,17 @@ function renderStop(stop, timeline, to) {
   shownAbove = new Set(evidence.map((part) => part.text));
   $("stop-evidence").replaceChildren(...evidence.map(evidencePart));
   const actions = stop.actions || [];
-  const worded = [...new Set(actions.filter((action) => WORDED[action]).map((action) => WORDED[action]))];
-  $("stop-note-field").hidden = actions.every((action) => WORDLESS.has(action));
-  $("stop-note-label").textContent = worded.length
-    ? (worded.includes("Guide") ? "Your guidance, to the role you press it to" : "Your note, sent with Revise")
-    : "Your note";
+  const noted = actions.includes("approve") && !stop.ends;
+  const worded = [...new Set(actions.filter((action) => WORDED[action] && (action !== "approve" || noted))
+    .map((action) => WORDED[action]))];
+  $("stop-note-field").hidden = actions.every((action) => WORDLESS.has(action) || (action === "approve" && !noted));
+  $("stop-note-label").textContent = worded.includes("Guide") ? "Your guidance, to the role you press it to"
+    : worded.includes("Approve") && worded.includes("Revise")
+      ? "Your note — with Approve, for the next step to act on; with Revise, for another round"
+      : worded.length ? "Your note, sent with " + worded.join(" or ") : "Your note";
   $("stop-note").placeholder = worded.includes("Guide") ? "How should the run go on…"
-    : worded.length ? "What should change, and why…" : "";
+    : worded.includes("Approve") ? "What the next step should keep in mind — or what should change, and why…"
+      : worded.length ? "What should change, and why…" : "";
   $("stop-note").value = drafts.get(stop.id) || "";
   for (const id of ["stop-note-alert", "stop-alert", "stop-result"]) $(id).textContent = "";
   $("stop-actions").replaceChildren(...actions.map((action) => {
@@ -412,10 +427,13 @@ function renderStop(stop, timeline, to) {
     const button = el("button", role ? "Guide the " + role : LABELS[action] || action,
       PRIMARY.has(action) ? "primary" : DANGER.has(action) ? "danger" : "");
     button.type = "button";
-    button.title = role ? guidedHint(action, to, "your note") : HINTS[action] || "Answer the run: " + action;
+    button.title = role ? guidedHint(action, to, "your note")
+      : action === "approve" && noted ? APPROVE_NOTED : HINTS[action] || "Answer the run: " + action;
+    if (action === "approve" && noted) button.dataset.noted = "";
     button.onclick = () => answer(stop, action, button);
     return button;
   }));
+  approveSays();
 }
 
 // What the role you talked with last answered you in its terminal since its turn — what you settled with it there —

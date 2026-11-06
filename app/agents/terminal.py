@@ -43,16 +43,14 @@ TURN_HOOK = os.path.join(HERE, "turn_hook.py")
 # Where a turn's events file is named in its agent's environment; turn_hook.py, which imports nothing of ours,
 # reads the same name.
 TURN_EVENTS = "ORCHESTRA_TURN_EVENTS"
-# The hook definitions a kind trusted on this host, each with what the kind recorded for it (`hooks_trust`).
-HOOK_TRUST = os.path.join(paths.RUNTIME_ROOT, "hook-trust.json")
 # The page's token, shared by the workbench and both workers through the one checkout.
 TOKEN_FILE = os.path.join(paths.SECRETS, "workbench.token")
 COLS, ROWS = 160, 48
 TICK_SECONDS = 1.0
 # How long a turn whose kind reads a held start (`held`) may go without an event before what its screen shows is
-# read, and how much of the screen: its CLI starts and submits the prompt within seconds (measured, both hosts),
-# and a dialog that holds it is drawn last.
-BEGIN_SECONDS = 60
+# read, and how much of the screen: its CLI starts and submits the prompt within seconds (measured, both hosts) —
+# the rest is the operator's, to answer the dialog in the role's terminal — and a dialog that holds it is drawn last.
+BEGIN_SECONDS = 120
 HELD_TAIL = 64 * 1024
 # The page's subprotocol. The token is offered beside it, in the handshake's own header, so it
 # never appears in a URL the browser prints to its console or a proxy writes to a log.
@@ -193,27 +191,6 @@ class _Agent:
                 self.proc.stdin.close()
             except OSError:
                 pass
-
-
-class _Nowhere:
-    """A terminal that keeps nothing: what a CLI started for a moment draws stays with that CLI."""
-
-    def emit(self, data):
-        pass
-
-    def agent_gone(self, agent):
-        pass
-
-
-class _Briefly(_Agent):
-    """A kind's CLI started for a moment in a terminal of its own, outside any role's — to answer its own dialog —
-    contained as an agent is, what it draws read as text."""
-
-    def __init__(self, argv, cwd, env):
-        super().__init__(_Nowhere(), argv, cwd, env)
-
-    def text(self):
-        return plain(bytes(self.output))
 
 
 class Terminal:
@@ -412,18 +389,11 @@ def run_turn(worktree, argv, rdir, name, prompt, timeout, env, on_tick=None, *, 
     argv = [executable] + list(argv[1:])
     session = adapter.session_in(argv)
     # The turn's events file is also in the agent's environment, for a kind whose hook names it as `-`: one hook
-    # definition on every turn, which a vendor that trusts a hook by its exact definition trusts once.
+    # definition on every turn, which a vendor that trusts a hook by its exact definition — the operator trusting
+    # it, at the vendor's own review in the role's terminal — trusts once.
     env = dict(os.environ if env is None else env, **{TURN_EVENTS: paths["events"]})
-    turn_sink = lambda label, source, events=paths["events"]: sink(events, label, source)  # noqa: E731
-    argv = adapter.wire(argv, paths["events"], turn_sink)
-    # A kind that runs a hook only once it has trusted it has its hooks trusted before the turn — its own dialog,
-    # started for a moment with no prompt — so the dialog never holds the turn; what it cannot trust safely fails
-    # the step, saying why.
-    if hasattr(adapter, "hooks_trust"):
-        try:
-            adapter.hooks_trust(turn_sink, lambda extra: _Briefly([executable] + extra, worktree, env), HOOK_TRUST)
-        except adapter.HooksRefused as exc:
-            raise launch.ExecutorError(str(exc)) from exc
+    argv = adapter.wire(argv, paths["events"],
+                        lambda label, source, events=paths["events"]: sink(events, label, source))
     # Options such as `--add-dir` take several values; `--` keeps the prompt from becoming one of them.
     argv += ["--", prompt]
 
@@ -452,19 +422,13 @@ def run_turn(worktree, argv, rdir, name, prompt, timeout, env, on_tick=None, *, 
             if done is not None:
                 ok, message, session = done
                 return finish(0 if ok else 1, adapter.output(message, session))
-            # A start its CLI holds on a dialog for the operator fails the step saying why, rather than waiting out
-            # the turn's limit. Read only once the turn should long have begun: before, the screen may show the
-            # prompt itself, which can quote any dialog.
+            # A start its CLI holds on a dialog for the operator, unanswered, fails the step saying why, rather than
+            # waiting out the turn's limit; nothing here ever answers it. Read only once the turn should long have
+            # begun: before, the screen may show the prompt itself, which can quote any dialog.
             if not events and hasattr(adapter, "held") and time.monotonic() >= begun_by:
                 why = adapter.held(plain(bytes(agent.output[-HELD_TAIL:])))
                 if why:
                     finish(1, "")
-                    # What was remembered as trusted did not keep this start from being held: the next turn has
-                    # the kind check its hooks afresh.
-                    try:
-                        os.remove(HOOK_TRUST)
-                    except FileNotFoundError:
-                        pass
                     raise launch.ExecutorError("the turn did not begin within %ds: %s" % (BEGIN_SECONDS, why))
             rc = agent.returncode()
             if rc is not None:

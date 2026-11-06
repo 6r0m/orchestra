@@ -15,8 +15,9 @@ agent message. Never its `notify`: that event carries every input of the thread 
 program's last argument, which on a long thread outgrew Windows' command line — measured, `os error 206`, the
 event never written and the turn never ended. The hooks are one definition on every turn — the turn's events
 file named in the environment, which Codex passes on to them (measured) — since Codex runs a hook only once it
-has trusted that exact definition (`hooks_trust`); a start its review of hooks still holds is read off its screen
-(`held`).
+has trusted that exact definition. Trusting them is the operator's, once per host, at Codex's own review in the
+role's terminal, where a turn's start waits for it; such a start is read off the screen and fails the step, saying
+so (`held`). Never answered here: its *Trust all* trusts every hook waiting, whoever's.
 
 Its trust record: `[projects.'<repo>'] trust_level = "trusted"` in `~/.codex/config.toml`, or in the root
 `CODEX_HOME` names — only ever appended, never with a key it already holds, since two tables of one key are
@@ -63,20 +64,12 @@ PLAIN_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]*")
 # shell Codex runs it with, on either host.
 HOOK_EVENTS = ("UserPromptSubmit", "Stop")
 PLAIN_PART = re.compile(r"[A-Za-z0-9_./:@%+=,-]+")
-# Its review of hooks new or changed, as its interface draws it (measured, 0.159): how many wait, its answer that
-# trusts them — the second of its choices, which trusts every hook waiting, whoever's — and its composer, drawn
-# once it is ready; a dialog comes within a moment of the composer. Its config keys a hook's trust by the event in
-# snake case.
+# Its review of hooks new or changed, as its interface draws it before a turn's prompt (measured, 0.159 and
+# 0.166): how many wait.
 HOOK_DIALOG = re.compile(r"(\d+)\s*hooks?\b.{0,16}?new\s*or\s*changed", re.I | re.S)
-HOOK_READY = re.compile(r"Ask Codex to do anything|for shortcuts", re.I)
 # Its question whether to trust the folder it starts in, drawn before anything else where the folder's repository
 # is not trusted (measured, 0.166) — words run together as its interface draws them.
 FOLDER_DIALOG = re.compile(r"Trust\s*this\s*folder\?", re.I)
-TRUST_ALL = b"2\r"
-STARTED_ALONE = ["-c", "check_for_update_on_startup=false"]
-HOOK_KEYS = {"UserPromptSubmit": "user_prompt_submit", "Stop": "stop"}
-TRUST_SECONDS = 45
-DIALOG_SECONDS = 4
 CONFIG_FILE = os.path.join(".codex", "config.toml")
 TRUSTED = 'trust_level = "trusted"'
 # Where a table begins: a header at the start of a line. Only removal uses this; what the config already
@@ -150,126 +143,21 @@ def wire(argv, events, sink):
     return list(argv) + hook_flags(sink)
 
 
-class HooksRefused(RuntimeError):
-    """Its hooks could not be trusted here without trusting others: the operator reviews those first."""
-
-
-def hooks_trust(sink, start, record, home=None):
-    """Its hooks trusted on this host before a turn, so its review dialog never holds a turn: Codex runs a hook only
-    once it has trusted that exact definition (`[hooks.state]` in its config, a hash only it computes). The
-    definition is remembered in `record` with the hashes Codex wrote for it; while Codex still holds those, they
-    are trusted. Otherwise its interface is started for a moment twice — `start(args)`, no prompt, no model. First
-    without ours: a hook it asks to review then is another's — the operator's, a plugin's or the repository's — and
-    fails the step, nothing answered. Then with ours, a moment later: all it can ask to review now is ours, so its
-    *Trust all*, which trusts every hook waiting, is answered; its hashes are then remembered. Raises HooksRefused
-    when other hooks wait for review, or when no trust can be read. True when it trusted them now."""
-    flags = hook_flags(sink)
-    definition = json.dumps(flags)
-    # Keyed by the config the trust lives in too: two homes of Codex on one host — a demo's own — never share it.
-    definition = config_path(home) + "\n" + definition
-    remembered = _remembered(record).get(definition)
-    if remembered and _hook_hashes(home) == remembered:
-        return False
-    _review(start(STARTED_ALONE), home, None)
-    before = _all_hooks(home)
-    answered = _review(start(STARTED_ALONE + flags), home, before)
-    hashes = _hook_hashes(home)
-    others = {key: value for key, value in _all_hooks(home).items() if key not in hashes and before.get(key) != value}
-    if others:
-        raise HooksRefused("trusting the orchestra's hooks also trusted %s on this host: review them with /hooks in "
-                           "Codex" % ", ".join(sorted(others)))
-    # What it remembers of a config that is gone — a demo's own home, removed with it — goes too.
-    kept = {key: value for key, value in _remembered(record).items() if os.path.exists(key.split("\n", 1)[0])}
-    _files.replace(record, json.dumps(dict(kept, **{definition: hashes}), indent=1) + "\n")
-    return answered
-
-
-def _review(cli, home, before):
-    """Codex, started for a moment, read until it is ready, then ended. With `before` None it was started without
-    our hooks, so any hook it asks to review is another's: refused, nothing answered. Otherwise with ours: its dialog
-    answered *Trust all* — never for more hooks than ours — until it holds a trust for each of ours that its config
-    did not hold `before`. True when it answered."""
-    try:
-        answered, ready_at = False, None
-        deadline = time.monotonic() + TRUST_SECONDS
-        while time.monotonic() < deadline:
-            seen = cli.text()
-            if FOLDER_DIALOG.search(seen):
-                raise HooksRefused("Codex asks whether to trust this folder on this host, which a turn's repository "
-                                   "is trusted for before it starts: start codex in it and answer, or check its "
-                                   "trust record")
-            dialog = HOOK_DIALOG.search(seen)
-            if dialog and not answered:
-                waiting = int(dialog.group(1))
-                if before is None or waiting > len(HOOK_EVENTS):
-                    raise HooksRefused(
-                        "Codex on this host has hooks waiting for review that are not the orchestra's (%d) — yours, a "
-                        "plugin's or the repository's — and its Trust all would trust them with the orchestra's: "
-                        "review them with /hooks in Codex started in the run's worktree, then continue the run"
-                        % (waiting if before is None else waiting - len(HOOK_EVENTS)))
-                cli.write(TRUST_ALL)
-                answered = True
-            hashes = _hook_hashes(home)
-            whole = before is None or (len(hashes) == len(HOOK_EVENTS) and all(hashes.values()))
-            if answered and whole and hashes != _ours(before):
-                return True
-            if not answered and whole and HOOK_READY.search(seen):
-                # Ready with no dialog: nothing waits — or, ours given, Codex trusts them already. A dialog drawn
-                # after the composer comes within a moment of it, so ready is believed only once that moment passed.
-                ready_at = ready_at or time.monotonic()
-                if time.monotonic() - ready_at >= DIALOG_SECONDS:
-                    return False
-            time.sleep(0.2)
-        raise HooksRefused("Codex's review of hooks could not be read on this host within %ds: start codex in the "
-                           "run's worktree and review its hooks with /hooks" % TRUST_SECONDS)
-    finally:
-        cli.end()
-
-
 def held(text):
     """Why what Codex drew before its turn began holds the turn for the operator, or None: its review of hooks new or
-    changed — another's, or ours once it no longer holds them trusted as remembered — or its question whether to
-    trust the folder."""
+    changed — the orchestra's own on a host that has not trusted them, or since Codex changed, or another's — or its
+    question whether to trust the folder."""
     dialog = HOOK_DIALOG.search(text)
     if dialog:
-        return ("Codex waits for hooks to be reviewed before it starts the turn (%s): review what /hooks lists in "
-                "Codex started in the run's worktree on this host — nothing, when only the orchestra's own wait — "
-                "then continue the run, which trusts the orchestra's own again" % dialog.group(1))
+        return ("Codex waits in the role's terminal for %s hook(s) to be reviewed before it starts the turn — the "
+                "orchestra's own two, which end its turns, the first time on a host or after Codex changed, or "
+                "others new on it. Continue the run and answer it there: Review hooks shows each; trust the "
+                "orchestra's, whose command runs turn_hook.py, and any you recognise. Continue without trusting "
+                "leaves the turn unable to end" % dialog.group(1))
     if FOLDER_DIALOG.search(text):
-        return ("Codex asks whether to trust this folder before it starts the turn: start codex in the run's worktree "
-                "on this host and answer, then continue the run")
+        return ("Codex asks in the role's terminal whether to trust this folder before it starts the turn: continue "
+                "the run and answer it there")
     return None
-
-
-def _remembered(record):
-    """The definitions trusted before, each with the hashes Codex wrote for it; empty when there are none."""
-    try:
-        known = json.loads(_files.read(record) or "{}")
-    except ValueError:
-        return {}
-    return known if isinstance(known, dict) else {}
-
-
-def _all_hooks(home=None):
-    """Every hook its config records trust for: key -> trusted hash; empty when the config cannot be read."""
-    try:
-        import tomllib
-        state = ((tomllib.loads(_files.read(config_path(home))).get("hooks") or {}).get("state") or {})
-    except Exception:                               # noqa: BLE001 - unreadable: nothing is trusted
-        return {}
-    return {key: (value or {}).get("trusted_hash") for key, value in state.items() if isinstance(value, dict)}
-
-
-def _ours(hooks):
-    """Of a config's hook trust, what it holds for ours: given with `-c`, one per event, each the first of its
-    group, keyed `<root>\\<session-flags>\\config.toml:<event>:0:0` (measured)."""
-    wanted = {"%s:0:0" % HOOK_KEYS[label] for label in HOOK_EVENTS}
-    return {key: value for key, value in hooks.items()
-            if "<session-flags>" in key and ":".join(key.rsplit(":", 3)[1:]) in wanted}
-
-
-def _hook_hashes(home=None):
-    return _ours(_all_hooks(home))
 
 
 def completion(events, prompt, session):

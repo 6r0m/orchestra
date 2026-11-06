@@ -7,7 +7,8 @@ Workbench's): headless Edge, driven over the DevTools protocol, opens the page, 
 link, presses the run's button with that label — an answer to its stop, Stop run, Force terminate, or the
 start of the worker it is blocked by — or, given `stack` for the run, the one in the stack's popover,
 opened from its chips; the page's own confirmation answered yes, and each question it asked printed;
-given a note, it types it into the stop's own note first, as an answer's words are. Given `start`, it
+given a note, it types it into the stop's own note first, as an answer's words are, the page hearing it typed —
+so a button that then names the note, *Approve with note*, is pressed by that name. Given `start`, it
 opens New run and types the task into the page's own form, with the first repository it offers, and
 presses Start run; given `refused:<repo>:<task>` for it, it starts the run on that listed repository and
 reads the window the page opens once the run is refused: its exit code says whether the window says the
@@ -949,10 +950,14 @@ def main(url, run_id, label, said, note=None):
                     page.value(OPEN % json.dumps(run_id))
                     wait(lambda: page.value(OPENED), 60, "the run")
                     pressed = button("#run", label)
-            wait(lambda: page.value(pressed + " !== undefined"), 60, "the %r button" % label)
-            # Typed once its stop is drawn: drawing a new stop clears the note.
+            # Typed once its stop is drawn — drawing a new stop clears the note — and as typing is, heard by the page,
+            # whose buttons may say then that the note goes with them.
             if note and not typed:
-                page.value("document.getElementById('stop-note').value = %s; true" % json.dumps(note))
+                wait(lambda: page.value("document.getElementById('stop-actions').children.length > 0"), 60,
+                     "the run's stop")
+                page.value("(n => { n.value = %s; n.dispatchEvent(new Event('input')); return true; })"
+                           "(document.getElementById('stop-note'))" % json.dumps(note))
+            wait(lambda: page.value(pressed + " !== undefined"), 60, "the %r button" % label)
             region = "banners" if run_id == "stack" else page.value(REGION % pressed)
             page.value(pressed + ".click(); true")
             # The page asks before a press that stops, lands or removes work; the operator says yes, and what

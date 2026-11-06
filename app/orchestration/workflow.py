@@ -53,6 +53,9 @@ ACTIONS = {
 # The stops whose guidance may go to the architect instead; a run recorded before it offered the one route.
 GUIDED = ("blocker", "exhausted")
 GUIDE_THE_ARCHITECT = "guide-the-architect"
+# A note given with an approval goes on with it, as guidance to the stage approved into; a run recorded before
+# kept no note an approval carried — words the command line sent with every answer, `yes` among them.
+APPROVE_WITH_A_NOTE = "approve-with-a-note"
 HINTS = {
     "approval": "approve to start implementation, or revise with feedback for a new plan",
     "blocker": "guide with your decision to continue",
@@ -199,6 +202,12 @@ class FeatureRun:
                             return await self._end("DONE")
                         at += 1
                         await self._next(self.segments[at]["work"][1])
+                        # Your note, approving, is guidance to the stage approved into: its work, and the review
+                        # that judges it.
+                        note = (answer.get("text") or "").strip()
+                        if note and workflow.patched(APPROVE_WITH_A_NOTE):
+                            s["guidance"] = "The %s was approved, with this note for the work after it:\n\n%s" % (
+                                work, note)
                     review_next = not stands      # the plan changed: the architect judges it again
                     continue
                 # Guidance, or a revised plan or research: a new bounded episode. The operator's words
@@ -246,12 +255,14 @@ class FeatureRun:
         """What an approval shows besides the run's own feedback — after research, its brief — and where
         approving goes: on to `onward`, or to the run's end."""
         going = "end the run" if last else "go on to the %s" % onward
+        # Approving the run's end leaves no stage to read a note.
+        ends = {"ends": True} if last else {}
         if work in stages.ANSWERS:
-            return {"text": self.state.get("brief") or "",
-                    "hint": "approve to %s, or revise with feedback for new research" % going}
+            return dict(ends, text=self.state.get("brief") or "",
+                        hint="approve to %s, or revise with feedback for new research" % going)
         if work == "plan" and onward == "build":
-            return {}                     # HINTS["approval"], as a plan's approval has always read
-        return {"hint": "approve to %s, or revise with feedback for a new %s" % (going, work)}
+            return ends                   # HINTS["approval"], as a plan's approval has always read
+        return dict(ends, hint="approve to %s, or revise with feedback for a new %s" % (going, work))
 
     async def _stage(self, stage, gate=None, onward=None):
         """Run one stage to a result, stopping for the operator on each failure. False when aborted.
@@ -494,7 +505,7 @@ class FeatureRun:
                        % ", ".join(reopened["kept"]))
         return True
 
-    async def _stop(self, reason, text=None, hint=None):
+    async def _stop(self, reason, text=None, hint=None, ends=False):
         s = self.state
         self._unless_stopping()
         self.stops += 1
@@ -506,13 +517,18 @@ class FeatureRun:
         self.stop = {"id": "%s:%d" % (s["run_id"], self.stops), "reason": reason, "phase": s.get("phase"),
                      "todo": s.get("todo_path"), "feedback": feedback or "", "hint": hint or HINTS[reason],
                      "actions": actions, "since": workflow.now().isoformat()}
+        if ends:
+            self.stop["ends"] = True
         self._line("stopped: %s" % reason)
         if reason in TRACED_STOPS:
             await self._trace("record_stop", {"state": s, "stop": self.stop})
         await workflow.wait_condition(lambda: self.answer_given is not None)
         answer, self.answer_given, self.stop = self.answer_given, None, None
         if reason in TRACED_STOPS:
-            await self._trace("record_answer", {"state": s, "answer": answer.get("text") or answer["action"]})
+            said = answer.get("text") or answer["action"]
+            if answer["action"] == "approve" and answer.get("text"):
+                said = "approve: " + said         # a note with it, never mistaken for a revision
+            await self._trace("record_answer", {"state": s, "answer": said})
         return answer
 
     async def _end(self, status):
@@ -615,6 +631,9 @@ class FeatureRun:
                              % (named, ", ".join(stop["actions"])))
         if action in ("guide", "revise") and not (answer.get("text") or "").strip():
             raise ValueError("%s needs the feedback to act on" % action)
+        if action == "approve" and stop.get("ends") and (answer.get("text") or "").strip():
+            raise ValueError("approving ends the run, so no stage after it would read your note: approve without "
+                             "one, or revise with it")
         if action == "discard" and answer.get("confirm") is not True:
             raise ValueError("discard deletes the worktree and its branch, so it must be confirmed")
 

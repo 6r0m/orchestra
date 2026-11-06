@@ -194,6 +194,46 @@ class Routing(Scenario):
         self.assertIn("the premise holds: the shim stays", self.agent.calls[-1]["prompt"])
         self.assertEqual(run.stop["reason"], "approval", "the architect passed the plan it judged again")
 
+    def test_a_note_given_with_an_approval_is_guidance_to_the_stage_approved_into(self):
+        """Approve with a note: the run goes on, and the note reaches the work approved into and the review
+        that judges it — no plan round first, and nothing of it after that review."""
+        a1, _ = codex_review_first("PASS")
+        run = self.drive([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1),
+                          ("build-e2-1", 0, "built\n"), ("verify-e2-1", 0, codex_review_resumed("PATCH", "fix B")),
+                          ("build-e2-2", 0, "fixed\n"), ("verify-e2-2", 0, codex_review_resumed("PASS"))])
+        self.assertEqual(run.stop["reason"], "approval")
+        self.assertNotIn("ends", run.stop, "approving goes on to the build")
+        run.answer("yes keep the public API unchanged")
+        self.assertEqual(self.names(), ["plan-e1-1", "assess-e1-1", "build-e2-1", "verify-e2-1", "build-e2-2",
+                                        "verify-e2-2"], "on to the build, no plan round first")
+        prompts = {call["name"]: call["prompt"] for call in self.agent.calls}
+        for name in ("build-e2-1", "verify-e2-1"):
+            self.assertIn("keep the public API unchanged", prompts[name], name)
+            self.assertIn("The plan was approved, with this note", prompts[name], name)
+        for name in ("plan-e1-1", "assess-e1-1", "build-e2-2", "verify-e2-2"):
+            self.assertNotIn("keep the public API unchanged", prompts[name], name)
+
+    def test_yes_alone_approves_with_no_note(self):
+        a1, _ = codex_review_first("PASS")
+        run = self.drive([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1),
+                          ("build-e2-1", 0, "built\n"), ("verify-e2-1", 0, codex_review_resumed("PASS"))])
+        run.answer("yes")
+        self.assertEqual(run.stop["reason"], "final")
+        self.assertNotIn("# Operator guidance", self.agent.calls[2]["prompt"], "`yes` itself is no note")
+
+    def test_an_approval_that_ends_the_run_takes_no_note(self):
+        a1, _ = codex_review_first("PASS")
+        run = self.drive([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)],
+                         flow=["engineer:plan", "architect:assess", "you:approve"])
+        self.assertTrue(run.stop["ends"])
+        waiting = run.stop["id"]
+        code, said = run.answer("yes and then build it")
+        self.assertNotEqual(code, 0, said)
+        self.assertIn("ends the run", said)
+        self.assertEqual(run.stop["id"], waiting, "the run waits on")
+        self.assertEqual(run.answer("yes")[0], 0)
+        self.assertEqual(run.state["status"], "DONE")
+
     def test_guidance_to_the_architect_at_rounds_run_out_has_it_judge_again(self):
         legacy = dict(POLICY)
         legacy.pop("review_rounds", None)

@@ -69,12 +69,14 @@ agent questions are denied and real blockers reach the normal workflow stop. Onl
 reports such a dialog, through its hooks, and in practice a Claude architect: a Claude engineer is
 denied what it may not do rather than asked, and a Codex role never asks.
 
-Codex runs a hook only once it has been trusted, so the first Codex turn on a host has the orchestra's own hooks
-trusted through Codex's review, and every turn after needs nothing. Only the orchestra's own hooks are ever
-trusted this way: if other hooks wait for review on that host — yours, a plugin's or the repository's — the turn
-fails and says so, at once before it starts, or within a minute when they appear later and Codex stops at its
-review in the role's terminal, which you can answer there meanwhile. Review them with `/hooks` in Codex started in
-the run's worktree, then Continue.
+Codex runs a hook only once you have trusted it, and the orchestra's own two hooks are how a Codex turn ends. So
+the first Codex turn on a host — and the first after a Codex update that asks again — stops at Codex's *Hooks need
+review* in the role's terminal, before its prompt goes. Answer it there: *Review hooks* shows each one; the
+orchestra's run `turn_hook.py`. Trust them, and every turn after asks nothing. The same review
+comes up for any other hook new on that host — yours, a plugin's or the repository's. The orchestra never answers
+it for you: Codex's *Trust all* would trust whatever waits. Left unanswered for two minutes, the step fails and
+says what waits; Continue, and answer it in the terminal then. *Continue without trusting* leaves the turn unable
+to end.
 
 *New run* opens the form that starts one — and with no runs at all, the page opens on it: on a
 repository named in `.orchestra/repos.json` or in the file named by `ORCHESTRA_REPOS` — its menu
@@ -109,6 +111,12 @@ it, with that worker's Start beside it. A run whose worker is down is still show
 When a run waits for you, its decision comes first, with what to judge it by: the brief at a research's
 approval, the architect's assessment and the plan at a plan's, the architect's verification and the
 change at the final gate, the blocker or the last finding, or the failure, whole, to copy.
+
+At an approval your note goes with either answer. With *Revise*, it is what should change, for another round of
+the same work. With *Approve* — the button then reads *Approve with note* — the run goes on, and the note goes
+with it to the next step: the engineer building an approved plan reads it as your guidance, and so does the
+architect verifying that build; the review after that no longer carries it. An approval that ends the run has
+no next step, so it takes no note.
 
 A blocker, or rounds run out, comes from the architect's review of the engineer's work, and only you can say
 whom your guidance is for, so it takes it either way. *Guide the engineer* sends your note to the engineer, whose
@@ -295,8 +303,8 @@ $O --show <run-id>                 # the stage table and the architect's words
 $O --worktrees --repo work/webapp  # every worktree, and whether its work is merged
 ```
 
-Each stop prints what it asks and the answers it takes: `yes` or `revise <feedback>` at an approval —
-the plan's, with its summary, or the research's, with its brief; your guidance at a blocker or an
+Each stop prints what it asks and the answers it takes: `yes`, `yes <note for the next stage>` or
+`revise <feedback>` at an approval — the plan's, with its summary, or the research's, with its brief; your guidance at a blocker or an
 exhausted budget — for the engineer, or `guide architect <your guidance>` for the architect; `continue` after a
 failed stage. A build that could not meet one of its plan's
 completion criteria comes to you as such a blocker, naming the criterion: only your guidance sets one

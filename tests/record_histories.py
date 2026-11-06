@@ -127,6 +127,18 @@ def blocker_guidance_to_the_architect_stop():
     return run
 
 
+def approval_with_a_note_stop():
+    """A plan approved with a note: on to the build, which takes it as guidance, as its verification does."""
+    a1, _ = codex_review_first("PASS")
+    E.host([("plan-e1-1", 0, "p\n"), ("assess-e1-1", 0, a1),
+            ("build-e2-1", 0, "b\n"), ("verify-e2-1", 0, codex_review_resumed("PASS"))])
+    run = E.Run()
+    run.answer("yes keep the API as it is")
+    E.run(run.handle.cancel())
+    E.run(E.cli.follow(run.handle, answered=run.stop["id"]))
+    return run
+
+
 def final_revise_conflict_merge():
     a1, _ = codex_review_first("PASS")
     E.host([("plan-e1-1", 0, "p\n"), ("assess-e1-1", 0, a1),
@@ -282,7 +294,7 @@ def base_moved_judged_again_then_at_the_merge():
 RECORDINGS = (patch_loop_approval_merge, blocker_guidance_failure_continue_discard, final_revise_conflict_merge,
               approval_stop, final_merge_stop_lands, final_merge_no_worker_continue, research_revise_plan_merge,
               plan_only_done, closeout_revise_conflict_reopen_merge, base_moved_judged_again_then_at_the_merge,
-              blocker_guidance_to_the_architect_stop)
+              blocker_guidance_to_the_architect_stop, approval_with_a_note_stop)
 
 
 def main(names):

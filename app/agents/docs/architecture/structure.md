@@ -69,15 +69,13 @@ prompt id, or Codex's `Stop` for the turn its `UserPromptSubmit` began with our 
 never on a first event. Every hook is given its event on stdin: one carried on a command line grows with the
 session and outgrows Windows' (Codex's `notify`, measured). Codex runs a hook only once it has trusted that exact
 definition, so its hooks are one definition on every turn — the turn's events file named in the environment
-(`ORCHESTRA_TURN_EVENTS`), which both vendors pass on to their hooks — and before a turn the kind has them
-trusted (`hooks_trust`) through Codex's own review dialog, Codex started for a moment with no prompt: first without
-our hooks, when anything it asks to review is another's — the operator's, a plugin's or the repository's — and
-fails the step with nothing answered; then with them, when all it can ask to review is ours, so its *Trust all*,
-which trusts every hook waiting, is answered. Never by a count of the hooks waiting: one of ours trusted and
-another's new make as many as ours. What Codex records then is remembered in `tmp/orchestration/hook-trust.json`,
-so a later turn starts Codex only for itself. A start a dialog still holds — another's hook new since, or ours no
-longer trusted as remembered — records no event: a minute on, the kind reads the dialog off the screen (`held`)
-and the step fails, saying what to review, the record dropped so that the next turn checks afresh.
+(`ORCHESTRA_TURN_EVENTS`), which both vendors pass on to their hooks — so the operator trusts them once on a
+host, at Codex's own review, which it draws before a turn's prompt goes in the role's terminal. Nothing here ever
+answers that review: its *Trust all* trusts every hook waiting, whoever's, and Codex trusts no hook by name, so
+no automatic answer could be kept to ours — not by a count of the hooks waiting, nor by a look a moment before,
+which a hook new in between would pass. A start held there records no event: two minutes on, unless the operator
+has answered it, the kind reads the review off the screen (`held`) and the step fails, saying what waits and where
+to answer it when the run continues.
 Claude's notification and tool-finish hooks also record their events, keeping only the session and a
 notification's kind — never what a dialog says or what a tool read or wrote. Every event is stamped with when
 its hook recorded it (`_at`), so answers in two roles' records are ordered by when each came, never by when a

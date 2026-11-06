@@ -133,128 +133,15 @@ class CodexHooks(unittest.TestCase):
                 found[key[len("hooks."):]] = tomllib.loads("v = " + toml)["v"][0]["hooks"][0]
         return found
 
-    OURS = {"C:\\<session-flags>\\config.toml:user_prompt_submit:0:0": "sha256:aa",
-            "C:\\<session-flags>\\config.toml:stop:0:0": "sha256:bb"}
-
-    THEIRS = {"C:\\repo\\.codex\\hooks.json:stop:0:0": "sha256:cc"}
-
-    class Codex:
-        """Codex's review of hooks as it behaves (measured, 0.159): started, it asks to review each hook it does not
-        trust as it is now — ours when given with `-c`, `others` always — and its Trust all trusts every one it
-        asked for, whoever's."""
-
-        def __init__(self, config, ours, others):
-            self.config, self.ours, self.others, self.started = config, dict(ours), dict(others), []
-
-        def __call__(self, args):
-            given = any(arg.startswith("hooks.") for arg in args)
-            self.started.append(CodexHooks.Started(self, dict(self.others, **(self.ours if given else {}))))
-            return self.started[-1]
-
-        def trust(self, waiting):
-            os.makedirs(os.path.dirname(self.config), exist_ok=True)
-            with open(self.config, "a", encoding="utf-8") as fh:
-                for key, value in waiting.items():
-                    fh.write("\n[hooks.state.'%s']\ntrusted_hash = \"%s\"\n" % (key, value))
-            for held in (self.ours, self.others):
-                for key in waiting:
-                    held.pop(key, None)
-
-    class Started:
-        def __init__(self, codex, waiting):
-            self.codex, self.waiting, self.sent, self.ended = codex, waiting, [], False
-
-        def text(self):
-            dialog = ("Hooks need review %d hooks are new or changed. 1. Review hooks 2. Trust all and continue "
-                      % len(self.waiting)) if self.waiting else ""
-            return dialog + "Ask Codex to do anything"
-
-        def write(self, data):
-            self.sent.append(data)
-            if data.startswith(b"2"):
-                self.codex.trust(self.waiting)
-
-        def end(self):
-            self.ended = True
-
-    def trusting(self, ours=None, others=None):
-        """Codex in a home of its own: `ours` those of our hooks it does not trust as they are, `others` another's
-        hooks waiting for review."""
-        from unittest import mock
+    def test_a_start_held_for_the_operator_is_read_off_its_screen_and_said(self):
         from app.agents.adapters import codex
-        home = self.home = tempfile.mkdtemp(prefix="orchestra-codex-home-")
-        self.addCleanup(lambda: __import__("shutil").rmtree(home, True))
-        # A dialog comes within a moment of the composer; this stand-in draws both at once.
-        patched = mock.patch.object(codex, "DIALOG_SECONDS", 0.3)
-        patched.start()
-        self.addCleanup(patched.stop)
-        self.record = os.path.join(home, "hook-trust.json")
-        started = self.Codex(codex.config_path(home), self.OURS if ours is None else ours, others or {})
-
-        def trust():
-            return codex.hooks_trust(lambda label, source, events="e": ["/py", "/hook.py", events, label, source],
-                                     started, self.record, home=home)
-        return codex, started, trust
-
-    def trusted(self, entries):
-        from app.agents.adapters import codex
-        os.makedirs(os.path.dirname(codex.config_path(self.home)), exist_ok=True)
-        with open(codex.config_path(self.home), "w", encoding="utf-8") as fh:
-            fh.write("".join("[hooks.state.'%s']\ntrusted_hash = \"%s\"\n" % item for item in entries.items()))
-
-    def config(self):
-        from app.agents.adapters import codex
-        try:
-            with open(codex.config_path(self.home), encoding="utf-8") as fh:
-                return fh.read()
-        except FileNotFoundError:
-            return ""
-
-    def test_its_hooks_are_trusted_once_by_its_own_dialog_and_then_need_none(self):
-        codex, started, trust = self.trusting()
-        self.assertTrue(trust())
-        self.assertEqual([(each.sent, each.ended) for each in started.started], [([], True), ([codex.TRUST_ALL], True)],
-                         "started alone first, nothing answered; then with ours, its dialog answered")
-        self.assertFalse(trust(), "remembered with what Codex wrote: no dialog again")
-        self.assertEqual(len(started.started), 2)
-
-    def test_codex_trusting_ours_already_is_asked_nothing(self):
-        codex, started, trust = self.trusting(ours={})
-        self.trusted(self.OURS)
-        self.assertFalse(trust())
-        self.assertEqual([each.sent for each in started.started], [[], []])
-        self.assertFalse(trust(), "and remembered")
-        self.assertEqual(len(started.started), 2)
-
-    def test_what_it_remembers_of_a_config_that_is_gone_is_dropped(self):
-        # A demo's own Codex home goes with the demo: its entry is not kept, demo after demo.
-        codex, started, trust = self.trusting()
-        gone = os.path.join(self.home, "vanished", "config.toml") + "\n[]"
-        with open(self.record, "w", encoding="utf-8") as fh:
-            json.dump({gone: {"key": "sha256:old"}}, fh)
-        self.assertTrue(trust())
-        with open(self.record, encoding="utf-8") as fh:
-            kept = json.load(fh)
-        self.assertNotIn(gone, kept)
-        self.assertEqual(len(kept), 1, "what it trusted now")
-
-    def test_other_hooks_waiting_for_review_are_never_trusted_for_the_operator(self):
-        codex, started, trust = self.trusting(others=self.THEIRS)
-        with self.assertRaises(codex.HooksRefused) as refused:
-            trust()
-        self.assertIn("/hooks", str(refused.exception))
-        self.assertEqual([(each.sent, each.ended) for each in started.started], [([], True)], "nothing answered; ended")
-        self.assertNotIn(list(self.THEIRS)[0], self.config())
-
-    def test_one_of_ours_trusted_and_anothers_waiting_never_answers_trust_all(self):
-        # Two wait, as many as ours, but one is another's: no count of hooks proves that only ours wait.
-        first, second = self.OURS.items()
-        codex, started, trust = self.trusting(ours=dict([second]), others=self.THEIRS)
-        self.trusted(dict([first]))
-        with self.assertRaises(codex.HooksRefused):
-            trust()
-        self.assertEqual([each.sent for each in started.started], [[]], "Trust all never answered")
-        self.assertNotIn(list(self.THEIRS)[0], self.config(), "their hook not trusted")
+        # As Codex 0.166 drew it, measured: its words run together where it draws them so.
+        review = ("Hooks need review1 hook is new or changed.Hooks can run outside the sandbox after you trust "
+                  "them.\u203a 1. Review hooks 2.Trustallandcontinue3.Continuewithouttrusting(hookswon'trun)")
+        self.assertIn("1 hook(s)", codex.held(review))
+        self.assertIn("role's terminal", codex.held(review))
+        self.assertIn("role's terminal", codex.held("Trust this folder? 1. Yes 2. No"))
+        self.assertIsNone(codex.held("\u203a Ask Codex to do anything ? for shortcuts"))
 
     def test_one_definition_on_every_turn_its_file_in_the_environment_and_no_notify(self):
         first, second = self.wired("one/turn.events"), self.wired("two/turn.events")

@@ -42,15 +42,18 @@ FOLLOW_SECONDS = 1
 # by your words, and which ask for --confirm.
 SHORTHANDS = {"yes": "approve", "y": "approve"}
 TAKES_WORDS = ("guide", "revise")
+# An answer your words may follow, as a note it carries on — and that goes on without one.
+MAY_TAKE_WORDS = ("approve",)
 CONFIRMED = ("discard",)
 
 
 def parse_answer(stop, text, confirm=False):
     """The operator's typed answer as one of the stop's published actions; None when it names none.
 
-    `yes` approves; an action that takes your words is followed by them, a revise's role first when
-    the stop publishes one per role; any other action is typed alone. At a stop that takes guidance,
-    anything else typed is that guidance.
+    `yes` approves, and words after it are a note the approval carries to the next stage; an action
+    that takes your words is followed by them, a revise's role first when the stop publishes one per
+    role; any other action is typed alone. At a stop that takes guidance, anything else typed is that
+    guidance.
     """
     words = (text or "").strip()
     head, _, rest = words.partition(" ")
@@ -65,6 +68,9 @@ def parse_answer(stop, text, confirm=False):
         answer = {"action": "%s:%s" % (name, role.lower()), "text": after.strip()}
     elif name in offered and name in TAKES_WORDS:
         answer = {"action": name, "text": rest.strip()} if rest.strip() else None
+    elif name in offered and name in MAY_TAKE_WORDS:
+        # Only the words after it: `yes` itself is no note.
+        answer = {"action": name, "text": rest.strip()}
     elif name in offered and not rest.strip():
         answer = {"action": name, "text": words}
     elif "guide" in offered and words:
@@ -78,7 +84,7 @@ def answer_line(stop):
     """The stop's answers as they are typed here."""
     def typed(action):
         if action == "approve":
-            return '"yes"'
+            return '"yes"' if stop.get("ends") else '"yes [<note for the next stage>]"'
         if action == "guide":
             return '"<your guidance>"'
         spelled = action.replace(":", " ")

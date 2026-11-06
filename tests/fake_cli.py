@@ -176,11 +176,10 @@ def completer(brain, argv, prompt, foreign=False):
         return complete
 
 
-def codex_hold(argv):
-    """Codex's review of hooks, as measured on 0.159, drawn before anything else: each hook given with `-c`, or in
-    the repository's `.codex/hooks.json`, that its config does not trust with its present definition — how many —
-    and, on its second choice, every one of them trusted, recorded in `[hooks.state]` with a hash of its definition.
-    Until a key is read, nothing else happens."""
+def codex_waiting(argv):
+    """The hooks Codex asks to review, as measured on 0.159: each given with `-c`, or in the repository's
+    `.codex/hooks.json`, that its config does not trust with its present definition — its config, and each such
+    hook's key and the hash of its definition."""
     import hashlib
     import tomllib
     home = os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
@@ -200,29 +199,32 @@ def codex_hold(argv):
         given.update({"%s:%s:0:0" % (project, snake(event)): groups for event, groups in theirs.items()})
     wanted = {key: "sha256:" + hashlib.sha256(json.dumps(groups, sort_keys=True).encode("utf-8")).hexdigest()
               for key, groups in given.items()}
-    new = {key: value for key, value in wanted.items() if (state.get(key) or {}).get("trusted_hash") != value}
+    return config, {key: value for key, value in wanted.items()
+                    if (state.get(key) or {}).get("trusted_hash") != value}
+
+
+def codex_trust(argv):
+    """Every hook Codex would ask to review trusted, as its Trust all records them."""
+    config, new = codex_waiting(argv)
+    os.makedirs(os.path.dirname(config), exist_ok=True)
+    with open(config, "a", encoding="utf-8") as fh:
+        for key, value in new.items():
+            fh.write("\n[hooks.state.'%s']\ntrusted_hash = \"%s\"\n" % (key, value))
+
+
+def codex_hold(argv):
+    """Codex's review of hooks, drawn before its prompt goes: how many wait, and on its second choice — the
+    operator's, in its terminal — every one of them trusted. Until a key is read, nothing else happens."""
+    _, new = codex_waiting(argv)
     if new:
         draw("Hooks need review %d %s new or changed." % (len(new), "hook is" if len(new) == 1 else "hooks are"))
         draw("1. Review hooks 2. Trust all and continue 3. Continue without trusting")
         if read_key() == "2":
-            os.makedirs(home, exist_ok=True)
-            with open(config, "a", encoding="utf-8") as fh:
-                for key, value in new.items():
-                    fh.write("\n[hooks.state.'%s']\ntrusted_hash = \"%s\"\n" % (key, value))
-
-
-def codex_review(argv):
-    """Codex started with no prompt: its review of hooks, then its composer, until it is ended."""
-    codex_hold(argv)
-    draw("Ask Codex to do anything")
-    while True:
-        read_key()
+            codex_trust(argv)
 
 
 def main():
     brain, argv = sys.argv[1], sys.argv[2:]
-    if brain == "codex" and "--" not in argv:
-        return codex_review(argv)
     if brain == "codex":
         # Its prompt waits until its review of hooks is answered.
         codex_hold(argv)

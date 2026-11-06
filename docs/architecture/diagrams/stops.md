@@ -17,7 +17,7 @@ graph TD
     assess -. PATCH / UNVERIFIED .-> plan
     assess -. "PASS, no approval" .-> build
     assess -. "approval · blocker · exhausted" .-> stop1{{stop}}
-    stop1 -. approve .-> build
+    stop1 -. "approve · with a note, as guidance" .-> build
     stop1 -. "revise · guide" .-> plan
     stop1 -. "guide architect" .-> assess
     assess -. "PASS, a flow with no build" .-> done([DONE])
