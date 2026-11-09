@@ -1,10 +1,16 @@
 // Pi owns settlement and the session; this extension only records evidence for the controller.
 import fs from "node:fs";
 import path from "node:path";
+import { VERSION } from "@earendil-works/pi-coding-agent";
 
 export default function (pi) {
+  // Older settlement events cannot distinguish an abort during tools or the final boundary from success.
+  const version = /^(\d+)\.(\d+)\.(\d+)(?:\+[\w.-]+)?$/.exec(VERSION);
+  if (!version || Number(version[1]) < 1 || (Number(version[1]) === 1 && Number(version[2]) < 1)) {
+    process.stderr.write("Orchestra requires Pi 1.1.0 or newer for reliable aborted-settlement reporting\n");
+    process.exit(1);
+  }
   let last = null;
-  let outcome = "completed";
   pi.registerFlag("orchestra-resume-session", {type: "string", description: "The exact session the controller resumes"});
   function emit(hook, ctx, fields = {}) {
     const file = process.env.ORCHESTRA_TURN_EVENTS;
@@ -48,7 +54,6 @@ export default function (pi) {
   });
   pi.on("input", (event, ctx) => {
     last = null;
-    outcome = "completed";
     emit("PiInput", ctx, {prompt: event.text, source: event.source});
   });
   pi.on("message_end", (event, ctx) => {
@@ -58,14 +63,13 @@ export default function (pi) {
     emit("PiGeneration", ctx, {answer, provider: last.provider, model: last.model, api: last.api,
       usage: last.usage, stop_reason: last.stopReason});
   });
-  pi.on("agent_before_settle", (event) => { outcome = event.outcome; });
-  pi.on("agent_settled", (_event, ctx) => {
-    if (outcome === "aborted" || last?.stopReason === "aborted") {
+  pi.on("agent_settled", (event, ctx) => {
+    if (event.aborted === true || last?.stopReason === "aborted") {
       emit("PiInterrupted", ctx);
       return;
     }
     const answer = (last?.content || []).filter(part => part.type === "text").map(part => part.text).join("\n");
-    emit("PiSettled", ctx, {ok: Boolean(last) && outcome !== "error" && !["error", "length"].includes(last.stopReason),
+    emit("PiSettled", ctx, {ok: event.aborted === false && last?.stopReason === "stop",
       answer: answer || last?.errorMessage || "", stop_reason: last?.stopReason});
   });
 }

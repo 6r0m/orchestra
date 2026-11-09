@@ -744,12 +744,14 @@ at commit `a60f864`.
   the summary the operator approves from is the one the architect wrote about the plan it read; and
   a merge still commits only the tree its last `PASS` judged. What a Claude engineer
   may do beyond editing its worktree is what the host's own Claude settings allow and deny:
-  those rules are part of its boundary. Both interactive CLIs stop at a trust dialog in a
-  repository they have no record of, so a run records its repository for them on its target host
+  those rules are part of its boundary. Claude and Codex can stop at a repository-access dialog,
+  so a run records that access decision for them on its target host
   before any agent starts — starting a run on a repository is that decision, whether it came from
   `repos.json` or as a path, and the record covers every later run of that repository
   ([tools/README.md](../../tools/README.md)). The record is best effort: one that
-  could not be written leaves the dialog, and a turn left waiting there ends at its timeout. An architect's turns nest under their stage
+  could not be written leaves the dialog. Executable-resource trust is a separate decision left to
+  the operator in the vendor terminal; [agents](../../app/agents/README.md) owns that boundary and
+  the held-start check. An architect's turns nest under their stage
   only with a Codex tracing plugin built with the parent-trace and
   turn-lifecycle changes that [tools/README.md](../../tools/README.md) names,
   kept under the orchestration's own directory on each host because Codex

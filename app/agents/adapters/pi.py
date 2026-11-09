@@ -46,7 +46,7 @@ def program(role):
 
 
 def command(role, resume_id, traced=None):
-    argv = [program(role), "--tui-mode", "regular", "--approve"]
+    argv = [program(role), "--tui-mode", "regular"]
     for key, flag in (("provider", "--provider"), ("model", "--model"), ("effort", "--thinking")):
         if role.get(key):
             argv += [flag, role[key]]
@@ -73,6 +73,15 @@ def session_in(argv):
 
 def wire(argv, events, sink):
     return list(argv) + ["--extension", BRIDGE]
+
+
+def held(text):
+    screen = " ".join(text.split())
+    if ("Trust project folder?" in screen and "settings and resources" in screen
+            and "execute project extensions." in screen and "Do not trust" in screen):
+        return ("Pi asks whether to trust project settings, packages and project extensions in the role's terminal. "
+                "Continue the run and review the prompt there; Orchestra does not answer or save a trust decision")
+    return None
 
 
 def _ours(event, session):

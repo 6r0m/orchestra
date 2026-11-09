@@ -2,9 +2,10 @@
 
 An interactive CLI stops at a trust dialog the first time it starts in a repository it has no record of,
 and a stopped turn waits until someone answers it in the page — for an unattended run, until its timeout.
-The dialog asks exactly what the operator answered by starting a run on that repository: an entry in the
-descriptors, or a path they typed into the workbench. So a run records that answer for the kinds it will
-use, on the host it will use, before any agent starts. Where each kind keeps its record, and how it is
+An access-only dialog asks what the operator answered by starting a run on that repository: an entry in the
+descriptors, or a path they typed into the workbench. A run records that answer only for kinds providing the
+`trust_ensure` adapter hook. Approval to load executable project resources remains with the operator in the
+vendor's own terminal; it is not an access-only trust record. Where each kind keeps its record, and how it is
 written, is that kind's own (`app.agents.adapters`).
 
 The record is per repository, not per run: a CLI resolves a run's worktree to the repository it belongs

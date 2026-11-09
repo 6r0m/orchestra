@@ -66,12 +66,17 @@ when preparing a run; no vendor path crosses the Settings API. What holds a turn
 runs with — the vendor's sandbox, or the vendor's own rules alone — is each kind's to state, and
 Settings shows a role the words of the kind chosen for it.
 
-The Pi adapter targets the native lifecycle API in Pi 1.0.4. Pi profiles select their provider, model
-and thinking level. Their optional launcher names a managed
+The Pi adapter requires Pi 1.1.0 or newer, whose final settlement reports whether the run was aborted.
+The bridge refuses older or unrecognizable releases before work; missing abort status never means success.
+Pi profiles select their provider, model and thinking level. Their optional launcher names a managed
 wrapper instead of the default executable; preparation checks the same program that will run. Credentials
 stay with Pi's native authentication store or the worker's environment. Orchestra neither copies them nor
-changes the host's active provider. Pi's regular TUI keeps scrollback; its invocation trusts this worktree
-for this session. Read access allows only read, grep, find and ls and disables MCP. Write access excludes
+changes the host's active provider. Pi's regular TUI keeps scrollback. Project trust remains Pi's decision,
+using the operator's saved decisions, user-level policy and extensions, or its own interactive prompt.
+Orchestra supplies no trust override and writes no Pi trust record: trust can authorize repository-supplied
+settings, packages and executable extensions. An unanswered native trust prompt uses the existing held-start
+check, failing after two minutes with instructions to Continue and review it in the role's terminal.
+Read access allows only read, grep, find and ls and disables MCP. Write access excludes
 the PowerShell tool so a managed installation's shell permission rules remain applicable. Installed
 extensions still execute as the host user: these settings provide no operating-system sandbox.
 Skill discovery includes native skill directories and registered local packages' declared skill globs.
@@ -117,7 +122,9 @@ which a hook new in between would pass. A start held there records no event: two
 has answered it, the kind reads the review off the screen (`held`) and the step fails, saying what waits and where
 to answer it when the run continues.
 Pi uses its native `agent_settled` notification after the controller's input, not `agent_end`, which can
-precede retries or compaction. Aborted settlement ends no turn; a later typed instruction can finish it.
+precede retries or compaction. Its explicit aborted flag is authoritative even when the last assistant
+message was a tool call and no pre-settlement callback ran. Aborted settlement ends no turn; a later
+typed instruction can finish it. A missing abort flag or non-final assistant response is never success.
 Its assistant messages record each generation's native token buckets for the observability owner to
 upload under the stage. A resumed session is an exact native session file: a missing file is session loss
 before work; unreadable, malformed or mismatched identity is a refusal, never a new conversation.
