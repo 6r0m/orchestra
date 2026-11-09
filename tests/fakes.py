@@ -32,6 +32,9 @@ def first_message_for(settings, role, message):
         return codex_first_out(message)
     if kind == "claude-code":
         return message, None
+    if kind == "pi":
+        session = "session-%s.jsonl" % uuid.uuid4()
+        return json.dumps({"session_file": session, "answer": message}) + "\n", session
     raise AssertionError("no fake first message for agent kind %r" % kind)
 
 
@@ -46,6 +49,8 @@ def review_resumed_for(settings, role, verdict, feedback="fb"):
         return codex_review_resumed(verdict, feedback)
     if kind == "claude-code":
         return json.dumps({"verdict": verdict, "feedback": feedback}) + "\n"
+    if kind == "pi":
+        return json.dumps({"answer": json.dumps({"verdict": verdict, "feedback": feedback})}) + "\n"
     raise AssertionError("no fake resumed review for agent kind %r" % kind)
 
 

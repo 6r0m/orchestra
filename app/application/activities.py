@@ -191,9 +191,9 @@ class Activities:
             raise ApplicationError(str(exc), type="Refused", non_retryable=True)
         # The agents' programs are theirs to name; that one is missing is this host's to say, before any git
         # is read, any worktree made or any agent started.
-        for adapter in kinds:
-            if not self.which(adapter.EXECUTABLE):
-                raise ApplicationError("%s is not installed on the %s host" % (adapter.EXECUTABLE, selected["target"]),
+        for program in dict.fromkeys(adapters.executable(role) for role in policy["roles"].values()):
+            if not self.which(program):
+                raise ApplicationError("%s is not installed on the %s host" % (program, selected["target"]),
                                        type="Refused", non_retryable=True)
         try:
             resolved = self.repositories.resolve(selected, policy["targets"][selected["target"]]["worktree_root"])
@@ -419,6 +419,8 @@ class Activities:
         except Exception as exc:
             # A failed step leaves no agent behind, whichever check failed it.
             terminal.end_agent(state["run_id"], role_name)
+            # A failed model turn can still have spent tokens; adapters with native turn records need no final session.
+            T.run_upload(T.optional("upload", lambda: _answer(adapter, "upload", None, context)), span)
             cut = _cut_short(state["run_id"] in self._stopped)
             if cut == "stopped":
                 # The operator stopped the run: the step did not fail, and its row says only that (D20).

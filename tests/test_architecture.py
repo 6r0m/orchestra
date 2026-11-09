@@ -394,7 +394,8 @@ def _docstrings(tree):
 def vendor_strings(source, words, exempt=frozenset()):
     """Every string in the code under `source`, outside `agents/adapters`, that holds one of `words` in
     any case, as (file, line, string). Docstrings and comments are prose, and are not read."""
-    pattern = re.compile("|".join(re.escape(word) for word in sorted(words)), re.IGNORECASE)
+    pattern = re.compile(r"(?<![A-Za-z0-9])(?:" + "|".join(re.escape(word) for word in sorted(words))
+                         + r")(?![A-Za-z0-9])", re.IGNORECASE)
     adapters = os.path.join(source, "agents", "adapters")
     found = []
     for path in source_files(source):
@@ -678,6 +679,11 @@ class TheCheckersCanFail(unittest.TestCase):
             self.assertEqual(vendor_strings(root, {"claude-code", "claude", "codex"}, {"orch-claude-settings-"}),
                              [("agents/nodes.py", 4, "claude-code"), ("agents/nodes.py", 5, "--Codex-flag"),
                               ("observability/sweep.py", 2, "orch-claude-settings-2")])
+
+    def test_short_kind_names_do_not_match_inside_other_words(self):
+        with tempfile.TemporaryDirectory() as root:
+            _tree(root, {"agents/nodes.py": 'words = ["episode", "StartupInfo", "/api/", "--pi-flag", "pi"]\n'})
+            self.assertEqual([row[2] for row in vendor_strings(root, {"pi"})], ["--pi-flag", "pi"])
 
     def test_it_finds_a_nested_unit_test(self):
         with tempfile.TemporaryDirectory() as root:

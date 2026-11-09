@@ -707,6 +707,21 @@ def run_upload(described, span=None):
     WARNING so the trace itself says it is incomplete, and never costs the run."""
     if not described:
         return
+    for generation in described.get("generations") or ():
+        ids = _ids(described.get("traceparent"))
+        if not ids or getattr(span, "client", None) is None:
+            continue
+        try:
+            from opentelemetry import trace as otel
+            with span.client.start_as_current_observation(
+                    name="LLM Call", as_type="generation", model=generation.get("model"),
+                    trace_context={"trace_id": ids[0], "parent_span_id": ids[1]}) as row:
+                _not_a_root(otel.get_current_span())
+                row.update(output=generation.get("output"), usage_details=generation.get("usage_details"),
+                           metadata=generation.get("metadata"))
+        except Exception as exc:
+            _warn_once("generation upload", type(exc).__name__)
+            warn(span, "telemetry_degraded", "a model generation could not be recorded: %s" % type(exc).__name__)
     for note in described.get("notes") or ():
         _warn_once(note["key"], note["say"])
         warn(span, "telemetry_degraded", note["degraded"])

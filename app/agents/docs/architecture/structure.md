@@ -12,6 +12,7 @@ the turn's explicit result back out.
 - `launch` — one agent process from an argv list, with its whole descendant tree contained; and `read`, a short read-only command that ends with the process that started it — on Windows even when that process is killed.
 - `ptyhost` — the pseudo-terminal the agent draws in; launched by path, inside the containment.
 - `turn_hook` — the vendors' own completion wiring, writing a turn's events into that turn's file; launched by path, by the vendor.
+- `pi_events` — Pi's native lifecycle extension, recording settlement and model usage in that same turn file.
 - `nodes` — the prompt a turn is given, built as labelled parts it is rendered from byte for byte, the agent argv, session identity, verdict parsing and the failure classes.
 - `adapters` — each vendor CLI's arguments, skill invocation syntax, installed skill roots and other kind-specific mechanics behind one contract.
 - `trust` — telling this host's agent CLIs that a run's repository is one the operator works in, so no turn stops at their trust dialog.
@@ -32,6 +33,7 @@ runs when, which is [orchestration](../../../orchestration/README.md). Any repos
 | `launch.py` | one contained process tree per agent, and a read that never outlives its process |
 | `ptyhost.py` | the pseudo-terminal the agent draws in — launched by path |
 | `turn_hook.py` | the vendor's completion, written into the turn's events file — launched by path |
+| `pi_events.mjs` | Pi's native input, settlement, exact-session validation and generation evidence |
 | `nodes.py` | prompt rendering, agent argv, session identity, verdict parsing |
 | `adapters/` | the vendor-specific kind contract, including skill invocation and roots |
 | `trust.py` | this host's CLI trust records for a run's repository |
@@ -64,6 +66,16 @@ when preparing a run; no vendor path crosses the Settings API. What holds a turn
 runs with — the vendor's sandbox, or the vendor's own rules alone — is each kind's to state, and
 Settings shows a role the words of the kind chosen for it.
 
+The Pi adapter targets the native lifecycle API in Pi 1.0.4. Pi profiles select their provider, model
+and thinking level. Their optional launcher names a managed
+wrapper instead of the default executable; preparation checks the same program that will run. Credentials
+stay with Pi's native authentication store or the worker's environment. Orchestra neither copies them nor
+changes the host's active provider. Pi's regular TUI keeps scrollback; its invocation trusts this worktree
+for this session. Read access allows only read, grep, find and ls and disables MCP. Write access excludes
+the PowerShell tool so a managed installation's shell permission rules remain applicable. Installed
+extensions still execute as the host user: these settings provide no operating-system sandbox.
+Skill discovery includes native skill directories and registered local packages' declared skill globs.
+
 Claude Code profiles may select DeepSeek as their API provider, following
 [DeepSeek's Claude Code integration](https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code/).
 The existing Claude adapter keeps ownership of its hooks, sessions, skills and access rules; changing the
@@ -90,6 +102,7 @@ terminal output. A quiet build alone is not a failure, and a redrawing spinner a
 progress. Known held-start and context stops, process exit, explicit completion, and operator Stop retain
 their existing behavior under a longer cap. A timeout ends the contained process tree and leaves the worktree
 and provider session available for the operator's Continue; there is no automatic retry or periodic restart.
+The turn cap bounds elapsed time, not billed usage; it configures no provider balance or spending limit.
 
 Through the vendor's own completion hook: a turn ends on Claude's `Stop` for its own
 prompt id, or Codex's `Stop` for the turn its `UserPromptSubmit` began with our prompt, in its own thread —
@@ -103,6 +116,11 @@ no automatic answer could be kept to ours — not by a count of the hooks waitin
 which a hook new in between would pass. A start held there records no event: two minutes on, unless the operator
 has answered it, the kind reads the review off the screen (`held`) and the step fails, saying what waits and where
 to answer it when the run continues.
+Pi uses its native `agent_settled` notification after the controller's input, not `agent_end`, which can
+precede retries or compaction. Aborted settlement ends no turn; a later typed instruction can finish it.
+Its assistant messages record each generation's native token buckets for the observability owner to
+upload under the stage. A resumed session is an exact native session file: a missing file is session loss
+before work; unreadable, malformed or mismatched identity is a refusal, never a new conversation.
 Claude's notification and tool-finish hooks also record their events, keeping only the session and a
 notification's kind — never what a dialog says or what a tool read or wrote. Every event is stamped with when
 its hook recorded it (`_at`), so answers in two roles' records are ordered by when each came, never by when a

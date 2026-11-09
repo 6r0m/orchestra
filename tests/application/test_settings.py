@@ -235,6 +235,28 @@ class Applying(unittest.TestCase):
         self.assertEqual(shown["settings"]["roles"]["architect"]["agent"], "claude-architect")
         self.assertEqual(shown["overrides"], self.patch())
 
+    def test_an_installation_can_choose_deepseek_and_long_turns_without_changing_shared_defaults(self):
+        shared_before = self.files()[0]
+        below = json.loads(shared_before)
+        untouched = {"targets": {"wsl": {"terminal_port": 8501}}}
+        self.write_patch(untouched)
+        timeout = 172800 if below["timeout_seconds"] != 172800 else 172801
+        shown = self.apply({"pointer": "/roles/engineer/agent", "value": "deepseek-engineer"},
+                           {"pointer": "/timeout_seconds", "value": timeout})
+        expected = P.merge(untouched, {"roles": {"engineer": {"agent": "deepseek-engineer"}},
+                                      "timeout_seconds": timeout})
+        self.assertEqual(self.patch(), expected)
+        self.assertEqual(self.files()[0], shared_before, "Apply changes no shared defaults")
+        snapshot = S.run_policy(shown["settings"])
+        self.assertEqual((snapshot["roles"]["engineer"]["provider"], snapshot["timeout_seconds"]),
+                         ("deepseek", timeout), "the local choices reach new runs")
+        reverted = self.apply({"pointer": "/roles/engineer/agent", "revert": True},
+                              {"pointer": "/timeout_seconds", "revert": True})
+        self.assertEqual(self.patch(), untouched, "other local settings survive Apply and Revert")
+        self.assertEqual(reverted["settings"]["roles"]["engineer"], below["roles"]["engineer"])
+        self.assertEqual(reverted["settings"]["timeout_seconds"], below["timeout_seconds"])
+        self.assertEqual(snapshot["timeout_seconds"], timeout, "an existing run keeps its snapshot")
+
     def test_control_a_writer_that_rebuilds_the_patch_from_the_effective_settings(self):
         """What the sparse writer is there to prevent: every shared value copied into the patch, where it
         would hide a later shared change."""

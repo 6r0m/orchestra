@@ -20,7 +20,7 @@ sys.path[:0] = [PKG, HERE]
 from app.agents import adapters  # noqa: E402
 import stand_in  # noqa: E402
 
-SHIPPED = ("claude-code", "codex")
+SHIPPED = ("claude-code", "codex", "pi")
 
 # What `available()` answers in a process of its own, with the folder of planted kinds on its search path.
 LIST = """

@@ -12,8 +12,8 @@ module alone.
 
 What a kind's module holds, each named below by what it answers:
 
-- `NAME`: how the page shows it. `EXECUTABLE`: the one program its turn runs, which its launch
-  starts and a run's preparation looks for.
+- `NAME`: how the page shows it. `EXECUTABLE`: the default program its turn runs.
+  Optional `program(role)` selects a profile's managed launcher; preparation checks that same program.
 - `ACCESS`: the access it can run with, of `read` and `write`. `BOUNDARY`: for each of those, what
   holds a turn to it — the vendor's sandbox, or only the vendor's own rules — in the words the page
   shows beside a role that runs it. `OPTIONS`: the settings a profile of it takes beyond its kind.
@@ -64,7 +64,7 @@ REQUIRED = ("NAME", "EXECUTABLE", "ACCESS", "BOUNDARY", "OPTIONS", "SKILL", "SES
 CALLABLE = ("validate", "command", "host", "session_in", "wire", "completion", "output", "session",
             "final_message", "message_of", "skill_folders", "skill_roots")
 OPTIONAL = ("trust_ensure", "trust_forget", "trace_env", "trace_settings", "reasoning", "upload", "waiting",
-            "readable", "reply", "held", "halted", "configure")
+            "readable", "reply", "held", "halted", "configure", "program")
 
 
 class Refused(ValueError):
@@ -182,6 +182,12 @@ def for_role(role):
     if role.get("kind"):
         return load(role["kind"])
     return for_brain(role.get("brain"))
+
+
+def executable(role):
+    """The program this profile launches, including a kind's explicitly selected native wrapper."""
+    module = for_role(role)
+    return module.program(view(role)) if hasattr(module, "program") else module.EXECUTABLE
 
 
 def view(role):

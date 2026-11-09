@@ -17,7 +17,7 @@ promise. Where the trace sits among the observability owners is `structure.md` D
 
 ## Rows
 
-A work item is one trace. Every row this component writes is one of six kinds, and its name says
+A work item is one trace. Every row this component writes is one of seven kinds, and its name says
 which kind — never which run, round or verdict, because saved views, the dashboard and the agent
 graph group rows by name. A run's own values are metadata.
 
@@ -26,6 +26,7 @@ graph group rows by name. A run's own values are metadata.
 | work item | none — the trace's only root | the request, the repository, the base branch and the OS the agents run on |
 | phase | the work item | research, plan, build or closeout — the work stages of the run's flow — and which roles act in it |
 | role step | its phase | one role-run: what the role was asked, and its answer — the engineer's account, the architect's research brief, or the architect's verdict, feedback and reasoning |
+| generation | its role step | a Pi assistant model call's native usage and answer; pricing and coverage limits are defined below |
 | stop | its phase; the work item for an approval | why the run stopped for a person — an approval, with what it approves: the plan's summary or the research brief; a blocker or an exhausted budget; a failed stage and the final gate write no row |
 | answer | where its stop is | what the person answered |
 | final diff | the work item | the change as the page reads it — what `gdiff -s` copies, under git's default settings — cut at a size cap |
@@ -38,14 +39,14 @@ and one a force terminate cut short is `lost`. On a role step, the round, phase,
 stage and role are metadata, and so are the logs, the brain, the model, the reasoning effort and
 the provider's session id.
 
-Under each role step, the agent's own tracing plugin nests its turns, model calls and tool calls.
+Under each role step, the agent's tracing plugin or native bridge records the evidence it supports.
 
 ## Levels and error types
 
 | level | when |
 |---|---|
 | DEFAULT | the row recorded what happened — a role step a Stop cut short included: its output says the run was stopped, and it has no error type, because the stage did not fail |
-| WARNING | the stage went on, degraded — `session_lost`: the session to resume did not exist, and a fresh one was given the whole task; `telemetry_degraded`: the architect's turns were not uploaded, so its step has none nested |
+| WARNING | the stage went on, degraded — `session_lost`: the session to resume did not exist, and a fresh one was given the whole task; `telemetry_degraded`: model evidence or usage could not be completely recorded |
 | ERROR | the stage failed and the run stopped with its exception; or git could not read the final diff, `git_error` |
 
 The cause is the row's status message, and it is also written into the step's output, because the
@@ -131,6 +132,13 @@ step. None of this is configurable from here:
 - **attribution** — a model call carries no role, so cost is broken down by model, not by role or
   repository.
 
+Pi's native lifecycle bridge records assistant generations, not a vendor tracing plugin. The trace writer
+uploads them as `LLM Call` generations directly beneath the causing role step. Native uncached input,
+output, cache-read and cache-write buckets remain separate. Missing buckets stay unknown and mark
+telemetry degraded. Pi's local catalog cost is not supplied as a provider-billed amount. These rows do
+not capture background cache-warming requests, calls inside independent child-agent extensions,
+or standalone search/fetch charges; they cannot establish a complete provider bill.
+
 For a round's cost, inspect the model generations beneath that round's role step in the trace tree,
 including its child-agent calls; do not subtract cumulative conversation totals across resumed sessions.
 The current dashboard groups costs by model, not by round. Langfuse's
@@ -138,9 +146,17 @@ The current dashboard groups costs by model, not by round. Langfuse's
 distinguishes provider-supplied costs from costs inferred using submitted usage and model prices.
 Missing usage or an unmatched model is unknown cost, never evidence of free usage.
 
-DeepSeek's [Anthropic usage contract](https://api-docs.deepseek.com/guides/anthropic_api/) reports uncached
-input separately from cache reads; streaming final usage is cumulative, so adding the initial and final
-usage would double-count it. Its [pricing owner](https://api-docs.deepseek.com/quick_start/pricing/)
+There is no per-round USD display in the Workbench. Before relying on DeepSeek costs, acceptance must
+observe a completed billed turn through the configured CLI, verify its provider and actual model, inspect
+the child generations' usage buckets and parentage, and reconcile a representative turn with provider
+billing. Only then can a read-only round estimate sum its generations, including child-agent calls, with
+the applicable tariffs. A missing generation or usage bucket makes completeness unknown. Manual tools
+such as `ccusage` are diagnostics, not another accounting authority; workflow decisions never depend on them.
+
+Pi's normalized input excludes cache reads, so cache hits must not be subtracted again. For a Claude
+profile, DeepSeek's [Anthropic usage contract](https://api-docs.deepseek.com/guides/anthropic_api/)
+also separates uncached input from cache reads; streaming final usage is cumulative, so adding the
+initial and final usage would double-count it. DeepSeek's [pricing owner](https://api-docs.deepseek.com/quick_start/pricing/)
 defines time-dependent peak rates, holiday exceptions and separate search/fetch charges. A flat custom
 model definition cannot represent all of those conditions. Treat inferred DeepSeek costs as estimates unless
 every request's applicable tariff and billable tools are accounted for and reconciled with provider billing.

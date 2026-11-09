@@ -31,7 +31,7 @@ from app.workspace import worktrees  # noqa: E402
 from fakes import FakeRepos, FakeWorktrees, Recorder, every_skill, installed  # noqa: E402
 import stand_in  # noqa: E402
 
-SHIPPED = ("claude-code", "codex")
+SHIPPED = ("claude-code", "codex", "pi")
 
 
 def policy(kind, **extra):
@@ -84,6 +84,13 @@ class Preparing(unittest.TestCase):
         host = self.host({stand_in.PROGRAM})
         self.assertIsNone(host.which(stand_in.KIND))
         self.assertIsNotNone(host.which(stand_in.PROGRAM))
+
+    def test_preparation_checks_the_pi_launcher_selected_by_the_profile(self):
+        configured = policy("pi")
+        for role in configured["roles"].values():
+            role.update(launcher="pi-sot", provider="deepseek", model="deepseek-flash")
+        self.host({"pi-sot"}).prepare({"repository": self.SELECTED, "policy": configured})
+        self.assertEqual(self.looked, ["pi-sot"])
 
     def test_every_kinds_launch_runs_its_program(self):
         for kind in SHIPPED + (stand_in.KIND,):
@@ -147,6 +154,17 @@ class Environment(unittest.TestCase):
         self.run_id = "test-activities-%s" % os.urandom(4).hex()
         self.addCleanup(shutil.rmtree, activities.run_dir(self.run_id), True)
         self.addCleanup(terminal.close_run, self.run_id)
+
+    def test_a_failed_turn_still_exports_recorded_usage_without_a_final_session(self):
+        adapter = adapters.load("pi")
+        host = activities.Activities(runner=lambda *args, **kwargs: (1, "provider failed"),
+                                     git=FakeWorktrees(), telemetry=None)
+        context = {"traceparent": "parent"}
+        with mock.patch.object(T, "trace_context", return_value=context), \
+                mock.patch.object(adapter, "upload", return_value=None) as upload:
+            with self.assertRaises(ApplicationError):
+                host.run_role({"stage": "plan", "state": state(self.run_id), "policy": policy("pi")})
+        upload.assert_called_once_with(None, context)
 
     def test_deepseek_is_scoped_to_its_profile_and_missing_auth_starts_no_agent(self):
         configured = policy("claude-code")

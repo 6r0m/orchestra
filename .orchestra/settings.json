@@ -1,7 +1,7 @@
 {
   "agents": {
     "deepseek-engineer": {
-      "kind": "claude-code",
+      "kind": "pi",
       "provider": "deepseek",
       "model": "deepseek-flash",
       "effort": "max"
@@ -29,7 +29,7 @@
   },
   "roles": {
     "engineer": {
-      "agent": "deepseek-engineer",
+      "agent": "claude-engineer",
       "persona_file": "roles/engineer.md"
     },
     "architect": {
@@ -56,7 +56,7 @@
   },
   "auto_proceed": false,
   "default_flow": "engineer-code",
-  "timeout_seconds": 172800,
+  "timeout_seconds": 3600,
   "workbench_port": 8390,
   "heartbeat_seconds": 120,
   "workflow_queue": "orchestration",

@@ -222,8 +222,8 @@ still lands on a checkout.
   the todo and the documents its repository names, and the operator judges it
   at the final gate (D24).
 - **D7** **Sessions:** one persistent CLI session per `(run_id, role)`;
-  resume by exact stored id (Claude `--session-id` minted by us, Codex the
-  thread its first turn completed in), never `--last`. Session = disposable
+  resume by exact stored handle (Claude's minted session id, Codex's completed
+  thread id or Pi's native session file), never `--last`. Session = disposable
   working memory; the workflow's state + worktree = truth, sufficient to
   rehydrate. Automatic fresh-rehydrate only on a definitive
   session-not-found *before* work begins.
@@ -243,7 +243,9 @@ still lands on a checkout.
   its completion ends it: Claude's `Stop` for the prompt id its `UserPromptSubmit` reported for
   that prompt or any submitted after it in the role's session, while no background task of it
   still runs; Codex's `Stop` for the turn its `UserPromptSubmit` began with that prompt or any
-  submitted after it in the role's thread. Each vendor gives its hook the event on stdin, never on
+  submitted after it in the role's thread. Pi records final settlement through its native extension;
+  its lifecycle and access boundary belong to [agents](../../app/agents/README.md).
+  The hook-based vendors give their hooks the event on stdin, never on
   a command line, which a long session's event would outgrow. Codex's own work in threads of its
   own never ends it; an interrupt completes nothing. `StopFailure`, any check of the result failing,
   the agent exiting first, or the timeout fails the step and ends the agent. A successful turn
@@ -291,10 +293,9 @@ still lands on a checkout.
   timeout. The prompt, the final message, the turn's events and what the terminal showed during
   the turn stay under `tmp/orchestration/<run-id>/logs/` of the orchestration checkout on that
   host.
-- **D18** **Model and reasoning effort are configuration**: optional per-role
-  `model` and `reasoning_effort` strings are passed straight to each brain's
-  native control — `--model` on both, `--effort` for Claude, the
-  `model_reasoning_effort` config override for Codex. Absent means the
+- **D18** **Model and reasoning effort are configuration**: optional profile
+  `model` and `effort` values reach each kind's native control through its adapter.
+  Runs carrying the old per-role `reasoning_effort` keep that value. Absent means the
   provider default, which is whatever was last chosen interactively on this
   machine, so a role whose judgement must not drift pins both: the architect
   does. No model registry. Policy validation is **strict** — unknown
@@ -302,7 +303,8 @@ still lands on a checkout.
   and both values must be plain tokens.
 - **D21** **A role's durable conversation is owned by its provider's own
   session store on the target host** — Claude under `~/.claude/projects/<cwd>/<session-id>.jsonl`,
-  Codex under `~/.codex/sessions/<date>/rollout-*-<thread-id>.jsonl`, in that
+  Codex under `~/.codex/sessions/<date>/rollout-*-<thread-id>.jsonl`, Pi in its native agent
+  directory's `sessions/`, in that
   host's user profile — keyed by the worktree the role ran in, spanning every
   resumed stage of that role, and independent of the process that launched it.
   Our `logs/*.out` own the *parsed* evidence a stage was judged on; the session
@@ -326,8 +328,8 @@ still lands on a checkout.
   build, closeout; in each, every round's engineer and architect step, named for its kind of step with the
   round in its metadata and the architect's verdict scored on it; each stop for a human and the
   answer given to it, an approval carrying the plan's summary or the research brief; each agent's
-  own turns and tool calls, nested by that vendor's
-  tracing plugin under the step that caused them; and the final diff as the page reads the change — what
+  instrumented model and tool evidence, nested by its plugin or native lifecycle bridge
+  under the step that caused it, with coverage defined by the trace contract; and the final diff as the page reads the change — what
   `gdiff -s` copies, under git's default settings — cut
   at a size cap and marked truncated when it exceeds one, redacted and marked when it held a secret.
   The names, levels, scores and dimensions that views and the dashboard select on are the

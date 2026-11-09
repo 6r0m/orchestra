@@ -2,7 +2,7 @@
 
 **Local-first orchestration and operator workbench for coding agents.**
 
-Temporal owns workflow state. Git owns code and merge state. Claude Code and Codex stay exactly what
+Temporal owns workflow state. Git owns code and merge state. Claude Code, Codex and Pi stay exactly what
 they are — native CLI agents, running on your machine, in their own terminals. Orchestra adds the
 part that is usually missing: a deterministic loop between them, live terminals you can watch and
 type into, a review you can read, and gates only a human answers.
@@ -72,7 +72,7 @@ processes they run in.
 ## Quick start
 
 You need Docker, [uv](https://docs.astral.sh/uv/), git, and whichever agent CLIs you intend to use
-(`claude`, `codex`) installed and signed in as you normally use them.
+(`claude`, `codex`, `pi`) installed and authenticated as you normally use them.
 
 ```bash
 git clone <this repository> orchestra && cd orchestra
@@ -86,9 +86,12 @@ Open the page — `http://127.0.0.1:8390` by default — and start a run on this
 your own repositories, copy `.orchestra/repos.example.json` to `.orchestra/repos.json` (ignored) and
 describe them there; the page can also start a run on any path you type.
 
-The shared engineer profile uses DeepSeek through Claude Code. Set `DEEPSEEK_API_KEY` in `.env`,
-or select another engineer profile in Settings before starting a run. A missing key refuses the turn.
-The per-turn limit is editable in hours there; a run keeps the settings it started with.
+To use DeepSeek through Pi, configure DeepSeek authentication in Pi and select `deepseek-engineer`
+in Settings. A managed Pi installation can name its wrapper in that profile's optional `launcher`
+setting in the ignored `.orchestra/settings.local.json`; the default executable is `pi`.
+The engineer selection and per-turn limit, editable in hours, are saved in the local settings patch.
+A run keeps the settings it started with. Provider usage and cost limits are separate from elapsed time;
+see the [trace and cost contract](docs/architecture/trace-contract.md#what-the-vendor-plugins-own).
 
 ```bash
 make feature TASK="fix the retry in the uploader"   # the same run, from the command line
@@ -184,7 +187,7 @@ Running it day to day — the page, the command line, and where to look when som
 [docs/using.md](docs/using.md). What is being worked on right now is in [todo/](todo/README.md).
 
 The Workbench's Settings view manages role profiles, one explicit methodology skill per stage, review
-budgets and the default flow. Each Apply writes a sparse patch to the ignored
+budgets, the per-turn time limit and the default flow. Each Apply writes a sparse patch to the ignored
 `.orchestra/settings.local.json`; Revert removes one local override, while Reset stages Revert for every
 setting the page owns and still requires Apply. Other hand-written local members survive. The shared
 file carries the defaults. A separate stack may name its own complete settings file through
