@@ -1,10 +1,10 @@
 # Your answers fold in the history
 
-**Status:** BUILT 2026-11-06 — seen on the operator's run's history. It awaits the external reviewer and the
-operator's word to close it.
-**Scope:** how the run's history draws the operator's answers ([run.js](../app/interfaces/workbench/static/run.js)
-`answerRow`, [style.css](../app/interfaces/workbench/static/style.css)).
-**Stable documentation owner:** [using.md](../docs/using.md), the history's paragraph.
+**Status:** DONE 2026-11-09 — the goal met: seen on the operator's run's history; reviewer PASS; the full suite
+green on both hosts; closed on the operator's word.
+**Scope:** how the run's history draws the operator's answers ([run.js](../../app/interfaces/workbench/static/run.js)
+`answerRow`, [style.css](../../app/interfaces/workbench/static/style.css)).
+**Stable documentation owner:** [using.md](../../docs/using.md), the history's paragraph.
 
 ## Goal
 

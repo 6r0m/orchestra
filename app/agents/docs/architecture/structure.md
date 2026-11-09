@@ -64,6 +64,10 @@ when preparing a run; no vendor path crosses the Settings API. What holds a turn
 runs with — the vendor's sandbox, or the vendor's own rules alone — is each kind's to state, and
 Settings shows a role the words of the kind chosen for it.
 
+A role's session spans every turn of the role, so it can fill its context: a Claude turn's own settings turn
+its auto-compact on, whatever the operator's, since a session that fills with it off stops at *Context limit
+reached* and fires no hook (measured), and its turn would wait out its limit.
+
 Through the vendor's own completion hook: a turn ends on Claude's `Stop` for its own
 prompt id, or Codex's `Stop` for the turn its `UserPromptSubmit` began with our prompt, in its own thread —
 never on a first event. Every hook is given its event on stdin: one carried on a command line grows with the

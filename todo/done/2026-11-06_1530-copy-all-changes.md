@@ -1,11 +1,12 @@
 # Copy all changes
 
-**Status:** BUILT 2026-11-06 — used on the operator's run while it worked; `make demo` passed. It awaits the
-external reviewer and the operator's word to close it.
-**Scope:** the run's Change section ([change.js](../app/interfaces/workbench/static/change.js),
-[diff.js](../app/interfaces/workbench/static/diff.js) `copyPatch`, [index.html](../app/interfaces/workbench/static/index.html))
-and its check ([demo_press.py](../tools/demo_press.py) `change:`).
-**Stable documentation owner:** [using.md](../docs/using.md), the change's paragraph.
+**Status:** DONE 2026-11-09 — the goal met: used on the operator's run while it worked; reviewer PASS, its
+finding on closed runs answered in the docs; `make demo` and the full suite green on both hosts; closed on the
+operator's word.
+**Scope:** the run's Change section ([change.js](../../app/interfaces/workbench/static/change.js),
+[diff.js](../../app/interfaces/workbench/static/diff.js) `copyPatch`, [index.html](../../app/interfaces/workbench/static/index.html))
+and its check ([demo_press.py](../../tools/demo_press.py) `change:`).
+**Stable documentation owner:** [using.md](../../docs/using.md), the change's paragraph.
 
 ## Goal
 
@@ -33,7 +34,7 @@ One press copies the run's whole change — every file, however long — wheneve
   Change section (`renderChange`, as before); its turns' changes stay in its history. A press racing the merge
   that removes the worktree says *Copy failed*, git's refusal on hover.
 - Reviewer, 2026-11-06, PATCH: *the documentation promises the button after closure, and the read is refused once
-  the worktree is gone*. The wording was loose — [using.md](../docs/using.md) now says closed keeping its
+  the worktree is gone*. The wording was loose — [using.md](../../docs/using.md) now says closed keeping its
   worktree — but no press reaches that refusal from the page; copying a merged run's last judged snapshot is a
   capability not asked for, and a merged change is in git.
 - `copyPatch` takes the snapshot's first part or the read that will give it, so that read is part of the press.

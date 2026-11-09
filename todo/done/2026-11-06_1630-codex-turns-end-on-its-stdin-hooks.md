@@ -1,18 +1,16 @@
 # Codex turns end on its stdin hooks
 
-**Status:** BUILT 2026-11-06 — red, then green on both hosts; real Codex turns, fresh and resumed, ended on both;
-the operator's run, continued, ended the turn that had hung. After two review rounds the orchestra no longer
-answers Codex's review of hooks at all — the reviewer's PASS; the full suite passed on both hosts. The Windows
-worker, which runs the architect's Codex turns, restarted on it; the WSL worker, by the operator's choice, still
-runs the first version, whose preflight answers Codex's review — a Codex turn on WSL would meet it. It awaits the
-operator's word to close it.
-**Scope:** how a Codex turn's end is wired and read ([codex.py](../app/agents/adapters/codex.py) `hook_flags`,
+**Status:** DONE 2026-11-09 — the goal met: red, then green on both hosts; real Codex turns, fresh and resumed,
+ended on both, and the operator's run ended the turn that had hung; after two review rounds the orchestra no
+longer answers Codex's review of hooks at all, reviewer PASS; the full suite green on both hosts; both workers
+run it, the WSL worker since the operator restarted WSL; closed on the operator's word.
+**Scope:** how a Codex turn's end is wired and read ([codex.py](../../app/agents/adapters/codex.py) `hook_flags`,
 `wire`, `completion`, `reply`, `held`), the turn's events file in its environment and a start held for the
-operator ([terminal.py](../app/agents/terminal.py) `run_turn`, `BEGIN_SECONDS`;
-[turn_hook.py](../app/agents/turn_hook.py) `-`), the adapter contract ([adapters](../app/agents/adapters/__init__.py)),
-and the stand-ins ([fake_cli.py](../tests/fake_cli.py), [demo.py](../tools/demo.py)).
-**Stable documentation owner:** D17 in the [architecture](../docs/architecture/structure.md); the agents'
-[structure](../app/agents/docs/architecture/structure.md); [using.md](../docs/using.md) for the review in the
+operator ([terminal.py](../../app/agents/terminal.py) `run_turn`, `BEGIN_SECONDS`;
+[turn_hook.py](../../app/agents/turn_hook.py) `-`), the adapter contract ([adapters](../../app/agents/adapters/__init__.py)),
+and the stand-ins ([fake_cli.py](../../tests/fake_cli.py), [demo.py](../../tools/demo.py)).
+**Stable documentation owner:** D17 in the [architecture](../../docs/architecture/structure.md); the agents'
+[structure](../../app/agents/docs/architecture/structure.md); [using.md](../../docs/using.md) for the review in the
 role's terminal.
 
 ## Goal

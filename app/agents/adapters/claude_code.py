@@ -10,7 +10,8 @@ skills a stage invokes keep their references.
 Its turn ends on its own hooks: `Stop` for a prompt id that `UserPromptSubmit` reported for our prompt, or
 for any prompt submitted after it in the session, while no background task of it still runs; `StopFailure`
 fails the turn. The hooks go in its settings — the file a traced turn already has, since Claude takes one
-`--settings`, or its own. Its answer is the turn's final message.
+`--settings`, or its own — with its auto-compact on, whatever the operator's own setting: a session that fills
+its context with it off stops there and fires no hook. Its answer is the turn's final message.
 
 A worker started from inside a Claude Code session inherits that session's markers, and a Claude agent
 carrying them runs as that session's child: measured, it keeps no transcript, so its session cannot be
@@ -55,6 +56,12 @@ HOOKS = ("UserPromptSubmit", "Stop", "StopFailure", "PostToolUse", "PostToolUseF
 # The notifications that mean a dialog waits in its terminal for someone to answer it: each its own hook
 # matcher, since a `|` between them is a command separator to the Windows `.cmd` shim.
 DIALOGS = ("permission_prompt", "elicitation_dialog", "elicitation_url_dialog")
+# What a turn's own settings say besides its hooks. A role's session spans every turn of the role, and one that
+# fills its context with auto-compact off stops at *Context limit reached · /compact or /clear to continue*
+# firing no hook, so the turn waits out its limit (measured: the operator's build, its session through nine plan
+# rounds, the operator's own setting off). A turn's `--settings` outrank the user's; only `DISABLE_AUTO_COMPACT`
+# in the worker's environment turns it off again (documented), which neither host sets.
+TURN_SETTINGS = {"autoCompactEnabled": True}
 WINDOWS = sys.platform.startswith("win")
 # Model and effort reach the command line, so each is a plain token.
 PLAIN_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]*")
@@ -141,7 +148,7 @@ def _hook(sink):
 
 
 def wire(argv, events, sink):
-    """Its hooks in its settings — the file it names, or its own."""
+    """Its hooks in its settings — the file it names, or its own — and its auto-compact on (`TURN_SETTINGS`)."""
     hooks = {event: [{"hooks": [{"type": "command", "command": _hook(sink(event, "stdin"))}]}] for event in HOOKS}
     hooks["Notification"] = [
         {"matcher": kind, "hooks": [{"type": "command", "command": _hook(sink("Notification", "stdin"))}]}
@@ -151,12 +158,12 @@ def wire(argv, events, sink):
         path = argv[argv.index("--settings") + 1]
         with open(path, encoding="utf-8") as fh:
             settings = json.load(fh)
-        settings["hooks"] = hooks
+        settings.update(TURN_SETTINGS, hooks=hooks)
         # The file is the turn's private one; it keeps holding what it held.
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(settings, fh)
         return argv
-    return argv[:1] + ["--settings", json.dumps({"hooks": hooks})] + argv[1:]
+    return argv[:1] + ["--settings", json.dumps(dict(TURN_SETTINGS, hooks=hooks))] + argv[1:]
 
 
 def waiting(events):

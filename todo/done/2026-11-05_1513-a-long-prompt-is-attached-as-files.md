@@ -1,14 +1,13 @@
 # A long prompt is attached as files
 
-**Status:** REOPENED 2026-11-06, FIXED — closed too early: the operator's run continued and read its
-attachment, but its next engineer turn could write nothing to its worktree because of how the attachment was
-made readable (*Defect found after closing*, below). Fixed red first, proven with a real Claude on both hosts;
-the reviewer passed the fix. It awaits the full suite at the final pass, the Windows worker's restart in the
-operator's deployment, and their word to close it.
-**Scope:** how a role turn's prompt reaches the agent's CLI ([nodes.py](../app/agents/nodes.py) `attach`,
-[activities.py](../app/application/activities.py) `run_role`, the Claude adapter's `readable`).
-**Stable documentation owner:** D17 in the [architecture](../docs/architecture/structure.md) and the agents'
-[structure](../app/agents/docs/architecture/structure.md).
+**Status:** DONE 2026-11-09 — the goal met: reopened once, when the operator's next engineer turn could write
+nothing to its worktree because of how the attachment was made readable (*Defect found after closing*, below);
+fixed red first, proven with a real Claude on both hosts, reviewer PASS; the full suite green on both hosts; live,
+that run's build turn wrote its plugins into its worktree; closed on the operator's word.
+**Scope:** how a role turn's prompt reaches the agent's CLI ([nodes.py](../../app/agents/nodes.py) `attach`,
+[activities.py](../../app/application/activities.py) `run_role`, the Claude adapter's `readable`).
+**Stable documentation owner:** D17 in the [architecture](../../docs/architecture/structure.md) and the agents'
+[structure](../../app/agents/docs/architecture/structure.md).
 
 ## Goal
 

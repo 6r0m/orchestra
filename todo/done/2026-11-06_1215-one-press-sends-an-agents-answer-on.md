@@ -1,17 +1,16 @@
 # Guidance goes to the role you choose, an agent's answer in one press
 
-**Status:** BUILT 2026-11-06 — the reviewer's PATCH taken: red, then green. It awaits the reviewer's final pass,
-the full suite then, the operator's deployment — the Workbench's restart for the answers' order — and their word
-to close it.
-**Scope:** a stop's guidance answers ([workflow.py](../app/orchestration/workflow.py) `GUIDED`, the loop's
-`review_next`), whom a stop's words go to ([client.py](../app/application/client.py) `recipient`), what the run's
-view carries at a stop that takes guidance ([server.py](../app/interfaces/workbench/server.py) `role_reply`), how a
-kind reads its own reply from its events (`reply` in [adapters](../app/agents/adapters/__init__.py),
-[codex.py](../app/agents/adapters/codex.py), [claude_code.py](../app/agents/adapters/claude_code.py)), the stop's
-card ([run.js](../app/interfaces/workbench/static/run.js), [index.html](../app/interfaces/workbench/static/index.html))
-and the command line ([cli.py](../app/interfaces/cli.py) `answer_line`).
-**Stable documentation owner:** D6 in the [architecture](../docs/architecture/structure.md) and its
-[stops](../docs/architecture/diagrams/stops.md); [using.md](../docs/using.md); the interfaces' and agents'
+**Status:** DONE 2026-11-09 — the goal met: the reviewer's PATCH taken, red then green, and its final pass; the
+full suite green on both hosts; the Workbench and both workers restarted on it; closed on the operator's word.
+**Scope:** a stop's guidance answers ([workflow.py](../../app/orchestration/workflow.py) `GUIDED`, the loop's
+`review_next`), whom a stop's words go to ([client.py](../../app/application/client.py) `recipient`), what the run's
+view carries at a stop that takes guidance ([server.py](../../app/interfaces/workbench/server.py) `role_reply`), how a
+kind reads its own reply from its events (`reply` in [adapters](../../app/agents/adapters/__init__.py),
+[codex.py](../../app/agents/adapters/codex.py), [claude_code.py](../../app/agents/adapters/claude_code.py)), the stop's
+card ([run.js](../../app/interfaces/workbench/static/run.js), [index.html](../../app/interfaces/workbench/static/index.html))
+and the command line ([cli.py](../../app/interfaces/cli.py) `answer_line`).
+**Stable documentation owner:** D6 in the [architecture](../../docs/architecture/structure.md) and its
+[stops](../../docs/architecture/diagrams/stops.md); [using.md](../../docs/using.md); the interfaces' and agents'
 structure.
 
 ## Goal

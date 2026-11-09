@@ -155,6 +155,37 @@ class CodexHooks(unittest.TestCase):
                                                        "stdin"])
 
 
+class ClaudeCompacts(unittest.TestCase):
+    """A role's Claude session spans every turn of the role, and one that fills its context with auto-compact off
+    stops at *Context limit reached* firing no hook, so the turn waits out its limit (measured, the operator's
+    build): its turns ask for auto-compact in their own settings, which outrank the operator's."""
+
+    @staticmethod
+    def sink(label, source):
+        return ["python", "hook", label, source]
+
+    def test_its_own_settings_ask_for_auto_compact(self):
+        from app.agents.adapters import claude_code
+        wired = claude_code.wire(["claude", "--session-id", "s"], "turn.events", self.sink)
+        settings = json.loads(wired[wired.index("--settings") + 1])
+        self.assertIs(settings.get("autoCompactEnabled"), True)
+        self.assertIn("Stop", settings["hooks"])
+
+    def test_a_traced_turns_settings_file_asks_for_it_and_keeps_what_it_held(self):
+        from app.agents.adapters import claude_code
+        folder = tempfile.mkdtemp(prefix="orchestra-claude-settings-")
+        self.addCleanup(lambda: __import__("shutil").rmtree(folder, True))
+        path = os.path.join(folder, "claude-settings.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({"enabledPlugins": {claude_code.PLUGIN: True}}, fh)
+        claude_code.wire(["claude", "--settings", path], "turn.events", self.sink)
+        with open(path, encoding="utf-8") as fh:
+            settings = json.load(fh)
+        self.assertIs(settings.get("autoCompactEnabled"), True)
+        self.assertEqual(settings["enabledPlugins"], {claude_code.PLUGIN: True})
+        self.assertIn("Stop", settings["hooks"])
+
+
 class Reply(unittest.TestCase):
     """What a role last answered the operator in its terminal after its turn — words they settled with it at a
     stop, for the page to send on — read from the turn's events by the kind whose events they are."""

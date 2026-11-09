@@ -1,16 +1,15 @@
 # A terminal reads and scrolls at any size
 
-**Status:** BUILT 2026-11-06 — proven on the live Workbench and in `make demo`, with mutation controls; green on
-both hosts; the reviewer passed it. It awaits the full suite at the final pass, the Windows worker's restart in
-the operator's deployment, and their word to close it.
+**Status:** DONE 2026-11-09 — the goal met: proven on the live Workbench and in `make demo`, with mutation
+controls; reviewer PASS; the full suite green on both hosts; closed on the operator's word.
 **Scope:** a role's terminal on the run's page — its size, a way to read it large, its scrollbar, its copy
-([terminals.js](../app/interfaces/workbench/static/terminals.js), [index.html](../app/interfaces/workbench/static/index.html),
-[style.css](../app/interfaces/workbench/static/style.css), and the size the page's config gives it in
-[server.py](../app/interfaces/workbench/server.py)) — and how Codex draws into it
-([codex.py](../app/agents/adapters/codex.py) `command`); their proof in [demo_press.py](../tools/demo_press.py)
-and [demo.py](../tools/demo.py). The terminal's 160 by 48 on the host does not change.
-**Stable documentation owner:** [using.md](../docs/using.md) for what the operator sees; the agents'
-[structure](../app/agents/docs/architecture/structure.md) for how Codex is started.
+([terminals.js](../../app/interfaces/workbench/static/terminals.js), [index.html](../../app/interfaces/workbench/static/index.html),
+[style.css](../../app/interfaces/workbench/static/style.css), and the size the page's config gives it in
+[server.py](../../app/interfaces/workbench/server.py)) — and how Codex draws into it
+([codex.py](../../app/agents/adapters/codex.py) `command`); their proof in [demo_press.py](../../tools/demo_press.py)
+and [demo.py](../../tools/demo.py). The terminal's 160 by 48 on the host does not change.
+**Stable documentation owner:** [using.md](../../docs/using.md) for what the operator sees; the agents'
+[structure](../../app/agents/docs/architecture/structure.md) for how Codex is started.
 
 ## Goal
 

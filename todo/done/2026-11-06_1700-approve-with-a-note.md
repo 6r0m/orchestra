@@ -1,16 +1,15 @@
 # Approve with a note
 
-**Status:** BUILT 2026-11-06 — red, then green; the reviewer's PATCH for page and worker of different versions
-taken, and its final review PASS; the full suite passed on both hosts; the Workbench restarted on it. The WSL
-worker, which runs the workflow, is not restarted, by the operator's choice: until it is, no stop says it takes a
-note, and the page offers none. It awaits the operator's word to close it.
-**Scope:** an approval's answer ([workflow.py](../app/orchestration/workflow.py) `_loop`, `_approval`, `_stop`,
-the answer's validator), the answer's one path for both surfaces ([client.py](../app/application/client.py)
-`answer`), the command line's `yes` ([cli.py](../app/interfaces/cli.py) `parse_answer`, `answer_line`), the
-stop's note and Approve on the page ([run.js](../app/interfaces/workbench/static/run.js)), and the recorded
-history ([record_histories.py](../tests/record_histories.py)).
-**Stable documentation owner:** D6 in the [architecture](../docs/architecture/structure.md) and its
-[stops diagram](../docs/architecture/diagrams/stops.md); [using.md](../docs/using.md), the decision's paragraph
+**Status:** DONE 2026-11-09 — the goal met: red, then green; the reviewer's PATCH for page and worker of
+different versions taken, and its final PASS; the full suite green on both hosts; the Workbench and the WSL
+worker, which runs the workflow, run it — approvals drawn from then on take a note; closed on the operator's word.
+**Scope:** an approval's answer ([workflow.py](../../app/orchestration/workflow.py) `_loop`, `_approval`, `_stop`,
+the answer's validator), the answer's one path for both surfaces ([client.py](../../app/application/client.py)
+`answer`), the command line's `yes` ([cli.py](../../app/interfaces/cli.py) `parse_answer`, `answer_line`), the
+stop's note and Approve on the page ([run.js](../../app/interfaces/workbench/static/run.js)), and the recorded
+history ([record_histories.py](../../tests/record_histories.py)).
+**Stable documentation owner:** D6 in the [architecture](../../docs/architecture/structure.md) and its
+[stops diagram](../../docs/architecture/diagrams/stops.md); [using.md](../../docs/using.md), the decision's paragraph
 and the command line's answers.
 
 ## Goal
