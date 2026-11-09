@@ -194,11 +194,15 @@ class ClaudeCompacts(unittest.TestCase):
                    "or /clear to continue · auto-compact is off · /config to turn it on✻ Cogitated for 0s")
         together = "Contextlimitreached·/compactor/cleartocontinue·auto-compactisoff·/configtoturniton"
         thrashing = "Autocompact is thrashing: the context refilled to the limit several times in a row"
+        # As the build's last events stood: its own prompt, then a background check's notification, submitted.
+        begun = [{"_hook": "UserPromptSubmit"}, {"_hook": "PostToolUse"}, {"_hook": "UserPromptSubmit"}]
         for screen in (working + stopped, "esctointerrupt " + together, working + thrashing):
-            self.assertIn("context limit", claude_code.halted(screen), screen)
+            self.assertIn("context limit", claude_code.halted(screen, begun), screen)
         # Working again after it — compacting and going on, or writing those words itself: nothing to read.
-        self.assertIsNone(claude_code.halted(stopped + " " + working))
-        self.assertIsNone(claude_code.halted(working + "editing the plan"))
+        self.assertIsNone(claude_code.halted(stopped + " " + working, begun))
+        self.assertIsNone(claude_code.halted(working + "editing the plan", begun))
+        # Its answer ended — a background task of it still running — quoting the line: idle as it should be.
+        self.assertIsNone(claude_code.halted(working + stopped, begun + [{"_hook": "Stop"}]))
 
 
 class Reply(unittest.TestCase):

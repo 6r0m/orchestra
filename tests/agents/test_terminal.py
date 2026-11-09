@@ -289,6 +289,13 @@ class Turns(unittest.TestCase):
         self.assertIn("context limit", str(halted.exception))
         self.assertFalse(terminal.get(self.run_id, "engineer").live())
 
+    def test_a_working_claude_whose_tool_prints_that_line_is_never_ended_for_it(self):
+        # The line as a long tool's output, while its spinner goes on and no hook fires for longer than the quiet
+        # the stop is read after: the turn runs to its own end.
+        saved, terminal.HALT_SECONDS = terminal.HALT_SECONDS, 2
+        self.addCleanup(setattr, terminal, "HALT_SECONDS", saved)
+        self.assertEqual(self.turn("quoted context", timeout=30), (0, "done quoted"))
+
     def test_a_timeout_ends_the_agent(self):
         with self.assertRaises(launch.RoleTimeout):
             self.turn("hang forever", timeout=3)

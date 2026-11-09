@@ -52,8 +52,8 @@ TICK_SECONDS = 1.0
 # the rest is the operator's, to answer the dialog in the role's terminal — and a dialog that holds it is drawn last.
 BEGIN_SECONDS = 120
 HELD_TAIL = 64 * 1024
-# How long a begun turn whose kind reads a stop for the operator (`halted`) may record no new event before its
-# screen is read: as long as a start, the rest the operator's to answer in the role's terminal.
+# How long a begun turn whose kind reads a stop for the operator (`halted`) may record no new event and draw
+# nothing before its screen is read: as long as a start, the rest the operator's to answer in the role's terminal.
 HALT_SECONDS = 120
 # The page's subprotocol. The token is offered beside it, in the handshake's own header, so it
 # never appears in a URL the browser prints to its console or a proxy writes to a log.
@@ -152,6 +152,9 @@ class _Agent:
         self.proc = self.tree.start([sys.executable, PTYHOST, str(COLS), str(ROWS), "--"] + list(argv), cwd,
                                     subprocess.PIPE, subprocess.PIPE, subprocess.DEVNULL, env)
         self.output = bytearray()
+        # When it last drew anything: a CLI at work keeps redrawing — its spinner, its timer — and one stopped for
+        # the operator draws nothing (measured, Claude).
+        self.heard = time.monotonic()
         self.lock = threading.Lock()
         self.ended = False
         self.pump = threading.Thread(target=self._pump, args=(terminal,), daemon=True)
@@ -163,6 +166,7 @@ class _Agent:
             if not data:
                 break
             self.output += data
+            self.heard = time.monotonic()
             terminal.emit(data)
         self.proc.stdout.close()
         self.proc.wait()
@@ -437,12 +441,15 @@ def run_turn(worktree, argv, rdir, name, prompt, timeout, env, on_tick=None, *, 
                     finish(1, "")
                     raise launch.ExecutorError("the turn did not begin within %ds: %s" % (BEGIN_SECONDS, why))
             # So does a begun turn its CLI stopped for the operator without a hook — read only once it has gone
-            # quiet, and only as an exact stop its kind knows, never words a working agent may write itself.
-            if events and hasattr(adapter, "halted") and time.monotonic() - quiet_since >= HALT_SECONDS:
-                why = adapter.halted(plain(bytes(agent.output[-HELD_TAIL:])))
+            # silent, no hook and nothing drawn: what it drew is a stream, not its screen as it stands, so a line
+            # in it is a stop only when nothing has moved since, as nothing does under a CLI that stopped and
+            # always does under one at work.
+            silent = time.monotonic() - max(quiet_since, agent.heard)
+            if events and hasattr(adapter, "halted") and silent >= HALT_SECONDS:
+                why = adapter.halted(plain(bytes(agent.output[-HELD_TAIL:])), events)
                 if why:
                     finish(1, "")
-                    raise launch.ExecutorError("the turn went quiet for %ds: %s" % (HALT_SECONDS, why))
+                    raise launch.ExecutorError("the turn went silent for %ds: %s" % (HALT_SECONDS, why))
             rc = agent.returncode()
             if rc is not None:
                 agent.pump.join(timeout=launch.GRACE_SECONDS)

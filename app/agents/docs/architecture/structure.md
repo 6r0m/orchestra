@@ -67,9 +67,11 @@ Settings shows a role the words of the kind chosen for it.
 A role's session spans every turn of the role, so it can fill its context: a Claude turn's own settings turn
 its auto-compact on, whatever the operator's, since a session that fills with it off stops at *Context limit
 reached* and fires no hook (measured), and its turn would wait out its limit. Compaction can still stop — off
-by the worker's environment, or given up when the context refills at once (documented) — so a begun turn that
-records no new event for two minutes has its screen read (`halted`), and an exact stop of that kind, drawn after
-anything it was still working on, fails the step saying how to go on; never words a working agent may write.
+by the worker's environment, or given up when the context refills at once (documented) — so a begun turn gone
+silent for two minutes, no new event and nothing drawn, has what it drew read (`halted`). What it drew is a
+stream, not its screen as it stands, so silence is the evidence: a Claude at work keeps redrawing its spinner,
+and one stopped draws nothing (measured). An exact stop of that kind, its working line nowhere after it and its
+answer not ended, fails the step saying how to go on; never words a working agent or its tools may print.
 
 Through the vendor's own completion hook: a turn ends on Claude's `Stop` for its own
 prompt id, or Codex's `Stop` for the turn its `UserPromptSubmit` began with our prompt, in its own thread —

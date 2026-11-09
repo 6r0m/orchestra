@@ -253,7 +253,19 @@ def main():
     if "hang" in words:
         while True:
             time.sleep(1)
-    if "failure" in words:
+    if "quoted" in words:
+        # A long tool whose output holds that very line — a log, a fixture, a document — while the turn goes on: no
+        # hook until it ends, and Claude's spinner redrawing only what changes, its timer, never its working words.
+        draw("* Running... (esc to interrupt)")
+        draw("$ cat diagnostic.log")
+        draw("Context limit reached · /compact or /clear to continue")
+        for second in range(6):
+            for _ in range(4):
+                sys.stdout.write("\x1b[s\x1b[1;20H%ds\x1b[u" % second)
+                sys.stdout.flush()
+                time.sleep(0.25)
+        complete("done quoted")
+    elif "failure" in words:
         complete("", failure=True)
     elif "background" in words:
         complete("Waiting for the command to complete...", running=True)

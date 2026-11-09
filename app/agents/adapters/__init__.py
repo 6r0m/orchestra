@@ -41,9 +41,9 @@ What a kind's module holds, each named below by what it answers:
   to words typed into its terminal after the turn's prompt, as (text, when its hook recorded it), or None;
   `held(text)`: why what its CLI drew holds a turn that has recorded no event long after it should have begun —
   a dialog for the operator to answer in the role's terminal, such as its review of hooks a kind runs only once
-  trusted — or None, for a kind whose first hook fires as its turn begins; `halted(text)`: why what its CLI drew
-  holds a begun turn that has recorded no new event for a while — an exact stop for the operator that fires no
-  hook, never words a working agent may write itself — or None.
+  trusted — or None, for a kind whose first hook fires as its turn begins; `halted(text, events)`: why what its CLI
+  drew holds a begun turn that has gone silent for a while, no new event and nothing drawn — an exact stop for the
+  operator that fires no hook, never words a working agent may write itself — or None.
 
 Importing a kind's module only defines it: anything that touches the host happens in its answers,
 so the kinds can be listed on a host that has none of their CLIs.

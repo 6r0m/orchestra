@@ -175,10 +175,13 @@ def wire(argv, events, sink):
     return argv[:1] + ["--settings", json.dumps(dict(TURN_SETTINGS, hooks=hooks))] + argv[1:]
 
 
-def halted(text):
-    """Why what it drew holds a turn that has gone quiet — stopped at its context limit, waiting for `/compact` or
-    `/clear`, which fires no hook — or None: only where that stop is the last thing it said, and it has not
-    worked since; words it writes itself while working are followed by its working line."""
+def halted(text, events):
+    """Why what it drew holds a turn gone silent — stopped at its context limit, waiting for `/compact` or
+    `/clear`, which fires no hook — or None: only where that stop is the last of its kind it drew, its working line
+    nowhere after it, and it had not ended its answer — after a `Stop`, while a background task of it runs, it is
+    idle as it should be, whatever its answer quoted."""
+    if events and events[-1].get("_hook") in ("Stop", "StopFailure"):
+        return None
     stops = list(CONTEXT_STOPPED.finditer(text))
     if not stops or WORKING.search(text, stops[-1].end()):
         return None
