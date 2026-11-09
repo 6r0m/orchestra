@@ -185,6 +185,21 @@ class ClaudeCompacts(unittest.TestCase):
         self.assertEqual(settings["enabledPlugins"], {claude_code.PLUGIN: True})
         self.assertIn("Stop", settings["hooks"])
 
+    def test_a_turn_stopped_at_its_context_limit_is_read_off_its_screen(self):
+        from app.agents.adapters import claude_code
+        working = "Running… (esc to interrupt) "
+        # As the operator's build drew it (measured), its words spaced and run together, and as Claude's docs
+        # spell the error that ends its auto-compact when the context refills at once.
+        stopped = ('Background command "Run each red case" completed (exit code 0)Context limit reached · /compact '
+                   "or /clear to continue · auto-compact is off · /config to turn it on✻ Cogitated for 0s")
+        together = "Contextlimitreached·/compactor/cleartocontinue·auto-compactisoff·/configtoturniton"
+        thrashing = "Autocompact is thrashing: the context refilled to the limit several times in a row"
+        for screen in (working + stopped, "esctointerrupt " + together, working + thrashing):
+            self.assertIn("context limit", claude_code.halted(screen), screen)
+        # Working again after it — compacting and going on, or writing those words itself: nothing to read.
+        self.assertIsNone(claude_code.halted(stopped + " " + working))
+        self.assertIsNone(claude_code.halted(working + "editing the plan"))
+
 
 class Reply(unittest.TestCase):
     """What a role last answered the operator in its terminal after its turn — words they settled with it at a

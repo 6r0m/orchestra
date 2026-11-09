@@ -245,6 +245,11 @@ def main():
     if "exit" in words:
         draw("giving up")
         sys.exit(3)
+    if "full" in words:
+        # A session that filled its context with auto-compact off, as Claude draws it (measured): no hook fires.
+        draw("Context limit reached · /compact or /clear to continue · auto-compact is off")
+        while True:
+            time.sleep(1)
     if "hang" in words:
         while True:
             time.sleep(1)

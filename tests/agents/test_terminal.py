@@ -279,6 +279,16 @@ class Turns(unittest.TestCase):
         with open(os.path.join(self.rdir, "logs", "build-e1-2.err"), encoding="utf-8") as fh:
             self.assertIn("giving up", fh.read(), "the terminal's text is the turn's error log")
 
+    def test_a_claude_turn_stopped_at_its_context_limit_fails_once_quiet_not_at_its_limit(self):
+        saved, terminal.HALT_SECONDS = terminal.HALT_SECONDS, 2
+        self.addCleanup(setattr, terminal, "HALT_SECONDS", saved)
+        began = time.monotonic()
+        with self.assertRaises(launch.ExecutorError) as halted:
+            self.turn("full context", timeout=20)
+        self.assertLess(time.monotonic() - began, 12, "failed once quiet, not at the turn's limit")
+        self.assertIn("context limit", str(halted.exception))
+        self.assertFalse(terminal.get(self.run_id, "engineer").live())
+
     def test_a_timeout_ends_the_agent(self):
         with self.assertRaises(launch.RoleTimeout):
             self.turn("hang forever", timeout=3)

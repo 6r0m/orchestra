@@ -52,6 +52,9 @@ TICK_SECONDS = 1.0
 # the rest is the operator's, to answer the dialog in the role's terminal — and a dialog that holds it is drawn last.
 BEGIN_SECONDS = 120
 HELD_TAIL = 64 * 1024
+# How long a begun turn whose kind reads a stop for the operator (`halted`) may record no new event before its
+# screen is read: as long as a start, the rest the operator's to answer in the role's terminal.
+HALT_SECONDS = 120
 # The page's subprotocol. The token is offered beside it, in the handshake's own header, so it
 # never appears in a URL the browser prints to its console or a proxy writes to a log.
 PROTOCOL = "workbench.v1"
@@ -416,8 +419,11 @@ def run_turn(worktree, argv, rdir, name, prompt, timeout, env, on_tick=None, *, 
     try:
         deadline = time.monotonic() + timeout
         begun_by = time.monotonic() + BEGIN_SECONDS
+        seen, quiet_since = 0, time.monotonic()
         while True:
             events = _events(paths["events"])
+            if len(events) != seen:
+                seen, quiet_since = len(events), time.monotonic()
             done = adapter.completion(events, prompt, session)
             if done is not None:
                 ok, message, session = done
@@ -430,6 +436,13 @@ def run_turn(worktree, argv, rdir, name, prompt, timeout, env, on_tick=None, *, 
                 if why:
                     finish(1, "")
                     raise launch.ExecutorError("the turn did not begin within %ds: %s" % (BEGIN_SECONDS, why))
+            # So does a begun turn its CLI stopped for the operator without a hook — read only once it has gone
+            # quiet, and only as an exact stop its kind knows, never words a working agent may write itself.
+            if events and hasattr(adapter, "halted") and time.monotonic() - quiet_since >= HALT_SECONDS:
+                why = adapter.halted(plain(bytes(agent.output[-HELD_TAIL:])))
+                if why:
+                    finish(1, "")
+                    raise launch.ExecutorError("the turn went quiet for %ds: %s" % (HALT_SECONDS, why))
             rc = agent.returncode()
             if rc is not None:
                 agent.pump.join(timeout=launch.GRACE_SECONDS)

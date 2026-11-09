@@ -11,7 +11,9 @@ Its turn ends on its own hooks: `Stop` for a prompt id that `UserPromptSubmit` r
 for any prompt submitted after it in the session, while no background task of it still runs; `StopFailure`
 fails the turn. The hooks go in its settings — the file a traced turn already has, since Claude takes one
 `--settings`, or its own — with its auto-compact on, whatever the operator's own setting: a session that fills
-its context with it off stops there and fires no hook. Its answer is the turn's final message.
+its context with it off stops there and fires no hook. A stop like that all the same — compaction off by the
+environment, or given up — is read off its screen once the turn goes quiet (`halted`). Its answer is the turn's
+final message.
 
 A worker started from inside a Claude Code session inherits that session's markers, and a Claude agent
 carrying them runs as that session's child: measured, it keeps no transcript, so its session cannot be
@@ -59,9 +61,16 @@ DIALOGS = ("permission_prompt", "elicitation_dialog", "elicitation_url_dialog")
 # What a turn's own settings say besides its hooks. A role's session spans every turn of the role, and one that
 # fills its context with auto-compact off stops at *Context limit reached · /compact or /clear to continue*
 # firing no hook, so the turn waits out its limit (measured: the operator's build, its session through nine plan
-# rounds, the operator's own setting off). A turn's `--settings` outrank the user's; only `DISABLE_AUTO_COMPACT`
-# in the worker's environment turns it off again (documented), which neither host sets.
+# rounds, the operator's own setting off). A turn's `--settings` outrank the user's. Compaction can still stop:
+# `DISABLE_AUTO_COMPACT` or `DISABLE_COMPACT` in the worker's environment turns it off (documented; neither host
+# sets either), and Claude gives up auto-compacting when the context refills at once after each summary
+# (documented, *Autocompact is thrashing: …*) — such a stop is read off its screen (`halted`).
 TURN_SETTINGS = {"autoCompactEnabled": True}
+# Those stops as its interface draws them — the first measured, its words spaced or run together; the second as
+# its docs spell it — and what it draws while it works, below anything it said before.
+CONTEXT_STOPPED = re.compile(r"Context\s*limit\s*reached\W{0,5}/compact\s*or\s*/clear|Autocompact\s*is\s*thrashing",
+                             re.I)
+WORKING = re.compile(r"esc\s*to\s*interrupt", re.I)
 WINDOWS = sys.platform.startswith("win")
 # Model and effort reach the command line, so each is a plain token.
 PLAIN_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]*")
@@ -164,6 +173,18 @@ def wire(argv, events, sink):
             json.dump(settings, fh)
         return argv
     return argv[:1] + ["--settings", json.dumps(dict(TURN_SETTINGS, hooks=hooks))] + argv[1:]
+
+
+def halted(text):
+    """Why what it drew holds a turn that has gone quiet — stopped at its context limit, waiting for `/compact` or
+    `/clear`, which fires no hook — or None: only where that stop is the last thing it said, and it has not
+    worked since; words it writes itself while working are followed by its working line."""
+    stops = list(CONTEXT_STOPPED.finditer(text))
+    if not stops or WORKING.search(text, stops[-1].end()):
+        return None
+    return ("Claude stopped at its context limit and waits for /compact or /clear, which fires no hook (it said: "
+            "%s). Continue the run; if it stops there again, type /compact in the role's terminal within two minutes "
+            "— with a focus on what to keep, when it says auto-compact is thrashing" % stops[-1].group(0))
 
 
 def waiting(events):
