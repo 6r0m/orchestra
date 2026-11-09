@@ -18,6 +18,7 @@ sys.path[:0] = [PKG, HERE]
 
 from app.agents import trust  # noqa: E402
 from app.agents.adapters import claude_code, codex  # noqa: E402
+import cast  # noqa: E402
 
 REPO = os.path.abspath(PKG)          # a repository that really is on this host
 
@@ -199,7 +200,7 @@ class Wiring(unittest.TestCase):
         saved = trust.ensure
         trust.ensure = lambda repo, kinds, home=None: recorded.append((repo, sorted(set(kinds))))
         self.addCleanup(setattr, trust, "ensure", saved)
-        settings = S.load()
+        settings = cast.settings()
         policy = S.run_policy(settings)
         host = activities.Activities(runner=None, git=None, repositories=FakeRepos(), telemetry=None,
                                      which=installed, holds_skill=every_skill)

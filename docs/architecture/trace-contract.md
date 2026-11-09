@@ -131,6 +131,22 @@ step. None of this is configurable from here:
 - **attribution** — a model call carries no role, so cost is broken down by model, not by role or
   repository.
 
+For a round's cost, inspect the model generations beneath that round's role step in the trace tree,
+including its child-agent calls; do not subtract cumulative conversation totals across resumed sessions.
+The current dashboard groups costs by model, not by round. Langfuse's
+[usage and cost contract](https://langfuse.com/docs/observability/features/token-and-cost-tracking)
+distinguishes provider-supplied costs from costs inferred using submitted usage and model prices.
+Missing usage or an unmatched model is unknown cost, never evidence of free usage.
+
+DeepSeek's [Anthropic usage contract](https://api-docs.deepseek.com/guides/anthropic_api/) reports uncached
+input separately from cache reads; streaming final usage is cumulative, so adding the initial and final
+usage would double-count it. Its [pricing owner](https://api-docs.deepseek.com/quick_start/pricing/)
+defines time-dependent peak rates, holiday exceptions and separate search/fetch charges. A flat custom
+model definition cannot represent all of those conditions. Treat inferred DeepSeek costs as estimates unless
+every request's applicable tariff and billable tools are accounted for and reconciled with provider billing.
+Claude Code's own displayed dollar total is also
+[calculated locally](https://code.claude.com/docs/en/costs), rather than a provider billing receipt.
+
 ## Dashboard and saved views
 
 The *Orchestration Health* dashboard is defined and applied by

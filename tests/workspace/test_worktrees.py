@@ -23,6 +23,7 @@ from app.application import activities as A  # noqa: E402
 from app.foundation import envpath  # noqa: E402
 from app.workspace import worktrees as W  # noqa: E402
 import folders  # noqa: E402
+import cast  # noqa: E402
 
 WINDOWS = sys.platform.startswith("win")
 TARGET = "windows" if WINDOWS else "wsl"
@@ -221,13 +222,12 @@ class Guard(Repo):
             git(worktree, "add", "-A")
             return 0, "done\n"
 
-        from app.application import settings as S
         host = A.Activities(runner=staging_agent, telemetry=None)
         state = {"run_id": "run1-guard", "task": "t", "phase": "plan", "round": 0, "episode": 1,
                  "worktree_path": path, "todo_path": os.path.join(path, "todo", "x.md"), "agent_sessions": {}}
         self.addCleanup(shutil.rmtree, A.run_dir("run1-guard"), ignore_errors=True)
         with self.assertRaises(Exception) as raised:
-            host.run_role({"stage": "plan", "state": state, "policy": S.run_policy(S.load())})
+            host.run_role({"stage": "plan", "state": state, "policy": cast.policy()})
         self.assertIn("git_violation", str(raised.exception))
 
     def test_an_agents_git_can_neither_push_nor_reach_a_remote(self):

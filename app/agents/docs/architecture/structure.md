@@ -64,6 +64,18 @@ when preparing a run; no vendor path crosses the Settings API. What holds a turn
 runs with — the vendor's sandbox, or the vendor's own rules alone — is each kind's to state, and
 Settings shows a role the words of the kind chosen for it.
 
+Claude Code profiles may select DeepSeek as their API provider, following
+[DeepSeek's Claude Code integration](https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code/).
+The existing Claude adapter keeps ownership of its hooks, sessions, skills and access rules; changing the
+model's provider does not introduce another kind of CLI. Only that process receives the provider endpoint,
+model mappings and authentication from `DEEPSEEK_API_KEY` in its host worker's environment or the checkout's
+private `.env`, read at each turn with the environment taking precedence. The provider overrides also enter
+the private per-turn CLI settings, since Claude settings can replace inherited environment values. The
+file is shared with hook and trace settings and removed at the end of the stage; a dead worker's sweep
+removes what it left. No credential is passed on the command line. Missing
+authentication refuses before launch, with no subscription fallback. The key is never a profile setting,
+part of the run snapshot or trace metadata. Other profiles keep the CLI's existing configuration.
+
 A role's session spans every turn of the role, so it can fill its context: a Claude turn's own settings turn
 its auto-compact on, whatever the operator's, since a session that fills with it off stops at *Context limit
 reached* and fires no hook (measured), and its turn would wait out its limit. Compaction can still stop — off
@@ -72,6 +84,12 @@ silent for two minutes, no new event and nothing drawn, has what it drew read (`
 stream, not its screen as it stands, so silence is the evidence: a Claude at work keeps redrawing its spinner,
 and one stopped draws nothing (measured). An exact stop of that kind, its working line nowhere after it and its
 answer not ended, fails the step saying how to go on; never words a working agent or its tools may print.
+
+The run's snapshotted `timeout_seconds` remains a finite wall-clock cap on each role turn, independent of
+terminal output. A quiet build alone is not a failure, and a redrawing spinner alone cannot prove useful
+progress. Known held-start and context stops, process exit, explicit completion, and operator Stop retain
+their existing behavior under a longer cap. A timeout ends the contained process tree and leaves the worktree
+and provider session available for the operator's Continue; there is no automatic retry or periodic restart.
 
 Through the vendor's own completion hook: a turn ends on Claude's `Stop` for its own
 prompt id, or Codex's `Stop` for the turn its `UserPromptSubmit` began with our prompt, in its own thread —
@@ -101,7 +119,8 @@ lay their screens out for, and 48 rows until a page's Maximize asks for as many 
 and its Restore for 48 again, as a console window's own resize does. The size travels to the PTY host in its stdin
 as a sequence no key makes (`ESC _ orchestra-size;…`, refused in what a page types), holds for the role's next
 turns until a Restore or the worker's restart, and is marked in the record where each size begins (`OSC 5379`), so
-every page draws each part at the size it was drawn at; a page asks only a worker that names its size. The same
+every page draws each part at the size it was drawn at. The marker is recorded and delivered before the resize
+command can trigger the agent's redraw; a page asks only a worker that names its size. The same
 socket serves each feed the worker hands it, by name, beside the terminals —
 the run's change is one — with the same origin and token; what a feed reads is the worker's to compose, and
 this package knows nothing of it.

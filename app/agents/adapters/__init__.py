@@ -32,7 +32,9 @@ What a kind's module holds, each named below by what it answers:
 - `session(out, minted)`: the session a new turn began. `final_message(out)`: its answer.
 - `message_of(event)`: an agent message inside one JSON line of its output, or None.
 - `skill_folders(name, repo)`: where a skill of that name would be found for it.
-- optional — `trust_ensure(repo, home)`, `trust_forget(repo, home)`; `trace_env(context)`,
+- optional — `configure(role, env, traced, private)`: the process environment and CLI settings for a selected API provider, or a refusal
+  before launch when it cannot be configured; no credentials enter the role's policy or trace;
+  `trust_ensure(repo, home)`, `trust_forget(repo, home)`; `trace_env(context)`,
   `trace_settings(context, private)`, `reasoning(session)`, `upload(session, context)`;
   `waiting(events)`: whether its turn's events end on a dialog waiting in its terminal, for a kind that
   reports one; `readable(argv, folders)`: the command with folders outside the worktree readable to it
@@ -62,7 +64,7 @@ REQUIRED = ("NAME", "EXECUTABLE", "ACCESS", "BOUNDARY", "OPTIONS", "SKILL", "SES
 CALLABLE = ("validate", "command", "host", "session_in", "wire", "completion", "output", "session",
             "final_message", "message_of", "skill_folders", "skill_roots")
 OPTIONAL = ("trust_ensure", "trust_forget", "trace_env", "trace_settings", "reasoning", "upload", "waiting",
-            "readable", "reply", "held", "halted")
+            "readable", "reply", "held", "halted", "configure")
 
 
 class Refused(ValueError):

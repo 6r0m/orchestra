@@ -76,7 +76,7 @@ You need Docker, [uv](https://docs.astral.sh/uv/), git, and whichever agent CLIs
 
 ```bash
 git clone <this repository> orchestra && cd orchestra
-cp .env.example .env          # nothing in it is required to start
+cp .env.example .env          # set the credentials for the profiles you use
 make workbench-install        # the Workbench: a systemd user service in WSL, started with it
 make up                       # Temporal + its database, then both workers — or Start in the page
 make check                    # each part of the stack, and the Workbench's service
@@ -85,6 +85,10 @@ make check                    # each part of the stack, and the Workbench's serv
 Open the page — `http://127.0.0.1:8390` by default — and start a run on this repository. To work on
 your own repositories, copy `.orchestra/repos.example.json` to `.orchestra/repos.json` (ignored) and
 describe them there; the page can also start a run on any path you type.
+
+The shared engineer profile uses DeepSeek through Claude Code. Set `DEEPSEEK_API_KEY` in `.env`,
+or select another engineer profile in Settings before starting a run. A missing key refuses the turn.
+The per-turn limit is editable in hours there; a run keeps the settings it started with.
 
 ```bash
 make feature TASK="fix the retry in the uploader"   # the same run, from the command line

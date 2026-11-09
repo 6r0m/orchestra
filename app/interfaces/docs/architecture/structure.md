@@ -40,6 +40,13 @@ Through the worker's WebSocket: the page attaches to a run's live terminals on w
 host is running them, and — while a role works on the run — to its change, which that worker reads from the
 run's worktree and sends again whenever it moves: a summary that writes nothing in git. A file opened is read
 through the change's own reader, as the change is now, and read again only when its row says it changed.
+
+The terminal browser module accepts the earlier Workbench configuration containing only columns and rows,
+using the resize protocol's original row bounds when they are absent. A worker restart can therefore enable
+resizing while the Workbench still serves its earlier configuration. New Settings controls or server behavior
+still require reloading the Workbench process; workers load their code on restart. Restart workers only between
+turns, since restarting one ends its contained agents. Settings exposes the per-turn cap in hours and a profile's
+optional provider; the application settings owner stores their validated values for new runs.
 Its Operator action list also projects a waiting vendor dialog from the active turn's local
 hook events — Claude's; Codex reports none — and the workflow still owns actual stops and their answers.
 At a stop that takes guidance, the run's view also carries what the role the operator talked with last

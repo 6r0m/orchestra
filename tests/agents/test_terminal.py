@@ -527,6 +527,21 @@ class Resize(unittest.TestCase):
         self.addCleanup(shutil.rmtree, terminal.run_dir(self.run_id), True)
         self.addCleanup(terminal.close_run, self.run_id)
 
+    def test_the_size_marker_precedes_output_caused_by_the_resize(self):
+        term = terminal.open_terminal(self.run_id, "engineer")
+        told = []
+        term.attach(told.append)
+        pump = threading.Thread(target=lambda: None)
+        pump.start()
+        term.agent = type("Agent", (), {
+            "resize": lambda self, rows: term.emit(b"redrawn at 138 rows"),
+            "returncode": lambda self: None, "end": lambda self: None, "pump": pump})()
+        term.resize(138)
+        expected = [terminal.SIZE_MARK % (terminal.COLS, 138), b"redrawn at 138 rows"]
+        self.assertEqual(told[:2], expected, "viewers resize before the agent's new-size output")
+        with open(term.path, "rb") as fh:
+            self.assertEqual(fh.read(), b"".join(expected), "replay keeps the same causal order")
+
     def test_the_pty_host_reads_a_size_whole_across_reads_and_passes_every_key(self):
         from app.agents import ptyhost
         split = lambda *chunks: list(ptyhost.split(iter(chunks)))   # noqa: E731

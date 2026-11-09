@@ -324,6 +324,8 @@ class Activities:
             # runs untraced.
             traced = T.optional("trace settings", lambda: _answer(adapter, "trace_settings", context, private))
             env = agent_env(T.optional("trace environment", lambda: _answer(adapter, "trace_env", context)))
+            if hasattr(adapter, "configure"):
+                env, traced = adapter.configure(adapters.view(role), env, traced, private)
             # Again before every turn, not once per run: a CLI that was running when the record was written
             # may rewrite that file from its own copy when it exits, and take the record with it (measured).
             # Re-recording costs one small read; losing it costs a stopped turn.

@@ -10,10 +10,12 @@ flowchart LR
         policy["policy.py"]
         stages["stages.py"]
         flows["flows.py"]
+        localenv["localenv.py"]
     end
     settings_ext[(".orchestra/settings.json + local patch")]
     flows_ext[("flows/")]
     hostfs[("this host's disk")]
+    private_ext[(".env")]
     policy -->|"the stage vocabulary"| stages
     policy -->|"the checkout root"| paths
     policy -->|"what can name a flow"| flows
@@ -22,4 +24,6 @@ flowchart LR
     flows -->|"the checkout root"| paths
     flows_ext -->|"a flow's steps"| flows
     envpath -->|"the environment root"| hostfs
+    localenv -->|"the checkout root"| paths
+    private_ext -->|"deployment-private values"| localenv
 ```

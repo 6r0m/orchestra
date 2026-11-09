@@ -14,7 +14,7 @@ const staged = new Map();
 const promptEditors = new Set();
 const NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const ACCESS = { write: "Writes in the run's worktree.", read: "Reads only: its agent runs read-only." };
-const RESET = ["agents", "roles", "stage_skills", "review_rounds", "review_prompts", "default_flow"];
+const RESET = ["agents", "roles", "stage_skills", "review_rounds", "review_prompts", "default_flow", "timeout_seconds"];
 const PROMPT_EVENTS = [
   { key: "after_normal", title: "After normal budget",
     hint: "Added once to each role's next turn when after-reflection rounds remain." },
@@ -330,7 +330,7 @@ function drawProfiles(settings) {
     what.append(kind.name || profile.kind, el("span", kind.refused ? "Unusable: " + kind.refused
       : (kind.access.includes("read") ? "Can review. " : "Cannot review. ")
         + (kind.access.includes("write") ? "Can build." : "Cannot build."), "gloss"));
-    const cells = ["model", "effort"].map((option) => {
+    const cells = ["model", "effort", "provider"].map((option) => {
       const cell = el("td");
       const text = pointer("agents", name, option);
       if (!kind.options || !kind.options.includes(option)) {
@@ -409,6 +409,18 @@ function drawProfiles(settings) {
 }
 
 function drawTogether(settings) {
+  const timeout = el("input");
+  timeout.id = "settings-turn-hours";
+  timeout.type = "number";
+  timeout.min = "0";
+  timeout.step = "any";
+  timeout.value = settings.timeout_seconds / 3600;
+  timeout.setAttribute("aria-describedby", "settings-turn-hint");
+  timeout.onchange = () => stage("/timeout_seconds", { value: Math.round(Number(timeout.value) * 3600) }, timeout);
+  const hint = el("p", "Maximum time for one role turn. Healthy quiet work can continue until this cap. "
+    + "Stop and known startup or context failures still end it earlier. Existing runs keep their limit.", "hint");
+  hint.id = "settings-turn-hint";
+  $("settings-timeout").replaceChildren(field("Turn limit (hours)", timeout, "/timeout_seconds", [hint]));
   const rounds = settings.review_rounds || Object.fromEntries(shown.phases.map((phase) =>
     [phase, { normal: settings.max_rounds[phase], extended: 0 }]));
   $("settings-rounds").replaceChildren(...shown.phases.flatMap((phase) => {

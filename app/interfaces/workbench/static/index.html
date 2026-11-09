@@ -161,6 +161,7 @@
             <p class="hint">If still not PASS at the normal budget and after-reflection rounds remain, both roles reflect once. BLOCKER stops immediately.</p>
             <div class="choices" id="settings-rounds"></div>
           </fieldset>
+          <div id="settings-timeout"></div>
         </section>
         <section class="settings-part" aria-labelledby="settings-flow-title">
           <h2 id="settings-flow-title">Default flow</h2>
@@ -174,11 +175,13 @@
         </section>
         <details class="settings-disclosure" id="settings-profile-disclosure">
           <summary id="settings-profile-summary">Agent profiles</summary>
-          <p class="hint">Each role above uses one profile. Leave Model or Effort blank to use that provider's default.</p>
+          <p class="hint">Each role above uses one profile. A blank Provider uses the CLI's existing configuration.
+            DeepSeek requires its model and DEEPSEEK_API_KEY in .env or the worker environment.</p>
           <div class="table-wrap">
             <table class="profiles">
               <thead><tr><th scope="col">Profile</th><th scope="col">Kind</th><th scope="col">Model</th>
-                <th scope="col">Effort</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+                <th scope="col">Effort</th><th scope="col">Provider</th>
+                <th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
               <tbody id="settings-profiles"></tbody>
             </table>
           </div>

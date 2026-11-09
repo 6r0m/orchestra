@@ -35,6 +35,8 @@ import sys
 import uuid
 
 from app.agents.adapters import _files
+from app.agents import launch
+from app.foundation import localenv
 
 NAME = "Claude Code"
 EXECUTABLE = "claude"
@@ -47,7 +49,7 @@ BOUNDARY = {
     "write": "Claude Code's own rules hold its file edits to the worktree. The commands it runs are not "
              "confined by the operating system: what they reach is what this host's Claude settings allow.",
 }
-OPTIONS = ("model", "effort")
+OPTIONS = ("model", "effort", "provider")
 SKILL = "/{name}"
 SESSION_MARKERS = ("CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT", "CLAUDE_AGENT_SDK_VERSION")
 SESSION_MARKER_PREFIXES = ("CLAUDE_CODE_",)
@@ -86,9 +88,57 @@ def validate(profile):
             continue
         if key not in OPTIONS:
             problems.append((key, "Claude Code takes %s, not %r" % (" and ".join(OPTIONS), key)))
+        elif key == "provider":
+            if value != "deepseek":
+                problems.append((key, "must be deepseek, or omitted to use the CLI's existing configuration"))
         elif not (isinstance(value, str) and PLAIN_TOKEN.fullmatch(value)):
             problems.append((key, "must be a plain token"))
+    if profile.get("provider") == "deepseek" and profile.get("model") not in ("deepseek-flash", "deepseek-v4-pro"):
+        problems.append(("model", "DeepSeek requires deepseek-flash or deepseek-v4-pro"))
     return problems
+
+
+def environment(role, env):
+    """Overrides for the selected provider; empty values clear competing authentication and cloud routes."""
+    if role.get("provider") != "deepseek":
+        return {}
+    key = env.get("DEEPSEEK_API_KEY")
+    if not key:
+        try:
+            key = localenv.read().get("DEEPSEEK_API_KEY")
+        except (OSError, UnicodeError) as exc:
+            raise launch.ExecutorError("cannot read DeepSeek credentials from .env: %s" % type(exc).__name__) from None
+    if not key or not key.strip():
+        raise launch.ExecutorError("the DeepSeek profile requires DEEPSEEK_API_KEY in .env or this host's worker environment")
+    model = role["model"]
+    kept = dict.fromkeys(("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK",
+                          "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_USE_MANTLE",
+                          "CLAUDE_CODE_USE_ANTHROPIC_AWS"), "")
+    kept.update(ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic", ANTHROPIC_AUTH_TOKEN=key,
+                ANTHROPIC_MODEL=model + "[1m]", CLAUDE_CODE_SUBAGENT_MODEL=model,
+                CLAUDE_CODE_EFFORT_LEVEL=role.get("effort") or "max",
+                CLAUDE_CODE_AUTO_COMPACT_WINDOW="786432", CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1")
+    for size in ("OPUS", "SONNET", "HAIKU", "FABLE"):
+        kept["ANTHROPIC_DEFAULT_%s_MODEL" % size] = model
+    return kept
+
+
+def configure(role, env, traced, private):
+    """Provider routing in the private CLI settings, whose env outranks user and project settings."""
+    values = environment(role, env)
+    if not values:
+        return env, traced
+    settings = {}
+    if traced:
+        with open(traced, encoding="utf-8") as fh:
+            settings = json.load(fh)
+    settings.setdefault("env", {}).update(values)
+    if traced:
+        with open(traced, "w", encoding="utf-8") as fh:
+            json.dump(settings, fh)
+    else:
+        traced = _files.private_file(private, "claude-provider.json", json.dumps(settings))
+    return dict(env, **values), traced
 
 
 def command(role, resume_id, traced=None):
@@ -103,7 +153,7 @@ def command(role, resume_id, traced=None):
         minted = str(uuid.uuid4())
         parts += ["--session-id", minted]
     if role.get("model"):
-        parts += ["--model", role["model"]]
+        parts += ["--model", role["model"] + ("[1m]" if role.get("provider") == "deepseek" else "")]
     if role.get("effort"):
         parts += ["--effort", role["effort"]]
     if role["workspace_access"] == "read":

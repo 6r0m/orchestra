@@ -32,7 +32,8 @@ let lastSince;
 // takes none, and is asked nothing: its terminal is drawn larger, as far as both sides allow. Every size change is
 // marked in the record where it began, so a page — this one, another watching, one connecting later — draws each
 // part at the size it was drawn at.
-const { cols: COLS, rows: ROWS, min_rows: MIN_ROWS, max_rows: MAX_ROWS } = CONFIG.terminal_size;
+// An older Workbench serves only cols and rows while loading today's JavaScript from disk.
+const { cols: COLS, rows: ROWS, min_rows: MIN_ROWS = 24, max_rows: MAX_ROWS = 200 } = CONFIG.terminal_size;
 const SIZE_MARK = 5379;
 const LARGEST = 18;
 const MAXIMIZE = "Fill the window with this terminal: the agent's terminal takes as many rows as fit";

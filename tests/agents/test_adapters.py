@@ -155,6 +155,28 @@ class CodexHooks(unittest.TestCase):
                                                        "stdin"])
 
 
+class DeepSeekSettings(unittest.TestCase):
+    def test_provider_settings_share_the_private_trace_file_and_survive_hook_wiring(self):
+        from app.agents.adapters import claude_code
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "settings.json")
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump({"enabledPlugins": {"tracer": True}}, fh)
+            env, chosen = claude_code.configure({"provider": "deepseek", "model": "deepseek-flash"},
+                                                {"DEEPSEEK_API_KEY": "test-provider", "KEEP": "kept"}, path, None)
+            self.assertEqual(chosen, path, "one private file, no duplicated trace credentials")
+            self.assertEqual(env["KEEP"], "kept")
+            wired = claude_code.wire(["claude", "--settings", chosen], "turn.events",
+                                     lambda label, source: ["python", "hook.py", "events", label, source])
+            with open(path, encoding="utf-8") as fh:
+                settings = json.load(fh)
+            self.assertEqual(settings["enabledPlugins"], {"tracer": True})
+            self.assertEqual(settings["env"]["ANTHROPIC_AUTH_TOKEN"], "test-provider")
+            self.assertIn("Stop", settings["hooks"])
+            self.assertTrue(settings["autoCompactEnabled"])
+            self.assertNotIn("test-provider", " ".join(wired), "credentials never enter the command line")
+
+
 class ClaudeCompacts(unittest.TestCase):
     """A role's Claude session spans every turn of the role, and one that fills its context with auto-compact off
     stops at *Context limit reached* firing no hook, so the turn waits out its limit (measured, the operator's

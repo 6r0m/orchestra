@@ -26,6 +26,7 @@ from app.agents import nodes as N  # noqa: E402
 from app.agents.adapters import claude_code, codex  # noqa: E402
 from app.application import activities  # noqa: E402
 from app.observability import telemetry as T  # noqa: E402
+from app.foundation import localenv  # noqa: E402
 from app.workspace import worktrees  # noqa: E402
 from fakes import FakeRepos, FakeWorktrees, Recorder, every_skill, installed  # noqa: E402
 import stand_in  # noqa: E402
@@ -146,6 +147,55 @@ class Environment(unittest.TestCase):
         self.run_id = "test-activities-%s" % os.urandom(4).hex()
         self.addCleanup(shutil.rmtree, activities.run_dir(self.run_id), True)
         self.addCleanup(terminal.close_run, self.run_id)
+
+    def test_deepseek_is_scoped_to_its_profile_and_missing_auth_starts_no_agent(self):
+        configured = policy("claude-code")
+        configured["roles"]["engineer"].update(provider="deepseek", model="deepseek-flash", effort="max")
+        given = []
+
+        def runner(worktree, argv, rdir, name, prompt, timeout, env, *, kind):
+            with open(argv[argv.index("--settings") + 1], encoding="utf-8") as fh:
+                private_settings = json.load(fh)
+            given.append((argv, env, timeout, private_settings))
+            return 0, "planned"
+
+        host = activities.Activities(runner=runner, git=FakeWorktrees(), telemetry=None)
+        with mock.patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-deepseek", "ANTHROPIC_API_KEY": "test-anthropic",
+                                         "CLAUDE_CODE_OAUTH_TOKEN": "test-subscription", "CLAUDE_CODE_USE_VERTEX": "1"}):
+            host.run_role({"stage": "plan", "state": state(self.run_id), "policy": configured})
+            argv, env, timeout, private_settings = given[0]
+            self.assertEqual(argv[argv.index("--model") + 1], "deepseek-flash[1m]")
+            self.assertEqual(env["ANTHROPIC_BASE_URL"], "https://api.deepseek.com/anthropic")
+            self.assertEqual(env["ANTHROPIC_AUTH_TOKEN"], "test-deepseek")
+            for competing in ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_VERTEX"):
+                self.assertEqual(env[competing], "")
+                self.assertEqual(private_settings["env"][competing], "", "overrides competing settings-file env")
+            self.assertEqual(private_settings["env"]["ANTHROPIC_AUTH_TOKEN"], "test-deepseek")
+            self.assertFalse(os.path.exists(argv[argv.index("--settings") + 1]), "private settings removed after the turn")
+            for name in ("OPUS", "SONNET", "HAIKU", "FABLE"):
+                self.assertEqual(env["ANTHROPIC_DEFAULT_%s_MODEL" % name], "deepseek-flash")
+            self.assertEqual(os.environ["ANTHROPIC_API_KEY"], "test-anthropic", "the worker's environment is untouched")
+        given.clear()
+        with mock.patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}), \
+                mock.patch.object(localenv, "read", return_value={}), self.assertRaises(ApplicationError) as raised:
+            host.run_role({"stage": "plan", "state": state(self.run_id), "policy": configured})
+        self.assertIn("DEEPSEEK_API_KEY", str(raised.exception))
+        self.assertEqual(given, [], "missing DeepSeek credentials never fall back to a subscription")
+
+    def test_deepseek_reads_the_deployment_file_without_exporting_other_values(self):
+        role = {"provider": "deepseek", "model": "deepseek-flash"}
+        with mock.patch.object(localenv, "read", return_value={"DEEPSEEK_API_KEY": "test-file", "UNRELATED": "private"}):
+            configured = claude_code.environment(role, {})
+        self.assertEqual(configured["ANTHROPIC_AUTH_TOKEN"], "test-file")
+        self.assertNotIn("UNRELATED", configured)
+        with mock.patch.object(localenv, "read", side_effect=OSError("private contents")):
+            unchanged = {"ANTHROPIC_AUTH_TOKEN": "test-existing"}
+            self.assertEqual(claude_code.environment({}, unchanged), {}, "other profiles read no DeepSeek key")
+            self.assertEqual(claude_code.environment(role, {"DEEPSEEK_API_KEY": "test-env"})["ANTHROPIC_AUTH_TOKEN"],
+                             "test-env", "an explicit environment needs no file")
+            with self.assertRaisesRegex(Exception, "cannot read DeepSeek credentials") as raised:
+                claude_code.environment(role, {})
+        self.assertNotIn("private contents", str(raised.exception))
 
     def test_no_agent_of_any_kind_inherits_any_kinds_session_markers(self):
         for kind in SHIPPED + (stand_in.KIND,):

@@ -282,10 +282,10 @@ class Terminal:
         if rows == self.rows:
             return
         self.rows = rows
+        self.emit(SIZE_MARK % (COLS, rows))
         agent = self.agent
         if agent is not None:
             agent.resize(rows)
-        self.emit(SIZE_MARK % (COLS, rows))
         self.announce()
 
     def start(self, argv, cwd, env):

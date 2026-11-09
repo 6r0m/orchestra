@@ -36,6 +36,7 @@ import re
 import sys
 
 from app.foundation import paths
+from app.foundation import localenv
 from app.foundation import stages
 # The change a human reviews is the worktree's; the trace only records it.
 
@@ -73,22 +74,12 @@ _warned = set()
 def _read_secrets_file():
     """`NAME=value` entries of the secrets file, {} when it is absent. Never raises, never logs a value."""
     try:
-        with open(SECRETS_FILE, encoding="utf-8") as handle:
-            lines = handle.read().splitlines()
-    except FileNotFoundError:
-        return {}                       # absent is normal: telemetry is optional
+        return localenv.read(SECRETS_FILE)
     except (OSError, UnicodeError) as exc:
         # The kind of failure only, nothing read from the file.
         _warn_once("secrets", "cannot read %s: %s"
-                   % (os.path.relpath(SECRETS_FILE, REPO_ROOT), type(exc).__name__))
+                   % (os.path.basename(SECRETS_FILE), type(exc).__name__))
         return {}
-    entries = {}
-    for line in lines:
-        name, sep, value = line.partition("=")
-        name = name.strip()
-        if sep and name and not name.startswith("#"):
-            entries[name] = value.strip().strip("'\"")
-    return entries
 
 
 def _load_credentials():
@@ -605,8 +596,7 @@ OLD_DIR_PREFIXES = ("orch-claude-settings-",)
 
 
 class Private:
-    """A traced turn's private folder, for what its agent's kind writes there — a settings file with the
-    trace store's keys, say.
+    """A turn's private folder, for what its agent's kind writes there — settings with tracing or provider keys.
 
     Made on first use, in the machine's temporary folder rather than on the repository's drive, whose mount
     ignores file modes; only this user can enter it; named after this process, so a worker that starts later

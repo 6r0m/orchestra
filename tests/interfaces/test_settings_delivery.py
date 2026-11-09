@@ -125,6 +125,7 @@ class SettingsDelivery(unittest.TestCase):
             {"pointer": "/review_prompts/at_limit/engineer", "value": "SMOKE ENGINEER HANDOFF"},
             {"pointer": "/review_prompts/at_limit/architect", "value": "SMOKE ARCHITECT HANDOFF"},
             {"pointer": "/default_flow", "value": "architect-research"},
+            {"pointer": "/timeout_seconds", "value": 172800},
         ]
         status, applied = ask("POST", "/api/settings", {"revision": shown["revision"], "changes": changes})
         self.assertEqual(status, 200, applied)
@@ -147,6 +148,7 @@ class SettingsDelivery(unittest.TestCase):
         status, changed = ask("POST", "/api/settings", {
             "revision": applied["revision"],
             "changes": [{"pointer": "/roles/engineer/agent", "revert": True},
+                        {"pointer": "/timeout_seconds", "value": 3600},
                         {"pointer": "/roles/architect/agent", "revert": True},
                         {"pointer": "/agents/codex-engineer/model", "revert": True},
                         {"pointer": "/agents/claude-architect/model", "revert": True},
@@ -170,6 +172,8 @@ class SettingsDelivery(unittest.TestCase):
                           "plan-e2-3", "assess-e2-3"])
         self.assertEqual([call["kind"] for call in self.agent.calls[:3]],
                          ["claude-code", "codex", "claude-code"])
+        self.assertEqual({call["timeout_seconds"] for call in self.agent.calls}, {172800},
+                         "a two-day turn limit reaches the runner and stays after settings change")
         self.assertIn("smoke-architect", self.agent.calls[0]["argv"])
         self.assertIn("smoke-engineer", self.agent.calls[1]["argv"])
         self.assertIn("--effort", self.agent.calls[0]["argv"])

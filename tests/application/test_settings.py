@@ -57,6 +57,16 @@ class EachKindChecksItsOwnValues(unittest.TestCase):
                 self.assertEqual(raised.exception.pointer, "/agents/mine/model")
             S.check(P.validate(self.with_profile(kind=kind, model="any.model-1", effort="medium")))
 
+    def test_a_deepseek_profile_names_its_provider_and_an_explicit_deepseek_model(self):
+        S.check(P.validate(self.with_profile(kind="claude-code", provider="deepseek", model="deepseek-flash",
+                                           effort="max")))
+        for extra, pointer in (({"provider": "other", "model": "deepseek-flash"}, "provider"),
+                               ({"provider": "deepseek", "model": "claude-opus-5-5"}, "model"),
+                               ({"provider": "deepseek"}, "model")):
+            with self.subTest(extra=extra), self.assertRaises(P.InvalidPolicy) as raised:
+                S.check(P.validate(self.with_profile(kind="claude-code", **extra)))
+            self.assertEqual(raised.exception.pointer, "/agents/mine/" + pointer)
+
     def test_the_plain_token_rule_is_the_kinds_never_the_settings(self):
         """The control: a model the stand-in takes, which a generic plain-token rule would refuse."""
         settings = self.with_profile(kind=stand_in.KIND, model="its model (preview)")

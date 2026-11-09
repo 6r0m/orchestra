@@ -627,6 +627,60 @@ TERMINAL_ROWS = """(role => {
   return { rows: rows.children.length, top: Math.round(s.top), bottom: Math.round(s.bottom), window: innerHeight };
 })(%s)"""
 
+# A Workbench process from before row bounds, serving today's JavaScript from the shared checkout.
+LEGACY_TERMINAL_CONFIG = """(() => {
+  const get = document.getElementById.bind(document);
+  document.getElementById = (id) => {
+    const node = get(id);
+    if (id === "config" && node) {
+      const config = JSON.parse(node.textContent);
+      delete config.terminal_size.min_rows;
+      delete config.terminal_size.max_rows;
+      node.textContent = JSON.stringify(config);
+    }
+    return node;
+  };
+})();"""
+
+SETTINGS_POLICY_STAND_IN = """(() => {
+  const real = window.fetch;
+  window.__policyChanges = null;
+  let shown;
+  window.fetch = async (path, options = {}) => {
+    if (String(path) !== "/api/settings") return real(path, options);
+    if (options.method === "POST") {
+      window.__policyChanges = JSON.parse(options.body).changes;
+      return new Response(JSON.stringify(shown), { status: 200 });
+    }
+    shown = await (await real(path, options)).json();
+    shown.writable = true;
+    shown.settings.timeout_seconds = 3600;
+    delete shown.settings.agents['deepseek-engineer'].provider;
+    return new Response(JSON.stringify(shown), { status: 200 });
+  };
+})();"""
+
+
+def settings_policy(page):
+    """The Settings controls stage a duration and provider; their Apply is captured without writing settings."""
+    page.value("location.hash = '#settings'; true")
+    wait(lambda: page.value("Boolean(document.getElementById('settings-turn-hours'))"), 30, "Settings controls")
+    page.value("""(() => {
+      document.getElementById('settings-profile-disclosure').open = true;
+      for (const [id, value] of [['settings-turn-hours', '48'], ['settings-provider-deepseek-engineer', 'deepseek']]) {
+        const field = document.getElementById(id);
+        field.value = value;
+        field.dispatchEvent(new Event('change'));
+      }
+      document.getElementById('settings-apply').click();
+      return true;
+    })()""")
+    sent = wait(lambda: page.value("window.__policyChanges"), 30, "Settings Apply")
+    expected = {"/timeout_seconds": 172800, "/agents/deepseek-engineer/provider": "deepseek"}
+    correct = len(sent) == len(expected) and {change["pointer"]: change.get("value") for change in sent} == expected
+    print("Settings Apply captured, no settings written: %s" % sent)
+    return 0 if correct else 1
+
 
 def terminal_rows(page, run_id, role):
     """`role`'s terminal on the run's page, in a window taller than wide, as a portrait display's: 0 when Maximize has
@@ -935,7 +989,7 @@ def main(url, run_id, label, said, note=None):
     # A terminal is fitted in a window as narrow as an operator's, where 160 columns at the page's font do not fit.
     size = "1032x1100" if label.startswith("terminal-fit:") else size
     # A terminal's rows follow a window taller than wide, as a portrait display's.
-    size = "1000x1700" if label.startswith("terminal-rows:") else size
+    size = "1000x1700" if label.startswith(("terminal-rows:", "terminal-rows-legacy:")) else size
     edge = subprocess.Popen([EDGE, "--headless=new", "--disable-gpu", "--no-first-run", "--remote-debugging-port=0",
                              "--user-data-dir=" + profile]
                             + (["--window-size=" + size.replace("x", ",")] if size else []) + ["about:blank"],
@@ -950,6 +1004,12 @@ def main(url, run_id, label, said, note=None):
             "http://127.0.0.1:%s/json/list" % port)) if page.get("type") == "page"), 30, "a page to drive")
         with connect(target, max_size=None) as socket:
             page = Page(socket)
+            if label == "settings-policy":
+                page.call("Page.enable")
+                page.call("Page.addScriptToEvaluateOnNewDocument", source=SETTINGS_POLICY_STAND_IN)
+            if label.startswith("terminal-rows-legacy:"):
+                page.call("Page.enable")
+                page.call("Page.addScriptToEvaluateOnNewDocument", source=LEGACY_TERMINAL_CONFIG)
             if label in ("change-rows", "change-idle"):
                 # A script for documents to come is applied only once the Page domain is enabled (measured).
                 page.call("Page.enable")
@@ -967,6 +1027,9 @@ def main(url, run_id, label, said, note=None):
                 page.call("Page.enable")
                 page.call("Page.addScriptToEvaluateOnNewDocument", source=CLIPBOARD_STAND_IN)
             page.call("Page.navigate", url=url)
+            if label == "settings-policy":
+                wait(lambda: page.value("document.readyState === 'complete'"), 30, "the Workbench page")
+                return settings_policy(page)
             if label == "hints":
                 # Its views read no run, so neither does it wait for the list of runs.
                 wait(lambda: page.value("document.readyState === 'complete'"), 30, "the Workbench page")
@@ -992,7 +1055,7 @@ def main(url, run_id, label, said, note=None):
                 return change_idle(page, run_id)
             if label.startswith("terminal-fit:"):
                 return terminal_fit(page, run_id, label.split(":", 1)[1])
-            if label.startswith("terminal-rows:"):
+            if label.startswith(("terminal-rows:", "terminal-rows-legacy:")):
                 return terminal_rows(page, run_id, label.split(":", 1)[1])
             if label == "handoff":
                 return handoff(page, run_id)

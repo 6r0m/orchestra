@@ -471,6 +471,8 @@ class Demo:
         check(self.press(merged, "hints", "none"),
               "every button shown — New run's, Settings', the stack's and this run's at its approval — says on hover "
               "what it does")
+        check(self.press("page", "settings-policy", "none"),
+              "Settings stages a 48-hour turn limit; its Apply is captured without changing the demo's settings")
         check(self.press(merged, "terminal-fit:engineer", "none"),
               "the engineer's terminal, in a narrow window, fits its box; a drag of its scrollbar scrolls back and "
               "selects nothing; Maximize fills the window larger and Restore puts it back; Ctrl+C on a selection "
@@ -478,6 +480,9 @@ class Demo:
         check(self.press(merged, "terminal-rows:engineer", "none"),
               "in a window taller than wide, Maximize has the engineer's terminal take as many rows as fill it, "
               "through its worker, and Restore puts back its usual rows")
+        check(self.press(merged, "terminal-rows-legacy:engineer", "none"),
+              "with the old Workbench's configuration, today's browser still resizes through the worker and "
+              "draws its size markers")
         check(self.press(merged, "handoff", "none"),
               "at a blocker, stood in for, the card names the agent that answered and offers the other first, is "
               "drawn anew when the other answers the same words, and each press sends exactly its action and words")
