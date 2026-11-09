@@ -1,5 +1,15 @@
 # Structure
 
+## Contents
+
+- [Purpose and ownership](#purpose)
+- [Composition](#composition)
+- [Relationships](#relationships)
+- [Invariants](#invariants)
+- [Updating running code](#updating-running-orchestra-code)
+- [Accepted decisions](#accepted-decisions)
+- [Risks](#risks-and-technical-debt)
+
 ## Purpose
 
 Put the concerns together: carry out on a target host what the workflow commanded, and
@@ -11,7 +21,7 @@ and stop the stack.
 - `activities` — everything a run does on its target host: resolve the repository, make the worktree, record trust, run a role turn — its prompt's parts kept beside the prompt, and a review's judged tree returned whatever its verdict when the worktree did not move while it judged; a closeout held to the todo and documentation, the tree it left returned — look at the run's base and bring it in when it moved, reopen a change sent back, merge, discard, read the change for review, write the trace.
 - `client` — the one client of runs: start, list, status, what a run is doing now and whom its stop's words go to, answer, stop, reject and force terminate, where a rejected run's cleanup stands, the change, what its Temporal history holds of its turns and accepted answers, the worktrees and the removal of what a closed run kept, shared by the page and the command line.
 - `settings` — the one settings loader and writer, adapter-aware validation, and the run-policy snapshot built from the selected flow.
-- `stack` — the stack's one reading and its one owner: whether Temporal answers and each host's worker runs and polls, and the start, stop and restart of the stack and of each part, in order, each outcome proven — and, once a stopped worker is proven gone, the sweep of what its stages left. The process mechanics it orders are `workers.sh` and `workers.ps1`, at the checkout root.
+- `stack` — the stack's one reading and its one owner: whether Temporal answers and each host's worker runs and polls, and the start, stop, restart and worker reload, in order, each outcome proven — and, once a stopped worker is proven gone, the sweep of what its stages left. The process mechanics it orders are `workers.sh` and `workers.ps1`, at the checkout root.
 
 ## Does not own
 
@@ -54,6 +64,53 @@ handed, and never learns how git reads one.
 - **A part of the stack is up only when proven, and a worker stopped only once its process is gone (D32)**; one stack action at a time, and a stack under another policy never touches Temporal or the Windows worker.
 - **An activity never waits for a human** (D6).
 - **A persona file is resolved by `foundation.policy.prompt_path` and nowhere else**, on the host that runs the role and inside the step, so a policy that host cannot read, or a host copy that differs from the run's, fails the step before an agent starts.
+
+## Updating running Orchestra code
+
+Orchestra updates never require shutting down or terminating a WSL distribution. Replace only the
+process that loads the changed code. Browser assets take effect on page refresh; CLI invocations and
+agent CLIs start fresh. New runs read current settings and keep that snapshot; changing the selection
+or turn limit does not require a worker reload. Changing deployment identities, queue names or ports
+requires a separate migration of the old deployment, rather than treating it as a source-code reload.
+
+For Python code hosted by workers, run from WSL:
+
+```bash
+make reload                                             # both managed workers, leaving Temporal alone
+make reload-wsl                                         # only the WSL worker
+make reload-windows                                     # only the Windows worker
+make check
+```
+
+The Make targets select this checkout's managed environment and call the shared CLI. Reload requests
+native Temporal shutdown, stops new activity polls and waits for current activities with their existing
+deadlines. On WSL, workflow polling remains available
+for queries and Stop until its activities have finished. Subsequent activities queue normally. The
+controller proves the original process gone, cleans its scope and stale stage settings through the
+existing host mechanics, starts fresh code and verifies the new process polls its assigned queues.
+Cleanup uses the host scripts' idle-only path, which refuses to signal a worker or remove its record
+if one appears meanwhile. It never automatically escalates to force stop. Unknown process state,
+unsupported drain requests,
+or an unelevated Windows launch that cannot be arranged refuse replacement and say why.
+
+The reload caller waits and holds the stack lock, potentially for a long turn. Run it in a terminal
+that can stay open. Interrupting the caller does not undo a drain already requested: the worker may
+finish and exit. Run `make check`, then repeat reload or start the stopped worker to complete activation.
+Other stack actions are refused as busy until the lock is released; Stop for an individual run remains Temporal's.
+The reported `draining` state projects a PID-scoped drain request; the worker logs when native
+shutdown begins. It must not be treated as proof that every in-flight poll has already stopped.
+
+An already running worker from before drain support must be replaced once while idle using its
+targeted `--stack restart wsl` or `--stack restart windows` control. Ordinary `restart` and `stop`
+remain interrupting operations. Successful turns leave live CLIs behind; replacement ends those
+processes, including any manually initiated conversation still running in them. Finish that manual
+work first. Vendor sessions, run snapshots and the worktree persist for subsequent controller turns.
+
+For Workbench server or interface Python changes, use `make workbench-restart`, then refresh the page.
+Its separate systemd service does not own the workers, so they and their activities keep running.
+Do this after any stack operation issued through that Workbench has completed; restarting the caller
+would interrupt that operation. Workbench never manages its own service. No update command here
+restarts Temporal, Docker, WSL, or unrelated workloads.
 
 ## Accepted decisions
 

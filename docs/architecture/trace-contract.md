@@ -135,31 +135,56 @@ step. None of this is configurable from here:
 Pi's native lifecycle bridge records assistant generations, not a vendor tracing plugin. The trace writer
 uploads them as `LLM Call` generations directly beneath the causing role step. Native uncached input,
 output, cache-read and cache-write buckets remain separate. Missing buckets stay unknown and mark
-telemetry degraded. Pi's local catalog cost is not supplied as a provider-billed amount. These rows do
-not capture background cache-warming requests, calls inside independent child-agent extensions,
-or standalone search/fetch charges; they cannot establish a complete provider bill.
+telemetry degraded. The completeness marker validates those buckets, not coverage of every billed
+request. Assistant-message events do not establish a separate record for every transport retry.
+These rows do not capture background cache-warming requests, calls inside independent child-agent
+extensions, or standalone search/fetch charges; they cannot establish a complete provider bill.
+
+The bridge retains Pi's native usage object locally, including any cost provenance, but the adapter
+exports only token buckets and model/provider metadata. It exports neither a USD amount nor Pi's
+provider-billed indicator. Pi's [native usage contract](https://github.com/earendil-works/pi/blob/v1.5.0/packages/ai/src/types.ts)
+distinguishes a provider-reported total from a catalog estimate; an absent indicator is not evidence
+of provider billing. The bridge's event time is capture time, not Pi's request-start timestamp, and
+these native generation rows receive their Langfuse timestamps when uploaded after the turn. Those upload times
+cannot establish the tariff applicable when a request was made.
 
 For a round's cost, inspect the model generations beneath that round's role step in the trace tree,
 including its child-agent calls; do not subtract cumulative conversation totals across resumed sessions.
 The current dashboard groups costs by model, not by round. Langfuse's
 [usage and cost contract](https://langfuse.com/docs/observability/features/token-and-cost-tracking)
-distinguishes provider-supplied costs from costs inferred using submitted usage and model prices.
+distinguishes ingested costs from costs inferred using submitted usage and model prices. Ingesting
+a cost does not itself establish that a provider billed it.
 Missing usage or an unmatched model is unknown cost, never evidence of free usage.
 
-There is no per-round USD display in the Workbench. Before relying on DeepSeek costs, acceptance must
-observe a completed billed turn through the configured CLI, verify its provider and actual model, inspect
-the child generations' usage buckets and parentage, and reconcile a representative turn with provider
-billing. Only then can a read-only round estimate sum its generations, including child-agent calls, with
-the applicable tariffs. A missing generation or usage bucket makes completeness unknown. Manual tools
-such as `ccusage` are diagnostics, not another accounting authority; workflow decisions never depend on them.
+There is no per-round USD display or cost query in the Workbench. The accepted
+[observability boundary](structure.md#accepted-decisions) forbids reading trace data back into Orchestra;
+the Workbench links to its views. A Workbench cost projection would change that boundary and is not
+an existing capability. Langfuse remains the trace accounting store; provider billing is the authority
+for actual charges. Manual tools such as `ccusage` are diagnostics, not another accounting authority;
+workflow decisions never depend on them.
+
+Cost provenance and billing coverage are separate. A provider-reported subtotal applies only to the
+charges it covers. A catalog or tariff calculation is an estimate, even when stored in Langfuse's
+cost fields. Unknown coverage remains incomplete regardless of provenance; missing observations,
+usage, tool charges or prices must not be treated as zero. A round subtotal counts each attributable
+generation once, including instrumented child calls, without adding parent rollups to their children.
+Tool charges already included in a provider total are not added again.
+An explicitly labelled estimate does not require a new paid call or invoice reconciliation. An exact
+provider-billed round total requires complete attribution and reconciliation with provider billing.
 
 Pi's normalized input excludes cache reads, so cache hits must not be subtracted again. For a Claude
 profile, DeepSeek's [Anthropic usage contract](https://api-docs.deepseek.com/guides/anthropic_api/)
 also separates uncached input from cache reads; streaming final usage is cumulative, so adding the
 initial and final usage would double-count it. DeepSeek's [pricing owner](https://api-docs.deepseek.com/quick_start/pricing/)
 defines time-dependent peak rates, holiday exceptions and separate search/fetch charges. A flat custom
-model definition cannot represent all of those conditions. Treat inferred DeepSeek costs as estimates unless
-every request's applicable tariff and billable tools are accounted for and reconciled with provider billing.
+model definition cannot represent all of those conditions. Langfuse's conditional pricing tiers match
+usage, model parameters or top-level metadata; they do not derive the provider's calendar from a
+timestamp. Time-dependent pricing needs the request's applicable tariff context and effective pricing
+revision, with uncertain timing or missing context left unknown. Stored costs are calculated at ingestion;
+changing a model price does not automatically repair historical observations. DeepSeek Search and Fetch
+are separately billable where used; Pi's assistant token buckets do not measure those charges. Treat
+inferred costs as estimates even after validating the tariff calculation; exact billed totals still require
+complete coverage and reconciliation.
 Claude Code's own displayed dollar total is also
 [calculated locally](https://code.claude.com/docs/en/costs), rather than a provider billing receipt.
 

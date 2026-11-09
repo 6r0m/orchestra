@@ -1,8 +1,8 @@
 # One Windows worker, for the stack owner through workers.sh:
-#   powershell -File workers.ps1 start|stop|status|sweep <name> [the pid a sweep knows is gone]
+#   powershell -File workers.ps1 start|stop|status|sweep|drain <name> [pid for status or sweep]
 # <name> is the worker's name on this machine: its pid file and log in tmp\orchestration. It runs
 # this checkout's own settings, in this checkout's uv-managed Windows environment (app\foundation\envpath.py).
-param([ValidateSet("start", "stop", "status", "sweep")][string] $Action, [Parameter(Mandatory)][string] $Name,
+param([ValidateSet("start", "stop", "status", "sweep", "drain")][string] $Action, [Parameter(Mandatory)][string] $Name,
       [string] $Gone = "", [switch] $Handed)
 $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -12,13 +12,14 @@ $log = Join-Path $runtime "$Name.log"
 $uv = Join-Path $env:USERPROFILE ".local\bin\uv.exe"
 New-Item -ItemType Directory -Force -Path $runtime | Out-Null
 
-function Get-Worker {
+function Get-Worker([string] $Expected = "") {
     # The process its pid file names while that is still this worker: the file outlives a killed
     # worker, and Windows reuses pids. A process of a higher integrity hides its command line; one
     # named python there is taken for the worker, so that it is never started twice.
-    if (-not (Test-Path $pidFile)) { return $null }
+    if (-not $Expected -and -not (Test-Path $pidFile)) { return $null }
     $id = 0
-    if (-not [int]::TryParse(([string](Get-Content -Raw $pidFile)).Trim(), [ref] $id)) { return $null }
+    $recorded = if ($Expected) { $Expected } else { ([string](Get-Content -Raw $pidFile)).Trim() }
+    if (-not [int]::TryParse($recorded, [ref] $id)) { return $null }
     $process = Get-CimInstance Win32_Process -Filter "ProcessId = $id"
     if (-not $process) { return $null }
     if ($process.CommandLine -like "*-m app.interfaces.worker windows*") { return $process }
@@ -56,8 +57,10 @@ function Use-Environment {
 
 switch ($Action) {
     "status" {
-        $worker = Get-Worker
+        $worker = Get-Worker $Gone
         if ($worker) { "running $($worker.ProcessId)" } else { "stopped" }
+        if ($worker -and (Test-Path "$pidFile.drain") -and
+            (Get-Content -Raw "$pidFile.drain") -eq "$($worker.ProcessId)") { "draining" }
         # Whether a start from here would be refused — elevated, with no desktop shell in this session to
         # hand it to — so no one stops a worker only to find that out. The process is enough to read here.
         $session = [Diagnostics.Process]::GetCurrentProcess().SessionId
@@ -117,6 +120,12 @@ switch ($Action) {
     }
     "stop" {
         $worker = Get-Worker
+        if ($Gone -eq "idle") {
+            if ($worker) { "left running $($worker.ProcessId): reload cleanup never signals a worker"; exit 1 }
+            # Leave even a stale record: a worker appearing meanwhile must not lose its record.
+            "stopped"
+            exit 0
+        }
         if ($worker) {
             Stop-Process -Id $worker.ProcessId -Force
             $deadline = (Get-Date).AddSeconds(10)
@@ -126,6 +135,14 @@ switch ($Action) {
         }
         Remove-Item $pidFile -ErrorAction SilentlyContinue
         "stopped"
+    }
+    "drain" {
+        $worker = Get-Worker
+        if (-not $worker) { "worker is not running"; exit 1 }
+        Use-Environment | Out-Null
+        $ErrorActionPreference = "Continue"
+        & $uv --project $here run --locked --no-sync python -m app.interfaces.worker drain $Name $worker.ProcessId
+        exit $LASTEXITCODE
     }
     "sweep" {
         Use-Environment | Out-Null

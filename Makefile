@@ -14,7 +14,7 @@ export TASK_SAFE
 V = UV_PROJECT_ENVIRONMENT="$$(uv run --no-project --managed-python --python 3.13 python app/foundation/envpath.py $(CURDIR))" \
     uv run --locked python
 
-.PHONY: help up check down restart workbench-install workbench-uninstall workbench-start workbench-stop \
+.PHONY: help up check down restart reload reload-wsl reload-windows workbench-install workbench-uninstall workbench-start workbench-stop \
 	workbench-restart workbench-status feature demo test public-check hooks
 
 help: ## Show these targets
@@ -33,6 +33,15 @@ down: ## Stop both workers, then Temporal; its data stays on its volume, and the
 
 restart: ## Stop the stack, then start it
 	@$(V) -m app.interfaces.cli --stack restart
+
+reload: ## Load fresh worker code after current activities finish; leave Temporal and WSL running
+	@$(V) -m app.interfaces.cli --stack reload
+
+reload-wsl: ## Drain and reload only the WSL worker
+	@$(V) -m app.interfaces.cli --stack reload wsl
+
+reload-windows: ## Drain and reload only the Windows worker
+	@$(V) -m app.interfaces.cli --stack reload windows
 
 # The Workbench is not part of the stack it controls: WSL's systemd starts it and keeps it running.
 workbench-install: ## Install the Workbench as a systemd user service in WSL, enabled and (re)started

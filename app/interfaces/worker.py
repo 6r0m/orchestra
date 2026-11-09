@@ -12,6 +12,7 @@ starts and the stack does once it has stopped one — naming the worker it has p
 """
 import asyncio
 import concurrent.futures
+import datetime
 import os
 import socket
 import sys
@@ -29,6 +30,17 @@ from app.foundation import paths
 from app.agents import terminal
 from app.observability import telemetry
 from app.orchestration import workflow as WF
+
+
+async def drain(workers, record):
+    """The host scripts request shutdown locally; Temporal owns stopping polls and flushing activities."""
+    while not stack.drain_requested(record, os.getpid()):
+        await asyncio.sleep(0.5)
+    print("worker draining; current activities finish before exit", flush=True)
+    # Keep the workflow poller available for status and Stop while host activities drain. Its
+    # next activities queue normally, without being picked up by the retiring activity worker.
+    await workers[0].shutdown()
+    await asyncio.gather(*(worker.shutdown() for worker in workers[1:]))
 
 
 def sweep(gone=()):
@@ -61,24 +73,38 @@ async def main(target):
         queue = P.queue(policy, target)
         host = activities.Activities()
         # Role-runs are sequential by policy; the pool only keeps a long one from blocking the trace writes.
+        # An update adds no practical shorter deadline than an activity's own. The public SDK's
+        # duration, rather than module reload or cancellation suppression, keeps the running code intact.
         workers = [Worker(client, task_queue=queue, activities=host.all(),
+                          graceful_shutdown_timeout=datetime.timedelta.max,
                           activity_executor=concurrent.futures.ThreadPoolExecutor(max_workers=8))]
         if target == runs.WORKFLOW_HOST:
             workers.append(Worker(client, task_queue=P.workflow_queue(policy),
+                                  graceful_shutdown_timeout=datetime.timedelta.max,
                                   workflows=[WF.FeatureRun, WF.WorktreeView, WF.ReviewDiff, WF.RemoveWorktree]))
         # Where its stages' settings go, which is where the sweep after its stop must look.
         print("worker for %s polling %s; stage settings under %s" % (
             target, ", ".join(name for name, _ in stack.worker_queues(policy, target)), tempfile.gettempdir()),
             flush=True)
-        await asyncio.gather(*(worker.run() for worker in workers))
+        stack.drain_ready(record, os.getpid())
+        await asyncio.gather(*(worker.run() for worker in workers), drain(workers, record))
     finally:
-        try:
-            os.remove(record)
-        except OSError:
-            pass
+        for path in (record + ".ready", record + ".drain", record):
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
 
 
 if __name__ == "__main__":
+    if len(sys.argv) == 4 and sys.argv[1] == "drain" and sys.argv[3].isdigit() \
+            and sys.argv[2] == os.path.basename(sys.argv[2]) and sys.argv[2].startswith("worker-"):
+        try:
+            stack.request_drain(os.path.join(paths.RUNTIME_ROOT, sys.argv[2] + ".pid"), int(sys.argv[3]))
+        except runs.Refusal as exc:
+            sys.exit(str(exc))
+        print("drain requested; waiting for current activities", flush=True)
+        sys.exit(0)
     if not (len(sys.argv) == 2 and sys.argv[1] in P.TARGETS
             or len(sys.argv) >= 2 and sys.argv[1] == "sweep" and all(pid.isdigit() for pid in sys.argv[2:])):
         sys.exit("usage: python -m app.interfaces.worker %s | sweep [pid ...]" % "|".join(P.TARGETS))

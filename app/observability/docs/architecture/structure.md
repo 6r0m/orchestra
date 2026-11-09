@@ -7,7 +7,7 @@ something the run itself depends on.
 
 ## Owns
 
-- `telemetry` — the trace of a run: its work item, phases, role steps, stops, final diff and scores, written to the [trace contract](../../../../docs/architecture/trace-contract.md), and the per-run settings that let each agent's own tracing plugin nest its turns under the step that caused them.
+- `telemetry` — the trace of a run: its work item, phases, role steps, native generations, stops, final diff and scores, written to the [trace contract](../../../../docs/architecture/trace-contract.md), and the per-run settings that let each agent's own tracing plugin nest its turns under the step that caused them.
 
 ## Does not own
 
@@ -20,7 +20,7 @@ is what the operator reads (D20). The conversation: the provider's session store
 
 | part | responsibility |
 |---|---|
-| `telemetry.py` | the trace of a run, and the per-run settings an agent's plugin reports through |
+| `telemetry.py` | the trace of a run, native generation uploads, and the per-run settings an agent's plugin reports through |
 
 ## Relationships
 

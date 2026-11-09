@@ -4,7 +4,7 @@
 # command line and the Workbench all go through it. And the Workbench's own systemd user service,
 # which only the Make targets manage — the Workbench never manages itself.
 #   bash workers.sh temporal start|stop|status
-#   bash workers.sh wsl|windows start|stop|status|sweep <name> [the pid a sweep knows is gone]
+#   bash workers.sh wsl|windows start|stop|status|sweep|drain <name> [pid for status or sweep]
 #   bash workers.sh workbench install|uninstall|start|stop|restart|status
 # <name> is the worker's name on this machine (stack.worker_name): its pid file and log in
 # tmp/orchestration, and its systemd scope. ORCHESTRA_SETTINGS, when set, names the settings the WSL worker
@@ -19,7 +19,7 @@ mkdir -p "$RUNTIME"
 
 usage() {
     echo "usage: bash workers.sh temporal start|stop|status" >&2
-    echo "       bash workers.sh wsl|windows start|stop|status|sweep <name> [pid]" >&2
+    echo "       bash workers.sh wsl|windows start|stop|status|sweep|drain <name> [pid]" >&2
     echo "       bash workers.sh workbench install|uninstall|start|stop|restart|status" >&2
     exit 2
 }
@@ -68,9 +68,13 @@ wsl_pid() {
     # The pid its file names while that process is still this worker: the file outlives a killed
     # worker, and pids are reused. A zombie's command line is empty.
     local file="$RUNTIME/$NAME.pid" pid
-    [ -f "$file" ] || return 1
-    # The worker removes its file as it ends, which may be between the test above and this read.
-    pid="$(cat "$file" 2>/dev/null)" && [ -n "$pid" ] || return 1
+    # A reload waits on its original pid even after its file was removed during finalization.
+    if [ "$ACTION" = status ] && [ -n "$GONE" ]; then
+        pid="$GONE"
+    else
+        [ -f "$file" ] || return 1
+        pid="$(cat "$file" 2>/dev/null)" && [ -n "$pid" ] || return 1
+    fi
     tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | grep -q -- "-m app.interfaces.worker wsl" || return 1
     echo "$pid"
 }
@@ -79,7 +83,17 @@ wsl_worker() {
     local pid scope="orchestra-$NAME.scope"
     case "$ACTION" in
         status)
-            if pid="$(wsl_pid)"; then echo "running $pid"; else echo "stopped"; fi ;;
+            if pid="$(wsl_pid)"; then
+                echo "running $pid"
+                if [ "$(cat "$RUNTIME/$NAME.pid.drain" 2>/dev/null || true)" = "$pid" ]; then
+                    echo "draining"
+                fi
+            else echo "stopped"; fi ;;
+        drain)
+            if ! pid="$(wsl_pid)"; then echo "worker is not running" >&2; return 1; fi
+            environment
+            cd "$HERE"
+            uv --project "$HERE" run --locked --no-sync python -m app.interfaces.worker drain "$NAME" "$pid" ;;
         start)
             if pid="$(wsl_pid)"; then echo "running $pid"; return; fi
             environment
@@ -93,9 +107,14 @@ wsl_worker() {
                 >>"$RUNTIME/$NAME.log" 2>&1 </dev/null) >/dev/null 2>&1 </dev/null &
             echo "started; log: $RUNTIME/$NAME.log" ;;
         stop)
-            if pid="$(wsl_pid)"; then
-                # SIGINT lets it shut down — its activities cancelled, its turns' agents ended, its pid
-                # file removed. One still there after 10 s is killed, and its reapers end its agents.
+            if [ "$GONE" = idle ]; then
+                if pid="$(wsl_pid)"; then
+                    echo "left running $pid: reload cleanup never signals a worker" >&2
+                    return 1
+                fi
+            elif pid="$(wsl_pid)"; then
+                # SIGINT starts native shutdown. An explicit force stop is still bounded: after
+                # 10 s it is killed, and its reapers end its agents.
                 kill -INT "$pid" 2>/dev/null || true
                 for _ in $(seq 20); do wsl_pid >/dev/null || break; sleep 0.5; done
                 if wsl_pid >/dev/null; then kill -KILL "$pid" 2>/dev/null || true; fi
@@ -118,7 +137,8 @@ wsl_worker() {
                 systemctl --user stop "$scope" 2>/dev/null || true
             fi
             if systemctl --user is-active --quiet "$scope"; then echo "its scope $scope still runs" >&2; exit 1; fi
-            rm -f "$RUNTIME/$NAME.pid"
+            # An idle cleanup never removes a record another worker may have published meanwhile.
+            if [ "$GONE" != idle ]; then rm -f "$RUNTIME/$NAME.pid"; fi
             echo "stopped" ;;
         sweep)
             environment

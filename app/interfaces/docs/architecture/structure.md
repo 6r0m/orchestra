@@ -33,19 +33,27 @@ This package's relationships are drawn once, in [the main view](diagrams/main.md
 
 Through `application.client`: every start, answer, Stop, Reject, force terminate and removal, so the
 page and the command line can do nothing the workflow's own rules and validators, or Temporal's own
-lifecycle, do not allow. Through `application.stack`: the stack's reading and every start, stop
-and restart of it, so neither keeps a second copy of how the stack runs.
+lifecycle, do not allow. Through `application.stack`: the stack's reading and lifecycle controls,
+so neither keeps a second copy of how the stack runs.
 
 Through the worker's WebSocket: the page attaches to a run's live terminals on whichever
 host is running them, and — while a role works on the run — to its change, which that worker reads from the
 run's worktree and sends again whenever it moves: a summary that writes nothing in git. A file opened is read
 through the change's own reader, as the change is now, and read again only when its row says it changed.
 
+The worker entry point publishes drain capability only after constructing its SDK workers, watches
+the stack owner's local process-control requests, drains its activity worker first, then its workflow
+worker, and removes its process records on exit. Native SDK activity grace uses the largest supported
+Python duration so updates impose no practical shorter deadline. Existing force-stop mechanics still
+bound emergency termination. The SDK owns stopping polls, cancellation delivery and completion flushing;
+local control files never decide workflow transitions.
+
 The terminal browser module accepts the earlier Workbench configuration containing only columns and rows,
 using the resize protocol's original row bounds when they are absent. A worker restart can therefore enable
 resizing while the Workbench still serves its earlier configuration. New Settings controls or server behavior
-still require reloading the Workbench process; workers load their code on restart. Restart workers only between
-turns, since restarting one ends its contained agents. Settings exposes the per-turn cap in hours and a profile's
+still require reloading the Workbench process. Worker updates use the application's
+[scoped reload procedure](../../../application/docs/architecture/structure.md#updating-running-orchestra-code).
+Settings exposes the per-turn cap in hours and a profile's
 optional provider; the application settings owner stores their validated values for new runs.
 Its Operator action list also projects a waiting vendor dialog from the active turn's local
 hook events — Claude's; Codex reports none — and the workflow still owns actual stops and their answers.

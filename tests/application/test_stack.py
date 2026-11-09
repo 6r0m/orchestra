@@ -76,10 +76,11 @@ class Mechanics:
     their script refuses — elevated, with no desktop shell to hand it to — `unswept` those whose sweep
     fails."""
 
-    def __init__(self, running=(), refuse=(), linger=(), unreadable=(), elevated=(), unswept=()):
+    def __init__(self, running=(), refuse=(), linger=(), unreadable=(), elevated=(), unswept=(), draining=()):
         self.calls, self.swept, self.running = [], [], set(running)
         self.refuse, self.linger, self.unreadable = set(refuse), set(linger), set(unreadable)
         self.elevated, self.unswept = set(elevated), set(unswept)
+        self.draining = set(draining)
 
     def __call__(self, policy, component, action, *more):
         self.calls.append((component, action))
@@ -89,7 +90,8 @@ class Mechanics:
             if component == "temporal":
                 return True, "temporal" if component in self.running else "none running"
             said = "running 4242" if component in self.running else "stopped"
-            return True, said + ("\nelevated" if component in self.elevated else "")
+            return True, said + ("\nelevated" if component in self.elevated else "") + (
+                "\ndraining" if component in self.draining else "")
         if action == "start":
             self.running.add(component)
             return True, "started"
@@ -321,6 +323,13 @@ class Ports(unittest.TestCase):
 
 @unittest.skipIf(WINDOWS, "the stack is read from WSL")
 class Reading(unittest.TestCase):
+    def test_draining_is_distinct_from_a_worker_ready_for_new_activities(self):
+        mine = [{"identity": "4242@here", "polled": now()}]
+        reading = self.read(("wsl", "windows"), lambda host: mine, draining=("wsl",))
+        self.assertEqual(self.states(reading)["wsl"], "draining")
+        self.assertEqual(reading["hosts"]["wsl"], "down")
+        self.assertIn("current activities finish", reading["components"][1]["detail"])
+
     """What the reading calls up: a worker is up only as the process it is, polling now."""
 
     def read(self, running, polls, client=True, **processes):
@@ -454,6 +463,49 @@ class RealWorker(unittest.TestCase):
         record = stack.pid_file(policy, target)
         self.addCleanup(lambda: os.path.exists(record) and os.remove(record))
         return record
+
+    def test_native_drain_dispatch_and_original_pid_status_leave_processes_running(self):
+        policy, path = other_policy(self)
+        target = "windows" if WINDOWS else "wsl"
+        record = self.record(policy, target)
+        worker, pid, _ = self.stand_in(path, target)
+        for suffix in (".ready", ".drain"):
+            self.addCleanup(lambda suffix=suffix: os.path.exists(record + suffix) and os.remove(record + suffix))
+
+        def native(action, *more):
+            if WINDOWS:
+                code, said = self.windows(action, stack.worker_name(policy, target), *map(str, more))
+                return code == 0, said
+            return stack.mechanics(policy, target, action, *more)
+
+        ok, said = native("drain")
+        self.assertFalse(ok, said)
+        self.assertFalse(os.path.exists(record + ".drain"), "unsupported worker was left alone")
+        stack.drain_ready(record, pid)
+        ok, said = native("drain")
+        self.assertTrue(ok, said)
+        self.assertTrue(stack.drain_requested(record, pid))
+        self.assertIsNone(worker.poll(), "requesting a drain never signals or kills a process")
+        os.remove(record)
+        ok, said = native("status", pid)
+        self.assertTrue(ok, said)
+        self.assertIn("running %d" % pid, said, "pid-file deletion does not prove process death")
+        self.assertIn("draining", said)
+
+    def test_idle_cleanup_refuses_to_signal_a_worker_that_appeared_since_the_owner_checked(self):
+        policy, path = other_policy(self)
+        target = "windows" if WINDOWS else "wsl"
+        record = self.record(policy, target)
+        worker, pid, _ = self.stand_in(path, target)
+        if WINDOWS:
+            code, said = self.windows("stop", stack.worker_name(policy, target), "idle")
+            ok = code == 0
+        else:
+            ok, said = stack.mechanics(policy, target, "stop", "idle")
+        self.assertFalse(ok, "reload cleanup must refuse a live worker: %s" % said)
+        self.assertIsNone(worker.poll(), "reload cleanup must never enter the force-stop path")
+        with open(record) as fh:
+            self.assertEqual(fh.read(), str(pid), "the running worker keeps its record")
 
     @unittest.skipIf(WINDOWS, "the stack is controlled from WSL")
     def test_stopping_a_worker_takes_its_stages_settings_with_it(self):

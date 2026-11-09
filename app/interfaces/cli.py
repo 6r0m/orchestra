@@ -8,7 +8,7 @@ the worktree view, and the stack:
     orchestrate --force-terminate <run-id>
     orchestrate --show <run-id>
     orchestrate --worktrees [--repo NAME|PATH]
-    orchestrate --stack status | start|stop|restart [temporal|wsl|windows]
+    orchestrate --stack status | start|stop|restart|reload [temporal|wsl|windows]
 
 A new run prints its run id, which is its Workflow Id. The run lives in
 Temporal, so this process may exit at any stop and any later process answers it.
@@ -342,7 +342,7 @@ def parse_args(argv):
     parser.add_argument("--show", metavar="RUN_ID", help="print this run's history and stop")
     parser.add_argument("--worktrees", action="store_true", help="list the repository's worktrees")
     parser.add_argument("--stack", nargs="+", metavar="ACTION",
-                        help="the stack: `status`, or `start`, `stop` or `restart` — all of it, or one of "
+                        help="the stack: `status`, `start`, `stop`, `restart`, or worker-only `reload` — all of it, or one of "
                              "temporal, wsl, windows")
     parser.add_argument("--settings", metavar="PATH",
                         help="a complete settings file, taken alone, in place of this checkout's")
@@ -352,7 +352,7 @@ def parse_args(argv):
         parser.error("give exactly one of: a task, --resume <run-id>, --continue <run-id>, --stop <run-id>, "
                      "--force-terminate <run-id>, --show <run-id>, --worktrees, --stack")
     if args.stack and not (args.stack == ["status"] or (args.stack[0] in stack.ACTIONS and len(args.stack) <= 2)):
-        parser.error("--stack takes `status`, or start, stop or restart and at most one of temporal, wsl, windows")
+        parser.error("--stack takes `status`, or start, stop, restart or reload and at most one of temporal, wsl, windows")
     if args.resume and args.answer is None:
         parser.error("--resume requires --answer")
     if not args.resume and args.answer is not None:

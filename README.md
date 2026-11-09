@@ -98,6 +98,8 @@ make feature TASK="fix the retry in the uploader"   # the same run, from the com
 make down                                           # stop the stack; Temporal keeps its data
 ```
 
+For code updates, use the [scoped reload procedure](app/application/docs/architecture/structure.md#updating-running-orchestra-code).
+
 <!-- A screenshot or short GIF of the workbench belongs here: the run list, a live terminal
      mid-turn, and the final gate with a diff. Put it in docs/images/ and link it. -->
 

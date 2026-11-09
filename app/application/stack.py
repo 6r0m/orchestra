@@ -17,6 +17,7 @@ import datetime
 import os
 import re
 import subprocess
+import tempfile
 import time
 
 from temporalio.api.enums.v1 import TaskQueueType
@@ -36,7 +37,7 @@ LOCK = os.path.join(paths.RUNTIME_ROOT, "stack.lock")
 TEMPORAL_READY = 180
 WORKER_READY = 90
 # How long each script action may take: a first start pulls Temporal's images.
-SCRIPT_SECONDS = {"start": 900, "stop": 90, "status": 60, "sweep": 120}
+SCRIPT_SECONDS = {"start": 900, "stop": 90, "status": 60, "sweep": 120, "drain": 120}
 
 
 # WSL runs a Windows program with the token of whatever started WSL, and the Windows worker and its
@@ -73,6 +74,47 @@ def pid_file(policy, target):
     return os.path.join(paths.RUNTIME_ROOT, worker_name(policy, target) + ".pid")
 
 
+def _control_write(path, value):
+    """Promote one complete process-control message on either host."""
+    fd, staged = tempfile.mkstemp(dir=os.path.dirname(path), prefix="worker-control-")
+    try:
+        with os.fdopen(fd, "w", encoding="ascii") as fh:
+            fh.write(value)
+        os.replace(staged, path)
+    finally:
+        if os.path.exists(staged):
+            os.remove(staged)
+
+
+def _control_read(path):
+    try:
+        with open(path, encoding="ascii") as fh:
+            return fh.read()
+    except FileNotFoundError:
+        return None
+
+
+def drain_ready(record, pid):
+    """Publish support only after this worker can honor native shutdown requests."""
+    try:
+        os.remove(record + ".drain")
+    except FileNotFoundError:
+        pass
+    _control_write(record + ".ready", "%d ready" % pid)
+
+
+def request_drain(record, pid):
+    """Refuse a worker without the protocol before touching its processes or writing a request."""
+    if _control_read(record + ".ready") != "%d ready" % pid:
+        raise runs.Refusal("worker does not support safe reload; replace this worker once while idle")
+    if not drain_requested(record, pid):
+        _control_write(record + ".drain", str(pid))
+
+
+def drain_requested(record, pid):
+    return _control_read(record + ".drain") == str(pid)
+
+
 def worker_queues(policy, target):
     """The queues a host's worker polls: its target's own, and the WSL one its policy's workflows' too."""
     own_queue = [(P.queue(policy, target), TaskQueueType.TASK_QUEUE_TYPE_ACTIVITY)]
@@ -107,6 +149,10 @@ def _process(said):
     """A script's word on a worker: its pid while it runs, None when it does not."""
     found = re.search(r"^running (\d+)$", said, re.MULTILINE)
     return int(found.group(1)) if found else None
+
+
+def _worker_known(ok, said):
+    return ok and len(re.findall(r"^(?:running \d+|stopped)$", said, re.MULTILINE)) == 1
 
 
 def _elevated(said):
@@ -157,6 +203,8 @@ async def status(policy, client=None, error=None):
         startable = mine and not unread and not _elevated(said[target][1])
         if unread:
             state = "unknown"
+        elif mine and re.search(r"^draining$", said[target][1], re.MULTILINE):
+            state = "draining"
         elif mine and pid is None:
             state = "down"
         elif polls is None:
@@ -164,6 +212,7 @@ async def status(policy, client=None, error=None):
         else:
             state = "up" if polls else ("starting" if mine else "down")
         detail = ("its process could not be read: %s" % said[target][1] if unread else
+                  "draining; current activities finish before fresh worker code is loaded" if state == "draining" else
                   "polls " + ", ".join(name for name, _ in worker_queues(policy, target)) if state == "up" else "")
         if mine and not unread and not startable:
             detail = "; ".join(filter(None, [detail, ELEVATED]))
@@ -173,7 +222,7 @@ async def status(policy, client=None, error=None):
                   "polled": None if pollers is None else _serving(pollers[name], None, since)}
                  for name, _ in worker_queues(policy, target)]
     return {"temporal": components[0]["state"], "error": error, "components": components, "queues": rows,
-            "hosts": {part["name"]: {"up": "up", "down": "down", "starting": "down"}.get(part["state"], "unknown")
+            "hosts": {part["name"]: {"up": "up", "down": "down", "starting": "down", "draining": "down"}.get(part["state"], "unknown")
                       for part in components[1:]}}
 
 
@@ -283,7 +332,7 @@ def _start_one(policy, component):
         ", ".join(name for name, _ in worker_queues(policy, component))))
 
 
-def _stop_one(policy, component):
+def _stop_one(policy, component, gone=None, idle_only=False):
     if component == "temporal":
         ok, said = mechanics(policy, "temporal", "stop")
         if not ok:
@@ -292,8 +341,10 @@ def _stop_one(policy, component):
             return _result(component, False, "its containers stopped, but it still answers")
         return _result(component, True, "stopped; its data stays on its volume")
     looked, said = mechanics(policy, component, "status")
-    before = _process(said) if looked else None
-    ok, said = mechanics(policy, component, "stop")
+    if idle_only and (not _worker_known(looked, said) or _process(said) is not None):
+        return _result(component, False, "not cleaned or replaced: the worker is not proven gone: %s" % said)
+    before = gone or (_process(said) if looked else None)
+    ok, said = mechanics(policy, component, "stop", *(["idle"] if idle_only else []))
     if not ok:
         return _result(component, False, said)
     # Proven gone before anything it left is taken: the script's own word, then a second look.
@@ -357,4 +408,46 @@ def restart(policy, component=None, progress=None):
                         lambda part: _start_one(policy, part), progress))
 
 
-ACTIONS = {"start": start, "stop": stop, "restart": restart}
+def _reload_one(policy, target, progress):
+    looked, said = mechanics(policy, target, "status")
+    if not _worker_known(looked, said):
+        return _result(target, False, "left as it is: its process could not be read: %s" % said)
+    if target == "windows" and _elevated(said):
+        return _result(target, False, "left as it is: %s" % ELEVATED)
+    before = _process(said)
+    if before is not None:
+        ok, said = mechanics(policy, target, "drain")
+        if not ok:
+            return _result(target, False, "not reloaded; no forced stop: %s" % said)
+        if progress:
+            progress(_result(target, True, "draining; waiting for current activities, with no forced stop"))
+        while True:
+            # Inspect the original process, even after its finally removed the pid file: deletion is
+            # not evidence of death. Native scripts also verify that this pid still names a worker.
+            looked, said = mechanics(policy, target, "status", before)
+            if not _worker_known(looked, said):
+                return _result(target, False, "drain requested, but its process could not be read; "
+                               "no replacement started: %s" % said)
+            if _process(said) is None:
+                break
+            time.sleep(5)
+        looked, said = mechanics(policy, target, "status")
+        if not _worker_known(looked, said) or _process(said) is not None:
+            return _result(target, False, "worker changed during reload; no forced stop or replacement: %s" % said)
+    stopped = _stop_one(policy, target, gone=before, idle_only=True)
+    if not stopped["ok"]:
+        return stopped
+    return _start_one(policy, target)
+
+
+def reload(policy, component=None, progress=None):
+    """Drain and replace workers only. The caller waits; interrupting it never forces a worker down."""
+    chosen = _chosen(policy, component)
+    if component == "temporal":
+        raise runs.Refusal("reload is for workers; Temporal does not need restarting for Orchestra code changes")
+    with _exclusive():
+        return _each([part for part in chosen if part in P.TARGETS],
+                     lambda part: _reload_one(policy, part, progress), progress)
+
+
+ACTIONS = {"start": start, "stop": stop, "restart": restart, "reload": reload}
