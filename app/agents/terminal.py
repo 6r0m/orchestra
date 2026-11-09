@@ -46,6 +46,12 @@ TURN_EVENTS = "ORCHESTRA_TURN_EVENTS"
 # The page's token, shared by the workbench and both workers through the one checkout.
 TOKEN_FILE = os.path.join(paths.SECRETS, "workbench.token")
 COLS, ROWS = 160, 48
+# A terminal's rows follow a maximized page — as a console window's do — within these bounds; its columns stay
+# COLS, the width the agents lay their screens out for. The PTY host takes a size in its stdin as a sequence no key
+# makes (ptyhost.py), and the record marks each size where it began, so a page replays each part at its own.
+MIN_ROWS, MAX_ROWS = 24, 200
+RESIZE = b"\x1b_orchestra-size;%d;%d\x1b\\"
+SIZE_MARK = b"\x1b]5379;%d;%d\x07"
 TICK_SECONDS = 1.0
 # How long a turn whose kind reads a held start (`held`) may go without an event before what its screen shows is
 # read, and how much of the screen: its CLI starts and submits the prompt within seconds (measured, both hosts) —
@@ -147,9 +153,9 @@ def plain(data):
 class _Agent:
     """One agent process under a terminal, in its own contained tree."""
 
-    def __init__(self, terminal, argv, cwd, env):
+    def __init__(self, terminal, argv, cwd, env, rows=ROWS):
         self.tree = launch._Tree()
-        self.proc = self.tree.start([sys.executable, PTYHOST, str(COLS), str(ROWS), "--"] + list(argv), cwd,
+        self.proc = self.tree.start([sys.executable, PTYHOST, str(COLS), str(rows), "--"] + list(argv), cwd,
                                     subprocess.PIPE, subprocess.PIPE, subprocess.DEVNULL, env)
         self.output = bytearray()
         # When it last drew anything: a CLI at work keeps redrawing — its spinner, its timer — and one stopped for
@@ -179,6 +185,10 @@ class _Agent:
             self.proc.stdin.flush()
         except (OSError, ValueError):
             pass
+
+    def resize(self, rows):
+        # One write, so the PTY host reads the sequence whole.
+        self.write(RESIZE % (rows, COLS))
 
     def returncode(self):
         return self.proc.poll()
@@ -211,6 +221,14 @@ class Terminal:
         self.viewers = []
         self.agent = None
         self.record = None
+        # Its rows, the one size every viewer draws: until a Restore or the worker's restart, a turn starting
+        # at the size the last Maximize set.
+        self.rows = ROWS
+
+    def state(self):
+        """What a viewer is told of it: whether an agent is under it, and its size — whose presence also says this
+        worker takes a resize."""
+        return json.dumps({"live": self.live(), "size": [COLS, self.rows]})
 
     def emit(self, data):
         with self.lock:
@@ -223,8 +241,9 @@ class Terminal:
             deliver(data)
 
     def announce(self):
-        """Tell every viewer whether an agent is under this terminal now, so none is told it is live when it is not."""
-        state = json.dumps({"live": self.live()})
+        """Tell every viewer whether an agent is under this terminal now, so none is told it is live when it is not,
+        and its size."""
+        state = self.state()
         with self.lock:
             viewers = list(self.viewers)
         for deliver in viewers:
@@ -247,13 +266,34 @@ class Terminal:
                 self.viewers.remove(deliver)
 
     def type(self, data):
+        # Keys carry no size: the sequence that resizes the PTY host is the worker's alone.
+        if RESIZE[:RESIZE.index(b";")] in data:
+            return
         agent = self.agent
         if agent is not None:
             agent.write(data)
 
+    def resize(self, rows):
+        """Its rows, asked for by a page's Maximize or Restore: held for the turns to come, given to the agent under
+        it, marked in the record where the new size begins — which every viewer draws — and announced. Raises
+        ValueError outside MIN_ROWS..MAX_ROWS, the size left as it was."""
+        if not isinstance(rows, int) or isinstance(rows, bool) or not MIN_ROWS <= rows <= MAX_ROWS:
+            raise ValueError("a terminal takes %d to %d rows, not %r" % (MIN_ROWS, MAX_ROWS, rows))
+        if rows == self.rows:
+            return
+        self.rows = rows
+        agent = self.agent
+        if agent is not None:
+            agent.resize(rows)
+        self.emit(SIZE_MARK % (COLS, rows))
+        self.announce()
+
     def start(self, argv, cwd, env):
         self.end_agent()
-        self.agent = _Agent(self, argv, cwd, env)
+        # The size every turn begins at, marked again: a page that drew the record at another size — before a
+        # worker's restart — draws this turn at the turn's.
+        self.emit(SIZE_MARK % (COLS, self.rows))
+        self.agent = _Agent(self, argv, cwd, env, self.rows)
         self.announce()
         return self.agent
 
@@ -474,9 +514,10 @@ def serve(port, workbench_port, host="127.0.0.1", feeds=None):
 
     A connection needs the workbench page's origin and its token, offered as the subprotocol
     `token.<token>` beside `workbench.v1`: in the handshake's own header, never in the URL. It first
-    receives whether an agent is under the terminal now and the terminal's record, then its live bytes,
-    and is told again whenever an agent starts or ends; what it sends is typed into the terminal. A run
-    with no terminal on this host — closed, or the worker restarted — is sent its record and closed.
+    receives whether an agent is under the terminal now and its size, and the terminal's record, then its
+    live bytes, and is told again whenever an agent starts or ends or the size changes; what it sends as
+    text is typed into the terminal, and a binary frame `{"rows": n}` resizes it. A run with no terminal on
+    this host — closed, or the worker restarted — is sent its record and closed, its size unnamed.
 
     A feed is what the worker hands this socket to say about a run as it changes, which this module knows
     nothing of: `feed(run_id, memo)` returns a message to send as JSON, or None, and how long until it is
@@ -572,7 +613,7 @@ def serve(port, workbench_port, host="127.0.0.1", feeds=None):
         backlog = terminal.attach(deliver)
         # Live is whether an agent is under the terminal now: between turns and after a failed step
         # the terminal is the run's, but what is typed into it would reach nobody.
-        await connection.send(json.dumps({"live": terminal.live()}))
+        await connection.send(terminal.state())
         if backlog:
             await connection.send(backlog)
 
@@ -587,7 +628,15 @@ def serve(port, workbench_port, host="127.0.0.1", feeds=None):
         sender = asyncio.create_task(send())
         try:
             async for message in connection:
-                terminal.type(message.encode("utf-8") if isinstance(message, str) else message)
+                if isinstance(message, str):
+                    terminal.type(message.encode("utf-8"))
+                    continue
+                # A binary frame is a page's Maximize or Restore asking for rows, never keys: the page sends its
+                # keys as text.
+                try:
+                    terminal.resize(json.loads(message.decode("utf-8"))["rows"])
+                except (ValueError, KeyError, TypeError):
+                    pass
         finally:
             sender.cancel()
             terminal.detach(deliver)

@@ -3,8 +3,9 @@
 **Status:** DONE 2026-11-09 — the goal met in the code: red, then green, the agents' and the workflow's tests
 green on both hosts; two reviewer PATCHes taken — the claim that a context-limit stop cannot occur corrected and
 its detection built, which the first pass had left out; then that detection held to a turn gone silent, so a
-tool printing the line never ends a working turn; closed on the operator's word, without the full suite. A
-worker runs it from its next restart.
+tool printing the line never ends a working turn, and the reviewer's final PASS; closed on the operator's word,
+without the full suite, which the reviewer did not require. The Windows worker, which runs the operator's Claude
+turns, restarted on it.
 **Scope:** a Claude turn's own settings and its stop at the context limit
 ([claude_code.py](../../app/agents/adapters/claude_code.py) `TURN_SETTINGS`, `wire`, `halted`), the quiet turn's
 screen read ([terminal.py](../../app/agents/terminal.py) `run_turn`, `HALT_SECONDS`), the adapter contract

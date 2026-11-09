@@ -26,12 +26,17 @@ let lastSince;
 // The host's terminal has one size for every viewer, its worker's, and the agent lays its screen out for that, so
 // the page never changes the columns — only how large they are drawn. A terminal's font is sized so its columns
 // and its scrollbar fit its box: wider than its box, its text would lie over the scrollbar, which no drag could
-// then reach. Maximized, the terminal fills the page's window and is drawn larger, as far as both of its sides
-// allow, up to the largest font a reader needs.
-const { cols: COLS, rows: ROWS } = CONFIG.terminal_size;
+// then reach. Maximized, the terminal fills the page's window, as a console window does: its font fits the columns
+// across the window, and its worker is asked for as many rows as that font fits down it — the agent's own terminal
+// grows, so its screen fills the window; Restore asks for the rows it had. A worker that does not name its size
+// takes none, and is asked nothing: its terminal is drawn larger, as far as both sides allow. Every size change is
+// marked in the record where it began, so a page — this one, another watching, one connecting later — draws each
+// part at the size it was drawn at.
+const { cols: COLS, rows: ROWS, min_rows: MIN_ROWS, max_rows: MAX_ROWS } = CONFIG.terminal_size;
+const SIZE_MARK = 5379;
 const LARGEST = 18;
-const MAXIMIZE = "Fill the window with this terminal, drawn larger, up to " + LARGEST + " px";
-const RESTORE = "Put this terminal back in its place on the page";
+const MAXIMIZE = "Fill the window with this terminal: the agent's terminal takes as many rows as fit";
+const RESTORE = "Put this terminal back in its place on the page, at its usual rows";
 
 for (const role of ROLES) {
   const box = $("terminal-" + role);
@@ -67,9 +72,48 @@ function maximize(role, on) {
   button.title = on ? RESTORE : MAXIMIZE;
   if (on && !box.open) box.open = true;
   fit(role);
+  ask(role, on ? fitting(role) : ROWS);
 }
 
-// The font that fits `role`'s 160 columns and its scrollbar across its box — and, maximized, its 48 rows down it.
+// The rows `role`'s maximized window fits at the font that fits its columns across; null when it is not maximized
+// or not drawn.
+function fitting(role) {
+  const entry = terminals[role];
+  const mount = $("term-" + role);
+  const screen = mount.querySelector(".xterm-screen");
+  const view = mount.querySelector(".xterm-viewport");
+  if (!entry || !screen || !view || !$("terminal-" + role).classList.contains("maximized")) return null;
+  const style = getComputedStyle(mount);
+  const width = mount.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+    - (view.offsetWidth - view.clientWidth);
+  const height = mount.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+  const drawn = screen.getBoundingClientRect();
+  // A row's height at the font that fits the columns across: rows scale with the font, as columns do.
+  const across = Math.min(width / drawn.width, LARGEST / entry.term.options.fontSize);
+  return Math.max(MIN_ROWS, Math.min(MAX_ROWS, Math.floor(height / (drawn.height / entry.term.rows * across))));
+}
+
+// `rows` asked of `role`'s worker — only one that names its size, and only when they differ from the size it holds;
+// the worker's mark in the record, drawn here and by every page watching, then resizes the terminal. Only this
+// page's Maximize, its window changing size while maximized, and its Restore ask: a page that merely connects or
+// watches never does, so it never undoes another's Maximize.
+function ask(role, rows) {
+  const entry = terminals[role];
+  if (!rows || !entry || !entry.size || !entry.socket || entry.socket.readyState !== WebSocket.OPEN) return;
+  if (rows === entry.size[1]) return;
+  entry.socket.send(new TextEncoder().encode(JSON.stringify({ rows: rows })));
+}
+
+// A maximized terminal's window changing size — turned, or the browser resized — asks again, once it settles.
+let settling = null;
+window.addEventListener("resize", () => {
+  clearTimeout(settling);
+  settling = setTimeout(() => {
+    for (const role of ROLES) ask(role, fitting(role));
+  }, 300);
+});
+
+// The font that fits `role`'s 160 columns and its scrollbar across its box — and, maximized, its rows down it.
 // A cell's size follows the font closely but not exactly, so the size is measured again once set.
 function fit(role) {
   const entry = terminals[role];
@@ -170,9 +214,22 @@ function make(role) {
     return false;
   });
   term.open(mount);
+  // The worker's mark of a new size, where it begins in the record: what follows is drawn at it. The parser waits
+  // for the resize, made outside its own pass, and a mark that is not a size this terminal takes is dropped.
+  term.parser.registerOscHandler(SIZE_MARK, (data) => new Promise((resolve) => {
+    const [cols, rows] = data.split(";").map(Number);
+    setTimeout(() => {
+      if (cols === COLS && rows >= MIN_ROWS && rows <= MAX_ROWS && rows !== term.rows) {
+        term.resize(cols, rows);
+        fit(role);
+      }
+      resolve(true);
+    }, 0);
+  }));
   // `shown` counts the record's bytes on screen: every connection streams the record from its start, and
-  // the record only grows, so a connection made again skips what is shown and adds only what is new.
-  const entry = { runId: run.id, term: term, socket: null, timer: null, live: false, shown: 0, skip: 0 };
+  // the record only grows, so a connection made again skips what is shown and adds only what is new. `size` is
+  // the worker's, as it last said — none from a worker that takes no size.
+  const entry = { runId: run.id, term: term, socket: null, timer: null, live: false, shown: 0, skip: 0, size: null };
   terminals[role] = entry;
   fit(role);
   // The agent is sent what the operator types and presses, and never this terminal's own answers.
@@ -201,9 +258,14 @@ function connect(role, entry, target) {
   if (!entry.shown) $("state-" + role).textContent = "connecting…";
   socket.onmessage = (event) => {
     if (typeof event.data === "string") {
-      // The first state comes before the record; each later one says an agent started or ended.
-      entry.live = JSON.parse(event.data).live;
+      // The first state comes before the record; each later one says an agent started or ended, or the size
+      // changed. A terminal maximized here before its worker said its size asks for its rows now.
+      const state = JSON.parse(event.data);
+      entry.live = state.live;
+      const first = !entry.size && state.size;
+      entry.size = state.size || null;
       say(role, entry);
+      if (first) ask(role, fitting(role));
       return;
     }
     let data = new Uint8Array(event.data);
@@ -221,6 +283,9 @@ function connect(role, entry, target) {
     const wasLive = entry.live;
     entry.live = false;
     entry.socket = null;
+    // The next worker says its size again — or, older, says none and is asked nothing: one that does not name it
+    // would take a size's frame for keys.
+    entry.size = null;
     // A live terminal that drops is its worker gone mid-turn: tried again shortly. One that was only its
     // record — the worker holds no terminal for the role until its next turn — stays as it is, and is
     // connected again once the run reads that role at work, or moves on.

@@ -96,7 +96,13 @@ Through a host containment primitive: a transient systemd user scope on POSIX, a
 on Windows. A launch no scope can hold is refused before the agent runs.
 
 Through the worker's WebSocket: the terminal's record and its live bytes reach the page, and
-keystrokes come back. The same socket serves each feed the worker hands it, by name, beside the terminals —
+keystrokes come back. The terminal's size is the worker's, one for every viewer: 160 columns, the width the agents
+lay their screens out for, and 48 rows until a page's Maximize asks for as many as fill its window — 24 to 200 —
+and its Restore for 48 again, as a console window's own resize does. The size travels to the PTY host in its stdin
+as a sequence no key makes (`ESC _ orchestra-size;…`, refused in what a page types), holds for the role's next
+turns until a Restore or the worker's restart, and is marked in the record where each size begins (`OSC 5379`), so
+every page draws each part at the size it was drawn at; a page asks only a worker that names its size. The same
+socket serves each feed the worker hands it, by name, beside the terminals —
 the run's change is one — with the same origin and token; what a feed reads is the worker's to compose, and
 this package knows nothing of it.
 

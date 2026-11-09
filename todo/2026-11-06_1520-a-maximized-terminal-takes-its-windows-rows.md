@@ -1,6 +1,7 @@
 # A maximized terminal takes its window's rows
 
-**Status:** REVIEW REQUIRED
+**Status:** BUILT 2026-11-09 — green on both hosts and in `make demo`; the Workbench serves the page already. It
+awaits the workers' restart, the live check on the operator's portrait display, and their word to close it.
 **Scope:** a role's terminal size — the PTY host ([ptyhost.py](../app/agents/ptyhost.py)), the worker's terminal and
 its socket ([terminal.py](../app/agents/terminal.py) `Terminal`, `_Agent`, `serve`), the page's terminal
 ([terminals.js](../app/interfaces/workbench/static/terminals.js)), and their proof ([test_terminal.py](../tests/agents/test_terminal.py),
@@ -29,13 +30,17 @@ the agent's rows as fit, and Restore puts it back.
   - Reason: *"maximize should be in full height (now it's half screen height on my vertical display)"*.
   - Date/source: 2026-11-06, operator: *"let's try A"*.
 
+- **D2** Build it now, as a console window behaves: maximized, it takes the monitor's size.
+  - 2026-11-09, operator, of the maximized terminal still half the height: *"check web how window acts in windows,
+    cmd autosize by monitro when maximized simply"*.
+
 ### Operator gates
 
-- **Q1 [OPEN - NON-BLOCKING]:** Rows only, or columns too? - default while open: A1.
-- **Q2 [OPEN - NON-BLOCKING]:** While one page has a terminal maximized, another page watching it unmaximized
-  draws the same taller grid, its box as tall as those rows. Acceptable? - default while open: A2.
-- **Q3 [OPEN - NON-BLOCKING]:** Does the size outlive the page that set it — kept until Restore, the next turns
-  included — or fall back when that page goes? - default while open: A3.
+- **Q1 [CLOSED by D2, as A1]:** Rows only, or columns too? The page already fits the font so the 160 columns fill
+  the window's width, so rows alone fill it as a console's autosize does, the agents' layout and the record's
+  wrapping unchanged.
+- **Q2 [CLOSED by D2, as A2]:** Another page watching draws the same rows.
+- **Q3 [CLOSED by D2, as A3]:** The size holds until Restore, the next turns included.
 
 ### Working assumptions
 
@@ -192,6 +197,21 @@ follow it.
 - No keystroke resizes; out-of-bounds sizes are refused; an older worker is never sent a resize.
 - Tests on both hosts, the browser check in `make demo`, and the live check pass; the docs say it.
 
-## Review record
+## Verification
 
-- (none yet)
+- **How a console does it** (2026-11-09, the web): Windows Terminal resizes its pseudo-console to its window with
+  `ResizePseudoConsole` (columns X, rows Y); a browser terminal computes the rows its box fits and sends them to
+  its server, which resizes the PTY — as built here.
+- **Both hosts, the real PTY host** (`tests.agents.test_terminal`): `Resize` — the PTY host reads a size whole
+  across reads, a lone Esc and every other key passing at once; sizes out of bounds and keys carrying the sequence
+  change nothing; a size held, given to the agent, marked and announced. `Socket` — a binary frame resizes, a key
+  never does, the state frame names the size. `Turns.test_a_resize_reaches_the_agent_and_the_next_turn_starts_at_it`
+  — a fake agent saw its PTY take 100 rows, its next turn began at them and Restore put back 48, each size marked
+  where it began: WSL, and Windows through ConPTY's `setwinsize`. WSL 221 tests and Windows 76, OK.
+- **The browser** (`demo_press.py terminal-rows:engineer`, in `make demo`): in a 1,000 × 1,700 window, Maximize
+  took the engineer's terminal from 48 rows to 138, its screen down to 1,580 px of 1,608; Restore put back 48.
+  DEMO PASSED, 121 checks.
+- **Accepted, not guarded:** an agent printing an `OSC 5379` of its own can change how a page draws the terminal —
+  160 columns and 24 to 200 rows only — never the PTY, until the worker's next mark.
+- **Not measured yet:** the real Claude and Codex redrawing at a new row count, and the operator's portrait
+  display — the live check, after the workers' restart.

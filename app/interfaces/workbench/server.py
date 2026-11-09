@@ -255,7 +255,8 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
     origins = terminal.allowed_origins(port)
     config = {"token": token, "temporal_ui": TEMPORAL_UI,
               "terminal_ports": {name: target["terminal_port"] for name, target in policy["targets"].items()},
-              "terminal_size": {"cols": terminal.COLS, "rows": terminal.ROWS}}
+              "terminal_size": {"cols": terminal.COLS, "rows": terminal.ROWS,
+                                "min_rows": terminal.MIN_ROWS, "max_rows": terminal.MAX_ROWS}}
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "workbench"

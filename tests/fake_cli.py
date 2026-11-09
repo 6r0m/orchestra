@@ -253,7 +253,16 @@ def main():
     if "hang" in words:
         while True:
             time.sleep(1)
-    if "quoted" in words:
+    if "size" in words:
+        # Its terminal's size, said as it starts and again once its PTY is resized, as a window's resize does.
+        first = os.get_terminal_size(sys.stdout.fileno())
+        draw("size %d %d" % (first.columns, first.lines))
+        now = first
+        while now == first:
+            time.sleep(0.1)
+            now = os.get_terminal_size(sys.stdout.fileno())
+        complete("done size %d %d" % (now.columns, now.lines))
+    elif "quoted" in words:
         # A long tool whose output holds that very line — a log, a fixture, a document — while the turn goes on: no
         # hook until it ends, and Claude's spinner redrawing only what changes, its timer, never its working words.
         draw("* Running... (esc to interrupt)")

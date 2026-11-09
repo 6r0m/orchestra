@@ -6,6 +6,7 @@ Runs against `fake_cli.py` standing in for `claude` and `codex` on PATH, through
 import asyncio
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -296,6 +297,26 @@ class Turns(unittest.TestCase):
         self.addCleanup(setattr, terminal, "HALT_SECONDS", saved)
         self.assertEqual(self.turn("quoted context", timeout=30), (0, "done quoted"))
 
+    def test_a_resize_reaches_the_agent_and_the_next_turn_starts_at_it(self):
+        def resized(name, says, rows):
+            done = []
+            thread = threading.Thread(target=lambda: done.append(self.turn("size please", name=name)), daemon=True)
+            thread.start()
+            deadline = time.monotonic() + 30
+            while self.record().count(says) < 1 and time.monotonic() < deadline:
+                time.sleep(0.2)
+            terminal.get(self.run_id, "engineer").resize(rows)
+            thread.join(30)
+            return done[0]
+        self.assertEqual(resized("build-e1-1", "size 160 48", 100), (0, "done size 160 100"),
+                         "the agent's PTY took the rows")
+        self.assertEqual(resized("build-e1-2", "size 160 100", 48), (0, "done size 160 48"),
+                         "the next turn began at them; Restore put back 48")
+        with open(terminal.record_path(self.run_id, "engineer"), "rb") as fh:
+            marks = re.findall(rb"\x1b\]5379;(\d+);(\d+)\x07", fh.read())
+        self.assertEqual(marks, [(b"160", b"48"), (b"160", b"100"), (b"160", b"100"), (b"160", b"48")],
+                         "each turn's size and each change, where it began")
+
     def test_a_timeout_ends_the_agent(self):
         with self.assertRaises(launch.RoleTimeout):
             self.turn("hang forever", timeout=3)
@@ -497,6 +518,51 @@ class OwnerDeath(unittest.TestCase):
         self.assertTrue(self.survives_owner_death("uncontained"))
 
 
+class Resize(unittest.TestCase):
+    """A terminal's rows follow a maximized page, as a console window's do: its PTY host takes the size in its stdin
+    as a sequence no key makes, the worker's terminal holds it, marks it in the record and announces it."""
+
+    def setUp(self):
+        self.run_id = "test-resize-%s" % uuid.uuid4().hex[:8]
+        self.addCleanup(shutil.rmtree, terminal.run_dir(self.run_id), True)
+        self.addCleanup(terminal.close_run, self.run_id)
+
+    def test_the_pty_host_reads_a_size_whole_across_reads_and_passes_every_key(self):
+        from app.agents import ptyhost
+        split = lambda *chunks: list(ptyhost.split(iter(chunks)))   # noqa: E731
+        self.assertEqual(split(b"ab\x1b_orch", b"estra-size;100;160\x1b\\cd"),
+                         [(b"ab", None), (None, (100, 160)), (b"cd", None)], "cut across two reads")
+        self.assertEqual(split(b"\x1b"), [(b"\x1b", None)], "the Esc key, at once")
+        self.assertEqual(split(b"\x1b[A", b"q"), [(b"\x1b[A", None), (b"q", None)])
+        self.assertEqual(split(b"x\x1b_or", b"ange"), [(b"x", None), (b"\x1b_orange", None)],
+                         "what was held, not a size, goes on as it came")
+        self.assertEqual(split(b"\x1b_orchestra-size;x\x1b\\k"), [(b"k", None)], "begun as a size: never a key")
+
+    def test_a_size_is_held_bounded_given_to_the_agent_marked_and_announced(self):
+        term = terminal.open_terminal(self.run_id, "engineer")
+        written, told = [], []
+        pump = threading.Thread(target=lambda: None)
+        pump.start()
+        term.agent = type("Agent", (), {"write": lambda self, data: written.append(data),
+                                        "resize": lambda self, rows: written.append(terminal.RESIZE % (rows, 160)),
+                                        "returncode": lambda self: None, "end": lambda self: None,
+                                        "pump": pump})()
+        term.viewers.append(told.append)
+        for wrong in (23, 201, "100", True, None):
+            with self.assertRaises(ValueError):
+                term.resize(wrong)
+        self.assertEqual((term.rows, written, told), (48, [], []), "refused, the size kept")
+        term.resize(100)
+        self.assertEqual(term.rows, 100)
+        self.assertEqual(written, [b"\x1b_orchestra-size;100;160\x1b\\"])
+        self.assertEqual(told[0], b"\x1b]5379;160;100\x07", "every viewer draws it where it begins")
+        self.assertEqual(json.loads(told[1])["size"], [160, 100])
+        with open(terminal.record_path(self.run_id, "engineer"), "rb") as fh:
+            self.assertIn(b"\x1b]5379;160;100\x07", fh.read(), "and the record keeps it")
+        term.type(b"a key \x1b_orchestra-size;24;160\x1b\\")
+        self.assertEqual(len(written), 1, "no key carries a size")
+
+
 class Socket(unittest.TestCase):
     """The terminal's WebSocket: the workbench's token and origin, the record, then live bytes."""
 
@@ -573,7 +639,7 @@ class Socket(unittest.TestCase):
 
         async def talk():
             async with self.connect() as ws:
-                self.assertEqual(json.loads(await ws.recv()), {"live": True})
+                self.assertEqual(json.loads(await ws.recv()), {"live": True, "size": [160, 48]})
                 self.assertEqual(await ws.recv(), b"before\r\n")
                 term.emit(b"after\r\n")
                 self.assertEqual(await asyncio.wait_for(ws.recv(), 5), b"after\r\n")
@@ -584,6 +650,31 @@ class Socket(unittest.TestCase):
                     await asyncio.sleep(0.1)
         asyncio.run(talk())
         self.assertEqual(typed, [b"\x1b"])
+
+    def test_a_binary_frame_resizes_the_terminal_and_no_key_does(self):
+        term = terminal.open_terminal(self.run_id, "engineer")
+        written = []
+        pump = threading.Thread(target=lambda: None)
+        pump.start()
+        term.agent = type("Agent", (), {"write": lambda self, data: written.append(data),
+                                        "resize": lambda self, rows: written.append(("rows", rows)),
+                                        "returncode": lambda self: None, "end": lambda self: None,
+                                        "pump": pump})()
+
+        async def talk():
+            async with self.connect() as ws:
+                self.assertEqual(json.loads(await ws.recv())["size"], [160, 48], "it names its size: it takes one")
+                await ws.send(json.dumps({"rows": 100}).encode("utf-8"))
+                marked = await asyncio.wait_for(ws.recv(), 5)
+                told = json.loads(await asyncio.wait_for(ws.recv(), 5))
+                await ws.send("\x1b_orchestra-size;24;160\x1b\\")
+                await ws.send(json.dumps({"rows": 9999}).encode("utf-8"))
+                await asyncio.sleep(0.5)
+                return marked, told
+        marked, told = asyncio.run(talk())
+        self.assertEqual((marked, told), (b"\x1b]5379;160;100\x07", {"live": True, "size": [160, 100]}))
+        self.assertEqual((written, term.rows), ([("rows", 100)], 100),
+                         "a key carrying a size, and rows out of bounds, change nothing")
 
     def test_a_viewer_is_told_when_the_agent_under_the_terminal_goes(self):
         # A failed step keeps the terminal and its record but ends its agent: what is typed reaches nobody.
@@ -596,12 +687,13 @@ class Socket(unittest.TestCase):
 
         async def talk():
             async with self.connect() as ws:
-                self.assertEqual(json.loads(await ws.recv()), {"live": True})
+                self.assertEqual(json.loads(await ws.recv()), {"live": True, "size": [160, 48]})
                 self.assertEqual(await ws.recv(), b"the turn\r\n")
                 terminal.end_agent(self.run_id, "engineer")
                 return json.loads(await asyncio.wait_for(ws.recv(), 5))
-        self.assertEqual(asyncio.run(talk()), {"live": False}, "the viewer watching is told")
-        self.assertEqual(self.exchange()[0], {"live": False}, "and so is a page that attaches afterwards")
+        self.assertEqual(asyncio.run(talk()), {"live": False, "size": [160, 48]}, "the viewer watching is told")
+        self.assertEqual(self.exchange()[0], {"live": False, "size": [160, 48]},
+        "and so is a page that attaches afterwards")
 
     def test_closing_a_run_closes_its_viewers_so_they_reattach(self):
         term = terminal.open_terminal(self.run_id, "engineer")
@@ -609,7 +701,7 @@ class Socket(unittest.TestCase):
 
         async def talk():
             async with self.connect() as ws:
-                self.assertEqual(json.loads(await ws.recv()), {"live": False},
+                self.assertEqual(json.loads(await ws.recv()), {"live": False, "size": [160, 48]},
                                  "a terminal between turns is not live, and takes no keystrokes")
                 await ws.recv()
                 terminal.close_run(self.run_id)
@@ -757,7 +849,8 @@ class Lifecycle(unittest.TestCase):
                 getattr(host, action)({"state": state})
             self.assertEqual(ended, ["architect"], action)
             self.assertEqual([terminal.get(self.run_id, role) for role in ("engineer", "architect")], [None, None])
-            self.assertEqual(told[-2:], [json.dumps({"live": False}), None], "its page is told, then let go")
+            self.assertEqual(told[-2:], [json.dumps({"live": False, "size": [160, 48]}), None],
+            "its page is told, then let go")
         self.assertEqual(git.calls, [], "no git after an end not proved")
 
     def test_a_change_while_the_architect_judges_fails_the_step_and_is_never_the_verified_tree(self):

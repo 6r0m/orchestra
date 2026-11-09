@@ -10,14 +10,22 @@ the agent's own.
 On Windows the terminal is a ConPTY, which asks its terminal for win32-input-mode. Codex
 reads Windows key events there and ignores a bare ESC byte, so a lone ESC arriving on
 stdin is sent as the Esc key's down and up events.
+
+One thing on stdin is not the keyboard's: `ESC _ orchestra-size;<rows>;<cols> ESC \\`, an
+application program command no key makes, which resizes the terminal — as a console window's
+own resize does — and goes no further. It is read whole across reads; a lone ESC, the Esc key,
+is never held back for it.
 """
 import os
+import re
 import sys
 import threading
 
 WINDOWS = sys.platform.startswith("win")
 # win32-input-mode: ESC [ Vk ; Sc ; Uc ; Kd ; Cs ; Rc _ — the Esc key pressed, then released.
 WINDOWS_ESC = "\x1b[27;1;27;1;0;1_\x1b[27;1;27;0;0;1_"
+SIZE = b"\x1b_orchestra-size;"
+SIZE_WHOLE = re.compile(rb"\x1b_orchestra-size;(\d{1,4});(\d{1,4})\x1b\\")
 
 
 def _stdin_chunks():
@@ -27,6 +35,38 @@ def _stdin_chunks():
         if not data:
             return
         yield data
+
+
+def split(chunks):
+    """The keyboard's bytes and the sizes asked for, in order: `(bytes, None)` or `(None, (rows, cols))`. A size's
+    sequence cut across two reads is held until it is whole; anything held that turns out not to be one goes on as
+    it came. Only a tail of two bytes or more — `ESC _` on — is held: a lone ESC is the Esc key, sent at once."""
+    held = b""
+    for chunk in chunks:
+        data, held = held + chunk, b""
+        while data:
+            start = data.find(SIZE)
+            if start < 0:
+                # A size's start cut at the end of this read waits for the next.
+                cut = next((len(data) - n for n in range(len(SIZE) - 1, 1, -1) if data.endswith(SIZE[:n])), len(data))
+                if cut:
+                    yield data[:cut], None
+                held, data = data[cut:], b""
+                break
+            if start:
+                yield data[:start], None
+            whole = SIZE_WHOLE.match(data, start)
+            if whole:
+                yield None, (int(whole.group(1)), int(whole.group(2)))
+                data = data[whole.end():]
+            elif b"\x1b\\" in data[start:]:
+                # Begun as a size but not one: nothing a key makes, and nothing the agent is sent.
+                data = data[data.index(b"\x1b\\", start) + 2:]
+            else:
+                held, data = data[start:], b""
+                break
+    if held:
+        yield held, None
 
 
 def _out(data):
@@ -42,7 +82,11 @@ def windows(argv, cols, rows):
         import codecs
         # A character split across two reads is decoded whole.
         decoder = codecs.getincrementaldecoder("utf-8")("replace")
-        for data in _stdin_chunks():
+        for data, size in split(_stdin_chunks()):
+            if size:
+                if all(size):
+                    pty.setwinsize(*size)
+                continue
             text = decoder.decode(data)
             if text:
                 pty.write(WINDOWS_ESC if text == "\x1b" else text)
@@ -75,8 +119,13 @@ def posix(argv, cols, rows):
     os.close(slave)
 
     def keyboard():
-        for data in _stdin_chunks():
-            os.write(master, data)
+        for data, size in split(_stdin_chunks()):
+            if size:
+                # The kernel tells the agent's foreground group with SIGWINCH, as a terminal window's resize does.
+                if all(size):
+                    fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", size[0], size[1], 0, 0))
+            else:
+                os.write(master, data)
 
     threading.Thread(target=keyboard, daemon=True).start()
     import select

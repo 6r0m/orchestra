@@ -1,6 +1,6 @@
 """Press one of the Workbench's own buttons in a headless browser, as the operator would.
 
-    python tools/demo_press.py <workbench url> <run id | stack | start | page> <button label | task | refused:repo:task | answered:status | markdown | markdown-safety | change:words | change-rows | change-idle | terminal-fit:role | handoff | approval-notes | hints | terminal:role | turn:stage | turn-then:stage:label | file:path | round:stage:path | history | hold:role:label | type-after:role:label:line | layout:WIDTHxHEIGHT | absent:label,...> <what the page should say> [note]
+    python tools/demo_press.py <workbench url> <run id | stack | start | page> <button label | task | refused:repo:task | answered:status | markdown | markdown-safety | change:words | change-rows | change-idle | terminal-fit:role | terminal-rows:role | handoff | approval-notes | hints | terminal:role | turn:stage | turn-then:stage:label | file:path | round:stage:path | history | hold:role:label | type-after:role:label:line | layout:WIDTHxHEIGHT | absent:label,...> <what the page should say> [note]
 
 The Windows side of `make demo` (WSL cannot reach Windows' loopback, and Windows reaches the
 Workbench's): headless Edge, driven over the DevTools protocol, opens the page, opens the run by its
@@ -33,7 +33,9 @@ page: it exits 0 when the page, its run waiting with no role at work, opens no s
 dropped from before it loads, and its terminal read: it exits 0 when its text and scrollbar fit its box, a drag of
 the scrollbar's thumb scrolls it back and selects nothing, Maximize fills the window drawn larger and Restore puts it
 back, and Ctrl+C on a selection copies it and sends nothing — with nothing selected, a live agent's still. Given
-`handoff`, the run's status is stood in for from before the page loads — a blocker taking guidance to either role,
+`terminal-rows:<role>`, in a window taller than wide, as a portrait display's, through the worker's own socket: it
+exits 0 when Maximize has the agent's terminal take as many rows as fill the window, and Restore puts back its
+usual rows. Given `handoff`, the run's status is stood in for from before the page loads — a blocker taking guidance to either role,
 with what an agent last answered the operator — and the page's answers caught, none reaching the Workbench: it
 exits 0 when the card names the agent that answered and offers the other first, is drawn anew when the other
 answers the same words, and each of its four presses — the answer sent to either role, a note guiding either —
@@ -616,6 +618,45 @@ def fitted(seen, tall=False):
     return across and (not tall or seen["screen"][3] <= seen["details"][1] + seen["details"][3] + 1)
 
 
+# A role's terminal's rows as drawn, and how much of its window its screen fills down.
+TERMINAL_ROWS = """(role => {
+  const rows = document.querySelector('#term-' + role + ' .xterm-rows');
+  const screen = document.querySelector('#term-' + role + ' .xterm-screen');
+  if (!rows || !screen) return null;
+  const s = screen.getBoundingClientRect();
+  return { rows: rows.children.length, top: Math.round(s.top), bottom: Math.round(s.bottom), window: innerHeight };
+})(%s)"""
+
+
+def terminal_rows(page, run_id, role):
+    """`role`'s terminal on the run's page, in a window taller than wide, as a portrait display's: 0 when Maximize has
+    the agent's terminal take as many rows as fill the window — its worker's mark of the new size drawn — and Restore
+    puts back its usual rows. Prints what it saw."""
+    seen = lambda: page.value(TERMINAL_ROWS % json.dumps(role))   # noqa: E731
+    page.value(OPEN % json.dumps(run_id))
+    wait(lambda: page.value(OPENED), 60, "the run")
+    page.value(OPEN_TERMINAL % json.dumps(role))
+    rest = wait(lambda: (lambda now: now if now and now["rows"] else None)(seen()), 60, "the %s terminal" % role)
+    time.sleep(2)
+    page.value(button("#terminal-%s summary" % role, "Maximize") + ".click(); true")
+    big = wait(lambda: (lambda now: now if now and now["rows"] > rest["rows"] else None)(seen()), 30,
+               "the %s terminal to take more rows" % role)
+    time.sleep(1)
+    big = seen()
+    failures = []
+    if big["bottom"] < big["window"] - 60:
+        failures.append("maximized, its %d rows end %d px above the window's foot" % (big["rows"],
+                                                                                     big["window"] - big["bottom"]))
+    page.value(button("#terminal-%s summary" % role, "Restore") + ".click(); true")
+    back = wait(lambda: (lambda now: now if now and now["rows"] == rest["rows"] else None)(seen()), 30,
+                "the %s terminal to take its usual rows again" % role)
+    print("the %s terminal in a %d px tall window: %d rows in its place; maximized, %d rows, its screen down to %d px "
+          "of %d; restored, %d rows%s" % (role, rest["window"], rest["rows"], big["rows"], big["bottom"],
+                                          big["window"], back["rows"],
+                                          "" if not failures else "\nFAILED: " + "\nFAILED: ".join(failures)))
+    return 0 if not failures else 1
+
+
 def terminal_fit(page, run_id, role):
     """`role`'s terminal on the run's page, in a window as narrow as an operator's: 0 when its text and scrollbar
     fit its box; a drag of the thumb up its track scrolls it back, selecting nothing; Maximize fills the window,
@@ -893,6 +934,8 @@ def main(url, run_id, label, said, note=None):
     size = label.split(":", 1)[1] if label.startswith("layout:") else None
     # A terminal is fitted in a window as narrow as an operator's, where 160 columns at the page's font do not fit.
     size = "1032x1100" if label.startswith("terminal-fit:") else size
+    # A terminal's rows follow a window taller than wide, as a portrait display's.
+    size = "1000x1700" if label.startswith("terminal-rows:") else size
     edge = subprocess.Popen([EDGE, "--headless=new", "--disable-gpu", "--no-first-run", "--remote-debugging-port=0",
                              "--user-data-dir=" + profile]
                             + (["--window-size=" + size.replace("x", ",")] if size else []) + ["about:blank"],
@@ -949,6 +992,8 @@ def main(url, run_id, label, said, note=None):
                 return change_idle(page, run_id)
             if label.startswith("terminal-fit:"):
                 return terminal_fit(page, run_id, label.split(":", 1)[1])
+            if label.startswith("terminal-rows:"):
+                return terminal_rows(page, run_id, label.split(":", 1)[1])
             if label == "handoff":
                 return handoff(page, run_id)
             if label == "approval-notes":

@@ -189,8 +189,10 @@ never drawn again under you: after its worker restarts it keeps its record until
 which it then adds to. A terminal holds the whole session, including whatever you typed during a turn.
 
 A terminal is drawn to fit its box, all 160 columns of it, so in a narrow window its text is small. *Maximize*,
-beside its name, fills the window with it, drawn larger, and *Restore* puts it back; Esc
-still reaches the agent. Scroll back through the session with the wheel or by dragging its scrollbar — Codex too,
+beside its name, fills the window with it, as a console window does: its text is drawn as large as the columns
+allow across, and the agent's own terminal takes as many rows as fill the window down — on a portrait display,
+about three times its usual 48. Every page watching it draws those rows too, and the role's next turns start at
+them, until *Restore* puts back 48; Esc still reaches the agent. Scroll back through the session with the wheel or by dragging its scrollbar — Codex too,
 which draws inline as Claude does, and shows its session's history again each time a turn resumes it. Select text
 and press Ctrl+C to copy it, say into your guidance; with nothing selected, Ctrl+C goes to the agent, as in any
 terminal.

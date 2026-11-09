@@ -444,7 +444,8 @@ class Access(unittest.TestCase):
         self.assertEqual(config["terminal_ports"], {name: target["terminal_port"]
                                                     for name, target in E.SETTINGS["targets"].items()})
         # The size every worker gives an agent's terminal, from its one owner: the page draws that grid.
-        self.assertEqual(config["terminal_size"], {"cols": terminal.COLS, "rows": terminal.ROWS})
+        self.assertEqual(config["terminal_size"], {"cols": terminal.COLS, "rows": terminal.ROWS,
+                                                   "min_rows": terminal.MIN_ROWS, "max_rows": terminal.MAX_ROWS})
         connection = http.client.HTTPConnection("127.0.0.1", port())
         connection.request("GET", "/", headers={"Host": "127.0.0.1:%d" % port()})
         response = connection.getresponse()
