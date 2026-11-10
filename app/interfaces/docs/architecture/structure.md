@@ -92,11 +92,12 @@ when the decision above moves on; nothing else of it is read again.
 
 Terminal replay is paced by xterm's write-completion callback, including when an older worker sends
 its entire record in one frame. The browser counts parsed bytes rather than enqueued bytes and finishes
-pending writes before reconnecting, so it neither skips unseen output nor draws it twice. Updated workers
-also support bounded reads from that confirmed cursor. A large replay shows catch-up progress rather than
-claiming the visible terminal has reached the live output. Small redraw frames share bounded renderer
-writes, so replay does not schedule a separate callback for every old animation frame. Renderer or cursor
-errors remain visible.
+pending writes before reconnecting, so it neither skips unseen output nor draws it twice. An interrupted
+replay resumes even when no agent is live; a completed replay stays closed, and cursor refusals stay failed.
+Updated workers also support bounded reads from that confirmed cursor. A large replay shows catch-up
+progress rather than claiming the visible terminal has reached the live output. Small redraw frames share
+bounded renderer writes, so replay does not schedule a separate callback for every old animation frame.
+Renderer or cursor errors remain visible.
 
 The run and rail distinguish a worker's update notice from a down-worker warning. The update notice
 explains that current work continues while new steps wait for the replacement.

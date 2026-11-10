@@ -529,10 +529,9 @@ still lands on a checkout.
   operator's answers as the run's Temporal history accepted them; its change as its target host's git
   reads it, one snapshot listed file by file, each file's diff drawn by the page's own viewer as text,
   and the whole patch to copy; and links to its Temporal and Langfuse pages. The page's address names the run open, so a reload keeps it.
-  A terminal connected again adds only what its record gained — the record only grows, and every
-  connection streams it from its start — so what the operator reads is never drawn again under them; a
-  worker holds a role's terminal only from that role's first turn on it, so after a restart the page
-  connects again once the run reads the role at work, or moves on, never on a timer.
+  The page keeps terminal contents across reconnects; its
+  [terminal viewer](../../app/interfaces/docs/architecture/structure.md#invariants) owns replay and
+  reconnection behavior.
   A vendor permission or elicitation dialog that waits in a live terminal is projected into the
   Operator action list from the turn's local hook events, as its kind reads them — only Claude reports
   one. This is a page hint, not a Temporal stop or a workflow answer: a dialog's notification sets it,

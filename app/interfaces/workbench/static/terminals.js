@@ -364,10 +364,10 @@ function connect(role, entry, target) {
     // would take a size's frame for keys.
     entry.size = null;
     if (event.code === 1008) entry.failed = true;
-    // A live terminal that drops is its worker gone mid-turn: tried again shortly. One that was only its
-    // record — the worker holds no terminal for the role until its next turn — stays as it is, and is
-    // connected again once the run reads that role at work, or moves on.
-    if (wasLive && !entry.failed) {
+    // An unfinished replay needs the same reconnect as live output, even after the run has closed.
+    // A fully drawn record stays closed until the role works again or the run moves on.
+    const unfinished = entry.pending > 0 || entry.shown < entry.replayUntil;
+    if (!entry.failed && (wasLive || unfinished)) {
       $("state-" + role).textContent = "disconnected, trying again…";
       entry.timer = setTimeout(() => {
         entry.timer = null;
