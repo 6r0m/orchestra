@@ -430,8 +430,9 @@ class Sessions(Scenario):
         run = self._run_to_ready()
         logs = os.path.join(activities.run_dir(run.run_id), "logs")
         asks = [call for call in self.agent.calls if "Independently" in call["prompt"]]
-        self.assertEqual([call["name"] for call in asks], ["assess-e1-1", "verify-e2-1"],
-                         "each review stage's first turn carries the stage ask")
+        self.assertEqual([call["name"] for call in asks],
+                         ["assess-e1-1", "assess-e1-2", "verify-e2-1", "verify-e2-2"],
+                         "every review refreshes its stage ask after possible compaction")
         for call in asks:
             self.assertIn("Do not run tests or builds", call["prompt"])
             self.assertIn(logs, call["prompt"], "the engineer's reports are named where they are")

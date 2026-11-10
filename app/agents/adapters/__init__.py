@@ -34,6 +34,7 @@ What a kind's module holds, each named below by what it answers:
 - `skill_folders(name, repo)`: where a skill of that name would be found for it.
 - optional — `configure(role, env, traced, private)`: the process environment and CLI settings for a selected API provider, or a refusal
   before launch when it cannot be configured; no credentials enter the role's policy or trace;
+  `prompt_input(prompt, files)`: safe input on argv and per-turn environment for an adapter's native prompt delivery;
   `trust_ensure(repo, home)`, `trust_forget(repo, home)`; `trace_env(context)`,
   `trace_settings(context, private)`, `reasoning(session)`, `upload(session, context)`;
   `waiting(events)`: whether its turn's events end on a dialog waiting in its terminal, for a kind that
@@ -64,7 +65,7 @@ REQUIRED = ("NAME", "EXECUTABLE", "ACCESS", "BOUNDARY", "OPTIONS", "SKILL", "SES
 CALLABLE = ("validate", "command", "host", "session_in", "wire", "completion", "output", "session",
             "final_message", "message_of", "skill_folders", "skill_roots")
 OPTIONAL = ("trust_ensure", "trust_forget", "trace_env", "trace_settings", "reasoning", "upload", "waiting",
-            "readable", "reply", "held", "halted", "configure", "program")
+            "readable", "reply", "held", "halted", "configure", "program", "prompt_input")
 
 
 class Refused(ValueError):

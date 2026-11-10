@@ -74,6 +74,11 @@ class EngineerDefaults(Scenario):
         self.assertEqual(self.agent.calls[2]["kind"], "pi")
         self.assertEqual(self.agent.calls[2]["timeout_seconds"], selected["timeout_seconds"])
         self.assertNotIn("--session", self.agent.calls[2]["argv"], "the new harness gets a fresh session")
+        engineer_prompt = self.agent.calls[2]["prompt"]
+        self.assertIn(original["policy"]["roles"]["engineer"]["persona"].replace(
+            "{{TODO_PATH}}", before["state"]["todo_path"]).rstrip("\n"), engineer_prompt)
+        self.assertIn(before["state"]["task"], engineer_prompt)
+        self.assertIn("# Current stage: build", engineer_prompt)
         self.assertIn(before["state"]["agent_sessions"]["architect"], self.agent.calls[3]["command"])
         self.assertEqual((E.run(runs.history(E.client(), run.run_id))["attempts"][-2]["agent"]["kind"]), "pi")
         E.run(Replayer(workflows=[WF.FeatureRun]).replay_workflow(E.run(run.handle.fetch_history())))

@@ -1454,7 +1454,8 @@ class Runs(Scenario):
         for attempt in (first, retry):
             self.assertEqual("".join(part["text"] + "\n" for part in attempt["parts"]), attempt["input"],
                              attempt["attempt"])
-        self.assertNotIn("task", [part["part"] for part in first["parts"]], "a resumed turn carries its delta")
+        self.assertIn("task", [part["part"] for part in first["parts"]],
+                      "a resumed turn refreshes its contract before session-loss recovery too")
         self.assertIn("task", [part["part"] for part in retry["parts"]], "the fresh session is given the task again")
 
     def test_the_runs_history_holds_each_judged_tree_and_each_accepted_answer(self):

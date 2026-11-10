@@ -18,7 +18,7 @@ BOUNDARY = {
 OPTIONS = ("model", "effort", "provider", "launcher")
 # Pi separates a skill's name from its arguments at a literal space, including multiline arguments.
 SKILL = "/skill:{name} "
-SESSION_MARKERS = ("ORCHESTRA_PI_PROMPT_FILE", "ORCHESTRA_PI_INPUT_TOKEN")
+SESSION_MARKERS = ("ORCHESTRA_PI_PROMPT_FILE", "ORCHESTRA_PI_INPUT_TOKEN", "ORCHESTRA_PI_PARTS_FILE")
 SESSION_MARKER_PREFIXES = ()
 LOST_SESSION = ("pi session not found before work",)
 OLD_BRAIN = None
@@ -77,10 +77,11 @@ def wire(argv, events, sink):
     return list(argv) + ["--extension", BRIDGE]
 
 
-def prompt_input(_prompt, path):
+def prompt_input(_prompt, files):
     """A shell-safe input token; the native bridge delivers the already recorded prompt."""
     token = "orchestra-input-" + uuid.uuid4().hex
-    return token, {"ORCHESTRA_PI_PROMPT_FILE": path, "ORCHESTRA_PI_INPUT_TOKEN": token}
+    return token, {"ORCHESTRA_PI_PROMPT_FILE": files["prompt"], "ORCHESTRA_PI_INPUT_TOKEN": token,
+                   "ORCHESTRA_PI_PARTS_FILE": files["parts"]}
 
 
 def held(text):

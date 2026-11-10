@@ -190,6 +190,14 @@ answers and the page therefore does not send. What you read in one is
 never drawn again under you: after its worker restarts it keeps its record until its role's next turn,
 which it then adds to. A terminal holds the whole session, including whatever you typed during a turn.
 
+If a role loses track of its instructions, Pause it and ask it to re-read the applicable `AGENTS.md`,
+its current stage's skill and the approved todo, inspect the existing diff and verification evidence,
+then continue the current stage while preserving completed work. The latest controller prompt is
+available under that turn's *Received* history. Resuming a conversation retains history, but compaction
+can summarize earlier details. Each new role invocation refreshes its current contract; Pi also keeps
+that contract in a native system section during a long turn. These measures preserve context delivery,
+not proof of model compliance. No WSL restart or new session is needed for this recovery.
+
 A terminal is drawn to fit its box, all 160 columns of it, so in a narrow window its text is small. *Maximize*,
 beside its name, fills the window with it, as a console window does: its text is drawn as large as the columns
 allow across, and the agent's own terminal takes as many rows as fill the window down — on a portrait display,
@@ -205,8 +213,8 @@ between them, in the phase of the step they answered, with your words and when t
 with words folded to their first line, as a turn is, and opened with a click. Open a turn to see what it received
 and what it produced. *Received*
 is the turn's own new prompt — the vendor keeps the conversation before it in its session — in the parts
-it was built from: the stage's skill, the task and the role's persona as the run started on a session's
-first turn, the stage's instructions, and what it was handed, such as the research brief to check, the
+it was built from: the stage's skill, the task, the run's saved persona and current-stage instructions
+on every invocation, and what it was handed, such as the research brief to check, the
 findings to address or your guidance; the exact prompt is beside them, to copy. A turn whose parts were
 not recorded shows its exact prompt alone. *Produced* is its answer as the run kept it — the brief, the
 plan's account, the verdict and findings — said once: what the decision above shows is pointed to, not

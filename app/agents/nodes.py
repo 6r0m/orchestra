@@ -4,7 +4,7 @@ Contract highlights:
 - One persistent CLI session per (run_id, role_id), resumed always by exact id, never --last. Whether an id
   is minted before a session's first turn or learned from it is the role's kind's (`app.agents.adapters`).
 - Each role turn is the agent's interactive CLI in the role's live terminal (`terminal`, beside this
-  module), the prompt its argument, built by its kind. A read-only role runs under its kind's read-only
+  module), the prompt delivered by its kind. A read-only role runs under its kind's read-only
   mode; a review ends its final message with the {verdict, feedback} JSON, which is validated here, for
   every kind alike, and research answers with its final message.
 - The workflow never treats hidden session history as its state: only the explicit output parsed here
@@ -207,8 +207,7 @@ def _verdict_object(value):
     return found
 
 
-# What a prompt can carry, each a part of its own: the skill it invokes, the task and the role's persona on a
-# session's first turn, the stage's instructions or a review's re-check, and what is carried in.
+# What a prompt can carry: the current contract, followed by feedback and other context for this turn.
 PARTS = ("skill", "task", "persona", "instructions", "recheck", "brief", "previous-brief", "findings", "guidance",
          "reflection", "reflection-guidance", "handoff", "handoff-guidance")
 
@@ -274,16 +273,15 @@ def compose_parts(stage, stage_cfg, is_review, state, session_first,
 
     HOW a role acts lives in its persona, which the run carries from its start, so
     no later edit reaches it (a run started before agent profiles still reads its
-    persona file when a session is born). Mechanics — task at session birth,
+    persona file). Mechanics — the task and current contract at every invocation,
     the stage ask, feedback/re-check deltas, operator guidance — stay here:
     workflow, not personality. A role's session persists across its stages
     (engineer: plan→build; architect: research→assess→verify), so the stage ask
     re-anchors the session when the stage changes. `is_review` is the stage's,
     from the stages' contract: a review re-checks its findings, work addresses them.
 
-    Invariant: a prompt built with `session_first=True` must be independently
-    executable from zero — state and the worktree are the only context a
-    rehydrated role gets.
+    Every invocation refreshes its contract; a resumed conversation may have compacted it away.
+    Feedback remains incremental, and a new session also receives the findings it must re-check.
     """
     todo = state["todo_path"]
     parts = []
@@ -295,22 +293,16 @@ def compose_parts(stage, stage_cfg, is_review, state, session_first,
     # The operator may bind a skill to a stage (`stage_skills`): its methodology, which this component
     # does not own. An invocation only takes effect as the prompt's very first characters (measured: a
     # trailing one is inert), so it leads the composed prompt and everything after it — task, persona,
-    # stage ask — is its argument; how it is spelled is the role's kind's. Only when the skill is not
-    # already loaded in this session: a session persists across its stages, but a role's stages can each
-    # be bound to a different skill. A run of the old shape named it `/name`.
+    # stage ask — is its argument; how it is spelled is the role's kind's. Reload the applicable method
+    # even in a resumed session: its earlier expansion may no longer be in active context.
     named = (skills or {}).get(stage)
     skill = adapters.skill(adapters.for_role(stage_cfg), named[1:] if named and named.startswith("/") else named)
-    if skill and (session_first or stage_first):
+    if skill:
         add("skill", skill, "")
-    if session_first:
-        add("task", "# Task", state["task"], "")
-        add("persona", _template(stage_cfg, todo))        # the ROLE's persona file
-    # A session being born has no memory to lean on, so it always gets the
-    # full current-stage bootstrap — whatever the attempt number. Without
-    # this a session lost mid-loop would be rehydrated with a delta that
-    # references findings and instructions it never received.
+    add("task", "# Task", state["task"], "")
+    add("persona", _template(stage_cfg, todo))
+    add("instructions", "# Current stage: " + stage, _ask(stage, state, todo, logs))
     if stage_first or session_first:
-        add("instructions", _ask(stage, state, todo, logs))
         # A flow that began with research hands its brief to the plan that turns it into a todo, and a
         # research session born again gets the brief it gave, which the operator's feedback is about.
         if stage == "plan" and state.get("brief"):

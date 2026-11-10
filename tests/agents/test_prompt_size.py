@@ -1,5 +1,4 @@
-"""A turn's prompt fits the command line it rides on: a part too long for it is attached as a file — written whole —
-which the prompt names in its place, under that part's own heading, and which the agent may read."""
+"""Every turn refreshes its current contract; oversized prompt parts remain readable as whole attachments."""
 import os
 import sys
 import tempfile
@@ -9,7 +8,8 @@ HERE = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 PKG = os.path.abspath(os.path.join(HERE, os.pardir))
 sys.path[:0] = [PKG, HERE]
 
-from app.agents import nodes as N  # noqa: E402
+from app.agents import nodes as N, adapters  # noqa: E402
+from app.foundation import stages  # noqa: E402
 from app.agents.adapters import claude_code, codex  # noqa: E402
 import folders  # noqa: E402
 
@@ -18,6 +18,38 @@ BRIEF = {"part": "brief", "text": "\n# The approved research brief\n" + "the bri
 # An operator's note as one was pasted: a long audit, quotes and all — the quotes a Windows command line escapes.
 GUIDANCE = {"part": "guidance", "text": "\n# Operator guidance\n" + "".join(
     "line %d of the audit — \"PATCH\", it says, and “why”\n" % n for n in range(700))}
+
+
+class TurnContract(unittest.TestCase):
+    def test_every_invocation_refreshes_the_snapshot_contract_and_current_skill(self):
+        state = {"task": "A task kept by this run", "todo_path": "todo/approved.md", "worktree_path": "/w",
+                 "phase": "build", "feedback": "The current finding", "guidance": "The current operator decision"}
+        for kind in ("claude-code", "codex", "pi"):
+            role = {"kind": kind, "persona": "The saved role for {{TODO_PATH}}. Never commit."}
+            for stage in stages.STAGES:
+                for fresh in (True, False):
+                    with self.subTest(kind=kind, stage=stage, fresh=fresh):
+                        parts = N.compose_parts(stage, role, stage in stages.REVIEWS, state, fresh, fresh,
+                                                skills={stage: "current-method"})
+                        by_name = {part["part"]: part["text"] for part in parts}
+                        self.assertEqual(parts[0]["text"].strip(), adapters.skill(adapters.load(kind), "current-method").strip())
+                        self.assertIn("A task kept by this run", by_name["task"])
+                        self.assertEqual(by_name["persona"], "The saved role for todo/approved.md. Never commit.")
+                        self.assertIn(N._ask(stage, state, state["todo_path"], "the run's logs"), by_name["instructions"])
+                        self.assertIn("# Current stage: " + stage, by_name["instructions"])
+                        self.assertIn("The current operator decision", by_name["guidance"])
+                        if stage not in stages.REVIEWS or fresh:
+                            self.assertIn("The current finding", by_name["findings"])
+
+    def test_stage_transition_replaces_the_active_contract_without_replaying_old_feedback(self):
+        role = {"kind": "pi", "persona": "Saved engineer"}
+        state = {"task": "t", "todo_path": "todo/approved.md", "worktree_path": "/w", "phase": "build"}
+        build = N.compose_prompt("build", role, False, state, False, False,
+                                 skills={"plan": "planning", "build": "building"})
+        self.assertTrue(build.startswith(adapters.skill(adapters.load("pi"), "building")))
+        self.assertIn("# Current stage: build", build)
+        self.assertNotIn("/skill:planning", build)
+        self.assertNotIn(stages.STAGE_ASK["plan"].split("{{TODO_PATH}}")[0], build)
 
 
 class Attach(unittest.TestCase):

@@ -54,8 +54,8 @@ in — its flow, one file in `flows/`.
   and every git side effect are single-attempt activities, and a failure stops
   the run for the operator.
 - **D8** **State stays compact and raw** (ids, refs, verdict, feedback —
-  never transcripts/diffs/accumulated prompts); prompts reach CLIs as an argv
-  argument and are kept in files we name; per-role-run logs and terminal
+  never transcripts/diffs/accumulated prompts); prompts are kept in named files
+  and delivered through each CLI's adapter; per-role-run logs and terminal
   records own the bulky evidence.
 
 ## Does not own
@@ -107,7 +107,7 @@ Do not re-derive a `states/` layer here.
 | [cli.py](../../app/interfaces/cli.py) | the command line over the same client and the stack's owner: start, answer, continue, stop, force terminate, show, list, the stack — for tests, automation and the Makefile |
 | [worker.py](../../app/interfaces/worker.py) · [workers.sh](../../workers.sh) · [workers.ps1](../../workers.ps1) | one Temporal worker per host, and each part of the stack's process mechanics: start, stop, status and the sweep of what a dead worker's stages left |
 | [temporal/](../../temporal/compose.yaml) | the Temporal service: server, its PostgreSQL, the web UI, the namespace |
-| [roles/](../../roles/) | two persona files, sent at session start |
+| [roles/](../../roles/) | two persona files, snapshotted at run start |
 | [flows/](../../flows/README.md) · [flows.py](../../app/foundation/flows.py) | the order of a run's stages, one file per flow, and the rules a flow keeps |
 | [tests/](../../tests/README.md) | what is proven, and how to run it |
 
@@ -132,8 +132,8 @@ Do not re-derive a `states/` layer here.
   `engineer-code`, `plan → assess → build → verify → closeout`, is the default.
 - **D13** **Config vs code:** which brain, model and reasoning effort a role
   uses, budgets, access, target hosts, repository descriptors and role
-  personalities (`roles/engineer.md`, `roles/architect.md` — sent at session
-  start) are configuration; the set of brains that can be bound is code,
+  personalities (`roles/engineer.md`, `roles/architect.md` — snapshotted at run
+  start and refreshed on each role invocation) are configuration; the set of brains that can be bound is code,
   because each CLI has its own flags for session identity, turn completion
   and read-only mode, and none of that is derivable from configuration. Stage
   asks (which artifact a stage produces or judges), which role takes each,
@@ -601,7 +601,9 @@ still lands on a checkout.
 - **D10** **Account safety:** human-triggered only (no scheduler may start an
   agent run on subscription auth), strictly sequential, bounded, official
   CLI interfaces only. Scheduled/parallel execution, if ever wanted, moves
-  to API-key auth first.
+  to API-key auth first. Sequential applies to an account across runs and hosts,
+  not just the stages of one run. Worker activity capacity is not account admission;
+  the runtime limitation is recorded under [accepted limits](#risks-and-technical-debt).
 - **D14** **Mutual critique, both directions:** feedback is evidence, not
   authority. The engineer refutes wrong findings with evidence instead of
   applying them; the architect re-verifies refutations against code instead
@@ -668,13 +670,13 @@ still lands on a checkout.
   Reject says it is still stopping — never yet that it was rejected — and that nothing was
   removed; where the removal is refused, it says so in the removal's own words. It tries
   nothing again, and the removal finishes it.
-- **D18b** **A rehydrated session is bootstrapped from zero**:
-  any prompt built for a session being born carries task, persona, the
-  **current stage ask**, and the latest findings/guidance — never a delta
-  that references memory the new session never had. This is the executable
-  form of the standing boundary that state plus the worktree must be
-  sufficient to reconstruct a role. Healthy resumed sessions keep the
-  cheap delta.
+- **D18b** **Every role invocation refreshes its current contract**:
+  task, snapshotted persona, current stage ask and bound skill accompany both
+  new and resumed sessions. Feedback and guidance remain incremental; a new
+  session also receives the findings a continuing reviewer must re-check.
+  State plus the worktree remain sufficient to reconstruct a role, without
+  depending on remembered instructions after compaction. Vendor-specific
+  protection within a long turn belongs to [agents](../../app/agents/docs/architecture/structure.md).
 - **D19** **The skill owns its methodology; the persona owns only what is
   orchestrator-specific**: the global `architect`, `investigate-change` and
   `implement-approved-change` skills own their stance, evidence rules and
@@ -684,8 +686,8 @@ still lands on a checkout.
   Settings name at most one skill per stage. The kind's adapter owns how it is
   invoked and which installed roots it can use; Settings discovers names through
   those roots, and `prepare` checks a binding on the target host before work.
-  A stage invokes its skill at its first prompt, and a session born again gets
-  it again; retries in the same session do not. The binding is configuration,
+  A stage invokes its bound skill on every role invocation, including a retry
+  or a resumed review round. The binding is configuration,
   not role initialization or workflow code.
 - **D25** **The workflow is deterministic.** No clock, randomness, file,
   network or process call happens in workflow code outside Temporal's own APIs;
@@ -738,6 +740,12 @@ The superseded founding register — 77 decisions and the full reviewer journey 
 at commit `a60f864`.
 
 ## Risks and technical debt
+
+- Worker capacity admits independent activities across runs. Orchestra does not identify a
+  subscription account or coordinate that account's execution across workers; its activity
+  limit does not enforce D10. Subscription execution therefore requires operator-controlled
+  account sequencing. Account admission is a separate runtime gap, not a guarantee of prompt
+  delivery or the worker's thread count.
 
 - **D28** **Accepted limits.** The agent's git guards are its environment, not a
   security boundary: a role that clears `GIT_ALLOW_PROTOCOL` and the `GIT_CONFIG_*`

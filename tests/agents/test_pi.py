@@ -181,7 +181,7 @@ class PiContract(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("node"), "Pi's extension bridge requires Node")
 class PiBridge(unittest.TestCase):
-    def run_bridge(self, script, folder, expected=None, version="1.1.0", environ=None):
+    def run_bridge(self, script, folder, expected=None, version="1.5.0", environ=None):
         pi = adapters.load("pi")
         setup = """
 import fs from 'node:fs';
@@ -210,8 +210,13 @@ const ctx = {sessionManager: {getSessionId: () => 's', getSessionFile: () => pro
 
     def test_multiline_prompt_survives_a_launcher_that_passes_only_its_first_line(self):
         pi = adapters.load("pi")
-        prompt = '/skill:method\nRead the whole task, including "quotes", %VARIABLE% and &.\nUnicode: \u2713\n'
+        parts = [{"part": "skill", "text": '/skill:method \n'},
+                 {"part": "task", "text": 'Read the whole task, including "quotes", %VARIABLE% and &.\nUnicode: \u2713'},
+                 {"part": "persona", "text": "Saved engineer"},
+                 {"part": "instructions", "text": "Implement the approved todo"}]
+        prompt = nodes.render(parts)
         with tempfile.TemporaryDirectory(prefix="pi prompt ") as folder:
+            terminal.record_parts(folder, "build-e1-1", parts)
             term = mock.Mock()
             observed = {}
 
@@ -245,21 +250,80 @@ events.agent_settled({aborted:false},ctx);
             with open(path, encoding="utf-8", newline="") as stream:
                 self.assertEqual(stream.read(), prompt)
 
+    def test_native_system_section_projects_only_the_current_recorded_contract(self):
+        with tempfile.TemporaryDirectory() as folder:
+            files = terminal.turn_files(folder, "build-e1-2")
+            parts = [{"part": "skill", "text": "/skill:method \n"},
+                     {"part": "task", "text": "Current task"},
+                     {"part": "persona", "text": "Saved engineer. Never commit."},
+                     {"part": "instructions", "text": "# Current stage: build\nImplement the approved todo."},
+                     {"part": "findings", "text": "Dynamic feedback"}]
+            terminal.record_parts(folder, "build-e1-2", parts)
+            with open(files["prompt"], "w", encoding="utf-8", newline="") as stream:
+                stream.write(nodes.render(parts))
+            result = self.run_bridge("""
+const options = {sections:{existing:'Keep native and other extension instructions'}};
+events.before_agent_start({systemPromptOptions:options},ctx);
+const anchor = options.sections.orchestra_turn;
+if (typeof anchor !== 'string' || !anchor.includes('Saved engineer. Never commit.')
+  || !anchor.includes('# Current stage: build') || !anchor.includes('/skill:method')
+  || !anchor.includes('Current task') || anchor.includes('Dynamic feedback')) process.exit(8);
+events.before_agent_start({systemPromptOptions:options},ctx);
+if (options.sections.orchestra_turn !== anchor || options.sections.existing !== 'Keep native and other extension instructions'
+  || options.forceSystemPrompt !== undefined) process.exit(9);
+""", folder, version="1.5.0", environ={"ORCHESTRA_PI_PROMPT_FILE": files["prompt"],
+                "ORCHESTRA_PI_INPUT_TOKEN": "token", "ORCHESTRA_PI_PARTS_FILE": files["parts"]})
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+            missing_api = self.run_bridge("events.before_agent_start({systemPromptOptions:{}},ctx); console.log('work began');",
+                folder, environ={"ORCHESTRA_PI_PROMPT_FILE": files["prompt"], "ORCHESTRA_PI_INPUT_TOKEN": "token",
+                                 "ORCHESTRA_PI_PARTS_FILE": files["parts"]})
+            self.assertNotEqual(missing_api.returncode, 0)
+            self.assertNotIn("work began", missing_api.stdout)
+
+    def test_a_missing_or_mismatched_recorded_contract_refuses_before_input(self):
+        for case in ("missing", "malformed", "wrong-prompt", "no-persona", "no-instructions"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as folder:
+                files = terminal.turn_files(folder, "build-e1-1")
+                parts = [{"part": "persona", "text": "Saved role"},
+                         {"part": "task", "text": "Task"}, {"part": "instructions", "text": "Stage contract"}]
+                if case.startswith("no-"):
+                    parts = [part for part in parts if part["part"] != case[3:]]
+                terminal.record_parts(folder, "build-e1-1", parts)
+                with open(files["prompt"], "w", encoding="utf-8", newline="") as stream:
+                    stream.write("different" if case == "wrong-prompt" else nodes.render(parts))
+                if case == "malformed":
+                    with open(files["parts"], "w", encoding="utf-8") as stream:
+                        stream.write("not JSON")
+                env = {"ORCHESTRA_PI_PROMPT_FILE": files["prompt"], "ORCHESTRA_PI_INPUT_TOKEN": "token"}
+                if case != "missing":
+                    env["ORCHESTRA_PI_PARTS_FILE"] = files["parts"]
+                result = self.run_bridge("console.log('work began');", folder, version="1.5.0", environ=env)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn("work began", result.stdout)
+                self.assertFalse(os.path.exists(files["events"]))
+
     def test_prompt_transport_refuses_missing_files_incomplete_parameters_and_wrong_input_before_work(self):
         for case in ("missing-file", "missing-token", "missing-path", "wrong-input", "empty-file"):
             with self.subTest(case=case), tempfile.TemporaryDirectory() as folder:
                 path = os.path.join(folder, "prompt.txt")
-                original = "" if case == "empty-file" else "controller task\nwith its full tail"
+                parts = [{"part": "task", "text": "controller task\nwith its full tail"},
+                         {"part": "persona", "text": "Saved role"}, {"part": "instructions", "text": "Current stage"}]
+                terminal.record_parts(folder, "build-e1-1", parts)
+                original = "" if case == "empty-file" else nodes.render(parts)
                 if case != "missing-file":
                     with open(path, "w", encoding="utf-8", newline="") as stream:
                         stream.write(original)
-                env = {"ORCHESTRA_PI_PROMPT_FILE": path, "ORCHESTRA_PI_INPUT_TOKEN": "expected-input"}
+                env = {"ORCHESTRA_PI_PROMPT_FILE": path, "ORCHESTRA_PI_INPUT_TOKEN": "expected-input",
+                       "ORCHESTRA_PI_PARTS_FILE": terminal.turn_files(folder, "build-e1-1")["parts"]}
                 if case == "missing-token":
                     env.pop("ORCHESTRA_PI_INPUT_TOKEN")
                 if case == "missing-path":
                     env.pop("ORCHESTRA_PI_PROMPT_FILE")
                 result = self.run_bridge("events.input({text:'wrong-input',source:'interactive'},ctx);", folder, environ=env)
                 self.assertNotEqual(result.returncode, 0)
+                if case == "wrong-input":
+                    self.assertIn("did not receive the controller input token", result.stderr)
                 self.assertFalse(os.path.exists(os.path.join(folder, "events")), "refusal cannot record a begun turn")
                 if os.path.exists(path):
                     with open(path, encoding="utf-8", newline="") as stream:
@@ -268,16 +332,20 @@ events.agent_settled({aborted:false},ctx);
     def test_transport_applies_once_and_operator_followups_remain_ordinary_inputs(self):
         with tempfile.TemporaryDirectory() as folder:
             path = os.path.join(folder, "prompt.txt")
+            parts = [{"part": "task", "text": "controller task\ncomplete"},
+                     {"part": "persona", "text": "Saved role"}, {"part": "instructions", "text": "Current stage"}]
+            terminal.record_parts(folder, "build-e1-1", parts)
             with open(path, "w", encoding="utf-8", newline="") as stream:
-                stream.write("controller task\ncomplete")
+                stream.write(nodes.render(parts))
             result = self.run_bridge("""
 const restored = events.input({text:'expected-input',source:'interactive'},ctx);
-if (restored?.action !== 'transform' || restored.text !== 'controller task\\ncomplete') process.exit(8);
+if (restored?.action !== 'transform' || !restored.text.includes('controller task\\ncomplete')) process.exit(8);
 if (events.input({text:'operator followup',source:'interactive'},ctx) !== undefined) process.exit(9);
-""", folder, environ={"ORCHESTRA_PI_PROMPT_FILE": path, "ORCHESTRA_PI_INPUT_TOKEN": "expected-input"})
+""", folder, environ={"ORCHESTRA_PI_PROMPT_FILE": path, "ORCHESTRA_PI_INPUT_TOKEN": "expected-input",
+                         "ORCHESTRA_PI_PARTS_FILE": terminal.turn_files(folder, "build-e1-1")["parts"]})
             self.assertEqual(result.returncode, 0, result.stderr)
             events = terminal._events(os.path.join(folder, "events"))
-            self.assertEqual([event["prompt"] for event in events], ["controller task\ncomplete", "operator followup"])
+            self.assertEqual([event["prompt"] for event in events], [nodes.render(parts), "operator followup"])
 
     def test_aborted_settlement_after_a_tool_call_skips_before_settle_and_cannot_complete(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -292,12 +360,12 @@ events.agent_settled({aborted:true}, ctx);
             self.assertEqual(events[-1]["_hook"], "PiInterrupted")
             self.assertIsNone(adapters.load("pi").completion(events, "our task", "s"))
 
-    def test_a_runtime_without_reliable_abort_reporting_is_refused_before_work(self):
+    def test_a_runtime_without_the_native_contract_api_is_refused_before_work(self):
         with tempfile.TemporaryDirectory() as folder:
-            for version in ("1.0.4", "0.99.1", "unknown", "1.1.0-dev"):
+            for version in ("1.0.4", "1.1.0", "1.4.9", "0.99.1", "unknown", "1.5.0-dev"):
                 result = self.run_bridge("process.stdout.write('work started');", folder, version=version)
                 self.assertEqual(result.returncode, 1, version)
-                self.assertIn("Pi 1.1.0 or newer", result.stderr)
+                self.assertIn("Pi 1.5.0 or newer", result.stderr)
                 self.assertNotIn("work started", result.stdout)
                 self.assertFalse(os.path.exists(os.path.join(folder, "events")))
 

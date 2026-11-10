@@ -61,20 +61,36 @@ needed. The final architect handoff names a cause with evidence and separates th
 contribution, the architect's assessment, unresolved and disputed findings, and any operator
 decision. The addition does not replace the stage ask or the role's verdict contract.
 
+Every role invocation refreshes the task, the run's snapshotted persona, the complete current-stage
+ask and its bound skill, using the adapter's native skill syntax. Session continuity preserves useful
+work, not the authority of old stage instructions. Feedback and guidance retain their incremental
+delivery; the todo is referenced, not copied. The same labelled parts own the recorded prompt and
+its vendor-specific projection, so no separate instruction store is reconstructed from a transcript.
+Pre-profile policies carry no persona snapshot and retain their existing host-resolved persona file.
+
 Through the adapter contract: Settings discovers skill names from the same roots a kind checks
 when preparing a run; no vendor path crosses the Settings API. What holds a turn to the access it
 runs with — the vendor's sandbox, or the vendor's own rules alone — is each kind's to state, and
 Settings shows a role the words of the kind chosen for it.
 
-The Pi adapter requires Pi 1.1.0 or newer, whose final settlement reports whether the run was aborted.
-The bridge refuses older or unrecognizable releases before work; missing abort status never means success.
+The Pi adapter requires Pi 1.5.0 or newer for its native structured system-prompt API and explicit
+aborted settlement. The bridge refuses older or unrecognizable releases before work; missing abort
+status never means success.
 Pi receives a one-line input token on argv. Its native input extension restores the complete recorded
 UTF-8 prompt before skill expansion or model work, preserving multiline text across Windows batch wrappers.
 Skill invocations retain Pi's literal-space separator before their multiline arguments.
 The bridge records that delivered text; completion still requires an exact controller prompt and native
 successful settlement in the same session. Missing transport data or a wrong initial token refuses before
 work. The transport is consumed once, so later operator inputs remain ordinary steering. Other agent
-processes inherit neither the prompt path nor its token.
+processes inherit neither the prompt path, its token nor the recorded-parts path.
+The bridge validates those parts against the full prompt, refusing a missing or mismatched task,
+persona or stage contract before input. Its `before_agent_start` hook sets one named native system
+section from the recorded contract, excluding feedback and guidance, with a reference to the full
+prompt for recovery. Pi retains that system section across compaction and replaces its current-stage
+contents on the next invocation. The bridge adds no reminder history, compaction model or autonomous
+retry, and does not replace Pi's base prompt or other extensions' sections. Native settlement,
+verdict parsing and worktree guards remain the acceptance checks; context delivery cannot establish
+that a model obeyed its instructions.
 Pi profiles select their provider, model and thinking level. Their optional launcher names a managed
 wrapper instead of the default executable; preparation checks the same program that will run. Credentials
 stay with Pi's native authentication store or the worker's environment. Orchestra neither copies them nor

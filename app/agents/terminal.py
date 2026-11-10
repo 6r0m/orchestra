@@ -8,7 +8,7 @@ taking keystrokes back. Whoever holds the page can watch, press Esc and type at 
 
 A controller turn replaces the agent process under the terminal: the previous one ends,
 and the agent's CLI starts again in the worktree with the role's session resumed by exact id
-and the prompt as its argument. That process runs under `ptyhost.py`, launched through
+and the prompt delivered through its adapter. That process runs under `ptyhost.py`, launched through
 `launch.py`'s tree, so the turn's own failure ends it with everything it started and the
 worker's death ends every terminal's agent. The turn ends on the agent's own completion of
 that prompt, which its hooks write through `turn_hook.py` into the turn's own events file and
@@ -443,7 +443,7 @@ def run_turn(worktree, argv, rdir, name, prompt, timeout, env, on_tick=None, *, 
                         lambda label, source, events=paths["events"]: sink(events, label, source))
     supplied = prompt
     if hasattr(adapter, "prompt_input"):
-        supplied, extra = adapter.prompt_input(prompt, paths["prompt"])
+        supplied, extra = adapter.prompt_input(prompt, paths)
         env.update(extra)
     # Options such as `--add-dir` take several values; `--` keeps the prompt from becoming one of them.
     argv += ["--", supplied]

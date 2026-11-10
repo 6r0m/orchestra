@@ -1,31 +1,55 @@
-// Pi owns settlement and the session; this extension only records evidence for the controller.
+// Pi owns settlement and the session; this extension delivers the controller contract and records evidence.
 import fs from "node:fs";
 import path from "node:path";
 import { VERSION } from "@earendil-works/pi-coding-agent";
 
 export default function (pi) {
-  // Older settlement events cannot distinguish an abort during tools or the final boundary from success.
+  // The native structured system-prompt projection is part of the turn contract.
   const version = /^(\d+)\.(\d+)\.(\d+)(?:\+[\w.-]+)?$/.exec(VERSION);
-  if (!version || Number(version[1]) < 1 || (Number(version[1]) === 1 && Number(version[2]) < 1)) {
-    process.stderr.write("Orchestra requires Pi 1.1.0 or newer for reliable aborted-settlement reporting\n");
+  if (!version || Number(version[1]) < 1 || (Number(version[1]) === 1 && Number(version[2]) < 5)) {
+    process.stderr.write("Orchestra requires Pi 1.5.0 or newer for the native turn-contract system section\n");
     process.exit(1);
   }
   let last = null;
   const promptFile = process.env.ORCHESTRA_PI_PROMPT_FILE;
   const inputToken = process.env.ORCHESTRA_PI_INPUT_TOKEN;
+  const partsFile = process.env.ORCHESTRA_PI_PARTS_FILE;
   let controllerPrompt = null;
+  let contract = null;
   let awaitingController = Boolean(inputToken);
   try {
-    if (Boolean(promptFile) !== Boolean(inputToken)) throw new Error("incomplete prompt transport");
+    if (Boolean(promptFile) !== Boolean(inputToken) || Boolean(promptFile) !== Boolean(partsFile))
+      throw new Error("incomplete prompt transport");
     if (promptFile) {
       if (!fs.lstatSync(promptFile).isFile()) throw new Error("not a prompt file");
       controllerPrompt = fs.readFileSync(promptFile, "utf8");
       if (!controllerPrompt.trim()) throw new Error("empty prompt");
+      if (!fs.lstatSync(partsFile).isFile()) throw new Error("not a parts file");
+      const parts = JSON.parse(fs.readFileSync(partsFile, "utf8"));
+      if (!Array.isArray(parts) || parts.some(part => !part || typeof part.part !== "string"
+        || typeof part.text !== "string") || parts.map(part => part.text).join("\n") + "\n" !== controllerPrompt)
+        throw new Error("mismatched prompt parts");
+      for (const name of ["task", "persona", "instructions"]) {
+        const matches = parts.filter(part => part.part === name);
+        if (matches.length !== 1 || !matches[0].text.trim()) throw new Error("missing turn contract");
+      }
+      contract = "Use this current Orchestra contract rather than an earlier stage. If context is missing after "
+        + "compaction, re-read the full controller prompt and its referenced instructions: " + promptFile + "\n\n"
+        + parts.filter(part => ["skill", "task", "persona", "instructions"].includes(part.part))
+          .map(part => part.text).join("\n");
     }
   } catch {
-    process.stderr.write("Pi could not load the controller prompt before work\n");
+    process.stderr.write("Pi could not load the controller prompt and matching turn contract before work\n");
     process.exit(1);
   }
+  pi.on("before_agent_start", event => {
+    if (!contract) return;
+    if (!event.systemPromptOptions?.sections) {
+      process.stderr.write("Pi cannot project the controller contract into its native system prompt before work\n");
+      process.exit(1);
+    }
+    event.systemPromptOptions.sections.orchestra_turn = contract;
+  });
   pi.registerFlag("orchestra-resume-session", {type: "string", description: "The exact session the controller resumes"});
   function emit(hook, ctx, fields = {}) {
     const file = process.env.ORCHESTRA_TURN_EVENTS;
