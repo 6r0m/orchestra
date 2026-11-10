@@ -214,6 +214,19 @@ main:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .facts .repo-fact dd code { color: var(--ink); font-size: 16px; font-weight: 700; overflow-wrap: anywhere; }
 .facts .flow-fact dd { color: var(--ink); font-weight: 600; }
 .now { font-size: 15px; }
+.accounting { margin: 14px 0 18px; max-width: 960px; font-variant-numeric: tabular-nums; }
+.accounting-summary { display: flex; flex-wrap: wrap; gap: 12px 32px; }
+.accounting-summary > div { display: grid; gap: 4px; min-width: 0; }
+.accounting-summary strong { font-size: 18px; overflow-wrap: anywhere; }
+.accounting summary { cursor: pointer; padding: 8px 0; }
+.accounting-roles { display: flex; flex-wrap: wrap; gap: 4px 24px; }
+.accounting-roles p { margin: 6px 0; }
+.accounting-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.accounting-table th, .accounting-table td { padding: 9px 12px 9px 0; border-bottom: 1px solid var(--rule); text-align: left; }
+.accounting-table td > span, .accounting-identity > span { display: block; }
+.accounting-table td { white-space: nowrap; }
+.accounting-identity { font-weight: normal; min-width: 170px; }
+.turn-cost { font-variant-numeric: tabular-nums; }
 .now .who { font-weight: 600; }
 .notice { display: grid; gap: 8px; padding: 12px 14px; border-radius: 8px; border: 1px solid var(--rule);
   background: var(--surface); }

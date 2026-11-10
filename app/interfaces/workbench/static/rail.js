@@ -10,6 +10,18 @@ let olderCursor = null;
 let listed = [];
 let read = false;
 let selected = null;
+let runTitle = "";
+let waitingCount = 0;
+
+export function setRunTitle(text) {
+  runTitle = text;
+  title();
+}
+
+function title() {
+  document.title = (waitingCount ? "(" + waitingCount + ") " : "") +
+    (runTitle ? runTitle + " | " : "") + "Orchestra Workbench";
+}
 
 const GROUPS = { waiting: "runs-waiting", failed: "runs-waiting", running: "runs-running", stopping: "runs-running" };
 const NONE = { "runs-waiting": "No operator action waits.", "runs-running": "Nothing is working.",
@@ -74,8 +86,8 @@ function render() {
     if (link.dataset.run === selected) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
   }
-  const waiting = groups["runs-waiting"].length;
-  document.title = (waiting ? "(" + waiting + ") " : "") + "Orchestra Workbench";
+  waitingCount = groups["runs-waiting"].length;
+  title();
 }
 
 function row(run) {

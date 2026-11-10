@@ -12,11 +12,13 @@ flowchart LR
     end
     client_ext[("application.client")]
     stack_ext[("application.stack")]
+    accounting_ext[("observability.accounting")]
     temporal_ext[("Temporal server")]
     socket_ext[("a worker's terminal socket")]
     operator_ext[("the operator")]
     cli -->|"the shared client"| client_ext
     server -->|"the shared client"| client_ext
+    server -->|"optional recorded-cost display"| accounting_ext
     cli -->|"the stack's owner"| stack_ext
     server -->|"the stack's owner"| stack_ext
     worker -->|"its pid file's name, its queues"| stack_ext

@@ -304,7 +304,8 @@ class Activities:
             return _answer(adapter, "readable", argv, [os.path.dirname(attached[0])]) or argv
 
         span = T.begin(client, state, stage, role_name, dict(adapters.view(role), kind=kind, agent=role.get("agent")),
-                       log=os.path.relpath(os.path.join(rdir, "logs", name), paths.REPO))
+                       log=os.path.relpath(os.path.join(rdir, "logs", name), paths.REPO),
+                       activity_id=activity.info().activity_id if activity.in_activity() else None)
         # Whatever the kind writes for its tracing — the trace store's keys among it — lives here, and only
         # while this stage runs.
         private = T.Private()

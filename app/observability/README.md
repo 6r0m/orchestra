@@ -1,6 +1,6 @@
 # observability
 
-The optional trace of a run, and nothing a run depends on.
+The optional trace of a run, request tariff context and read-only cost display. Nothing a run depends on.
 
 | concern | owner |
 |---|---|

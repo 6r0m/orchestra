@@ -194,7 +194,7 @@ Orchestra's parts and the participants outside it are drawn in
 [the main view](diagrams/main.md); which process each runs in is
 [the processes view](diagrams/processes.md), and every stop a run can reach is
 [the stops view](diagrams/stops.md). Verdicts flow one way — architect to workflow — and
-nothing else routes. Observability depends on the workflow and is never read back (D20). What
+nothing else routes. Observability depends on the workflow; only optional cost display reads it back (D20). What
 each verdict means is in [the architect's own file](../../roles/architect.md); a host that binds its
 own methodology to a stage (`stage_skills`) owns it there instead.
 
@@ -337,7 +337,11 @@ still lands on a checkout.
   (D21), and `logs/` with the terminal records the raw evidence. The workbench (D29) shows
   Temporal's view, the live terminals and the records; it owns none of them.
 
-  The trace is observability only: nothing reads back from it, and its failure can neither break
+  The trace is observability only: the Workbench may read recorded generation costs for display,
+  independently of its run controls. This read never enters workflow state, routing, budgets or gates.
+  Its bounded process-local cache is a projection, not another accounting ledger; missing prices,
+  stale data and unknown billing coverage remain explicit. Provider billing owns actual charges.
+  Its failure can neither break
   correctness nor reroute a run, nor block one beyond its own bounded timeout. It is optional — a
   run without keys records nothing and behaves identically. Only activities write it, each run
   once, so neither a replayed workflow task nor a retry can write a row twice; the only values that

@@ -69,7 +69,9 @@ seen whole at the top of the page and with the page scrolled to its history, not
 left under them, each list of runs scrolling inside itself only past five runs — and, for each `list:run`
 the expected words name, that the run is in that list; `none` names none. Given `absent:` and labels, it presses nothing
 either: its exit code says whether the run's view, once shown, offers none of those buttons. Nothing is
-shown on screen.
+shown on screen. Given `accounting`, it reads a priced run, verifies zero/tiny/unknown/partial and
+API-equivalent presentation, disclosure focus across cost refresh, tab USD, and responsive layouts
+through 320 pixels and 200% CSS zoom; its cropped screenshot goes only to ignored `tmp/`.
 """
 import json
 import os
@@ -982,6 +984,64 @@ def hints(page, run_id):
     return 0 if shown and not bare else 1
 
 
+def accounting(page, run_id):
+    """Read a priced run, exercise the amount formatter and keep disclosure focus through a refresh."""
+    page.value(OPEN % json.dumps(run_id))
+    wait(lambda: page.value("document.querySelector('#accounting-summary').textContent.includes('$')"),
+         30, "a recorded cost")
+    result = page.call("Runtime.evaluate", expression="""(async () => {
+      const {money} = await import('/accounting.js');
+      const zero = money({usd:0,provenance:'provider_reported'});
+      return {zero:zero === new Intl.NumberFormat(undefined,{style:'currency',currency:'USD',
+        minimumFractionDigits:2,maximumFractionDigits:6}).format(0),
+        tiny:money({usd:1e-9}).includes('<'), unknown:money({usd:null}) === 'Cost unavailable',
+        partial:money({usd:.01,provenance:'estimated',partial:true}).includes('partial'),
+        equivalent:money({usd:.01,provenance:'estimated',api_equivalent:true}).includes('API-equivalent')};
+    })()""", awaitPromise=True, returnByValue=True)["result"].get("value")
+    if not result or not all(result.values()):
+        raise SystemExit("accounting amount contract failed: %r" % result)
+    page.value("document.getElementById('accounting-details').open=true; "
+               "window.__accountingSummary=document.querySelector('#accounting-details > summary'); "
+               "window.__accountingSummary.focus(); window.__accountingReads=0; "
+               "window.__accountingFetch=window.fetch; window.fetch=(...args)=>{ "
+               "if(String(args[0]).endsWith('/accounting')) window.__accountingReads++; "
+               "return window.__accountingFetch(...args); }; true")
+    wait(lambda: page.value("window.__accountingReads > 0"), 20, "the next independent cost read")
+    if not page.value("document.getElementById('accounting-details').open && "
+                      "document.activeElement===window.__accountingSummary && document.title.includes('$')"):
+        raise SystemExit("cost refresh lost disclosure focus or the tab amount")
+    page.value("window.__accountingAmount=document.querySelector('#accounting-summary > div:last-child strong').textContent; "
+               "window.fetch=(...args)=>String(args[0]).endsWith('/accounting') "
+               "? Promise.reject(new TypeError('accounting acceptance outage')) : window.__accountingFetch(...args); true")
+    wait(lambda: page.value("document.title.includes('stale')"), 20, "a visibly stale cost after read failure")
+    if not page.value("document.querySelector('#accounting-summary > div:last-child strong').textContent === "
+                      "window.__accountingAmount && [...document.querySelectorAll('#run-controls button')]"
+                      ".some(b=>!b.disabled && b.textContent.includes('Stop'))"):
+        raise SystemExit("cost outage lost the prior amount or disabled run controls")
+    page.value("window.fetch=window.__accountingFetch; true")
+    wait(lambda: page.value("!document.title.includes('stale')"), 20, "cost read recovery")
+    layouts = []
+    for width, zoom in ((1400, 1), (640, 1), (320, 1), (1400, 2)):
+        page.call("Emulation.setDeviceMetricsOverride", width=width, height=1000, deviceScaleFactor=1, mobile=False)
+        page.value("document.body.style.zoom=%s" % zoom)
+        found = page.value("({page:document.documentElement.scrollWidth, width:innerWidth, "
+                           "rows:document.querySelectorAll('#accounting-attempts tr').length})")
+        if found["page"] > found["width"] + 1 or not found["rows"]:
+            raise SystemExit("accounting overflow or missing iterations: %r" % found)
+        layouts.append([width, zoom])
+    page.value("document.body.style.zoom=1; document.getElementById('run-accounting').scrollIntoView(); true")
+    rectangle = page.value("(() => { const r=document.getElementById('run-accounting').getBoundingClientRect(); "
+                           "return {x:r.x+scrollX,y:r.y+scrollY,width:r.width,height:r.height,scale:1}; })()")
+    import base64
+    captured = page.call("Page.captureScreenshot", format="png", clip=rectangle, captureBeyondViewport=True)
+    with open(os.path.join(os.path.dirname(os.path.dirname(__file__)), "tmp", "accounting-desktop.png"), "wb") as fh:
+        fh.write(base64.b64decode(captured["data"]))
+    print(json.dumps({"accounting": "PASS", "formatter": result, "outage_recovery": True, "layouts": layouts,
+                      "summary": page.value("document.getElementById('accounting-summary').innerText"),
+                      "roles": page.value("document.getElementById('accounting-roles').innerText")}))
+    return 0
+
+
 def main(url, run_id, label, said, note=None):
     profile = tempfile.mkdtemp(prefix="orchestra-demo-edge-")
     # A layout is read at the window size it names; every press at the browser's own.
@@ -1038,6 +1098,8 @@ def main(url, run_id, label, said, note=None):
                                     "document.querySelector('#runs-finished li') !== null"), 30, "the Workbench page")
             if label.startswith("layout:"):
                 return laid_out(page, run_id, size, said)
+            if label == "accounting":
+                return accounting(page, run_id)
             if run_id == "start" and label.startswith("refused:"):
                 repo, task = label.split(":", 2)[1:]
                 return refused(page, repo, task, said)

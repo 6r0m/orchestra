@@ -835,6 +835,32 @@ class HistoryRead(unittest.TestCase):
                          datetime.datetime.fromisoformat(build["started"]), datetime.timedelta(minutes=1),
                          "from its start, not from when it was queued")
         self.assertEqual([turn["stage"] for turn in record["turns"]], ["assess", "build"], "the failed build is no turn")
+        attempts = record["attempts"]
+        self.assertEqual([row["status"] for row in attempts], ["completed", "failed", "completed"])
+        self.assertIsNone(attempts[1]["started"], "an unrecorded start is unknown, never queue time")
+        self.assertEqual(attempts[-1]["role"], "engineer")
+
+    def test_a_live_attempt_uses_temporals_last_started_time_not_its_queue_time(self):
+        from types import SimpleNamespace
+        from unittest import mock
+        from temporalio.api.workflow.v1 import PendingActivityInfo
+        from temporalio.client import WorkflowExecutionStatus
+        pending = PendingActivityInfo(activity_id="a1")
+        pending.last_started_time.FromDatetime(self.T0)
+        described = SimpleNamespace(id="r1", status=WorkflowExecutionStatus.RUNNING, start_time=self.T0,
+                                    close_time=None, task_queue="q", raw_description=SimpleNamespace(
+                                        pending_activities=[pending]))
+        row = {"activity_id": "a1", "started": None, "ended": None, "status": "queued"}
+        handle = SimpleNamespace(describe=mock.AsyncMock(return_value=described))
+        client = SimpleNamespace(get_workflow_handle=lambda run_id: handle)
+        with mock.patch.object(runs, "history", mock.AsyncMock(return_value={"attempts": [row]})):
+            result = E.run(runs.timings(client, "r1"))
+        self.assertEqual(result["attempts"][0]["started"], self.T0.isoformat())
+        self.assertEqual(result["attempts"][0]["status"], "running")
+
+    def test_accounting_uses_the_recorded_trace_id_instead_of_deriving_one(self):
+        record = self.read([("step", "open_run", {"trace_id": "e" * 32})])
+        self.assertEqual(record.get("trace_id"), "e" * 32)
 
     def test_patch_loops_in_both_phases_then_revisions_to_each_role(self):
         record = self.read([
@@ -1443,6 +1469,11 @@ class Runs(Scenario):
 
         status, history = request("GET", "/api/runs/%s/history" % run_id)
         self.assertEqual(status, 200, history)
+        status, accounting = request("GET", "/api/runs/%s/accounting" % run_id)
+        self.assertEqual(status, 200, accounting)
+        self.assertFalse(accounting["cost"]["available"], "no keys or paid services in a test")
+        self.assertEqual(len(accounting["attempts"]), len(history["turns"]) + 1, "the failed attempt is visible")
+        self.assertEqual(accounting["execution"], "COMPLETED")
         self.assertEqual([(turn["stage"], turn["episode"], turn["round"], turn.get("tree")) for turn in history["turns"]],
                          [("plan", 1, 1, None), ("assess", 1, 1, "tree-1"), ("plan", 1, 2, None),
                           ("assess", 1, 2, "tree-2"), ("plan", 2, 1, None), ("assess", 2, 1, "tree-3"),

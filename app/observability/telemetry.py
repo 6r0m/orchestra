@@ -8,7 +8,7 @@ root observation, which the workflow keeps as `trace_id` and `trace_root`, so ev
 later step, on either host and after any stop, attaches to the same root. They are
 opaque correlation ids. Nothing routes, judges, budgets or gates on them, and a
 run without them behaves identically; only its trace loses the shared root.
-Nothing is ever read back from Langfuse itself.
+Only the optional operator cost display reads Langfuse; no workflow decision reads it.
 
 The work item is the durable entity. One trace per `run_id` — stable across
 `--continue`, the human gate and a process restart — holds every stage of that
@@ -394,7 +394,7 @@ def open_work_item(client, values):
         return None, None
 
 
-def begin(client, state, stage, role_name, role, log=None):
+def begin(client, state, stage, role_name, role, log=None, activity_id=None):
     """Open the span for one role invocation. Always returns a usable object.
 
     `log` is where this stage's own prompt and output files are kept.
@@ -435,10 +435,12 @@ def begin(client, state, stage, role_name, role, log=None):
         _mark_work_item(current, state)
         # The round, phase and stage are what views and the dashboard filter a
         # step on, so they are metadata and never part of its name. The logs are
-        # pointed at directly: the counters that name those files would sit
-        # beside the round and read as a second, contradicting count.
+        # pointed at directly. Episode-local identity also correlates the optional
+        # cost display with Temporal attempts; the round stays the phase-wide count.
         described = {"role": role_name, "stage": stage, "phase": state.get("phase"),
-                     "round": attempt, "logs": log, "kind": role.get("kind"), "agent": role.get("agent"),
+                     "round": attempt, "episode_round": state.get("round", 0) + 1,
+                     "episode": state.get("episode", 1), "activity_id": activity_id,
+                     "logs": log, "kind": role.get("kind"), "agent": role.get("agent"),
                      "model": role.get("model"), "effort": role.get("effort"),
                      "run_id": state["run_id"], "worktree": state.get("worktree")}
         span.update(metadata={k: v for k, v in described.items() if v is not None})
@@ -712,6 +714,14 @@ def run_upload(described, span=None):
         if not ids or getattr(span, "client", None) is None:
             continue
         try:
+            from app.observability import pricing
+            try:
+                generation = pricing.enrich(generation)
+            except Exception as exc:
+                _warn_once("pricing", type(exc).__name__)
+                warn(span, "telemetry_degraded", "tariff context unavailable; native usage is retained")
+                metadata = dict(generation.get("metadata") or {}, pricing_status="unknown")
+                generation = dict(generation, model=metadata.get("response_model") or generation.get("model"), metadata=metadata)
             from opentelemetry import trace as otel
             with span.client.start_as_current_observation(
                     name="LLM Call", as_type="generation", model=generation.get("model"),

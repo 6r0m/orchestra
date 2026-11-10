@@ -466,6 +466,8 @@ async def history(client, run_id):
         return (await client.data_converter.decode(payloads))[0]
 
     turns, answers, scheduled, started, phase = [], [], {}, {}, None
+    attempts = {}
+    trace_id = None
     steps, began, came = {}, None, []
     try:
         async for event in client.get_workflow_handle(run_id).fetch_history_events():
@@ -474,14 +476,23 @@ async def history(client, run_id):
                 if attributes.activity_type.name == "run_role":
                     args = await decoded(attributes.input.payloads)
                     scheduled[event.event_id] = (args, at(event))
+                    state = args["state"]
+                    attempts[event.event_id] = {"activity_id": attributes.activity_id,
+                        "stage": args["stage"], "role": stages.STAGE_ROLE.get(args["stage"]),
+                        "episode": state.get("episode", 1), "round": state.get("round", 0) + 1,
+                        "queued": at(event), "started": None, "ended": None, "status": "queued"}
                     phase = args["state"].get("phase") or phase
-                elif attributes.activity_type.name in ("create_worktree", "reconcile"):
+                elif attributes.activity_type.name in ("create_worktree", "reconcile", "open_run"):
                     steps[event.event_id] = attributes.activity_type.name
             elif event.HasField("activity_task_started_event_attributes"):
-                started[event.activity_task_started_event_attributes.scheduled_event_id] = at(event)
+                key = event.activity_task_started_event_attributes.scheduled_event_id
+                started[key] = at(event)
+                if key in attempts:
+                    attempts[key].update(started=at(event), status="running")
             elif event.HasField("activity_task_completed_event_attributes"):
                 attributes = event.activity_task_completed_event_attributes
                 if attributes.scheduled_event_id in scheduled:
+                    attempts[attributes.scheduled_event_id].update(ended=at(event), status="completed")
                     args, queued = scheduled.pop(attributes.scheduled_event_id)
                     result, state = await decoded(attributes.result.payloads), args["state"]
                     turn = {"stage": args["stage"], "episode": state.get("episode", 1),
@@ -494,10 +505,21 @@ async def history(client, run_id):
                     turns.append(turn)
                 elif attributes.scheduled_event_id in steps:
                     result = await decoded(attributes.result.payloads)
-                    if steps.pop(attributes.scheduled_event_id) == "create_worktree":
+                    step = steps.pop(attributes.scheduled_event_id)
+                    if step == "create_worktree":
                         began = result.get("base_tip")
+                    elif step == "open_run":
+                        trace_id = (result or {}).get("trace_id")
                     elif result.get("moved") and result.get("tree"):
                         came.append((len(turns), result["tree"]))
+            elif any(event.HasField("activity_task_%s_event_attributes" % name)
+                     for name in ("failed", "timed_out", "canceled")):
+                for name in ("failed", "timed_out", "canceled"):
+                    field = "activity_task_%s_event_attributes" % name
+                    if event.HasField(field):
+                        key = getattr(event, field).scheduled_event_id
+                        if key in attempts:
+                            attempts[key].update(ended=at(event), status=name)
             elif event.HasField("workflow_execution_update_accepted_event_attributes"):
                 request = event.workflow_execution_update_accepted_event_attributes.accepted_request
                 if request.meta.update_id.startswith("answer:"):
@@ -510,7 +532,23 @@ async def history(client, run_id):
             return None
         raise
     _changes(turns, began, came)
-    return {"turns": turns, "answers": answers}
+    return {"turns": turns, "answers": answers, "attempts": list(attempts.values()), "trace_id": trace_id}
+
+
+async def timings(client, run_id):
+    """Observed role attempts, including failures and the actual start of a currently executing activity."""
+    record = await history(client, run_id)
+    if record is None:
+        return None
+    described = await client.get_workflow_handle(run_id).describe()
+    pending = {item.activity_id: item for item in described.raw_description.pending_activities}
+    for row in record["attempts"]:
+        active = pending.get(row["activity_id"])
+        if active is not None and active.HasField("last_started_time"):
+            row.update(started=active.last_started_time.ToDatetime(tzinfo=datetime.timezone.utc).isoformat(), status="running")
+        elif row["ended"] is None and described.status != WorkflowExecutionStatus.RUNNING:
+            row["status"] = "interrupted"
+    return dict(_listed(described), attempts=record["attempts"], trace_id=record.get("trace_id"))
 
 
 def _turn_key(turn):

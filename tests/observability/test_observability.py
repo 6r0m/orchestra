@@ -1031,8 +1031,9 @@ class TraceShape(Scenario):
         metadata = [u["metadata"] for u in span.updates if "metadata" in u][0]
         self.assertEqual((metadata["round"], metadata["phase"], metadata["stage"], metadata["role"]),
                          (3, "plan", "plan", "engineer"))
-        self.assertFalse({"episode", "attempt"} & set(metadata),
-                         "two more counters beside the round read as a contradiction")
+        self.assertEqual((metadata["episode"], metadata["episode_round"]), (2, 1),
+                         "identity survives guidance without changing the phase-wide displayed round")
+        self.assertNotIn("attempt", metadata)
         self.assertEqual({key: metadata[key] for key in ("kind", "agent", "model", "effort")},
                          {"kind": "claude-code", "agent": "a-profile", "model": "a-model", "effort": "an-effort"},
                          "the step's agent, as data")

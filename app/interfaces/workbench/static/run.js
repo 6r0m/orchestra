@@ -12,6 +12,7 @@ import { placeChange, readOnceFor, showChangeFor, watchChange } from "./change.j
 import { chevron, fileList } from "./diff.js";
 import { markdown, markdownLine } from "./markdown.js";
 import { removeKept } from "./worktrees.js";
+import { showAccounting, updateAccounting } from "./accounting.js";
 
 // How an answer is shown. Which answers a stop takes comes with the stop, and whether one is accepted is
 // the workflow's; an action named here only by the stop still gets its button.
@@ -106,6 +107,7 @@ let shownAbove = new Set();
 export function show(runId) {
   if (selected === runId) return;
   selected = runId;
+  showAccounting(runId);
   shownStop = null;
   shownAbove = new Set();
   record = { key: null, turns: [], answers: [], said: "" };
@@ -141,6 +143,7 @@ export async function refreshRun() {
   if (runId !== selected) return;
   const view = status.view;
   const state = status.state;
+  updateAccounting(view);
   landsOn = state && state.remote ? state.remote + "/" + state.base_branch : null;
   // With its worker down the run is shown from its listing alone: what it last said stays on the page.
   if (!status.unreadable || !$("run-task").textContent) $("run-task").textContent = view.goal || runId;
@@ -651,6 +654,9 @@ function turnRow(entry, role, turn, openDetails, bodies) {
   if (entry.verdict) head.appendChild(el("span", entry.verdict, "verdict " + entry.verdict));
   if (entry.gate) head.appendChild(el("span", "stopped for " + (GATES[entry.gate] || entry.gate), "hint"));
   if (turn) head.appendChild(el("span", lasted(turn.started, turn.ended), "hint took"));
+  const cost = el("span", "Cost unavailable", "hint turn-cost");
+  cost.dataset.turnCost = historyKey(entry);
+  head.appendChild(cost);
   const time = el("time", at(entry.at));
   time.dateTime = entry.at || "";
   head.appendChild(time);

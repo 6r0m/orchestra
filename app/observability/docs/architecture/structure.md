@@ -21,12 +21,15 @@ is what the operator reads (D20). The conversation: the provider's session store
 | part | responsibility |
 |---|---|
 | `telemetry.py` | the trace of a run, native generation uploads, and the per-run settings an agent's plugin reports through |
+| `pricing.py` · `pricing.json` | versioned provider tariff/calendar context for existing generations and the owned Langfuse model definition |
+| `accounting.py` | bounded read-only recorded-cost projection for the Workbench; no workflow consumer |
 
 ## Relationships
 
 This package's relationships are drawn once, in [the main view](diagrams/main.md).
 
-Through Langfuse's ingestion API: every row. Nothing is ever read back, and its failure can
+Through Langfuse's ingestion API: every row. The optional cost display reads recorded generations
+through observations v2, preserving provenance and unknown coverage. Its failure can
 neither break correctness, reroute a run, nor block one beyond its own bounded timeout.
 
 Through a diff reader handed in by the caller: the final diff. This package records a change
@@ -37,7 +40,7 @@ dashboard select on.
 
 ## Invariants
 
-- **Observability only (D20).** Nothing is ever read back. A run without keys behaves identically.
+- **Observability only (D20).** Only optional cost display reads back. A run without keys behaves identically.
 - **Only activities write it, each run once**, so neither a replayed workflow task nor a retry writes a row twice. `tests/observability/test_trace_parity.py` proves a replay writes none, with a control that writes one again.
 - **The only values crossing back into the workflow** are the opaque ids of the work item and its root observation. No route, verdict, budget or stop reads them.
 - **No secret leaves in a row.** The credentials this package reads are masked in this process, and a final diff that held one is redacted and marked.

@@ -57,6 +57,7 @@ STATIC = {"/": ("index.html", "text/html; charset=utf-8"),
           "/start.js": ("start.js", JS),
           "/rail.js": ("rail.js", JS),
           "/run.js": ("run.js", JS),
+          "/accounting.js": ("accounting.js", JS),
           "/change.js": ("change.js", JS),
           "/diff.js": ("diff.js", JS),
           "/terminals.js": ("terminals.js", JS),
@@ -229,7 +230,7 @@ def trace_links():
     return lambda trace_id: telemetry.trace_url(langfuse, trace_id)
 
 
-def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.environ):
+def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.environ, accounting=None):
     """The page and its API over `call`, the Temporal client's loop, for the stack of `policy`. The settings
     the page reads and applies are the checkout's at `root`, as `environ` names them."""
     port = policy["workbench_port"]
@@ -343,6 +344,13 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
                         if record is None:
                             return self._send(HTTPStatus.NOT_FOUND, {"error": "no run %r" % run_id})
                         return self._send(HTTPStatus.OK, record)
+                    if parts[2:] == ["accounting"]:
+                        timing = call(lambda client: runs.timings(client, run_id))
+                        if timing is None:
+                            return self._send(HTTPStatus.NOT_FOUND, {"error": "no such run"})
+                        cost = accounting.read(timing.pop("trace_id", None)) if accounting is not None else {
+                            "available": False, "reason": "Langfuse accounting is not configured."}
+                        return self._send(HTTPStatus.OK, dict(timing, cost=cost))
                     if parts[2:] == ["diff"]:
                         query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query, keep_blank_values=True)
                         asked, files_from = ((query.get(key) or [default])[0]
@@ -596,16 +604,17 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
     return Handler
 
 
-def serve(policy, call, links=None, host="127.0.0.1"):
+def serve(policy, call, links=None, host="127.0.0.1", accounting=None):
     server = ThreadingHTTPServer((host, policy["workbench_port"]),
-                                 make_handler(call, policy, terminal.token(), links))
+                                 make_handler(call, policy, terminal.token(), links, accounting=accounting))
     server.daemon_threads = True
     return server
 
 
 def main():
+    from app.observability import accounting, telemetry
     policy = settings.load()
-    server = serve(policy, Loop().call, trace_links())
+    server = serve(policy, Loop().call, trace_links(), accounting=accounting.Reader(telemetry.resolve()))
     print("workbench on http://127.0.0.1:%d" % policy["workbench_port"], flush=True)
     try:
         server.serve_forever()

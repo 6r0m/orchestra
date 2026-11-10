@@ -13,6 +13,7 @@ promise. Where the trace sits among the observability owners is `structure.md` D
 - Dimensions
 - Masking
 - What the vendor plugins own
+- Usage and cost
 - Dashboard and saved views
 
 ## Rows
@@ -132,6 +133,8 @@ step. None of this is configurable from here:
 - **attribution** — a model call carries no role, so cost is broken down by model, not by role or
   repository.
 
+## Usage and cost
+
 Pi's native lifecycle bridge records assistant generations, not a vendor tracing plugin. The trace writer
 uploads them as `LLM Call` generations directly beneath the causing role step. Native uncached input,
 output, cache-read and cache-write buckets remain separate. Missing buckets stay unknown and mark
@@ -163,10 +166,17 @@ distinguishes ingested costs from costs inferred using submitted usage and model
 a cost does not itself establish that a provider billed it.
 Missing usage or an unmatched model is unknown cost, never evidence of free usage.
 
-There is no per-round USD display or cost query in the Workbench. The accepted
-[observability boundary](structure.md#accepted-decisions) forbids reading trace data back into Orchestra;
-the Workbench links to its views. A Workbench cost projection would change that boundary and is not
-an existing capability. Langfuse remains the trace accounting store; provider billing is the authority
+The Workbench has a separate optional recorded-cost query, under the narrow display exception in
+[D20](structure.md#accepted-decisions). It reads observations v2 by the run's trace id, counts each
+generation once and follows parent ancestry for role/stage attribution. The role span retains episode,
+episode-local round and Temporal activity id, so repeated attempts and guidance remain distinct.
+Legacy observations lacking identity remain visible as unassigned rather than guessed.
+Temporal owns elapsed run and role-attempt timing, including failures; an absent start is unknown,
+never the time an activity was queued. Cost polling never delays the run's controls.
+The header, iteration rows and browser title show recorded USD, with estimates marked `≈`, unpriced
+requests marked partial and billing coverage always explicitly unknown. A confirmed zero remains zero;
+no rows or no verified price means unavailable. Read failure retains prior evidence marked stale.
+Langfuse remains the trace accounting store; provider billing is the authority
 for actual charges. Manual tools such as `ccusage` are diagnostics, not another accounting authority;
 workflow decisions never depend on them.
 
@@ -192,6 +202,22 @@ changing a model price does not automatically repair historical observations. De
 are separately billable where used; Pi's assistant token buckets do not measure those charges. Treat
 inferred costs as estimates even after validating the tariff calculation; exact billed totals still require
 complete coverage and reconciliation.
+The versioned schedule in `app/observability/pricing.json` supplies model aliases, an effective date,
+UTC peak windows, the published holiday calendar and rates. Ingestion selects the actual response model
+when available and classifies the native request timestamp. Unknown years, models, timing or unsupported
+cache-write buckets remain unclassified. `tools/langfuse_pricing.py` validates and applies only its
+Orchestra-owned model definition, with conditional peak/off-peak tiers. Langfuse requires a priced
+default tier; that tier is named `Unclassified`, and its inferred amounts are excluded from Workbench
+totals. An estimate is accepted only when the recorded tier matches the request's tariff context.
+Updating rates requires a new effective revision and live synthetic verification; existing stored
+observations are not silently repriced. The tool's `--verify` makes no model call and checks both
+tariffs, an unmatched model, a provider-reported zero and exclusion of the default fallback.
+The same manifest owns a Standard API-equivalent reference for the selected Codex model, including
+its native long-context threshold. Langfuse selects that tier from recorded input usage; this is a
+reference valuation, not a measurement of subscription spending or proof of the actual service tier.
+Every amount containing that valuation, including the tab total, carries `API-equivalent` explicitly.
+The live synthetic check covers both reference tiers. Existing observations remain immutable; a newly
+configured price applies to later ingestion and does not repair older unpriced rows.
 Claude Code's own displayed dollar total is also
 [calculated locally](https://code.claude.com/docs/en/costs), rather than a provider billing receipt.
 

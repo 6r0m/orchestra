@@ -332,9 +332,19 @@ any process may answer it.
 
 With `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` in `.env`, each run writes a work item: its
 phases, every role turn with the verdict and feedback, each stop and answer, and the final diff.
-Without them a run behaves identically and records nothing — the trace is never read back, and no
-decision depends on it. What the rows promise is in
+Without them a run behaves identically and records nothing. The Workbench optionally reads recorded
+costs for display; no workflow decision depends on them. What the rows promise is in
 [architecture/trace-contract.md](architecture/trace-contract.md).
+
+Under a run's title, **Run elapsed**, **Role time** and **Recorded USD** show its timing and recorded
+spend. Expand **Time and cost by role & iteration** for every role attempt, including failures and
+unknown starts. The browser tab also keeps the amount visible. `≈` means estimated; `partial` means
+some recorded requests are unpriced, an upload reported degradation or the trace read is truncated.
+`API-equivalent` identifies a Standard API reference valuation, including the Codex model's long-context
+rate; it does not measure subscription charges. Billing coverage remains unknown
+even when every observed request has a price: this is a recorded subtotal, not an invoice. Usage may
+arrive after a turn ends; costs refresh separately, and a store outage leaves the last amount marked
+stale while the run's controls continue to work.
 
 A self-hosted Langfuse keeps its traces in ClickHouse, whose own system logs can grow far past them — on one
 such stack 8 GB of them beside 38 MB of traces, and ClickHouse kept busy merging them. Langfuse reads none of

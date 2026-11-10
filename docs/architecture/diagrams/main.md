@@ -13,7 +13,7 @@ flowchart TD
         orchestration["orchestration<br/><i>workflow · routing</i>"]
         agents["agents<br/><i>terminal · launch · nodes · adapters · trust</i>"]
         workspace["workspace<br/><i>repos · worktrees</i>"]
-        observability["observability<br/><i>telemetry</i>"]
+        observability["observability<br/><i>telemetry · pricing · accounting</i>"]
         foundation["foundation<br/><i>paths · envpath · policy · stages · flows</i>"]
     end
 
@@ -28,7 +28,7 @@ flowchart TD
     interfaces -->|"the workflows a worker registers, the status query"| orchestration
     interfaces -->|"the repositories a run may start on"| workspace
     interfaces -->|"the terminal server a worker hosts, the page's token"| agents
-    interfaces -->|"the trace link"| observability
+    interfaces -->|"trace links and optional recorded-cost display"| observability
     interfaces -->|"the policy, the flows, the checkout root"| foundation
 
     orchestration -->|"the stage contract, the flow rules"| foundation
@@ -40,7 +40,7 @@ flowchart TD
     application <-->|"start · answer · status"| temporal
     workspace -->|"the target host's git"| git[("the run's repository")]
     agents -->|"argv, a PTY, and the vendor's completion hook"| clis[("claude · codex")]
-    observability -.->|"trace rows, never read back"| langfuse[("Langfuse")]
+    observability -.->|"trace writes and read-only cost display"| langfuse[("Langfuse")]
 ```
 
 The arrows between two parts inside the box are exactly the imports the boundary check allows,

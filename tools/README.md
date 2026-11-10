@@ -11,6 +11,7 @@ the test suite.
 | [ui_fixture.py](ui_fixture.py) | emit one complete work item — both roles, a round sent back, a lost session rehydrated, a blocker answered with guidance, the approval with its summary, a failed build attempt continued, and a final diff — to the trace UI in seconds, through the real workflow on Temporal's time-skipping test server and without calling a model, so the operator view can be judged without spending a real run |
 | [trust_probe.py](trust_probe.py) | check on this host that a repository recorded by [`trust.py`](../app/agents/trust.py) raises no trust dialog in a worktree of it: it makes a throwaway repository and worktree under `tmp/`, records it as a run does, starts the real CLI there, reports whether the dialog appeared — then removes the worktree, the files and the records it made. Run it per CLI after either vendor is upgraded |
 | [langfuse_dashboard.py](langfuse_dashboard.py) | create or update the *Orchestration Health* dashboard through Langfuse's API, from widgets the suite checks against the trace contract |
+| [langfuse_pricing.py](langfuse_pricing.py) | validate versioned DeepSeek tariff and Codex API-reference definitions; `--apply` writes only their Orchestra-owned ids after recording prior state in ignored scratch; `--verify` checks live pricing and fallback exclusion with synthetic generations and no model call. See the [cost contract](../docs/architecture/trace-contract.md#usage-and-cost) |
 
 Both write to the real Langfuse, with the keys `app/observability/telemetry.py` reads from
 this checkout's `.env`. They are therefore **not hermetic** and deliberately not
@@ -84,7 +85,7 @@ that had been open since before the change. Removing configuration does not
 stop it.
 
 The Codex plugin needs no guard of this kind. It uploads only when
-`TRACE_TO_LANGFUSE` is set, and only `telemetry.upload_codex_session` sets it,
+`TRACE_TO_LANGFUSE` is set, and only `app.agents.adapters.codex.upload` sets it,
 passing the keys and the host through the uploader's environment.
 
 ## The Codex plugin must support a parent trace
@@ -98,7 +99,7 @@ turns only when it finalizes just the turn that stopped. Released versions up to
 parent trace and
 [#71](https://github.com/langfuse/codex-observability-plugin/pull/71) for the turn
 lifecycle — so until a release includes them the plugin is built from the two
-combined:
+combined. Build on the host's native filesystem with Node 22 or newer:
 
 ```bash
 git clone https://github.com/langfuse/codex-observability-plugin <dir> && cd <dir>
@@ -116,19 +117,25 @@ what it wraps. Then:
 
 ```bash
 npx -y pnpm@9.5.0 install --frozen-lockfile
-npx -y pnpm@9.5.0 run lint:tsc && npx -y pnpm@9.5.0 exec vitest run
+npx -y pnpm@9.5.0 run lint:tsc
 npx -y pnpm@9.5.0 run build
+npx -y pnpm@9.5.0 exec vitest run
 root=~/.cache/orchestra/codex-observability-plugin
-cp -r ~/.codex/plugins/cache/codex-observability-plugin/tracing/0.3.0 "$root"
-cp plugins/tracing/dist/index.mjs "$root/dist/index.mjs"
+mkdir -p "$root"
+cp -r plugins/tracing/dist plugins/tracing/hooks plugins/tracing/.codex-plugin "$root/"
+cp plugins/tracing/package.json LICENSE "$root/"
 ```
 
 The build lives under the orchestration's own directory, never in Codex's plugin cache: Codex
 restores that cache whenever it starts, and a build placed there is gone after the next Codex
 session. Each host that runs Codex role-runs gets the same copy — on Windows,
 `%LOCALAPPDATA%\orchestra\codex-observability-plugin`.
+The worker must also resolve Node 22 or newer at runtime. Verify its project environment, not only
+the shell used to build the plugin. If the host default is older, bind a compatible pinned Node
+inside the checkout's environment (`app/foundation/envpath.py`); leave the host default and WSL
+lifecycle alone. A missing bound runtime should fail visibly rather than fall back to an older Node.
 
-`telemetry.upload_codex_session` sends what Codex's own Stop hook sends, the id of
+`app.agents.adapters.codex.upload` sends what Codex's own Stop hook sends, the id of
 the turn that stopped included, and #71 finalizes only that turn. A resumed
 session writes a record before its next turn starts; without the id the plugin
 exports that record as an empty turn, under every later stage.
@@ -138,7 +145,8 @@ the caller. The architect's turns therefore appear in the work item's trace tree
 under their stage, but not in the session page's inline list of observations.
 
 A build without these changes still uploads, and degrades silently: the turns
-land in a correlated separate session, and empty turns reappear. `telemetry.py`
+land in a correlated separate session, and empty turns reappear. `app/agents/adapters/codex.py`
 checks the installed build for both changes before each upload — the parent-trace
 input, and the option `finalizeTurnId` that #71 adds — and warns once, naming what
-is missing, when a plugin upgrade has replaced the build.
+is missing, when a plugin upgrade has replaced the build. Check these features before a paid smoke;
+an installed plugin version alone does not establish parent attribution or turn finalization.

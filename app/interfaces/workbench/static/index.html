@@ -259,6 +259,20 @@
         <p class="hint" id="run-controls-hint"></p>
         <p class="hint" id="run-kept-text"></p>
         <h1 id="run-task"></h1>
+        <section id="run-accounting" class="accounting" aria-label="Run time and recorded cost" hidden>
+          <div id="accounting-summary" class="accounting-summary"></div>
+          <p id="accounting-note" class="hint" role="status"></p>
+          <details id="accounting-details">
+            <summary>Time and cost by role &amp; iteration</summary>
+            <div id="accounting-roles" class="accounting-roles"></div>
+            <div class="table-wrap"><table class="accounting-table">
+              <caption class="visually-hidden">Recorded role attempts</caption>
+              <thead><tr><th scope="col">Role / iteration</th><th scope="col">Time</th>
+                <th scope="col">Recorded USD</th><th scope="col">Requests / tokens</th></tr></thead>
+              <tbody id="accounting-attempts"></tbody>
+            </table></div>
+          </details>
+        </section>
         <dl class="facts" id="run-facts"></dl>
         <ol class="score" id="run-score" aria-label="Its flow"></ol>
         <p class="now" id="run-now"></p>

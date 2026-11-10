@@ -86,7 +86,7 @@ when the decision above moves on; nothing else of it is read again.
 ## Invariants
 
 - **Nothing imports an entry point**, enforced by `tests/test_architecture.py`. That is what keeps argparse and console output out of the worker and the workbench.
-- **The workbench holds no state (D29).** Every read is Temporal's, a worker's or the stack owner's — the stack's reading shared by the requests of a few seconds, and a finished run's view kept once read — and every write goes through `client` or `stack`.
+- **The workbench holds no authoritative state (D29).** Reads are Temporal's, a worker's, the stack owner's or the optional Langfuse recorded-cost projection (D20). Its caches are disposable. Every write goes through `client` or `stack`; money never affects run decisions.
 - **The workbench never manages its own process (D32).** Systemd runs it; it starts and stops the stack, and the stack never includes it.
 - **A stop's answers are the ones it publishes (D6).** The page and the command line offer exactly the actions a stop publishes; the page owns their labels, colours and dialogs, the command line their shorthands and how each is typed, and neither keeps its own list.
 - **Everything listens on `127.0.0.1`**, and the API and the terminal sockets accept only the page's token, from the page's own origin. The terminal sockets take that token in the handshake's own header, never in a URL.
