@@ -717,8 +717,11 @@ def run_upload(described, span=None):
                     name="LLM Call", as_type="generation", model=generation.get("model"),
                     trace_context={"trace_id": ids[0], "parent_span_id": ids[1]}) as row:
                 _not_a_root(otel.get_current_span())
-                row.update(output=generation.get("output"), usage_details=generation.get("usage_details"),
-                           metadata=generation.get("metadata"))
+                values = {"output": generation.get("output"), "usage_details": generation.get("usage_details"),
+                          "metadata": generation.get("metadata")}
+                if "cost_details" in generation:
+                    values["cost_details"] = generation["cost_details"]
+                row.update(**values)
         except Exception as exc:
             _warn_once("generation upload", type(exc).__name__)
             warn(span, "telemetry_degraded", "a model generation could not be recorded: %s" % type(exc).__name__)

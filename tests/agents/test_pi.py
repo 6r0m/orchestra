@@ -109,6 +109,65 @@ class PiContract(unittest.TestCase):
         with mock.patch.object(terminal, "turn_attempts", return_value=[]):
             self.assertTrue(self.pi.upload("/session.jsonl", context).get("notes"), "no generation is not free usage")
 
+    def native_generation(self, cost=None, **fields):
+        event = self.event("PiGeneration", model="requested-model", provider="a-provider", api="an-api",
+                           usage={"input": 5, "output": 3, "cacheRead": 7, "cacheWrite": 0, "cost": cost},
+                           **fields)
+        context = {"traceparent": "parent", "metadata": {
+            "run_id": "test", "stage": "plan", "episode": 1, "round": 1}}
+        with mock.patch.object(terminal, "turn_attempts", return_value=[{"events": "unused"}]), \
+                mock.patch.object(terminal, "_events", return_value=[event]):
+            return self.pi.upload("/session.jsonl", context)["generations"][0]
+
+    def test_native_request_identity_and_catalog_cost_provenance_are_preserved(self):
+        generation = self.native_generation({"total": 1.25, "totalFromProvider": False},
+                                            request_timestamp_ms=1700000000123,
+                                            response_id="response-1", response_model="actual-model")
+        meta = generation["metadata"]
+        self.assertEqual(meta.get("request_timestamp_ms"), 1700000000123)
+        self.assertEqual(meta.get("response_id"), "response-1")
+        self.assertEqual(meta.get("response_model"), "actual-model")
+        self.assertEqual(generation["model"], "requested-model")
+        self.assertEqual(meta.get("native_cost_total"), 1.25)
+        self.assertIs(meta.get("native_cost_total_from_provider"), False)
+        self.assertEqual(meta.get("native_cost_source"), "catalog_estimate")
+        self.assertEqual(meta["cost_source"], "model_price_inference")
+        self.assertEqual(meta.get("billing_coverage"), "unknown")
+        self.assertNotIn("cost_details", generation)
+
+    def test_only_valid_explicit_provider_totals_are_supplied_as_costs(self):
+        for flag in (True, False, None, "true"):
+            for amount in (0, 1.25, -1, True, "1.25", float("nan"), float("inf"), 10 ** 1000):
+                with self.subTest(flag=flag, amount=amount):
+                    generation = self.native_generation({"total": amount, "totalFromProvider": flag})
+                    if flag is True and type(amount) in (float, int) and amount in (0, 1.25):
+                        self.assertEqual(generation.get("cost_details"), {"total": amount})
+                        self.assertEqual(generation["metadata"]["cost_source"], "provider_reported")
+                    else:
+                        self.assertNotIn("cost_details", generation)
+                        self.assertNotEqual(generation["metadata"]["cost_source"], "provider_reported")
+
+    def test_missing_or_invalid_native_time_is_not_replaced_by_capture_time(self):
+        for timestamp in (None, False, -1, "1700000000123", float("nan"), float("inf"), 10 ** 1000):
+            with self.subTest(timestamp=timestamp):
+                meta = self.native_generation(request_timestamp_ms=timestamp, _at=1700000999)["metadata"]
+                self.assertNotIn("request_timestamp_ms", meta)
+                self.assertEqual(meta.get("request_time_source"), "unknown")
+
+    def test_a_provider_total_does_not_claim_complete_token_or_billing_coverage(self):
+        event = self.event("PiGeneration", usage={"cost": {"total": 0.25, "totalFromProvider": True}})
+        context = {"traceparent": "parent", "metadata": {
+            "run_id": "test", "stage": "plan", "episode": 1, "round": 1}}
+        with mock.patch.object(terminal, "turn_attempts", return_value=[{"events": "unused"}]), \
+                mock.patch.object(terminal, "_events", return_value=[event]):
+            described = self.pi.upload("/session.jsonl", context)
+        generation = described["generations"][0]
+        self.assertEqual(generation["cost_details"], {"total": 0.25})
+        self.assertIsNone(generation["usage_details"])
+        self.assertFalse(generation["metadata"]["usage_complete"])
+        self.assertEqual(generation["metadata"]["billing_coverage"], "unknown")
+        self.assertTrue(described["notes"])
+
 
 @unittest.skipUnless(shutil.which("node"), "Pi's extension bridge requires Node")
 class PiBridge(unittest.TestCase):
@@ -222,7 +281,9 @@ events.agent_settled({aborted:false}, ctx);
 events.input({text: 'our task', source: 'interactive'}, ctx);
 events.message_end({message: {role: 'assistant', content: [{type: 'text', text: 'answer'}],
   provider: 'deepseek', model: 'deepseek-flash', api: 'openai-completions', stopReason: 'stop',
-  usage: {input: 12, output: 3, cacheRead: 7, cacheWrite: 0, cost: {total: 123}}}}, ctx);
+  timestamp: 1700000000123, responseId: 'response-1', responseModel: 'actual-model',
+  usage: {input: 12, output: 3, cacheRead: 7, cacheWrite: 0,
+    cost: {total: 123, totalFromProvider: true}}}}, ctx);
 if (events.agent_end) events.agent_end({messages: []}, ctx);
 events.agent_settled({aborted:false}, ctx);
 """
@@ -234,6 +295,17 @@ events.agent_settled({aborted:false}, ctx);
                 events = [json.loads(line) for line in fh]
             self.assertEqual([event["_hook"] for event in events], ["PiInput", "PiGeneration", "PiSettled"])
             self.assertEqual(events[1]["usage"]["cacheRead"], 7)
+            self.assertEqual(events[1].get("request_timestamp_ms"), 1700000000123)
+            self.assertEqual(events[1].get("response_id"), "response-1")
+            self.assertEqual(events[1].get("response_model"), "actual-model")
+            self.assertIs(events[1]["usage"]["cost"]["totalFromProvider"], True)
+            context = {"traceparent": "parent", "metadata": {
+                "run_id": "test", "stage": "plan", "episode": 1, "round": 1}}
+            with mock.patch.object(terminal, "turn_attempts", return_value=[{"events": path}]):
+                generation = adapters.load("pi").upload("/s.jsonl", context)["generations"][0]
+            self.assertEqual(generation["metadata"]["request_timestamp_ms"], 1700000000123)
+            self.assertEqual(generation["metadata"]["response_id"], "response-1")
+            self.assertEqual(generation["cost_details"], {"total": 123})
             self.assertEqual(events[-1]["answer"], "answer")
             self.assertTrue(events[-1]["ok"])
 

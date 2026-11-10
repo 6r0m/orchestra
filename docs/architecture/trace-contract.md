@@ -140,13 +140,20 @@ request. Assistant-message events do not establish a separate record for every t
 These rows do not capture background cache-warming requests, calls inside independent child-agent
 extensions, or standalone search/fetch charges; they cannot establish a complete provider bill.
 
-The bridge retains Pi's native usage object locally, including any cost provenance, but the adapter
-exports only token buckets and model/provider metadata. It exports neither a USD amount nor Pi's
-provider-billed indicator. Pi's [native usage contract](https://github.com/earendil-works/pi/blob/v1.5.0/packages/ai/src/types.ts)
-distinguishes a provider-reported total from a catalog estimate; an absent indicator is not evidence
-of provider billing. The bridge's event time is capture time, not Pi's request-start timestamp, and
-these native generation rows receive their Langfuse timestamps when uploaded after the turn. Those upload times
-cannot establish the tariff applicable when a request was made.
+The bridge retains Pi's native usage object and records its request-start timestamp, optional response
+identifier and provider-reported model alongside the requested model. The adapter carries those values
+into generation metadata, with explicit native cost provenance and unknown billing coverage.
+Pi's [native usage contract](https://github.com/earendil-works/pi/blob/v1.5.0/packages/ai/src/types.ts)
+distinguishes a provider-reported total from a catalog estimate. Only an explicit provider-reported
+indicator and a valid nonnegative finite amount supply a generation cost, including a confirmed zero.
+Catalog totals remain metadata and do not override Langfuse's configured prices. Missing or malformed
+cost evidence never becomes a provider-confirmed amount.
+
+The native request timestamp is preserved in milliseconds as generation metadata. Missing or invalid
+native timing remains unknown; the bridge's capture time is never substituted for it. The existing SDK
+observation API still gives these generations their start times at upload after the turn. Pricing must
+use native request timing and its applicable tariff context, not that upload timestamp. Optional response
+identifiers support correlation, not a guarantee that every billed operation has been captured.
 
 For a round's cost, inspect the model generations beneath that round's role step in the trace tree,
 including its child-agent calls; do not subtract cumulative conversation totals across resumed sessions.

@@ -61,6 +61,7 @@ export default function (pi) {
     last = event.message;
     const answer = (last.content || []).filter(part => part.type === "text").map(part => part.text).join("\n");
     emit("PiGeneration", ctx, {answer, provider: last.provider, model: last.model, api: last.api,
+      request_timestamp_ms: last.timestamp, response_id: last.responseId, response_model: last.responseModel,
       usage: last.usage, stop_reason: last.stopReason});
   });
   pi.on("agent_settled", (event, ctx) => {

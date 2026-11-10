@@ -6,6 +6,22 @@ from app.observability import telemetry as T
 
 
 class RecordedGenerations(unittest.TestCase):
+    def test_provider_charge_and_native_request_time_reach_the_existing_generation(self):
+        client = mock.Mock()
+        metadata = {"request_timestamp_ms": 1700000000123, "cost_source": "provider_reported",
+                    "billing_coverage": "unknown"}
+        # A MagicMock supplies the context-manager protocol used by the real SDK.
+        client.start_as_current_observation = mock.MagicMock()
+        row = client.start_as_current_observation.return_value.__enter__.return_value
+        span = T._Span(client=client)
+        T.run_upload({"traceparent": "00-" + "1" * 32 + "-" + "2" * 16 + "-01", "generations": [
+            {"model": "a-model", "usage_details": {"input": 5, "output": 3},
+             "cost_details": {"total": 0}, "metadata": metadata}]}, span)
+        self.assertEqual(client.start_as_current_observation.call_count, 1)
+        self.assertEqual(row.update.call_args.kwargs.get("cost_details"), {"total": 0})
+        self.assertEqual(row.update.call_args.kwargs["metadata"], metadata)
+        self.assertFalse(span.warnings)
+
     def test_an_export_failure_warns_without_failing_the_run(self):
         client = mock.Mock()
         client.start_as_current_observation.side_effect = RuntimeError("offline")

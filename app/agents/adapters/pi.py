@@ -3,6 +3,7 @@ import glob
 import json
 import os
 import re
+import sys
 import uuid
 
 NAME = "Pi"
@@ -181,6 +182,10 @@ def skill_folders(name, repo, agent_dir=None):
     return [os.path.join(root, name) for root in skill_roots(repo, agent_dir)]
 
 
+def _nonnegative_number(value):
+    return type(value) in (int, float) and 0 <= value <= sys.float_info.max
+
+
 def upload(session, context):
     if not context or not context.get("traceparent"):
         return None
@@ -192,16 +197,42 @@ def upload(session, context):
         for event in terminal._events(files["events"]):
             if event.get("_hook") != "PiGeneration" or not _ours(event, session):
                 continue
-            usage = event.get("usage") or {}
+            usage = event.get("usage")
+            usage = usage if isinstance(usage, dict) else {}
             keys = {"input": "input", "output": "output", "cacheRead": "input_cached_tokens",
                     "cacheWrite": "input_cache_creation_tokens"}
             complete = all(isinstance(usage.get(key), int) and not isinstance(usage[key], bool) and usage[key] >= 0
                            for key in keys)
-            generations.append({"model": event.get("model"), "output": event.get("answer"),
-                                "usage_details": {target: usage[key] for key, target in keys.items()} if complete else None,
-                                "metadata": {"provider": event.get("provider"), "api": event.get("api"),
-                                             "usage_complete": complete, "cost_source": "model_price_inference",
-                                             "stop_reason": event.get("stop_reason")}})
+            cost = usage.get("cost")
+            cost = cost if isinstance(cost, dict) else {}
+            amount = cost.get("total")
+            valid_cost = _nonnegative_number(amount)
+            provider_reported = cost.get("totalFromProvider") is True
+            timestamp = event.get("request_timestamp_ms")
+            valid_time = _nonnegative_number(timestamp) and timestamp <= 2 ** 53 - 1
+            metadata = {"provider": event.get("provider"), "api": event.get("api"),
+                        "usage_complete": complete, "billing_coverage": "unknown",
+                        "request_time_source": "native" if valid_time else "unknown",
+                        "cost_source": "provider_reported" if provider_reported and valid_cost else "model_price_inference",
+                        "native_cost_total_from_provider": provider_reported,
+                        "native_cost_source": ("unknown" if not valid_cost else
+                                               "provider_reported" if provider_reported else "catalog_estimate"),
+                        "stop_reason": event.get("stop_reason")}
+            if valid_time:
+                metadata["request_timestamp_ms"] = timestamp
+            if valid_cost:
+                metadata["native_cost_total"] = amount
+            for field in ("response_id", "response_model"):
+                if isinstance(event.get(field), str) and event[field]:
+                    metadata[field] = event[field]
+            generation = {"model": event.get("model"), "output": event.get("answer"),
+                          "usage_details": {target: usage[key] for key, target in keys.items()} if complete else None,
+                          "metadata": metadata}
+            # Ingest only an explicitly provider-reported total. Pi's catalog estimate remains
+            # evidence in metadata and never overrides Langfuse's configured model prices.
+            if provider_reported and valid_cost:
+                generation["cost_details"] = {"total": amount}
+            generations.append(generation)
     notes = []
     if not generations or any(not generation["metadata"]["usage_complete"] for generation in generations):
         notes.append({"key": "pi usage", "say": "native generation usage is incomplete",
