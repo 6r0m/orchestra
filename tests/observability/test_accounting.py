@@ -11,7 +11,7 @@ class Accounting(unittest.TestCase):
         return dict(dict(id=id, type="GENERATION", parentObservationId="role", totalCost=amount,
                     model="deepseek-flash", usageDetails={"input": 20, "output": 5},
                     usagePricingTierName="peak",
-                    metadata={"pricing_status": "matched", "tariff_period": "peak", "usage_complete": True,
+                    metadata={"provider": "deepseek", "pricing_status": "matched", "tariff_period": "peak", "usage_complete": True,
                               "cost_source": "model_price_inference"}), **changes)
 
     def project(self, *rows):
@@ -43,6 +43,17 @@ class Accounting(unittest.TestCase):
     def test_unattributed_requests_remain_visible_and_cycles_terminate(self):
         result = A.project([self.row(parentObservationId="g")])
         self.assertEqual(result["roles"]["unassigned"]["requests"], 1)
+
+    def test_a_direct_tariff_with_a_different_or_unknown_provider_is_excluded(self):
+        for provider in ("openrouter", None):
+            with self.subTest(provider=provider):
+                row = self.row()
+                row["metadata"]["provider"] = provider
+                result = self.project(row)
+                self.assertIsNone(result["total"]["usd"])
+                self.assertEqual(result["total"]["unpriced"], 1)
+                row["metadata"]["cost_source"] = "provider_reported"
+                self.assertEqual(self.project(row)["total"]["usd"], 0.1)
 
     def test_a_failed_role_upload_marks_the_known_subtotal_partial_without_inventing_requests(self):
         result = A.project([self.row(), {"id": "role", "type": "AGENT", "metadata": {

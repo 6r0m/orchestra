@@ -203,12 +203,15 @@ are separately billable where used; Pi's assistant token buckets do not measure 
 inferred costs as estimates even after validating the tariff calculation; exact billed totals still require
 complete coverage and reconciliation.
 The versioned schedule in `app/observability/pricing.json` supplies model aliases, an effective date,
-UTC peak windows, the published holiday calendar and rates. Ingestion selects the actual response model
-when available and classifies the native request timestamp. Unknown years, models, timing or unsupported
-cache-write buckets remain unclassified. `tools/langfuse_pricing.py` validates and applies only its
+UTC peak windows, the published holiday calendar and rates. Direct DeepSeek tariffs require an explicit
+DeepSeek provider identity; a recognizable model name from a gateway or an unknown provider is insufficient.
+Ingestion selects the actual response model when available and classifies the native request timestamp.
+Unknown years, models, timing or unsupported cache-write buckets remain unclassified.
+`tools/langfuse_pricing.py` validates and applies only its
 Orchestra-owned model definition, with conditional peak/off-peak tiers. Langfuse requires a priced
 default tier; that tier is named `Unclassified`, and its inferred amounts are excluded from Workbench
-totals. An estimate is accepted only when the recorded tier matches the request's tariff context.
+totals. A direct DeepSeek estimate is accepted only when both the provider identity and recorded tier
+match the request's tariff context, including when reading older observations.
 Updating rates requires a new effective revision and live synthetic verification; existing stored
 observations are not silently repriced. The tool's `--verify` makes no model call and checks both
 tariffs, an unmatched model, a provider-reported zero and exclusion of the default fallback.

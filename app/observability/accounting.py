@@ -23,7 +23,7 @@ def _add(summary, row):
     amount = row.get("totalCost")
     reported = metadata.get("cost_source") == "provider_reported"
     deepseek = metadata.get("provider") == "deepseek" or "deepseek" in (row.get("model") or "").lower()
-    matched = (metadata.get("pricing_status") == "matched" and
+    matched = (metadata.get("provider") == "deepseek" and metadata.get("pricing_status") == "matched" and
                row.get("usagePricingTierName") == metadata.get("tariff_period") and
                row.get("usagePricingTierName") in ("peak", "off_peak"))
     priced = _number(amount) and (reported or (metadata.get("usage_complete") is not False and (not deepseek or matched)))

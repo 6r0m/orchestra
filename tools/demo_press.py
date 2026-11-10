@@ -157,6 +157,7 @@ TURN_SAID = ("(stage => { " + LATEST_TURN + " const field = turn && turn.querySe
 # A changed file opened as a click on its row opens it — in the run's change, or in a turn's change since the review
 # before it, that change opened first — and the lines its diff then shows.
 OPEN_FILE = ("((scope, path) => { const box = typeof scope === 'string' ? document.querySelector(scope) : scope;"
+             " const change = box && box.closest('details.change'); if (change) change.open = true;"
              " const file = box && [...box.querySelectorAll('details.file')].find((f) => f.dataset.path === path);"
              " if (!file) return false; if (!file.open) file.querySelector('summary').click(); file.scrollIntoView();"
              " return true; })(%s, %s)")
@@ -569,12 +570,93 @@ def change_rows(page, run_id):
                  and changed["open"] == ["a.txt"] and changed["reads"] == {"a.txt": 2}) else 1
 
 
+CHANGE_DISCLOSURE_STAND_IN = FEED_STAND_IN + """(() => {
+  const real = window.fetch;
+  window.fetch = async (path, options) => {
+    const url = new URL(String(path), location.href);
+    if (url.pathname.endsWith('/diff') && !url.search) {
+      window.__feed.snapshots=(window.__feed.snapshots || 0)+1;
+      const files=Array.from({length:181},(_,i)=>({path:'file-'+String(i).padStart(3,'0')+'.txt',status:'A',added:1,removed:0}));
+      return new Response(JSON.stringify({base:'b'.repeat(40),tree:'t',against:'tip',files:files,files_total:files.length,
+        patch:'@@ -0,0 +1 @@\\n+fixture\\n',total:25,next:25}),{status:200,headers:{'Content-Type':'application/json'}});
+    }
+    if (/^\\/api\\/runs\\/[^/]+$/.test(url.pathname)) {
+      const response = await real(path, options), status = await response.json();
+      status.stop = null;
+      Object.assign(status.view, {state:'running', role:'engineer', stop:null, worktree:'/path/to/repo'});
+      return new Response(JSON.stringify(status), {status:200,headers:{'Content-Type':'application/json'}});
+    }
+    return real(path, options);
+  };
+})();"""
+
+
+def change_disclosure(page, run_id):
+    """A large change stays compact until opened, through live updates and keyboard interaction."""
+    page.value(OPEN % json.dumps(run_id))
+    wait(lambda: page.value(OPENED), 30, "the run")
+    wait(lambda: page.value("Boolean(window.__feed.socket && window.__feed.socket.onmessage)"), 30, "the change feed")
+    files = [("file-%03d.txt" % i, 1, "1:1") for i in range(181)]
+    page.value("window.__feed.say(%s); true" % json.dumps(summary(*files)))
+    if not page.value("document.getElementById('change').tagName==='DETAILS' && !document.getElementById('change').open"):
+        raise SystemExit("the large Change block is not collapsed by default")
+    if not page.value("document.getElementById('change-count').textContent==='181 files changed' && "
+                      "!document.getElementById('diff-files').checkVisibility() && "
+                      "document.getElementById('change').getBoundingClientRect().height === "
+                      "document.querySelector('#change > summary').getBoundingClientRect().height"):
+        raise SystemExit("the collapsed change must show its count and hide its files: %r" % page.value(
+            "({count:document.getElementById('change-count').textContent, "
+            "outer:document.getElementById('change').getBoundingClientRect().height, "
+            "summary:document.querySelector('#change > summary').getBoundingClientRect().height, "
+            "files:document.getElementById('diff-files').getBoundingClientRect().height, "
+            "visible:document.getElementById('diff-files').checkVisibility()})"))
+    page.value("window.__changeSummary=document.querySelector('#change > summary'); window.__changeSummary.focus(); true")
+    if not page.value("document.activeElement===window.__changeSummary"):
+        raise SystemExit("change summary cannot take keyboard focus: %r" % page.value(
+            "({active:document.activeElement.tagName,id:document.activeElement.id,hidden:document.getElementById('change').hidden})"))
+    def key(name, code, number):
+        page.call("Input.dispatchKeyEvent", type="keyDown", key=name, code=code, windowsVirtualKeyCode=number,
+                  nativeVirtualKeyCode=number, text="\r" if name == "Enter" else name)
+        page.call("Input.dispatchKeyEvent", type="keyUp", key=name, code=code, windowsVirtualKeyCode=number,
+                  nativeVirtualKeyCode=number)
+    key("Enter", "Enter", 13)
+    wait(lambda: page.value("document.getElementById('change').open"), 5, "Enter to open the change")
+    files.append(("file-181.txt", 1, "1:1"))
+    page.value("window.__feed.say(%s); true" % json.dumps(summary(*files)))
+    if not page.value("document.getElementById('change').open && document.activeElement===window.__changeSummary && "
+                      "document.getElementById('change-count').textContent==='182 files changed'"):
+        raise SystemExit("a live update lost the disclosure state or focus")
+    key(" ", "Space", 32)
+    wait(lambda: page.value("!document.getElementById('change').open"), 5, "Space to collapse the change")
+    page.value("window.__feed.say(%s); true" % json.dumps(summary(*files)))
+    time.sleep(3)
+    if not page.value("!document.getElementById('change').open && document.activeElement===window.__changeSummary"):
+        raise SystemExit("a status refresh reopened the change or lost focus")
+    page.call("Runtime.evaluate", expression="import('/change.js').then(c=>{ c.watchChange(null); c.readOnceFor({id:'disclosure-first'}); })", awaitPromise=True)
+    wait(lambda: page.value("document.getElementById('change-count').textContent==='181 files changed'"), 5, "a snapshot read")
+    if page.value("document.getElementById('change').open"):
+        raise SystemExit("a snapshot read reopened the collapsed change")
+    key("Enter", "Enter", 13)
+    page.value(button("#change", "Refresh") + ".click(); true")
+    wait(lambda: page.value("window.__feed.snapshots===2"), 5, "Refresh to read the next snapshot")
+    if not page.value("document.getElementById('change').open"):
+        raise SystemExit("Refresh collapsed the open change")
+    result = page.call("Runtime.evaluate", expression="""(async () => {
+      const change=await import('/change.js'); change.showChangeFor(null);
+      return !document.getElementById('change').open && document.getElementById('change-count').textContent==='Files and patch';
+    })()""", awaitPromise=True, returnByValue=True)["result"].get("value")
+    if not result: raise SystemExit("switching runs retained the prior change state")
+    print("PASS: 181-file change collapsed by default; count visible; Enter/Space work; live/snapshot updates preserve state/focus; Refresh stays open; navigation resets it")
+    return 0
+
+
 def change_idle(page, run_id):
     """The run's page while it waits with no role at work: 0 when it opens no socket for the change and offers its
     button to read it. Prints what it saw."""
     page.value(OPEN % json.dumps(run_id))
     wait(lambda: page.value(OPENED), 60, "the run")
     time.sleep(6)                                   # two of the page's reads of the run
+    page.value("const change=document.getElementById('change'); if(change.tagName==='DETAILS') change.open=true; true")
     opened = page.value("window.__feed.opened")
     button = page.value("(b => Boolean(b && !b.hidden && b.offsetParent))(document.getElementById('diff-load'))")
     print("the waiting run's page opened %d socket(s) for its change, %s its button to read it"
@@ -1074,6 +1156,9 @@ def main(url, run_id, label, said, note=None):
                 # A script for documents to come is applied only once the Page domain is enabled (measured).
                 page.call("Page.enable")
                 page.call("Page.addScriptToEvaluateOnNewDocument", source=FEED_STAND_IN)
+            if label == "change-disclosure":
+                page.call("Page.enable")
+                page.call("Page.addScriptToEvaluateOnNewDocument", source=CHANGE_DISCLOSURE_STAND_IN)
             if label.startswith("terminal-fit:"):
                 page.call("Page.enable")
                 page.call("Page.addScriptToEvaluateOnNewDocument", source=TERMINAL_STAND_IN)
@@ -1113,6 +1198,8 @@ def main(url, run_id, label, said, note=None):
                 return change(page, run_id, said, label.split(":", 1)[1])
             if label == "change-rows":
                 return change_rows(page, run_id)
+            if label == "change-disclosure":
+                return change_disclosure(page, run_id)
             if label == "change-idle":
                 return change_idle(page, run_id)
             if label.startswith("terminal-fit:"):

@@ -36,7 +36,7 @@ def enrich(generation):
     result = dict(generation)
     metadata = dict(generation.get("metadata") or {})
     actual = metadata.get("response_model") or generation.get("model")
-    if metadata.get("provider") != "deepseek" and not known_model(actual):
+    if metadata.get("provider") != "deepseek":
         return result
     metadata["requested_model"] = generation.get("model")
     result["model"] = actual

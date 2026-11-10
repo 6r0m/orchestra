@@ -29,13 +29,13 @@ class PricingIngestion(unittest.TestCase):
         self.assertTrue(all(type(price) in (int, float) and price >= 0 for tier in definition["pricing_tiers"]
                             for price in tier["prices"].values()))
 
-    def upload(self, timestamp, actual="deepseek-flash"):
+    def upload(self, timestamp, actual="deepseek-flash", provider="deepseek"):
         client = mock.Mock()
         client.start_as_current_observation = mock.MagicMock()
         row = client.start_as_current_observation.return_value.__enter__.return_value
         generation = {"model": "deepseek-flash", "usage_details": {"input": 100, "output": 20,
                        "input_cached_tokens": 50, "input_cache_creation_tokens": 0},
-                      "metadata": {"provider": "deepseek", "response_model": actual,
+                      "metadata": {"provider": provider, "response_model": actual,
                                    "request_timestamp_ms": timestamp, "cost_source": "model_price_inference"}}
         T.run_upload({"traceparent": "00-" + "1" * 32 + "-" + "2" * 16 + "-01",
                       "generations": [generation]}, T._Span(client=client))
@@ -58,6 +58,16 @@ class PricingIngestion(unittest.TestCase):
                 self.assertEqual(call["model"], model)
                 self.assertEqual(values["metadata"].get("pricing_status"), "unknown")
                 self.assertNotIn("tariff_period", values["metadata"])
+
+    def test_a_known_model_from_another_or_unknown_provider_gets_no_direct_tariff(self):
+        when = datetime.datetime(2026, 11, 10, 2, tzinfo=datetime.timezone.utc).timestamp() * 1000
+        for provider in ("openrouter", None):
+            with self.subTest(provider=provider):
+                _, values = self.upload(when, provider=provider)
+                self.assertEqual(values["metadata"]["provider"], provider)
+                self.assertEqual(values["usage_details"]["input_cached_tokens"], 50)
+                for key in ("pricing_provider", "pricing_status", "tariff_period"):
+                    self.assertNotIn(key, values["metadata"])
 
     def test_a_broken_tariff_file_preserves_native_usage_and_reports_degradation(self):
         with mock.patch("app.observability.pricing.schedule", side_effect=ValueError("invalid tariff")):

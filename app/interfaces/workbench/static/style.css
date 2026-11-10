@@ -273,7 +273,14 @@ main:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .decision .field textarea { background: var(--ground); }
 
 /* The change: what git reads in the run's worktree, file by file, each opening into its diff. */
-.change { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.change { min-width: 0; }
+.change > summary { padding: 8px 0; cursor: pointer; list-style: none; }
+.change > summary::-webkit-details-marker { display: none; }
+.change > summary:hover { background: var(--surface); }
+.change > summary h2 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.change > summary .hint { font-weight: 400; }
+.change[open] > summary { margin-bottom: 10px; }
+.change-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 .section-head { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
 .chevron { flex: none; width: 1em; color: var(--quiet); }
 .chevron::before { content: "\25B8" / ""; }

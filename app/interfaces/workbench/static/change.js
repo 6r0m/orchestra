@@ -14,6 +14,8 @@ let runId = null;
 let shown = null;
 // The stop whose change was read on its own: a reread is the operator's, by the button.
 let loadedFor = null;
+const number = new Intl.NumberFormat();
+const fileCount = (total) => number.format(total) + (total === 1 ? " file changed" : " files changed");
 
 // The change of `run`, not yet read.
 export function showChangeFor(run) {
@@ -21,6 +23,8 @@ export function showChangeFor(run) {
   runId = run;
   shown = null;
   loadedFor = null;
+  $("change").open = false;
+  $("change-count").textContent = "Files and patch";
   $("change-said").textContent = "";
   report($("change-result"), "");
   $("diff-files").replaceChildren();
@@ -111,6 +115,7 @@ function listen(watch) {
 function showLive(watch, summary) {
   watch.seen = true;
   shown = summary;
+  $("change-count").textContent = fileCount(summary.files_total);
   const said = $("change-said");
   if (!summary.files_total) {
     said.replaceChildren("No change yet: the worktree holds what its base does. Read ", clock(summary.read, "ago"),
@@ -160,7 +165,8 @@ async function loadDiff(asked) {
     const read = await api("/api/runs/" + encodeURIComponent(reading) + "/diff");
     if (reading !== runId) return;
     shown = read;
-    const counted = read.files_total === 1 ? "1 file changed" : read.files_total + " files changed";
+    const counted = fileCount(read.files_total);
+    $("change-count").textContent = counted;
     // What the change is read against, as the read itself says: a run from before runs recorded their base
     // is read against its worktree's last commit, or the base merged into it after a conflict.
     const against = { tip: "the base this run stands on", merged: "the base merged into this worktree" }[read.against]

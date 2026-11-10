@@ -160,7 +160,9 @@ agent's host stays its words, the path shown when you point at it; an image is i
 the text as written, and a failure, the exact prompt and the raw record stay as written too.
 
 The run's change is its result, so it comes first on its page, right under what the run is doing now —
-under the decision, when a decision judges it. While a role works on the run it is live: its host's worker
+under the decision, when a decision judges it. The Change disclosure starts collapsed with its file count
+visible. Open the heading to review files, refresh or copy the patch. Updates and Refresh preserve your
+open or closed choice; opening another run starts collapsed again. While a role works on the run it is live: its host's worker
 looks at the worktree every few seconds — less often when a look is slow — and, when something moved, the page
 shows how many files, lines added and removed and when it was read, with nothing to press. That look writes
 nothing in git; a file's diff is read when you open it, as the file is then, and a file you opened stays open,
@@ -175,7 +177,7 @@ and listed file by file, each by its whole path: a rename as its old path and it
 said so; a very long list comes a part at a time, *List more files* reading the rest of the same snapshot. Open a file to see its diff as an editor shows one: both line numbers, added lines green,
 removed red, long unchanged runs folded a click away. A file too large to show whole shows its changes
 alone, and says so. The patch sits below in a small box; *Copy patch* copies all of it, however large,
-from the same snapshot, and *Refresh* reads a new one. *Copy all changes*, beside the heading, copies the whole
+from the same snapshot, and *Refresh* reads a new one. *Copy all changes*, in the expanded block, copies the whole
 change as the worktree holds it at that moment — every file, however long — whenever you press it, the run at
 work, waiting, or closed keeping its worktree. A run merged or discarded has no worktree, and so no Change
 section: a merged change is in git, and each turn's change stays in the history.
