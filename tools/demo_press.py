@@ -72,9 +72,12 @@ either: its exit code says whether the run's view, once shown, offers none of th
 shown on screen. Given `accounting`, it reads a priced run, verifies zero/tiny/unknown/partial and
 API-equivalent presentation, disclosure focus across cost refresh, tab USD, and responsive layouts
 through 320 pixels and 200% CSS zoom; its cropped screenshot goes only to ignored `tmp/`.
+Given `engineer-selection`, it reads a paused run's native configuration and visible facts; the expected
+model is `what the page should say` and the expected per-turn hours are `note`. It starts no turn.
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -589,6 +592,32 @@ CHANGE_DISCLOSURE_STAND_IN = FEED_STAND_IN + """(() => {
     return real(path, options);
   };
 })();"""
+
+
+def engineer_selection(page, run_id, model, hours):
+    """The selected run's native configuration and visible facts agree, with no write or model call."""
+    page.value(OPEN % json.dumps(run_id))
+    wait(lambda: page.value(OPENED), 30, "the run")
+    observed = page.call("Runtime.evaluate", expression="""(async () => {
+      const {api}=await import('/api.js');
+      const status=await api('/api/runs/'+encodeURIComponent(%s));
+      return {configuration:status.configuration,stop:status.stop};
+    })()""" % json.dumps(run_id), awaitPromise=True, returnByValue=True)["result"].get("value")
+    if not observed or not observed.get("stop"):
+        raise SystemExit("the run must remain paused")
+    configuration = observed.get("configuration") or {}
+    engineer = configuration.get("engineer") or {}
+    if engineer.get("model") != model or configuration.get("timeout_seconds") != int(hours) * 3600:
+        raise SystemExit("the native run configuration does not match the requested engineer and limit")
+    facts = wait(lambda: page.value("Object.fromEntries([...document.querySelectorAll('#run-facts > div')]"
+                                   ".map(pair=>[pair.querySelector('dt').textContent,pair.querySelector('dd').textContent]))"),
+                 10, "the run facts")
+    if (not all(value in facts.get("Engineer", "") for value in
+                (engineer.get("launcher") or engineer.get("kind") or engineer.get("brain"), engineer.get("provider"), model)
+                if value) or not re.search(r"\b%s\s*(?:hr|hour)" % re.escape(hours), facts.get("Turn limit", ""))):
+        raise SystemExit("the visible engineer or turn limit disagrees with the native configuration: %r" % facts)
+    print("PASS: paused run shows its effective engineer (%s) and %s-hour per-turn limit; no turn started" % (model, hours))
+    return 0
 
 
 def change_disclosure(page, run_id):
@@ -1200,6 +1229,8 @@ def main(url, run_id, label, said, note=None):
                 return change_rows(page, run_id)
             if label == "change-disclosure":
                 return change_disclosure(page, run_id)
+            if label == "engineer-selection":
+                return engineer_selection(page, run_id, said, note)
             if label == "change-idle":
                 return change_idle(page, run_id)
             if label.startswith("terminal-fit:"):

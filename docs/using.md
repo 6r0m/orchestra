@@ -262,6 +262,13 @@ the vendor CLI. A run snapshots the effective settings when it starts. The page 
 each time it loads, so a default edited in `.orchestra/settings.json` shows at the next reload, with no
 restart.
 
+To switch a paused existing run to the current engineer profile and turn limit, run
+`orchestrate --use-engineer-defaults <run-id>`. This is explicit: changing Settings alone still affects
+new runs only. The command keeps the run paused, preserves its worktree and architect session, and
+starts a fresh engineer conversation on the next turn if its profile changed. Its existing persona
+stays with the run. The Workbench's run facts show the effective engineer and per-turn limit.
+Then use the stop's normal answer, such as Continue for a failed step, when ready to resume.
+
 Under each role's agent the page says what that role may do, and what holds the agent you chose to it.
 Codex is held by its own sandbox, which the operating system enforces: a read-only role cannot write, and
 a writing one cannot write outside its worktree — which also keeps a tool whose cache or environment lies

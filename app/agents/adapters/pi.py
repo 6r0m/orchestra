@@ -16,8 +16,9 @@ BOUNDARY = {
              "operating-system filesystem isolation; use the host's managed launcher for its permission rules.",
 }
 OPTIONS = ("model", "effort", "provider", "launcher")
-SKILL = "/skill:{name}"
-SESSION_MARKERS = ()
+# Pi separates a skill's name from its arguments at a literal space, including multiline arguments.
+SKILL = "/skill:{name} "
+SESSION_MARKERS = ("ORCHESTRA_PI_PROMPT_FILE", "ORCHESTRA_PI_INPUT_TOKEN")
 SESSION_MARKER_PREFIXES = ()
 LOST_SESSION = ("pi session not found before work",)
 OLD_BRAIN = None
@@ -74,6 +75,12 @@ def session_in(argv):
 
 def wire(argv, events, sink):
     return list(argv) + ["--extension", BRIDGE]
+
+
+def prompt_input(_prompt, path):
+    """A shell-safe input token; the native bridge delivers the already recorded prompt."""
+    token = "orchestra-input-" + uuid.uuid4().hex
+    return token, {"ORCHESTRA_PI_PROMPT_FILE": path, "ORCHESTRA_PI_INPUT_TOKEN": token}
 
 
 def held(text):

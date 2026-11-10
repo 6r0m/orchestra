@@ -233,9 +233,9 @@ still lands on a checkout.
   or the run otherwise ends: every byte its agent draws is recorded under `tmp/orchestration/<run-id>/terminals/`
   and served on the worker's WebSocket, which takes keystrokes back, so the operator can
   watch, press Esc and type at any time. A turn ends the agent process under the terminal,
-  if any, and starts the vendor's interactive CLI again from an argv list — no shell, so no
-  task text is ever parsed as shell syntax — with the role's session resumed by exact id and
-  the prompt as its last argument; a part too long for a command line — Windows takes 32,767
+  if any, and starts the vendor's interactive CLI again from an argv list, with the role's session
+  resumed by exact id and the adapter owning safe delivery of its full prompt; a part too long for
+  a command line — Windows takes 32,767
   characters — is attached as a file in the run's own folder, which the prompt names and the
   agent may read (`nodes.attach`). It ends on the vendor's own completion, which the vendor's
   hook writes into the turn's own events file. The file and the process are the turn's, so a
@@ -301,6 +301,12 @@ still lands on a checkout.
   does. No model registry. Policy validation is **strict** — unknown
   top-level or role keys are rejected, so a typo cannot silently do nothing,
   and both values must be plain tokens.
+  Settings edits never rewrite a running policy. An explicit `use_engineer_defaults` Temporal Update
+  may adopt the current engineer profile and turn limit while the run waits at an operator stop.
+  The stop id and configuration revision guard stale requests; the accepted Update owns the change
+  and starts no work. A changed engineer gets a fresh native session on its next turn, with the run's
+  existing persona. The architect profile and session, worktree, flow, role access and review budgets retain their values.
+  Each role activity records the profile it used, so historical turn records use their own parser.
 - **D21** **A role's durable conversation is owned by its provider's own
   session store on the target host** — Claude under `~/.claude/projects/<cwd>/<session-id>.jsonl`,
   Codex under `~/.codex/sessions/<date>/rollout-*-<thread-id>.jsonl`, Pi in its native agent

@@ -148,7 +148,7 @@ export async function refreshRun() {
   // With its worker down the run is shown from its listing alone: what it last said stays on the page.
   if (!status.unreadable || !$("run-task").textContent) $("run-task").textContent = view.goal || runId;
   if (!status.unreadable || !$("run-facts").children.length) {
-    renderFacts(runId, view, state, status.links, status.timeline);
+    renderFacts(runId, view, state, status.links, status.timeline, status.configuration);
   }
   renderScore(view);
   renderNow(view, status);
@@ -171,7 +171,8 @@ export async function refreshRun() {
 
 // ---- what the run is --------------------------------------------------------------------------
 
-function renderFacts(runId, view, state, links, timeline) {
+function renderFacts(runId, view, state, links, timeline, configuration) {
+  const engineer = configuration && configuration.engineer;
   const planned = Boolean(state.plan) && timeline.some((entry) => entry.stage === "plan");
   const facts = [
     ["Repository", view.repo && code(view.repo)],
@@ -181,11 +182,15 @@ function renderFacts(runId, view, state, links, timeline) {
     ["Worktree", view.worktree && [code(view.worktree), copyButton(view.worktree, "the worktree's path")]],
     ["Plan", planned && [code(state.plan), copyButton(state.todo_path || state.plan, "the plan's path")]],
     ["Started", view.started && at(view.started)],
+    ["Engineer", engineer && [engineer.launcher || engineer.kind || engineer.brain, engineer.provider,
+      engineer.model].filter(Boolean).join(" · ")],
+    ["Turn limit", configuration && configuration.timeout_seconds &&
+      lasted(new Date(0).toISOString(), new Date(configuration.timeout_seconds * 1000).toISOString())],
     ["Open in", openIn(links)],
   ];
   const list = $("run-facts");
   if (unchanged(list, [runId, view.repo, view.host, view.flow && view.flow.name, view.worktree, planned,
-    state.plan, view.started, links])) return;
+    state.plan, view.started, links, configuration])) return;
   list.replaceChildren(...facts.filter(([, value]) => value).map(([term, value]) => {
     const pair = el("div");
     const shown = el("dd");

@@ -13,6 +13,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))
 PKG = os.path.abspath(os.path.join(HERE, os.pardir))
@@ -124,6 +125,21 @@ class TheStack(unittest.TestCase):
 
 
 class Forms(unittest.TestCase):
+    def test_adopting_engineer_defaults_does_not_answer_or_follow_the_stop(self):
+        result = {"engineer": {"agent": "example-engineer", "kind": "pi"}, "timeout_seconds": 7200}
+        with mock.patch.object(cli.settings, "load", return_value={}) as loaded, \
+                mock.patch.object(cli.runs, "use_engineer_defaults", new_callable=mock.AsyncMock,
+                                  return_value=result) as changed, \
+                mock.patch.object(cli.runs, "answer", new_callable=mock.AsyncMock) as answered:
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(asyncio.run(cli.run(["--use-engineer-defaults", "example-run"],
+                                                     client=object(), check=False)), 0)
+            changed.assert_awaited_once()
+            answered.assert_not_awaited()
+            loaded.assert_called_once_with(None)
+            self.assertIn("run remains paused", output.getvalue())
+
     def test_a_run_names_its_flow_and_one_that_ended_without_a_build_succeeded(self):
         self.assertEqual(cli.parse_args(["a task", "--flow", "architect-research"]).flow, "architect-research")
         self.assertIsNone(cli.parse_args(["a task"]).flow, "none named: the policy's default")

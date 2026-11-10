@@ -29,6 +29,7 @@ sys.path[:0] = [PKG, HERE]
 
 from temporalio.api.enums.v1 import EventType  # noqa: E402
 from temporalio.client import WorkflowFailureError, WorkflowUpdateFailedError  # noqa: E402
+from temporalio.worker import Replayer  # noqa: E402
 
 import temporal_env as E  # noqa: E402
 from fakes import FakeRepos, FakeWorktrees, codex_review_first, codex_review_resumed  # noqa: E402
@@ -36,8 +37,79 @@ from tests.orchestration.test_workflow import Scenario  # noqa: E402
 import control_workflows  # noqa: E402
 from app.agents import terminal  # noqa: E402
 from app.orchestration import workflow as WF  # noqa: E402
+from app.application import client as runs  # noqa: E402
+import cast  # noqa: E402
+from fakes import first_message_for  # noqa: E402
 
 ACCEPTED = EventType.EVENT_TYPE_WORKFLOW_EXECUTION_UPDATE_ACCEPTED
+
+
+class EngineerDefaults(Scenario):
+    def paused(self):
+        selected = cast.settings(engineer="deepseek-engineer")
+        selected["timeout_seconds"] = 48 * 3600
+        built, _ = first_message_for(selected, "engineer", "built\n")
+        assessed, _ = codex_review_first("PASS")
+        run = self.drive([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, assessed),
+                          ("build-e2-1", 0, built), ("verify-e2-1", 0, codex_review_resumed("PASS"))])
+        return run, selected
+
+    def test_explicit_update_keeps_the_stop_worktree_architect_and_original_start(self):
+        run, selected = self.paused()
+        before = E.run(run.handle.query(WF.FeatureRun.status))
+        original = E.run(runs.started(E.client(), run.run_id))
+        changed = E.run(runs.use_engineer_defaults(E.client(), run.run_id, selected, check=False))
+        after = E.run(run.handle.query(WF.FeatureRun.status))
+        self.assertEqual(after["stop"], before["stop"])
+        self.assertEqual(after["state"]["worktree_path"], before["state"]["worktree_path"])
+        self.assertEqual(after["state"]["agent_sessions"], {"architect": before["state"]["agent_sessions"]["architect"]})
+        self.assertEqual(after["configuration"]["engineer"]["kind"], "pi")
+        self.assertEqual(changed["timeout_seconds"], selected["timeout_seconds"])
+        self.assertEqual(len(self.agent.calls), 2, "configuration starts no agent")
+        self.assertEqual(E.run(runs.started(E.client(), run.run_id)), original)
+        again = E.run(runs.use_engineer_defaults(E.client(), run.run_id, selected, check=False))
+        self.assertFalse(again["changed"], "adopting the same defaults again leaves the session policy alone")
+        self.assertEqual(again["revision"], changed["revision"])
+        self.assertEqual(run.answer("yes")[0], 0)
+        self.assertEqual(self.agent.calls[2]["kind"], "pi")
+        self.assertEqual(self.agent.calls[2]["timeout_seconds"], selected["timeout_seconds"])
+        self.assertNotIn("--session", self.agent.calls[2]["argv"], "the new harness gets a fresh session")
+        self.assertIn(before["state"]["agent_sessions"]["architect"], self.agent.calls[3]["command"])
+        self.assertEqual((E.run(runs.history(E.client(), run.run_id))["attempts"][-2]["agent"]["kind"]), "pi")
+        E.run(Replayer(workflows=[WF.FeatureRun]).replay_workflow(E.run(run.handle.fetch_history())))
+
+    def test_invalid_or_stale_updates_leave_state_and_history_unchanged_and_duplicates_are_idempotent(self):
+        run, selected = self.paused()
+        before = E.run(run.handle.query(WF.FeatureRun.status))
+        role = E.S.run_policy(selected)["roles"]["engineer"]
+        request = {"stop": run.stop["id"], "revision": 0, "engineer": role,
+                   "timeout_seconds": selected["timeout_seconds"]}
+        for changes in ({"stop": "wrong"}, {"revision": 1}, {"timeout_seconds": True},
+                        {"engineer": dict(role, workspace_access="read")}, {"architect": role}):
+            with self.subTest(changes=list(changes)):
+                with self.assertRaises(WorkflowUpdateFailedError):
+                    E.run(run.handle.execute_update(WF.FeatureRun.use_engineer_defaults,
+                          dict(request, **changes), id=uuid.uuid4().hex))
+                self.assertEqual(E.run(run.handle.query(WF.FeatureRun.status)), before)
+        accepted = E.run(run.handle.execute_update(WF.FeatureRun.use_engineer_defaults, request, id="configuration-once"))
+        self.assertEqual(E.run(run.handle.execute_update(WF.FeatureRun.use_engineer_defaults, request,
+                         id="configuration-once")), accepted)
+        with self.assertRaises(WorkflowUpdateFailedError):
+            E.run(run.handle.execute_update(WF.FeatureRun.use_engineer_defaults, request, id="stale-configuration"))
+        self.assertEqual([event.event_type for event in history(run.handle)].count(ACCEPTED), 1)
+        self.assertEqual(len(self.agent.calls), 2)
+
+    def test_an_executing_or_stopping_run_refuses_configuration(self):
+        instance = WF.FeatureRun()
+        instance.policy = dict(E.POLICY)
+        before = dict(instance.policy)
+        with self.assertRaisesRegex(ValueError, "waiting"):
+            instance._validate_engineer_defaults({})
+        instance.stop = {"id": "paused"}
+        instance.stopping = True
+        with self.assertRaisesRegex(ValueError, "waiting"):
+            instance._validate_engineer_defaults({"stop": "paused"})
+        self.assertEqual(instance.policy, before)
 
 
 def history(handle):

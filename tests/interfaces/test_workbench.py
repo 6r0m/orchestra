@@ -1331,6 +1331,29 @@ class Runs(Scenario):
             self.assertEqual(request("GET", "/api/runs/%s/turn?%s" % (run_id, query))[0], 400, query)
         self.assertEqual(request("GET", "/api/runs/no-such-run/turn?stage=plan&episode=1&round=1")[0], 404)
 
+    def test_engineer_switch_keeps_old_records_and_parses_new_turns_with_their_recorded_kind(self):
+        selected = cast.settings(engineer="deepseek-engineer")
+        selected["timeout_seconds"] = 48 * 3600
+        built, _ = first_message_for(selected, "engineer", "built with the new harness\n")
+        assessed, _ = configured_review_first("PASS")
+        self.host, self.agent = E.host([("plan-e1-1", 0, "original engineer plan\n"),
+            ("assess-e1-1", 0, assessed), ("build-e2-1", 0, built),
+            ("verify-e2-1", 0, configured_review_resumed("PASS")),
+            ("closeout-e3-1", 0, json.dumps({"answer": "closed out"}) + "\n")], git=FakeWorktrees())
+        self.host.runner = recorded(self.agent)
+        run_id = self.start("switch engineer at a stop")
+        before = self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["reason"] == "approval")
+        E.run(runs.use_engineer_defaults(E.client(), run_id, selected, check=False))
+        request("POST", "/api/runs/%s/answer" % run_id, {"stop": before["stop"]["id"], "action": "approve"})
+        after = self.wait_for(run_id, lambda body: body["stop"] and body["stop"]["id"] != before["stop"]["id"])
+        self.assertEqual(after["stop"]["reason"], "final", after["stop"])
+        entries = {entry["stage"]: entry for entry in after["timeline"]}
+        [plan] = request("GET", turn_path(run_id, entries["plan"]))[1]["attempts"]
+        [build] = request("GET", turn_path(run_id, entries["build"]))[1]["attempts"]
+        self.assertEqual(plan["output"], "original engineer plan\n")
+        self.assertEqual(build["message"], "built with the new harness\n")
+        self.assertEqual(after["configuration"]["engineer"]["kind"], "pi")
+
     def test_a_turn_record_is_read_by_the_kind_that_wrote_it_whatever_it_says(self):
         """A Claude engineer's answer that quotes Codex's own events stays its answer: the run's start names
         each role's kind, and only that kind reads the role's record."""

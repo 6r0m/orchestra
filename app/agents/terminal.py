@@ -441,8 +441,12 @@ def run_turn(worktree, argv, rdir, name, prompt, timeout, env, on_tick=None, *, 
     env = dict(os.environ if env is None else env, **{TURN_EVENTS: paths["events"]})
     argv = adapter.wire(argv, paths["events"],
                         lambda label, source, events=paths["events"]: sink(events, label, source))
+    supplied = prompt
+    if hasattr(adapter, "prompt_input"):
+        supplied, extra = adapter.prompt_input(prompt, paths["prompt"])
+        env.update(extra)
     # Options such as `--add-dir` take several values; `--` keeps the prompt from becoming one of them.
-    argv += ["--", prompt]
+    argv += ["--", supplied]
 
     run_id = os.path.basename(os.path.normpath(rdir))
     role = stages.STAGE_ROLE[name.split("-")[0]]

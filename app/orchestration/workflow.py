@@ -107,6 +107,7 @@ class FeatureRun:
         self.timeline = []
         self.stopping = False
         self.conflict_reopens = True
+        self.configuration_revision = 0
 
     @workflow.run
     async def run(self, start):
@@ -619,6 +620,51 @@ class FeatureRun:
         s["status"] = "REJECTED" if workflow.cancellation_reason() == REJECT else "STOPPED"
         self._line(s["status"])
 
+    def _configuration(self):
+        policy = self.policy or {}
+        engineer = (policy.get("roles") or {}).get("engineer") or {}
+        return {"revision": self.configuration_revision, "timeout_seconds": policy.get("timeout_seconds"),
+                "engineer": {key: engineer[key] for key in ("agent", "kind", "brain", "model", "provider", "launcher")
+                             if key in engineer}}
+
+    @workflow.update
+    def use_engineer_defaults(self, request):
+        previous = self.policy["roles"]["engineer"]
+        engineer = dict(request["engineer"])
+        if "persona" in previous:
+            engineer["persona"] = previous["persona"]
+        changed_role = engineer != previous
+        changed = changed_role or request["timeout_seconds"] != self.policy["timeout_seconds"]
+        if changed:
+            self.policy = dict(self.policy, roles=dict(self.policy["roles"], engineer=engineer),
+                               timeout_seconds=request["timeout_seconds"])
+            if changed_role:
+                self.state["agent_sessions"] = {key: value for key, value in
+                    (self.state.get("agent_sessions") or {}).items() if key != "engineer"}
+            self.configuration_revision += 1
+            self._line("engineer uses %s (%s); turn limit %ds; %s; still waiting at %s" % (
+                engineer["agent"], engineer["kind"], request["timeout_seconds"],
+                "fresh engineer session next turn" if changed_role else "engineer session retained", self.stop["id"]))
+        return dict(self._configuration(), changed=changed)
+
+    @use_engineer_defaults.validator
+    def _validate_engineer_defaults(self, request):
+        if (not isinstance(request, dict) or self.stopping or self.stop is None or self.answer_given is not None or
+                request.get("stop") != self.stop["id"]):
+            raise ValueError("the run must still be waiting at the named stop")
+        if set(request) != {"stop", "revision", "engineer", "timeout_seconds"}:
+            raise ValueError("name only the stop, configuration revision, engineer and turn limit")
+        if type(request["revision"]) is not int or request["revision"] != self.configuration_revision:
+            raise ValueError("the run's configuration changed; read it again")
+        if type(request["timeout_seconds"]) is not int or request["timeout_seconds"] < 1:
+            raise ValueError("the turn limit must be a positive integer in seconds")
+        engineer = request["engineer"]
+        if (not isinstance(engineer, dict) or engineer.get("workspace_access") != P.ROLE_ACCESS["engineer"] or
+                not all(isinstance(engineer.get(key), str) and P.NAME.fullmatch(engineer[key]) for key in ("kind", "agent")) or
+                not isinstance(engineer.get("persona"), str) or
+                len(engineer["persona"].encode("utf-8")) > P.MAX_PERSONA_BYTES):
+            raise ValueError("the engineer must be a validated writing profile with its bounded persona")
+
     @workflow.update
     def answer(self, answer):
         self.answer_given = answer
@@ -645,7 +691,8 @@ class FeatureRun:
     def status(self):
         # Both queues the run needs: its target host's, and the one it runs on, its policy's own.
         return {"state": self.state, "stop": self.stop, "lines": self.lines, "timeline": self.timeline,
-                "queue": self.queue, "workflow_queue": workflow.info().task_queue}
+                "queue": self.queue, "workflow_queue": workflow.info().task_queue,
+                "configuration": self._configuration()}
 
 
 @workflow.defn

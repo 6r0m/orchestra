@@ -6,8 +6,9 @@ adds what each kind of agent says through its adapter: whether a profile's value
 whether it can run with the access its role's contract requires, and whether it takes skills.
 
 A run is handed its policy whole at its start (`run_policy`): each role's kind, its values, its access
-and its persona's text, and the skills of the stages its flow takes. It carries that copy, so nothing
-applied or edited later — settings, or a persona file — reaches a run already started.
+and its persona's text, and the skills of the stages its flow takes. Ordinary settings edits apply to
+new runs; an existing run adopts engineer defaults only through the explicit paused-run Update owned
+by the workflow.
 
 The Settings view reads the settings with their revision (`read`) and applies its changes to the local
 patch (`apply`): only where the settings came from the checkout's shared file, only against the revision

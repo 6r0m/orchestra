@@ -17,7 +17,7 @@ $hostTests = @(
     "tests.agents.test_pi", "tests.observability.test_generation_upload",
     "tests.observability.test_pricing", "tests.observability.test_accounting",
     "tests.application.test_stack", "tests.application.test_reload", "tests.application.test_activities", "tests.test_architecture", "tests.test_harness",
-    "tests.test_public_check"
+    "tests.test_public_check", "tests.interfaces.test_worker"
 )
 if (-not $Tests) { $Tests = $hostTests }
 

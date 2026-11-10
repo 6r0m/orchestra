@@ -267,6 +267,32 @@ async def start(client, task, repo=None, auto_proceed=False, settings_path=None,
                 raise
 
 
+async def use_engineer_defaults(client, run_id, settings, check=True):
+    """Explicitly adopt the current engineer profile and turn limit at a stop, without continuing it."""
+    S.check(settings)
+    selected = S.run_policy(settings)
+    current = await (readable_status(client, run_id) if check else status(client, run_id))
+    if current is None or current.get("stop") is None:
+        raise NotWaiting("the run must be waiting at an operator stop")
+    configuration = current.get("configuration")
+    if configuration is None:
+        raise Refusal("the workflow worker needs a graceful reload before it supports engineer changes")
+    if check:
+        await preflight(client, queues(current["workflow_queue"], current["queue"]))
+    request = {"stop": current["stop"]["id"], "revision": configuration["revision"],
+               "engineer": selected["roles"]["engineer"], "timeout_seconds": selected["timeout_seconds"]}
+    try:
+        return await client.get_workflow_handle(run_id).execute_update(
+            WF.FeatureRun.use_engineer_defaults, request,
+            id="engineer:%s:%s" % (request["stop"], request["revision"]))
+    except WorkflowUpdateFailedError as error:
+        raise NotAccepted(error.cause.message if error.cause else str(error)) from error
+    except RPCError as error:
+        if error.status == RPCStatusCode.NOT_FOUND:
+            raise NotWaiting("run %s has closed" % run_id) from error
+        raise
+
+
 async def answer(client, run_id, answer, check=True, only=None):
     """Answer the stop `run_id` waits at with `answer` (its action and fields); returns that stop.
 
@@ -481,6 +507,9 @@ async def history(client, run_id):
                         "stage": args["stage"], "role": stages.STAGE_ROLE.get(args["stage"]),
                         "episode": state.get("episode", 1), "round": state.get("round", 0) + 1,
                         "queued": at(event), "started": None, "ended": None, "status": "queued"}
+                    role = ((args.get("policy") or {}).get("roles") or {}).get(stages.STAGE_ROLE.get(args["stage"]))
+                    if role:
+                        attempts[event.event_id]["agent"] = {key: role[key] for key in ("agent", "kind", "brain") if key in role}
                     phase = args["state"].get("phase") or phase
                 elif attributes.activity_type.name in ("create_worktree", "reconcile", "open_run"):
                     steps[event.event_id] = attributes.activity_type.name

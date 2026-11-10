@@ -562,9 +562,15 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
             start = call(lambda client: runs.started(client, run_id))
             if start is None:
                 return HTTPStatus.NOT_FOUND, {"error": "no run %r" % run_id}
-            # The kind that wrote the turn's record reads it: the run's own, as its start names it — never
-            # whichever kind would take the record's words for its own.
+            # A profile can change at a stop. Each activity records its own agent; the start is the
+            # fallback for histories lacking that evidence, never the run's currently selected agent.
             role = ((start.get("policy") or {}).get("roles") or {}).get(stages.STAGE_ROLE[stage])
+            recorded = call(lambda client: runs.history(client, run_id))
+            for attempt in reversed((recorded or {}).get("attempts", [])):
+                if (attempt["stage"] == stage and attempt["episode"] == int(episode) and
+                        attempt["round"] == int(round_number) and attempt.get("agent")):
+                    role = attempt["agent"]
+                    break
             try:
                 kind = adapters.for_role(role) if role else None
             except adapters.Refused:

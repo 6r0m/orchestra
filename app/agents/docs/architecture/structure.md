@@ -43,8 +43,8 @@ runs when, which is [orchestration](../../../orchestration/README.md). Any repos
 This package's relationships are drawn once, in [the main view](diagrams/main.md).
 
 Through the vendor CLI's own argv and its session store: a turn is that CLI started again
-with the role's session resumed by exact id and the prompt as its last argument. No shell
-sits between, so no task text is ever parsed as shell syntax. A prompt past `nodes.PROMPT_BUDGET` has its
+with the role's session resumed by exact id and the prompt delivered through its adapter. Orchestra
+passes argv directly; a managed launcher may use its own platform wrapper. A prompt past `nodes.PROMPT_BUDGET` has its
 longest parts — never the skill or the stage's ask — attached as files in the run's folder, each named in its
 place; a kind that reads outside the worktree only where it is told to is told that folder (`readable`) — Claude
 by a rule allowing reads there, never as a working directory, which would keep its shell's `cd` into the folder
@@ -68,6 +68,13 @@ Settings shows a role the words of the kind chosen for it.
 
 The Pi adapter requires Pi 1.1.0 or newer, whose final settlement reports whether the run was aborted.
 The bridge refuses older or unrecognizable releases before work; missing abort status never means success.
+Pi receives a one-line input token on argv. Its native input extension restores the complete recorded
+UTF-8 prompt before skill expansion or model work, preserving multiline text across Windows batch wrappers.
+Skill invocations retain Pi's literal-space separator before their multiline arguments.
+The bridge records that delivered text; completion still requires an exact controller prompt and native
+successful settlement in the same session. Missing transport data or a wrong initial token refuses before
+work. The transport is consumed once, so later operator inputs remain ordinary steering. Other agent
+processes inherit neither the prompt path nor its token.
 Pi profiles select their provider, model and thinking level. Their optional launcher names a managed
 wrapper instead of the default executable; preparation checks the same program that will run. Credentials
 stay with Pi's native authentication store or the worker's environment. Orchestra neither copies them nor

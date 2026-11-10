@@ -72,19 +72,22 @@ async def main(target):
         change.bind(client, asyncio.get_running_loop())
         queue = P.queue(policy, target)
         host = activities.Activities()
-        # Role-runs are sequential by policy; the pool only keeps a long one from blocking the trace writes.
+        # Runs sequence their own roles; different runs share this pool. Admit work only when a thread
+        # can execute it, so overflow cannot lose its heartbeat while still waiting for a thread.
+        activity_slots = 8
         # An update adds no practical shorter deadline than an activity's own. The public SDK's
         # duration, rather than module reload or cancellation suppression, keeps the running code intact.
         workers = [Worker(client, task_queue=queue, activities=host.all(),
                           graceful_shutdown_timeout=datetime.timedelta.max,
-                          activity_executor=concurrent.futures.ThreadPoolExecutor(max_workers=8))]
+                          max_concurrent_activities=activity_slots,
+                          activity_executor=concurrent.futures.ThreadPoolExecutor(max_workers=activity_slots))]
         if target == runs.WORKFLOW_HOST:
             workers.append(Worker(client, task_queue=P.workflow_queue(policy),
                                   graceful_shutdown_timeout=datetime.timedelta.max,
                                   workflows=[WF.FeatureRun, WF.WorktreeView, WF.ReviewDiff, WF.RemoveWorktree]))
         # Where its stages' settings go, which is where the sweep after its stop must look.
-        print("worker for %s polling %s; stage settings under %s" % (
-            target, ", ".join(name for name, _ in stack.worker_queues(policy, target)), tempfile.gettempdir()),
+        print("worker for %s polling %s; activity slots %d; stage settings under %s" % (
+            target, ", ".join(name for name, _ in stack.worker_queues(policy, target)), activity_slots, tempfile.gettempdir()),
             flush=True)
         stack.drain_ready(record, os.getpid())
         await asyncio.gather(*(worker.run() for worker in workers), drain(workers, record))

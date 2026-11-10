@@ -13,6 +13,7 @@ from unittest import mock
 from app.agents import adapters
 from app.agents import terminal
 from app.agents import launch
+from app.agents import nodes
 
 
 class PiContract(unittest.TestCase):
@@ -44,6 +45,15 @@ class PiContract(unittest.TestCase):
             for session in (None, "/session.jsonl"):
                 argv, _ = self.pi.command({"workspace_access": access}, session)
                 self.assertFalse({"--approve", "-a", "--no-approve", "-na"} & set(argv))
+
+    def test_multiline_skill_arguments_keep_the_native_literal_space_separator(self):
+        prompt = nodes.render([{"part": "skill", "text": adapters.skill(self.pi, "method") + "\n"},
+                               {"part": "instructions", "text": "Complete the stage\nwith its full tail"}])
+        # Pi extracts its skill name up to the first literal space, rather than any whitespace.
+        command, separator, arguments = prompt.partition(" ")
+        self.assertEqual(command, "/skill:method")
+        self.assertEqual(separator, " ")
+        self.assertIn("Complete the stage\nwith its full tail", arguments)
 
     def test_an_unknown_projects_trust_dialog_is_reported_without_answering_it(self):
         dialog = "Trust project folder?\n/path/to/repo\n\nThis allows pi to load .pi settings and resources, " \
@@ -171,7 +181,7 @@ class PiContract(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("node"), "Pi's extension bridge requires Node")
 class PiBridge(unittest.TestCase):
-    def run_bridge(self, script, folder, expected=None, version="1.1.0"):
+    def run_bridge(self, script, folder, expected=None, version="1.1.0", environ=None):
         pi = adapters.load("pi")
         setup = """
 import fs from 'node:fs';
@@ -193,9 +203,81 @@ const ctx = {sessionManager: {getSessionId: () => 's', getSessionFile: () => pro
 """
         return subprocess.run([shutil.which("node"), "--experimental-vm-modules", "--input-type=module", "-e", setup + script,
                                __import__("pathlib").Path(pi.BRIDGE).as_uri()],
-                              env=dict(os.environ, ORCHESTRA_TURN_EVENTS=os.path.join(folder, "events"),
-                                       EXPECTED_SESSION=expected or "", SESSION_FILE=expected or "/s.jsonl", PI_TEST_VERSION=version),
+                              env={**os.environ, "ORCHESTRA_TURN_EVENTS": os.path.join(folder, "events"),
+                                   "EXPECTED_SESSION": expected or "", "SESSION_FILE": expected or "/s.jsonl",
+                                   "PI_TEST_VERSION": version, **(environ or {})},
                               capture_output=True, text=True, timeout=15)
+
+    def test_multiline_prompt_survives_a_launcher_that_passes_only_its_first_line(self):
+        pi = adapters.load("pi")
+        prompt = '/skill:method\nRead the whole task, including "quotes", %VARIABLE% and &.\nUnicode: \u2713\n'
+        with tempfile.TemporaryDirectory(prefix="pi prompt ") as folder:
+            term = mock.Mock()
+            observed = {}
+
+            def started(argv, cwd, env):
+                supplied = argv[-1].splitlines()[0]
+                script = """
+const typed = %s;
+const result = events.input({text:typed,source:'interactive'},ctx);
+const actual = result?.action === 'transform' ? result.text : typed;
+events.message_end({message:{role:'assistant',content:[{type:'text',text:actual}],stopReason:'stop'}},ctx);
+events.agent_settled({aborted:false},ctx);
+""" % json.dumps(supplied)
+                child = self.run_bridge(script, folder, environ=env)
+                self.assertEqual(child.returncode, 0, child.stderr)
+                observed.update(argv=argv, env=env)
+                return type("Agent", (), {"output": bytearray(), "heard": time.monotonic(),
+                    "pump": mock.Mock(), "returncode": lambda self: None})()
+
+            term.start.side_effect = started
+            which = shutil.which
+            with mock.patch.object(terminal, "open_terminal", return_value=term), \
+                    mock.patch.object(terminal.shutil, "which", side_effect=lambda name: "pi" if name == "pi" else which(name)), \
+                    mock.patch.object(terminal, "TICK_SECONDS", 0.01):
+                rc, out = terminal.run_turn(folder, ["pi", "--session-id", "s"], folder, "build-e1-1",
+                                           prompt, 0.15, {}, on_tick=lambda: None, kind="pi")
+            self.assertEqual((rc, pi.final_message(out)), (0, prompt))
+            self.assertNotIn(prompt, observed["argv"])
+            self.assertNotIn("\n", observed["argv"][-1])
+            path = terminal.turn_files(folder, "build-e1-1")["prompt"]
+            self.assertNotIn(path, observed["argv"])
+            with open(path, encoding="utf-8", newline="") as stream:
+                self.assertEqual(stream.read(), prompt)
+
+    def test_prompt_transport_refuses_missing_files_incomplete_parameters_and_wrong_input_before_work(self):
+        for case in ("missing-file", "missing-token", "missing-path", "wrong-input", "empty-file"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as folder:
+                path = os.path.join(folder, "prompt.txt")
+                original = "" if case == "empty-file" else "controller task\nwith its full tail"
+                if case != "missing-file":
+                    with open(path, "w", encoding="utf-8", newline="") as stream:
+                        stream.write(original)
+                env = {"ORCHESTRA_PI_PROMPT_FILE": path, "ORCHESTRA_PI_INPUT_TOKEN": "expected-input"}
+                if case == "missing-token":
+                    env.pop("ORCHESTRA_PI_INPUT_TOKEN")
+                if case == "missing-path":
+                    env.pop("ORCHESTRA_PI_PROMPT_FILE")
+                result = self.run_bridge("events.input({text:'wrong-input',source:'interactive'},ctx);", folder, environ=env)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(os.path.exists(os.path.join(folder, "events")), "refusal cannot record a begun turn")
+                if os.path.exists(path):
+                    with open(path, encoding="utf-8", newline="") as stream:
+                        self.assertEqual(stream.read(), original)
+
+    def test_transport_applies_once_and_operator_followups_remain_ordinary_inputs(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "prompt.txt")
+            with open(path, "w", encoding="utf-8", newline="") as stream:
+                stream.write("controller task\ncomplete")
+            result = self.run_bridge("""
+const restored = events.input({text:'expected-input',source:'interactive'},ctx);
+if (restored?.action !== 'transform' || restored.text !== 'controller task\\ncomplete') process.exit(8);
+if (events.input({text:'operator followup',source:'interactive'},ctx) !== undefined) process.exit(9);
+""", folder, environ={"ORCHESTRA_PI_PROMPT_FILE": path, "ORCHESTRA_PI_INPUT_TOKEN": "expected-input"})
+            self.assertEqual(result.returncode, 0, result.stderr)
+            events = terminal._events(os.path.join(folder, "events"))
+            self.assertEqual([event["prompt"] for event in events], ["controller task\ncomplete", "operator followup"])
 
     def test_aborted_settlement_after_a_tool_call_skips_before_settle_and_cannot_complete(self):
         with tempfile.TemporaryDirectory() as folder:

@@ -27,6 +27,11 @@ print, serve and exit. The page holds no state of its own.
 | `workbench/static/` | the page itself: HTML, CSS, its JavaScript as native modules — the stack, runs, new-run form, Settings, terminals, the history as turns and answers, the change and its file-by-file diff viewer, worktrees, agent text drawn as Markdown, and `app.js` their entry — and a pinned xterm.js and markdown-it |
 | `workbench/orchestra-workbench.service` | the systemd user unit the page runs as, rendered for a checkout by `make workbench-install` |
 
+Each run sequences its own roles, while separate runs can execute concurrently. The host worker's
+Temporal activity admission matches its executor capacity. Overflow stays in Temporal's queue until
+a slot is free, before its execution and heartbeat clocks begin; it never waits in a second queue
+behind occupied executor threads. Workflow polling is separate, so operator controls remain available.
+
 ## Relationships
 
 This package's relationships are drawn once, in [the main view](diagrams/main.md).

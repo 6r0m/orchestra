@@ -11,6 +11,21 @@ export default function (pi) {
     process.exit(1);
   }
   let last = null;
+  const promptFile = process.env.ORCHESTRA_PI_PROMPT_FILE;
+  const inputToken = process.env.ORCHESTRA_PI_INPUT_TOKEN;
+  let controllerPrompt = null;
+  let awaitingController = Boolean(inputToken);
+  try {
+    if (Boolean(promptFile) !== Boolean(inputToken)) throw new Error("incomplete prompt transport");
+    if (promptFile) {
+      if (!fs.lstatSync(promptFile).isFile()) throw new Error("not a prompt file");
+      controllerPrompt = fs.readFileSync(promptFile, "utf8");
+      if (!controllerPrompt.trim()) throw new Error("empty prompt");
+    }
+  } catch {
+    process.stderr.write("Pi could not load the controller prompt before work\n");
+    process.exit(1);
+  }
   pi.registerFlag("orchestra-resume-session", {type: "string", description: "The exact session the controller resumes"});
   function emit(hook, ctx, fields = {}) {
     const file = process.env.ORCHESTRA_TURN_EVENTS;
@@ -53,8 +68,18 @@ export default function (pi) {
     }
   });
   pi.on("input", (event, ctx) => {
+    let text = event.text;
+    if (awaitingController) {
+      if (text !== inputToken) {
+        process.stderr.write("Pi did not receive the controller input token before work\n");
+        process.exit(1);
+      }
+      awaitingController = false;
+      text = controllerPrompt;
+    }
     last = null;
-    emit("PiInput", ctx, {prompt: event.text, source: event.source});
+    emit("PiInput", ctx, {prompt: text, source: event.source});
+    if (text !== event.text) return {action: "transform", text};
   });
   pi.on("message_end", (event, ctx) => {
     if (event.message.role !== "assistant") return;
