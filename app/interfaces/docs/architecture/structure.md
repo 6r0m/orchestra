@@ -90,13 +90,24 @@ when the decision above moves on; nothing else of it is read again.
 
 ## Invariants
 
+Terminal replay is paced by xterm's write-completion callback, including when an older worker sends
+its entire record in one frame. The browser counts parsed bytes rather than enqueued bytes and finishes
+pending writes before reconnecting, so it neither skips unseen output nor draws it twice. Updated workers
+also support bounded reads from that confirmed cursor. A large replay shows catch-up progress rather than
+claiming the visible terminal has reached the live output. Small redraw frames share bounded renderer
+writes, so replay does not schedule a separate callback for every old animation frame. Renderer or cursor
+errors remain visible.
+
+The run and rail distinguish a worker's update notice from a down-worker warning. The update notice
+explains that current work continues while new steps wait for the replacement.
+
 - **Nothing imports an entry point**, enforced by `tests/test_architecture.py`. That is what keeps argparse and console output out of the worker and the workbench.
 - **The workbench holds no authoritative state (D29).** Reads are Temporal's, a worker's, the stack owner's or the optional Langfuse recorded-cost projection (D20). Its caches are disposable. Every write goes through `client` or `stack`; money never affects run decisions.
 - **The workbench never manages its own process (D32).** Systemd runs it; it starts and stops the stack, and the stack never includes it.
 - **A stop's answers are the ones it publishes (D6).** The page and the command line offer exactly the actions a stop publishes; the page owns their labels, colours and dialogs, the command line their shorthands and how each is typed, and neither keeps its own list.
 - **Everything listens on `127.0.0.1`**, and the API and the terminal sockets accept only the page's token, from the page's own origin. The terminal sockets take that token in the handshake's own header, never in a URL.
 - **Agent text reaches the page as terminal bytes or as text, never as markup** — a file's lines in the diff viewer too. What an agent writes in Markdown is drawn as Markdown all the same: the vendored markdown-it only parses it, with raw HTML off, and the page's `markdown.js` makes from its tokens only the elements it knows, every word set as text. A link opens only over http(s); any other is its words, its target on hover; an image is its words, so nothing agent text names is loaded. What is copied, a failure, an exact prompt and a raw record stay as written.
-- **The page sends an agent only what the operator types and presses (D17).** A terminal emulator answers the queries in what it draws, and the page's draws a role's record from its start on every connection — the questions an agent's CLI asked its terminal as it started among them. Those answers are no key of the operator's and are never sent: they would land in the agent's own prompt as text, ahead of what the operator types there. An answer is known by its bytes alone, and a cursor's report from the top row is spelled exactly as F3 held with Shift, Alt or Ctrl is — so those chords are not sent either: a clean prompt is chosen over them.
+- **The page sends an agent only what the operator types and presses (D17).** A terminal emulator answers the queries in what it draws, including questions recorded when an agent's CLI started. Those answers are no key of the operator's and are never sent: they would land in the agent's own prompt as text, ahead of what the operator types there. An answer is known by its bytes alone, and a cursor's report from the top row is spelled exactly as F3 held with Shift, Alt or Ctrl is — so those chords are not sent either: a clean prompt is chosen over them. Binary read and resize controls are never agent keystrokes.
 
 ## Accepted decisions
 

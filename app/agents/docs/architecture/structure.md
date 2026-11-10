@@ -52,6 +52,14 @@ and move the turn out of its worktree. Every kind draws on its terminal's normal
 the terminal's scrollback: Codex is started with `--no-alt-screen`, since its default alternate screen keeps no
 scrollback and takes every mouse event.
 
+The terminal record remains the source of output for every viewer. The browser's negotiated streaming
+protocol requests one bounded byte range at a time and advances its cursor only after xterm parses it.
+A reconnect resumes that confirmed cursor. Slow viewers hold no growing output queue in the worker and
+never pause the agent; new output is already in the record before viewers are notified. State, keyboard
+input and resize controls remain responsive while a viewer catches up. Invalid cursors refuse without
+typing, resizing or changing the record. Closing a terminal lets streaming viewers finish its remaining
+record before their connection closes. The previous push protocol remains available to older clients.
+
 Through the run's settings snapshot: `nodes` appends an optional operator prompt addition for
 each role after the normal budget when extended rounds remain, and at the final budgeted
 iteration. The code-owned reflection and handoff instructions remain in force when an addition

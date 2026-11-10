@@ -215,6 +215,7 @@ def view(listed, status, health):
     working = {} if closed or stop else (state.get("current") or {})
     stack_hosts = {row["queue"]: row["host"] for row in health["queues"]}
     needed = [queue for queue in (listed.get("task_queue"), (status or {}).get("queue")) if queue in stack_hosts]
+    draining = {part["name"] for part in health.get("components", []) if part["state"] == "draining"}
     return {"run_id": listed["run_id"], "execution": listed["execution"], "started": listed["started"],
             "closed": listed["closed"], "goal": state.get("task"), "repo": state.get("repo"),
             "host": state.get("target"), "worktree": state.get("worktree_path"), "state": kind,
@@ -226,7 +227,10 @@ def view(listed, status, health):
                                   to=recipient(stop)),
             "failure": stop["feedback"] if kind == "failed" else None,
             "blocked_by": [] if closed else sorted({stack_hosts[queue] for queue in needed
-                                                    if health["hosts"].get(stack_hosts[queue]) == "down"}),
+                                                    if health["hosts"].get(stack_hosts[queue]) == "down"
+                                                    and stack_hosts[queue] not in draining}),
+            "draining_by": [] if closed else sorted({stack_hosts[queue] for queue in needed
+                                                     if stack_hosts[queue] in draining}),
             "actions": list(stop["actions"]) if stop and not closed else []}
 
 

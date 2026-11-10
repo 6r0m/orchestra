@@ -64,6 +64,8 @@ HALT_SECONDS = 120
 # The page's subprotocol. The token is offered beside it, in the handshake's own header, so it
 # never appears in a URL the browser prints to its console or a proxy writes to a log.
 PROTOCOL = "workbench.v1"
+STREAM_PROTOCOL = "workbench.v2"
+STREAM_CHUNK = 65536
 TOKEN_PROTOCOL = "token."
 # A turn tried again in a fresh session, its first one lost, keeps its files under its name and this.
 RETRIED = "-rehydrated"
@@ -249,12 +251,15 @@ class Terminal:
         for deliver in viewers:
             deliver(state)
 
-    def attach(self, deliver):
-        """The record so far, and every later byte to `deliver`, with nothing lost or repeated between them."""
+    def attach(self, deliver, *, replay=True):
+        """Subscribe before optionally taking the record's snapshot; streaming viewers only need notifications."""
         with self.lock:
             try:
-                with open(self.path, "rb") as fh:
-                    backlog = fh.read()
+                if replay:
+                    with open(self.path, "rb") as fh:
+                        backlog = fh.read()
+                else:
+                    backlog = b""
             except FileNotFoundError:
                 backlog = b""
             self.viewers.append(deliver)
@@ -594,12 +599,116 @@ def serve(port, workbench_port, host="127.0.0.1", feeds=None):
             except ConnectionClosed:
                 return
 
+    async def stream(connection, run_id, role, terminal):
+        # The record owns the bytes. A slow viewer holds one bounded read, never a growing output queue
+        # and never backpressure on the agent. A confirmed cursor also makes reconnects inexpensive.
+        loop, wake = asyncio.get_running_loop(), asyncio.Event()
+        closed, pending, expected_cursor = terminal is None, None, None
+        path = record_path(run_id, role)
+
+        def changed(ended):
+            nonlocal closed
+            if ended:
+                closed = True
+            wake.set()
+
+        def deliver(data):
+            loop.call_soon_threadsafe(changed, data is None)
+
+        def state():
+            return terminal.state() if terminal is not None else json.dumps({"live": False})
+
+        if terminal is not None:
+            terminal.attach(deliver, replay=False)
+
+        async def send():
+            nonlocal pending, expected_cursor
+            previous = None
+            while True:
+                wake.clear()
+                current = state()
+                if current != previous:
+                    if previous is None:
+                        first = json.loads(current)
+                        try:
+                            first["replay"] = os.path.getsize(path)
+                        except FileNotFoundError:
+                            first["replay"] = 0
+                        await connection.send(json.dumps(first))
+                    else:
+                        await connection.send(current)
+                    previous = current
+                if pending is not None:
+                    try:
+                        with open(path, "rb") as record:
+                            if pending > os.fstat(record.fileno()).st_size:
+                                await connection.close(1008, "terminal record changed")
+                                return
+                            record.seek(pending)
+                            data = record.read(STREAM_CHUNK)
+                    except FileNotFoundError:
+                        if pending:
+                            await connection.close(1008, "terminal record changed")
+                            return
+                        data = b""
+                    if data:
+                        expected_cursor = pending + len(data)
+                        pending = None
+                        await connection.send(data)
+                    elif closed:
+                        await connection.close()
+                        return
+                await wake.wait()
+
+        async def safely_send():
+            try:
+                await send()
+            except ConnectionClosed:
+                pass
+            except OSError as exc:
+                print("terminal record of run %s could not be read: %r" % (run_id, exc), file=sys.stderr, flush=True)
+                await connection.close(1011, "terminal record could not be read")
+
+        sender = asyncio.create_task(safely_send())
+        try:
+            async for message in connection:
+                if isinstance(message, str):
+                    if terminal is not None:
+                        terminal.type(message.encode("utf-8"))
+                    continue
+                try:
+                    control = json.loads(message.decode("utf-8"))
+                    if isinstance(control, dict) and "read" in control:
+                        cursor = control["read"]
+                        try:
+                            length = os.path.getsize(path)
+                        except FileNotFoundError:
+                            length = 0
+                        if (set(control) != {"read"} or type(cursor) is not int or cursor < 0 or cursor > length
+                                or pending is not None or (expected_cursor is not None and cursor != expected_cursor)):
+                            await connection.close(1008, "invalid terminal cursor")
+                            return
+                        pending = cursor
+                        wake.set()
+                    elif terminal is not None:
+                        terminal.resize(control["rows"])
+                except (ValueError, KeyError, TypeError):
+                    await connection.close(1008, "invalid terminal control")
+                    return
+        finally:
+            sender.cancel()
+            await asyncio.gather(sender, return_exceptions=True)
+            if terminal is not None:
+                terminal.detach(deliver)
+
     async def handler(connection):
         parsed = urllib.parse.urlsplit(connection.request.path)
         run_id, role = [part for part in parsed.path.split("/") if part]
         if role in feeds:
             return await follow(connection, run_id, role)
         terminal = get(run_id, role)
+        if connection.subprotocol == STREAM_PROTOCOL:
+            return await stream(connection, run_id, role, terminal)
         if terminal is None:
             await connection.send(json.dumps({"live": False}))
             try:
@@ -651,6 +760,7 @@ def serve(port, workbench_port, host="127.0.0.1", feeds=None):
                 server = await ws_serve(handler, host, port, process_request=check, max_size=2 ** 20,
                                         # Answer with the page's own subprotocol, never the token beside it.
                                         select_subprotocol=lambda connection, offered:
+                                        STREAM_PROTOCOL if STREAM_PROTOCOL in offered else
                                         PROTOCOL if PROTOCOL in offered else None)
             except OSError as exc:
                 failure.append(exc)

@@ -190,6 +190,11 @@ answers and the page therefore does not send. What you read in one is
 never drawn again under you: after its worker restarts it keeps its record until its role's next turn,
 which it then adds to. A terminal holds the whole session, including whatever you typed during a turn.
 
+Large terminal histories show catch-up progress while replaying, then live output. Reconnecting keeps
+the output already drawn. A worker marked *draining* is updating: its current work continues, and new
+steps wait for its replacement. This is an update notice, not a down-worker warning. An agent command
+that pipes its output through `tail` can still stay quiet until that command finishes.
+
 If a role loses track of its instructions, Pause it and ask it to re-read the applicable `AGENTS.md`,
 its current stage's skill and the approved todo, inspect the existing diff and verification evidence,
 then continue the current stage while preserving completed work. The latest controller prompt is

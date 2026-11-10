@@ -698,6 +698,17 @@ class View(unittest.TestCase):
         self.assertEqual(runs.view(self.listed(), on_windows, reading)["blocked_by"], ["windows"])
         self.assertEqual(runs.view(self.listed(), on_wsl, reading)["blocked_by"], [])
 
+    def test_draining_is_an_update_notice_not_a_claim_that_current_work_is_down(self):
+        reading = dict(self.READING, hosts={"wsl": "up", "windows": "down"},
+                       components=[{"name": "windows", "state": "draining"}])
+        status = {"state": {"current": {"stage": "build", "role": "engineer"}},
+                  "stop": None, "queue": "target:windows:local"}
+        shown = runs.view(self.listed(), status, reading)
+        self.assertEqual(shown["blocked_by"], [])
+        self.assertEqual(shown["draining_by"], ["windows"])
+        self.assertEqual(shown["role"], "engineer")
+        self.assertEqual(reading["hosts"]["windows"], "down", "new activity admission remains unavailable")
+
     def test_a_run_whose_status_cannot_be_read_is_blocked_by_the_worker_its_listing_names(self):
         self.assertEqual(runs.view(self.listed(), None, self.READING)["blocked_by"], ["wsl"],
                          "a query needs the workflow worker; the listing still says which queue it runs on")

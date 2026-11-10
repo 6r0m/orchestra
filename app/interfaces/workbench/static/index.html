@@ -277,7 +277,7 @@
         <ol class="score" id="run-score" aria-label="Its flow"></ol>
         <p class="now" id="run-now"></p>
         <div class="notice bad" id="run-blocked" hidden>
-          <p id="run-blocked-said"></p>
+          <p id="run-blocked-said" role="status"></p>
           <div class="actions" id="run-blocked-actions"></div>
           <p class="result" id="run-blocked-result" role="status"></p>
         </div>
@@ -327,11 +327,11 @@
       <section class="agents" id="agents" aria-labelledby="agents-title">
         <h2 id="agents-title">Terminals</h2>
         <details class="terminal" id="terminal-engineer" data-role="engineer">
-          <summary><span class="role engineer">engineer</span><span class="term-state" id="state-engineer"></span><button type="button" class="term-size" id="size-engineer">Maximize</button></summary>
+          <summary><span class="role engineer">engineer</span><span class="term-state" id="state-engineer" role="status"></span><button type="button" class="term-size" id="size-engineer">Maximize</button></summary>
           <div class="term" id="term-engineer"></div>
         </details>
         <details class="terminal" id="terminal-architect" data-role="architect">
-          <summary><span class="role architect">architect</span><span class="term-state" id="state-architect"></span><button type="button" class="term-size" id="size-architect">Maximize</button></summary>
+          <summary><span class="role architect">architect</span><span class="term-state" id="state-architect" role="status"></span><button type="button" class="term-size" id="size-architect">Maximize</button></summary>
           <div class="term" id="term-architect"></div>
         </details>
       </section>

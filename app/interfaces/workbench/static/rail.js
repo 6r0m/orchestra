@@ -2,7 +2,7 @@
 // rejected, each a link that opens it; older closed runs a page at a time.
 
 import { api } from "./api.js";
-import { $, blockedBy, clock, el, headline, unchanged } from "./ui.js";
+import { $, blockedBy, clock, drainingBy, el, headline, unchanged } from "./ui.js";
 
 // The older runs the operator has asked for, and where the next page of them starts.
 let older = [];
@@ -110,6 +110,8 @@ function row(run) {
   link.appendChild(branch);
   const blocked = blockedBy(run);
   if (blocked.length) link.appendChild(el("span", "Blocked: " + blocked.join(", "), "row-blocked"));
+  const updating = drainingBy(run);
+  if (updating.length) link.appendChild(el("span", "Updating: " + updating.join(", "), "row-meta"));
   const item = el("li");
   item.appendChild(link);
   return item;

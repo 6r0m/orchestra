@@ -38,6 +38,8 @@ const SIZE_MARK = 5379;
 const LARGEST = 18;
 const MAXIMIZE = "Fill the window with this terminal: the agent's terminal takes as many rows as fit";
 const RESTORE = "Put this terminal back in its place on the page, at its usual rows";
+const WRITE_CHUNK = 65536;
+const STREAM_PROTOCOL = "workbench.v2";
 
 for (const role of ROLES) {
   const box = $("terminal-" + role);
@@ -227,10 +229,11 @@ function make(role) {
       resolve(true);
     }, 0);
   }));
-  // `shown` counts the record's bytes on screen: every connection streams the record from its start, and
-  // the record only grows, so a connection made again skips what is shown and adds only what is new. `size` is
-  // the worker's, as it last said — none from a worker that takes no size.
-  const entry = { runId: run.id, term: term, socket: null, timer: null, live: false, shown: 0, skip: 0, size: null };
+  // `shown` counts parsed record bytes: streaming workers resume there, and legacy replay skips them.
+  // `size` is the worker's, as it last said — none from a worker that takes no size.
+  const entry = { runId: run.id, term: term, socket: null, timer: null, live: false, shown: 0, skip: 0, size: null,
+    writing: Promise.resolve(), buffer: [], rendering: false, pending: 0,
+    connecting: false, failed: false, catchingUp: false, replayUntil: 0 };
   terminals[role] = entry;
   fit(role);
   // The agent is sent what the operator types and presses, and never this terminal's own answers.
@@ -242,22 +245,92 @@ function make(role) {
 }
 
 function say(role, entry) {
-  $("state-" + role).textContent = entry.live ? "live: Esc interrupts it, and typing reaches it"
+  const remaining = Math.max(entry.pending, entry.replayUntil - entry.shown);
+  const text = entry.failed ? "terminal display failed; reload this page"
+    : entry.catchingUp || remaining > WRITE_CHUNK * 4
+      ? "catching up terminal output… " + Math.max(1, Math.ceil(remaining / 1048576)).toLocaleString() + "\u00a0MB remaining"
+    : entry.live ? "live: Esc interrupts it, and typing reaches it"
     : active ? "recorded, until its next turn" : "recorded";
+  if ($("state-" + role).textContent !== text) $("state-" + role).textContent = text;
+}
+
+function draw(role, entry, data) {
+  entry.buffer.push(data);
+  entry.pending += data.length;
+  if (entry.pending > WRITE_CHUNK * 4) entry.catchingUp = true;
+  say(role, entry);
+  if (entry.rendering) return entry.writing;
+  entry.rendering = true;
+  const parsed = Promise.resolve().then(async () => {
+    let head = 0;
+    while (entry.pending) {
+      if (terminals[role] !== entry || entry.failed) return;
+      // A CLI's redraw can arrive as thousands of tiny frames. Join them before asking xterm to parse,
+      // so its scheduled write callbacks cost one per bounded chunk rather than one per frame.
+      const length = Math.min(WRITE_CHUNK, entry.pending);
+      const part = new Uint8Array(length);
+      let filled = 0;
+      while (filled < length) {
+        const first = entry.buffer[head];
+        const take = Math.min(first.length, length - filled);
+        part.set(first.subarray(0, take), filled);
+        filled += take;
+        if (take === first.length) entry.buffer[head++] = null;
+        else entry.buffer[head] = first.subarray(take);
+      }
+      await new Promise((resolve) => entry.term.write(part, resolve));
+      if (terminals[role] !== entry) return;
+      // Only parsed bytes may be skipped or acknowledged after reconnecting.
+      entry.shown += part.length;
+      entry.pending -= part.length;
+      if (!entry.pending && entry.shown >= entry.replayUntil) entry.catchingUp = false;
+      say(role, entry);
+    }
+    entry.buffer.length = 0;
+  });
+  entry.writing = parsed.catch((error) => {
+    entry.failed = true;
+    console.error("Terminal rendering failed", error);
+    if (entry.socket) entry.socket.close();
+    say(role, entry);
+  }).finally(() => {
+    entry.rendering = false;
+  });
+  return entry.writing;
 }
 
 function connect(role, entry, target) {
+  if (entry.failed || entry.connecting || terminals[role] !== entry) return;
+  if (entry.pending) {
+    entry.connecting = true;
+    entry.writing.then(() => {
+      entry.connecting = false;
+      if (!entry.socket) connect(role, entry, target);
+    });
+    return;
+  }
   const port = CONFIG.terminal_ports[target];
   // The workers listen on the IPv4 loopback only, whatever name the page was opened by.
   const url = "ws://127.0.0.1:" + port + "/" + encodeURIComponent(entry.runId) + "/" + role;
   // The token travels as a subprotocol, in the handshake's own header: a URL is printed to the
   // browser's console on every failed connection and written to logs.
-  const socket = new WebSocket(url, ["workbench.v1", "token." + CONFIG.token]);
+  const socket = new WebSocket(url, [STREAM_PROTOCOL, "workbench.v1", "token." + CONFIG.token]);
   socket.binaryType = "arraybuffer";
   entry.socket = socket;
   entry.skip = entry.shown;
+  const read = () => {
+    if (!entry.failed && entry.socket === socket && socket.readyState === WebSocket.OPEN)
+      socket.send(new TextEncoder().encode(JSON.stringify({ read: entry.shown })));
+  };
+  socket.onopen = () => {
+    if (socket.protocol === STREAM_PROTOCOL) {
+      entry.skip = 0;
+      read();
+    }
+  };
   if (!entry.shown) $("state-" + role).textContent = "connecting…";
   socket.onmessage = (event) => {
+    if (terminals[role] !== entry || entry.socket !== socket || entry.failed) return;
     if (typeof event.data === "string") {
       // The first state comes before the record; each later one says an agent started or ended, or the size
       // changed. A terminal maximized here before its worker said its size asks for its rows now.
@@ -265,6 +338,8 @@ function connect(role, entry, target) {
       entry.live = state.live;
       const first = !entry.size && state.size;
       entry.size = state.size || null;
+      if (Number.isSafeInteger(state.replay) && state.replay >= 0) entry.replayUntil = state.replay;
+      if (entry.replayUntil - entry.shown > WRITE_CHUNK * 4) entry.catchingUp = true;
       say(role, entry);
       if (first) ask(role, fitting(role));
       return;
@@ -276,21 +351,23 @@ function connect(role, entry, target) {
       data = data.subarray(seen);
     }
     if (!data.length) return;
-    entry.term.write(data);
-    entry.shown += data.length;
+    draw(role, entry, data).then(() => {
+      if (socket.protocol === STREAM_PROTOCOL) read();
+    });
   };
-  socket.onclose = () => {
-    if (terminals[role] !== entry) return;
+  socket.onclose = (event) => {
+    if (terminals[role] !== entry || entry.socket !== socket) return;
     const wasLive = entry.live;
     entry.live = false;
     entry.socket = null;
     // The next worker says its size again — or, older, says none and is asked nothing: one that does not name it
     // would take a size's frame for keys.
     entry.size = null;
+    if (event.code === 1008) entry.failed = true;
     // A live terminal that drops is its worker gone mid-turn: tried again shortly. One that was only its
     // record — the worker holds no terminal for the role until its next turn — stays as it is, and is
     // connected again once the run reads that role at work, or moves on.
-    if (wasLive) {
+    if (wasLive && !entry.failed) {
       $("state-" + role).textContent = "disconnected, trying again…";
       entry.timer = setTimeout(() => {
         entry.timer = null;

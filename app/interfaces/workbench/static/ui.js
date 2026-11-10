@@ -251,6 +251,10 @@ export function blockedBy(view) {
   return view.blocked_by.map((host) => "the " + (PARTS[host] || host) + " is down");
 }
 
+export function drainingBy(view) {
+  return (view.draining_by || []).map((host) => PARTS[host] || host);
+}
+
 // ---- a flow ---------------------------------------------------------------------------------
 
 // A flow drawn as its line of cues into `list`: each step `role action`, those before `current` done and

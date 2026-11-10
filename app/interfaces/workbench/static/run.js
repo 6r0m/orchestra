@@ -4,7 +4,7 @@
 // redraws their nodes.
 
 import { api } from "./api.js";
-import { $, PARTS, at, blockedBy, clock, code, confirmAction, copyButton, decisionTitle, doing, el, ending, headline,
+import { $, PARTS, at, blockedBy, clock, code, confirmAction, copyButton, decisionTitle, doing, drainingBy, el, ending, headline,
   lasted, outcome, report, score, unchanged, wrote } from "./ui.js";
 import { stackButton, stackReading } from "./stack.js";
 import { interrupt, showTerminals, updateTerminals } from "./terminals.js";
@@ -265,10 +265,13 @@ function renderBlocked(view) {
   const parts = reading ? reading.components : [];
   const startable = view.blocked_by.filter((host) =>
     parts.some((part) => part.name === host && part.managed && part.startable && part.state === "down"));
-  box.hidden = !view.blocked_by.length;
-  if (unchanged(box, [view.blocked_by, startable])) return;
+  const updating = drainingBy(view);
+  box.hidden = !view.blocked_by.length && !updating.length;
+  if (unchanged(box, [view.blocked_by, updating, startable])) return;
+  box.classList.toggle("bad", !!view.blocked_by.length);
   $("run-blocked-said").textContent = view.blocked_by.length
-    ? "Blocked: " + blockedBy(view).join(", ") + ", so this run cannot move." : "";
+    ? "Blocked: " + blockedBy(view).join(", ") + ", so this run cannot move."
+    : updating.length ? "Updating: " + updating.join(", ") + ". Current work continues; new steps wait for the replacement." : "";
   $("run-blocked-actions").replaceChildren(...startable.map((host) =>
     stackButton("start", host, "Start the " + PARTS[host], $("run-blocked-result"))));
 }

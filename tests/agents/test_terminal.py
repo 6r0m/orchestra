@@ -15,6 +15,7 @@ import textwrap
 import threading
 import time
 import unittest
+from unittest import mock
 import uuid
 
 # The suite's own folder, reached from this concern's folder inside it, and the
@@ -605,7 +606,7 @@ class Socket(unittest.TestCase):
         self.addCleanup(shutil.rmtree, terminal.run_dir(self.run_id), True)
         self.addCleanup(terminal.close_run, self.run_id)
 
-    def connect(self, origin="http://127.0.0.1:%d" % WORKBENCH, token=None, path=None, in_url=False):
+    def connect(self, origin="http://127.0.0.1:%d" % WORKBENCH, token=None, path=None, in_url=False, stream=False):
         from websockets.asyncio.client import connect
         token = terminal.token() if token is None else token
         url = "ws://127.0.0.1:%d/%s" % (self.PORT, path or "%s/engineer" % self.run_id)
@@ -614,7 +615,112 @@ class Socket(unittest.TestCase):
             return connect(url + "?token=" + token, origin=origin, max_size=None,
                            subprotocols=[terminal.PROTOCOL])
         return connect(url, origin=origin, max_size=None,
-                       subprotocols=[terminal.PROTOCOL, terminal.TOKEN_PROTOCOL + token])
+                       subprotocols=(["workbench.v2"] if stream else []) + [terminal.PROTOCOL, terminal.TOKEN_PROTOCOL + token])
+
+    def test_streaming_is_bounded_by_viewer_reads_and_resumes_at_the_confirmed_cursor(self):
+        term = terminal.open_terminal(self.run_id, "engineer")
+        data = b"recorded\r\n" * 30000
+        term.emit(data)
+
+        async def talk():
+            async with self.connect(stream=True) as ws:
+                self.assertEqual(ws.subprotocol, "workbench.v2")
+                await ws.recv()
+                await ws.send(json.dumps({"read": 7}).encode())
+                first = await ws.recv()
+                self.assertLessEqual(len(first), 65536)
+                self.assertEqual(first, data[7:7 + len(first)])
+                term.emit(b"live\r\n")
+                with self.assertRaises(asyncio.TimeoutError):
+                    await asyncio.wait_for(ws.recv(), .05)
+                cursor = 7 + len(first)
+                received = first
+                while cursor < len(data) + 6:
+                    await ws.send(json.dumps({"read": cursor}).encode())
+                    part = await asyncio.wait_for(ws.recv(), 5)
+                    self.assertLessEqual(len(part), 65536)
+                    received += part
+                    cursor += len(part)
+                self.assertEqual(received, (data + b"live\r\n")[7:])
+            async with self.connect(stream=True) as ws:
+                await ws.recv()
+                await ws.send(json.dumps({"read": cursor}).encode())
+                term.emit(b"later")
+                self.assertEqual(await asyncio.wait_for(ws.recv(), 5), b"later")
+        asyncio.run(talk())
+
+    def test_bad_stream_cursors_cannot_type_to_the_agent_or_resize_or_change_its_record(self):
+        from websockets.exceptions import ConnectionClosedError
+        term = terminal.open_terminal(self.run_id, "engineer")
+        term.emit(b"record")
+        typed = []
+        with mock.patch.object(term, "type", side_effect=typed.append):
+            async def talk():
+                for cursor in (True, -1, 100, "0"):
+                    async with self.connect(stream=True) as ws:
+                        await ws.recv()
+                        await ws.send(json.dumps({"read": cursor}).encode())
+                        with self.assertRaises(ConnectionClosedError):
+                            await asyncio.wait_for(ws.recv(), 5)
+            asyncio.run(talk())
+        self.assertEqual((typed, term.rows), ([], terminal.ROWS))
+        with open(term.path, "rb") as stream:
+            self.assertEqual(stream.read(), b"record")
+
+    def test_a_paused_stream_still_accepts_keys_resize_state_and_close(self):
+        term = terminal.open_terminal(self.run_id, "engineer")
+        term.emit(b"recorded")
+        typed = []
+        pump = threading.Thread(target=lambda: None)
+        pump.start()
+        term.agent = type("Agent", (), {"write": lambda self, data: typed.append(data),
+            "resize": lambda self, rows: None, "returncode": lambda self: None,
+            "end": lambda self: None, "pump": pump})()
+
+        async def talk():
+            from websockets.exceptions import ConnectionClosedOK
+            async with self.connect(stream=True) as ws:
+                self.assertTrue(json.loads(await ws.recv())["live"])
+                await ws.send("operator-key")
+                await ws.send(json.dumps({"rows": 100}).encode())
+                told = json.loads(await asyncio.wait_for(ws.recv(), 5))
+                self.assertEqual(told["size"], [160, 100])
+                self.assertEqual(typed, [b"operator-key"])
+                terminal.close_run(self.run_id)
+                await ws.send(json.dumps({"read": 0}).encode())
+                got = b""
+                while True:
+                    message = await asyncio.wait_for(ws.recv(), 5)
+                    if isinstance(message, bytes):
+                        got += message
+                        break
+                with open(term.path, "rb") as record:
+                    self.assertEqual(got, record.read(), "closing must preserve the unread final output")
+                await ws.send(json.dumps({"read": len(got)}).encode())
+                with self.assertRaises(ConnectionClosedOK):
+                    while True:
+                        await asyncio.wait_for(ws.recv(), 5)
+        asyncio.run(talk())
+
+    def test_a_record_without_a_loaded_terminal_streams_to_eof(self):
+        data = b"recorded\r\n" * 30000
+        term = terminal.open_terminal(self.run_id, "engineer")
+        term.emit(data)
+        terminal.close_run(self.run_id)
+
+        async def talk():
+            from websockets.exceptions import ConnectionClosedOK
+            async with self.connect(stream=True) as ws:
+                self.assertFalse(json.loads(await ws.recv())["live"])
+                got = b""
+                while len(got) < len(data):
+                    await ws.send(json.dumps({"read": len(got)}).encode())
+                    got += await asyncio.wait_for(ws.recv(), 5)
+                self.assertEqual(got, data)
+                await ws.send(json.dumps({"read": len(got)}).encode())
+                with self.assertRaises(ConnectionClosedOK):
+                    await asyncio.wait_for(ws.recv(), 5)
+        asyncio.run(talk())
 
     def exchange(self, **kwargs):
         async def talk():
