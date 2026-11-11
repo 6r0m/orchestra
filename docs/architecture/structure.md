@@ -425,6 +425,9 @@ still lands on a checkout.
   alone), and the todo is gone from where it was and, where
   the repository keeps it, in the done folder. Either one failing fails the step. The
   architect's `PASS` accepts the implementation, and the operator judges the closeout.
+  An approved todo rename is adopted through the
+  [workflow's paused-update contract](../../app/orchestration/docs/architecture/structure.md#invariants),
+  so its saved artifact path remains Temporal's.
   The tree it left is the run's final tree, the one the final gate holds. At
   `READY_FOR_HUMAN` the run waits at its final gate for `merge`,
   `revise engineer|architect <feedback>` or a confirmed `discard`; a defect goes back into

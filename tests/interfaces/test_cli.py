@@ -125,6 +125,18 @@ class TheStack(unittest.TestCase):
 
 
 class Forms(unittest.TestCase):
+    def test_adopting_a_verified_todo_name_does_not_answer_or_follow_the_stop(self):
+        result = {"todo_path": "/worktree/todo/concise.md"}
+        with mock.patch.object(cli.runs, "adopt_todo_name", new_callable=mock.AsyncMock, return_value=result) as adopted, \
+                mock.patch.object(cli.runs, "answer", new_callable=mock.AsyncMock) as answered:
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(asyncio.run(cli.run(["--adopt-todo-name", "example-run", "concise.md"],
+                                                     client=object(), check=False)), 0)
+            adopted.assert_awaited_once()
+            answered.assert_not_awaited()
+            self.assertIn("run remains paused", output.getvalue())
+
     def test_adopting_engineer_defaults_does_not_answer_or_follow_the_stop(self):
         result = {"engineer": {"agent": "example-engineer", "kind": "pi"}, "timeout_seconds": 7200}
         with mock.patch.object(cli.settings, "load", return_value={}) as loaded, \

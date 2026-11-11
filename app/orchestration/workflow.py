@@ -21,7 +21,7 @@ from datetime import timedelta
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
-from temporalio.exceptions import ActivityError, TimeoutError, is_cancelled_exception
+from temporalio.exceptions import ActivityError, ApplicationError, TimeoutError, is_cancelled_exception
 
 with workflow.unsafe.imports_passed_through():
     from app.foundation import flows
@@ -664,6 +664,37 @@ class FeatureRun:
                 not isinstance(engineer.get("persona"), str) or
                 len(engineer["persona"].encode("utf-8")) > P.MAX_PERSONA_BYTES):
             raise ValueError("the engineer must be a validated writing profile with its bounded persona")
+
+    @workflow.update
+    async def adopt_todo_name(self, request):
+        try:
+            resolved = await workflow.execute_activity(
+                "adopt_todo_name", {"state": dict(self.state), "name": request["name"]}, task_queue=self.queue,
+                schedule_to_close_timeout=SHORT_TIMEOUT, retry_policy=READS)
+        except ActivityError as error:
+            raise ApplicationError(_message(error), type="TodoNameRefused", non_retryable=True) from error
+        # The stop may have been answered while its host checked the tree. Never retarget a running turn.
+        try:
+            self._validate_todo_name(request)
+        except ValueError as error:
+            raise ApplicationError(str(error), type="TodoNameRefused", non_retryable=True) from error
+        changed = resolved["todo_path"] != self.state["todo_path"]
+        if changed:
+            self.state.update(plan=resolved["plan"], todo_path=resolved["todo_path"])
+            self.stop["todo"] = resolved["todo_path"]
+            self._line("adopted verified todo name: %s; still waiting at %s" % (resolved["plan"], self.stop["id"]))
+        return dict(resolved, changed=changed)
+
+    @adopt_todo_name.validator
+    def _validate_todo_name(self, request):
+        if (not isinstance(request, dict) or self.stopping or self.stop is None or self.answer_given is not None
+                or self.stop["reason"] != "failed" or self.stop["phase"] not in stages.FINAL
+                or request.get("stop") != self.stop["id"]):
+            raise ValueError("the run must still be waiting at the named failed closeout")
+        if set(request) != {"stop", "plan", "name"} or request["plan"] != self.state.get("plan"):
+            raise ValueError("the saved todo path changed; read the run again")
+        if not isinstance(request["name"], str) or not 1 <= len(request["name"]) <= 255:
+            raise ValueError("name the verified todo's filename")
 
     @workflow.update
     def answer(self, answer):

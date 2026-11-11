@@ -131,6 +131,9 @@ class FakeWorktrees:
         # The todo's own path first, then where its repository keeps it finished, when it keeps it.
         return names[:1] if self.unclosed else names[1:]
 
+    def closeout_todo_matches(self, path, tree, plan, done_dir):
+        return True
+
     def reopen(self, worktree, final_tree, verified_tree):
         self.calls.append(("reopen", final_tree, verified_tree))
         return []

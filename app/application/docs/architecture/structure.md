@@ -60,6 +60,12 @@ handed, and never learns how git reads one.
 ## Invariants
 
 - **A role-run and every git side effect are single-attempt (D5).** A failure stops the run for the operator; there is no automatic retry and no retry ledger (D16).
+- **Closeout preflights the saved todo paths against the verified tree.** A retained todo must be
+  present under its assigned active or finished name; an already deleted todo remains valid where
+  the repository deletes finished tasks. A mismatch refuses before an agent starts, with the explicit
+  verified-name recovery command. Adoption follows the
+  [workflow's paused-update contract](../../../orchestration/docs/architecture/structure.md#invariants);
+  the activity reads the host's Git evidence and never writes workflow state.
 - **Every write to a run goes through the workflow's own start rules, Updates and validators, or Temporal's own lifecycle**, so the page can do nothing the workflow does not allow.
 - **A part of the stack is up only when proven, and a worker stopped only once its process is gone (D32)**; one stack action at a time, and a stack under another policy never touches Temporal or the Windows worker.
 - **An activity never waits for a human** (D6).

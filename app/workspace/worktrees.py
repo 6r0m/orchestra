@@ -318,6 +318,35 @@ def holds(path, tree, names):
     return [name for name in names if name in found]
 
 
+def todo_paths(plan, done_dir):
+    """The run's assigned todo and, when retained, its finished path, as Git names them."""
+    plan = plan.replace("\\", "/")
+    return [plan] + ([done_dir.replace("\\", "/").strip("/") + "/" + plan.rsplit("/", 1)[-1]] if done_dir else [])
+
+
+def closeout_todo_matches(worktree, tree, plan, done_dir):
+    """A retained todo is present under an assigned path; a deletion policy also permits its absence."""
+    return bool(holds(worktree, tree, todo_paths(plan, done_dir))) or not done_dir
+
+
+def adopt_todo_name(worktree, plan, verified_tree, name, done_dir=None):
+    """Resolve an explicitly selected filename from the verified tree; change no file or index."""
+    if (not isinstance(name, str) or not name.lower().endswith(".md") or len(name) > 255
+            or name != name.strip() or any(ord(char) < 32 or char in '/\\<>:"|?*' for char in name)):
+        raise GitError("name one Markdown filename, without folders or reserved path characters")
+    if not verified_tree:
+        raise GitError("no tree the architect verified is available to confirm the todo rename")
+    original = plan.replace("\\", "/")
+    renamed = os.path.join(os.path.dirname(original), name).replace("\\", "/")
+    previous, selected = todo_paths(original, done_dir), todo_paths(renamed, done_dir)
+    present = holds(worktree, verified_tree, previous + selected)
+    if not any(path in present for path in selected):
+        raise GitError("the architect's verified tree does not hold %s" % renamed)
+    if original != renamed and any(path in present for path in previous):
+        raise GitError("the verified tree still holds %s; this is not a verified rename" % original)
+    return {"plan": renamed, "todo_path": os.path.join(worktree, *renamed.split("/"))}
+
+
 def reopen(worktree, final_tree, verified_tree):
     """Take a worktree offered for its merge back to what the architect verified: each path changed from
     `verified_tree` to `final_tree` is again as it was verified, so the run's todo is where its roles are

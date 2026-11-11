@@ -435,6 +435,51 @@ class Closeout(unittest.TestCase):
         self.assertIn("closeout_violation", said)
         self.assertEqual(ran, [], "unknown is not unchanged: nothing is closed out against a tree nobody verified")
 
+    def test_a_verified_todo_rename_is_adopted_explicitly_without_moving_files_or_starting_an_agent(self):
+        renamed = "todo/concise.md"
+        os.rename(self.state["todo_path"], os.path.join(self.repo, *renamed.split("/")))
+        self.state["verified_tree"] = worktrees.work_tree(self.repo)
+        self.write("todo/done/concise.md", "the finished record\n")
+        os.remove(os.path.join(self.repo, *renamed.split("/")))
+        before = worktrees.work_tree(self.repo), worktrees.guard(self.repo, self.run_id)
+        host = activities.Activities(runner=lambda *args, **kwargs: self.fail("no agent may start"), git=worktrees,
+                                     telemetry=None)
+        result = host.adopt_todo_name({"state": self.state, "name": "concise.md"})
+        self.assertEqual(result, {"plan": renamed, "todo_path": os.path.join(self.repo, "todo", "concise.md")})
+        self.state["verified_tree"] = worktrees.work_tree(self.repo)
+        self.assertEqual(host.adopt_todo_name({"state": self.state, "name": "concise.md"}), result,
+                         "a verified finished record retains the same todo identity")
+        self.assertEqual(self.state["plan"].replace("\\", "/"), self.PLAN, "only Temporal may update the saved path")
+        self.assertEqual((worktrees.work_tree(self.repo), worktrees.guard(self.repo, self.run_id)), before)
+
+    def test_a_todo_name_mismatch_is_refused_before_paying_for_closeout(self):
+        os.rename(self.state["todo_path"], os.path.join(self.repo, "todo", "concise.md"))
+        self.state["verified_tree"] = worktrees.work_tree(self.repo)
+        ran = []
+        with mock.patch.object(T, "run_upload") as upload:
+            said = self.refused(lambda: ran.append(True))
+        upload.assert_not_called()
+        self.assertEqual(ran, [], "a missing recorded path is known before the agent starts")
+        self.assertIn("--adopt-todo-name", said)
+
+    def test_preflight_preserves_closeout_of_todos_already_finished_in_the_verified_tree(self):
+        self.closes_out()
+        self.state["verified_tree"] = worktrees.work_tree(self.repo)
+        self.assertIn("final_tree", self.turn(lambda: None))
+        os.remove(os.path.join(self.repo, *self.DONE.split("/")))
+        self.state["verified_tree"] = worktrees.work_tree(self.repo)
+        self.assertIn("final_tree", self.turn(lambda: None, todo_done_dir=None))
+
+    def test_adopting_a_todo_name_refuses_unsafe_missing_and_unverified_renames_without_mutation(self):
+        self.write("todo/concise.md", "another todo\n")
+        self.state["verified_tree"] = worktrees.work_tree(self.repo)
+        host = activities.Activities(git=worktrees, telemetry=None)
+        before = worktrees.work_tree(self.repo), worktrees.guard(self.repo, self.run_id)
+        for name in ("../elsewhere.md", "..\\elsewhere.md", "bad:name.md", "missing.md", "concise.md"):
+            with self.subTest(name=name), self.assertRaises(ApplicationError):
+                host.adopt_todo_name({"state": self.state, "name": name})
+            self.assertEqual((worktrees.work_tree(self.repo), worktrees.guard(self.repo, self.run_id)), before)
+
 
 class LongPrompt(unittest.TestCase):
     """A turn given guidance longer than a command line takes — an audit pasted whole — still starts: the

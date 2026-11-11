@@ -297,6 +297,24 @@ async def use_engineer_defaults(client, run_id, settings, check=True):
         raise
 
 
+async def adopt_todo_name(client, run_id, name, check=True):
+    """Adopt an operator-selected verified todo rename while its closeout stays paused."""
+    current = await (readable_status(client, run_id) if check else status(client, run_id))
+    if current is None or current.get("stop") is None:
+        raise NotWaiting("the run must be waiting at a failed closeout")
+    if check:
+        await preflight(client, queues(current["workflow_queue"], current["queue"]))
+    request = {"stop": current["stop"]["id"], "plan": current["state"]["plan"], "name": name}
+    try:
+        return await client.get_workflow_handle(run_id).execute_update(WF.FeatureRun.adopt_todo_name, request)
+    except WorkflowUpdateFailedError as error:
+        raise NotAccepted(error.cause.message if error.cause else str(error)) from error
+    except RPCError as error:
+        if error.status == RPCStatusCode.NOT_FOUND:
+            raise NotWaiting("run %s has closed" % run_id) from error
+        raise
+
+
 async def answer(client, run_id, answer, check=True, only=None):
     """Answer the stop `run_id` waits at with `answer` (its action and fields); returns that stop.
 

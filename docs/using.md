@@ -203,6 +203,18 @@ can summarize earlier details. Each new role invocation refreshes its current co
 that contract in a native system section during a long turn. These measures preserve context delivery,
 not proof of model compliance. No WSL restart or new session is needed for this recovery.
 
+If closeout reports that its saved todo path is missing after an approved rename, adopt the filename
+already present in the architect's verified tree:
+
+```bash
+orchestrate --adopt-todo-name <run-id> concise-change.md
+```
+
+This updates the saved path while keeping the run paused. It does not move files or start an agent;
+the old name must be absent from the verified tree and the selected active or finished name present. After checking the
+updated Plan path, press **Continue** to run closeout again in the existing session. The usual model
+usage applies to that continued turn. There is no need to repeat the build or verification.
+
 A terminal is drawn to fit its box, all 160 columns of it, so in a narrow window its text is small. *Maximize*,
 beside its name, fills the window with it, as a console window does: its text is drawn as large as the columns
 allow across, and the agent's own terminal takes as many rows as fill the window down — on a portrait display,

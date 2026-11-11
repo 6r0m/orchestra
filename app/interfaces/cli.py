@@ -5,6 +5,7 @@ the worktree view, and the stack:
     orchestrate --resume <run-id> --answer "<answer>" [--confirm]
     orchestrate --continue <run-id>
     orchestrate --use-engineer-defaults <run-id>
+    orchestrate --adopt-todo-name <run-id> <filename.md>
     orchestrate --stop <run-id>
     orchestrate --force-terminate <run-id>
     orchestrate --show <run-id>
@@ -338,6 +339,8 @@ def parse_args(argv):
                         help="run a failed stage again once you have fixed its cause")
     parser.add_argument("--use-engineer-defaults", metavar="RUN_ID",
                         help="while paused, adopt the current engineer profile and turn limit; keep waiting")
+    parser.add_argument("--adopt-todo-name", nargs=2, metavar=("RUN_ID", "FILENAME"),
+                        help="adopt an already verified todo rename at a failed closeout; keep waiting")
     parser.add_argument("--stop", metavar="RUN_ID", help="stop this run, keeping its worktree and branch")
     parser.add_argument("--force-terminate", metavar="RUN_ID",
                         help="close this run at once, with no cleanup, for a run a stop cannot finish; what its "
@@ -351,9 +354,10 @@ def parse_args(argv):
                         help="a complete settings file, taken alone, in place of this checkout's")
     args = parser.parse_args(argv)
     if sum(map(bool, (args.task, args.resume, args.continue_, args.stop, args.force_terminate, args.show,
-                      args.worktrees, args.stack, args.use_engineer_defaults))) != 1:
+                      args.worktrees, args.stack, args.use_engineer_defaults, args.adopt_todo_name))) != 1:
         parser.error("give exactly one of: a task, --resume <run-id>, --continue <run-id>, --stop <run-id>, "
-                     "--force-terminate <run-id>, --show <run-id>, --worktrees, --stack, --use-engineer-defaults <run-id>")
+                     "--force-terminate <run-id>, --show <run-id>, --worktrees, --stack, --use-engineer-defaults <run-id>, "
+                     "--adopt-todo-name <run-id> <filename.md>")
     if args.stack and not (args.stack == ["status"] or (args.stack[0] in stack.ACTIONS and len(args.stack) <= 2)):
         parser.error("--stack takes `status`, or start, stop, restart or reload and at most one of temporal, wsl, windows")
     if args.resume and args.answer is None:
@@ -374,10 +378,14 @@ async def run(argv=None, client=None, tele=None, check=True):
         if client is None:
             client = await runs.connect()
         if (tele is None and check and not args.show and not args.worktrees and not args.force_terminate
-                and not args.use_engineer_defaults):
+                and not args.use_engineer_defaults and not args.adopt_todo_name):
             tele = telemetry.resolve()
         if args.show:
             return await _show(client, args.show)
+        if args.adopt_todo_name:
+            adopted = await runs.adopt_todo_name(client, *args.adopt_todo_name, check=check)
+            print("todo: %s; run remains paused" % adopted["todo_path"])
+            return 0
         if args.use_engineer_defaults:
             changed = await runs.use_engineer_defaults(client, args.use_engineer_defaults,
                                                        settings.load(args.settings), check=check)

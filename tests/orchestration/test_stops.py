@@ -438,6 +438,100 @@ class Closing(FakeWorktrees):
         return []
 
 
+class TodoName(Scenario):
+    def paused(self):
+        class Renamed(Closing):
+            def closeout_todo_matches(inner, path, tree, plan, done_dir):
+                return plan == "todo/concise.md"
+
+            def adopt_todo_name(inner, worktree, plan, verified, name, done_dir=None):
+                if name != "concise.md":
+                    raise ValueError("the verified tree does not hold that filename")
+                return {"plan": "todo/concise.md", "todo_path": os.path.join(worktree, "todo", name)}
+
+        self.git = Renamed()
+        self.host, self.agent = E.host(to_ready() + [("closeout-e3-1", 0, "closed out\n")], git=self.git)
+        self.git.turns = self.agent.calls
+        run = E.Run(auto=True, flow=CLOSED)
+        self.addCleanup(run.cleanup)
+        self.assertEqual(run.stop["reason"], "failed")
+        self.assertIn("--adopt-todo-name", run.stop["feedback"])
+        self.assertEqual(len(self.agent.calls), 4, "the invalid closeout starts no paid turn")
+        return run
+
+    def test_verified_name_adoption_keeps_the_run_paused_and_the_next_turn_uses_it(self):
+        run = self.paused()
+        before = E.run(run.handle.query(WF.FeatureRun.status))
+        adopted = E.run(runs.adopt_todo_name(E.client(), run.run_id, "concise.md", check=False))
+        after = E.run(run.handle.query(WF.FeatureRun.status))
+        self.assertTrue(adopted["changed"])
+        self.assertEqual(after["state"]["plan"], "todo/concise.md")
+        self.assertEqual(after["state"]["todo_path"], adopted["todo_path"])
+        self.assertEqual(after["stop"]["todo"], adopted["todo_path"])
+        self.assertEqual(after["stop"]["id"], before["stop"]["id"])
+        for field in ("agent_sessions", "verified_tree", "worktree_path"):
+            self.assertEqual(after["state"][field], before["state"][field])
+        self.assertEqual(len(self.agent.calls), 4)
+        self.assertFalse(E.run(runs.adopt_todo_name(E.client(), run.run_id, "concise.md", check=False))["changed"])
+        self.assertEqual(run.answer("continue")[0], 0)
+        self.assertEqual(run.stop["reason"], "final")
+        self.assertIn(adopted["todo_path"], self.agent.calls[-1]["prompt"])
+        self.assertEqual(len(self.agent.calls), 5)
+        E.run(Replayer(workflows=[WF.FeatureRun]).replay_workflow(E.run(run.handle.fetch_history())))
+
+    def test_stale_and_unverified_name_adoption_cannot_change_the_waiting_run(self):
+        run = self.paused()
+        before = E.run(run.handle.query(WF.FeatureRun.status))
+        request = {"stop": before["stop"]["id"], "plan": before["state"]["plan"], "name": "concise.md"}
+        for changes in ({"stop": "stale"}, {"plan": "todo/elsewhere.md"}, {"name": ""},
+                        {"name": "missing.md"}, {"extra": True}):
+            with self.subTest(changes=changes), self.assertRaises(WorkflowUpdateFailedError):
+                E.run(run.handle.execute_update(WF.FeatureRun.adopt_todo_name, dict(request, **changes)))
+            self.assertEqual(E.run(run.handle.query(WF.FeatureRun.status)), before)
+        self.assertEqual(len(self.agent.calls), 4)
+        E.run(run.handle.execute_update(WF.FeatureRun.adopt_todo_name, request))
+        with self.assertRaises(WorkflowUpdateFailedError):
+            E.run(run.handle.execute_update(WF.FeatureRun.adopt_todo_name, request))
+        self.assertEqual(run.answer("continue")[0], 0)
+        with self.assertRaises(WorkflowUpdateFailedError):
+            E.run(run.handle.execute_update(WF.FeatureRun.adopt_todo_name, request))
+
+    def test_a_continue_during_tree_validation_prevents_the_old_update_from_retargeting_the_run(self):
+        run = self.paused()
+        before = E.run(run.handle.query(WF.FeatureRun.status))
+        entered, release = threading.Event(), threading.Event()
+        original = self.git.adopt_todo_name
+        failures = []
+
+        def checking(*args):
+            entered.set()
+            if not release.wait(10):
+                raise RuntimeError("the test did not release its tree check")
+            return original(*args)
+
+        def update():
+            try:
+                E.run(runs.adopt_todo_name(E.client(), run.run_id, "concise.md", check=False))
+            except runs.NotAccepted as error:
+                failures.append(error)
+
+        self.git.adopt_todo_name = checking
+        caller = threading.Thread(target=update)
+        caller.start()
+        try:
+            self.assertTrue(entered.wait(5))
+            self.assertEqual(run.answer("continue")[0], 2)
+        finally:
+            release.set()
+            caller.join(10)
+        self.assertFalse(caller.is_alive())
+        self.assertEqual(len(failures), 1, "the stale asynchronous update must refuse")
+        after = E.run(run.handle.query(WF.FeatureRun.status))
+        self.assertEqual(after["state"]["plan"], before["state"]["plan"])
+        self.assertNotEqual(after["stop"]["id"], before["stop"]["id"])
+        self.assertEqual(len(self.agent.calls), 4)
+
+
 class Closeout(Scenario):
     """A flow that closes out: the architect's PASS goes to the engineer's closeout, the tree that turn left is
     what the final gate holds and the merge commits, and a change that goes back into the run — sent back, or

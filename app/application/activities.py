@@ -172,7 +172,7 @@ class Activities:
         return [self.prepare, self.create_worktree, self.open_run, self.open_phase, self.run_role,
                 self.record_stop, self.record_answer, self.finish_trace, self.reconcile, self.reopen, self.merge,
                 self.discard,
-                self.worktree_view, self.review_diff, self.work_tree]
+                self.worktree_view, self.review_diff, self.work_tree, self.adopt_todo_name]
 
     def client(self):
         if not self._resolved:
@@ -310,6 +310,7 @@ class Activities:
         # while this stage runs.
         private = T.Private()
         context = T.trace_context(client, span, state, stage, role_name)
+        invoked = False
         try:
             verified = state.get("verified_tree")
             if stage in stages.FINAL and not verified:
@@ -317,6 +318,13 @@ class Activities:
                 # turn may not touch.
                 raise CloseoutViolation("the run holds no tree the architect verified, so there is nothing "
                                         "to close out")
+            if stage in stages.FINAL:
+                plan = state["plan"].replace("\\", "/")
+                if not self.git.closeout_todo_matches(worktree, verified, plan, state.get("todo_done_dir")):
+                    raise CloseoutViolation(
+                        "the saved todo path %s is absent from the architect's verified tree. "
+                        "If the todo was renamed, use orchestrate --adopt-todo-name %s <filename.md>, "
+                        "then Continue. No agent was started" % (plan, state["run_id"]))
             if "persona" not in role:
                 # A run started before agent profiles: its persona file as this host sees it, from the one
                 # resolver. A policy this host cannot map fails the step before an agent starts.
@@ -339,7 +347,9 @@ class Activities:
             judged = self.git.work_tree(worktree) if is_review else None
             argv, minted = N.build_argv(role, resume_id, traced)
             prompt, attached = compose(resume_id is None, name)
-            rc, out = self.runner(worktree, hosted(argv, attached), rdir, name, prompt, policy["timeout_seconds"], env,
+            command = hosted(argv, attached)
+            invoked = True
+            rc, out = self.runner(worktree, command, rdir, name, prompt, policy["timeout_seconds"], env,
                                   kind=kind)
             effective_resume = resume_id
             if rc != 0 and N.classify_failure(role, resume_id, rc, out,
@@ -379,10 +389,9 @@ class Activities:
                         "todo and the repository's documents; put these back as they were — in the engineer's "
                         "terminal or by hand — then continue to close out again" % ", ".join(outside))
                 # Whether the todo was closed at all is a fact, checked; how well is the operator's to judge.
-                plan = state["plan"].replace("\\", "/")
-                done = state.get("todo_done_dir") and "%s/%s" % (
-                    state["todo_done_dir"].replace("\\", "/").strip("/"), plan.rsplit("/", 1)[-1])
-                held = self.git.holds(worktree, left, [plan] + ([done] if done else []))
+                names = W.todo_paths(state["plan"], state.get("todo_done_dir"))
+                plan, done = names[0], names[1] if len(names) > 1 else None
+                held = self.git.holds(worktree, left, names)
                 if plan in held or (done and done not in held):
                     raise CloseoutViolation(
                         "the closeout left the todo unclosed: %s. Continue to close out again" % (
@@ -420,8 +429,9 @@ class Activities:
         except Exception as exc:
             # A failed step leaves no agent behind, whichever check failed it.
             terminal.end_agent(state["run_id"], role_name)
-            # A failed model turn can still have spent tokens; adapters with native turn records need no final session.
-            T.run_upload(T.optional("upload", lambda: _answer(adapter, "upload", None, context)), span)
+            # Failed turns may spend tokens, but preflight failures must not reuse a prior attempt's files.
+            if invoked:
+                T.run_upload(T.optional("upload", lambda: _answer(adapter, "upload", None, context)), span)
             cut = _cut_short(state["run_id"] in self._stopped)
             if cut == "stopped":
                 # The operator stopped the run: the step did not fail, and its row says only that (D20).
@@ -558,6 +568,15 @@ class Activities:
         """The tree this worktree would commit now, for the controller's own checks. Reads only."""
         try:
             return {"tree": self.git.work_tree(args["worktree_path"])}
+        except Exception as exc:
+            raise _failure(exc) from exc
+
+    @activity.defn
+    def adopt_todo_name(self, args):
+        state = args["state"]
+        try:
+            return self.git.adopt_todo_name(state["worktree_path"], state["plan"],
+                                           state.get("verified_tree"), args["name"], state.get("todo_done_dir"))
         except Exception as exc:
             raise _failure(exc) from exc
 
