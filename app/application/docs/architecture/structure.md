@@ -60,9 +60,10 @@ handed, and never learns how git reads one.
 ## Invariants
 
 - **A role-run and every git side effect are single-attempt (D5).** A failure stops the run for the operator; there is no automatic retry and no retry ledger (D16).
-- **Closeout preflights the saved todo paths against the verified tree.** A retained todo must be
-  present under its assigned active or finished name; an already deleted todo remains valid where
-  the repository deletes finished tasks. A mismatch refuses before an agent starts, with the explicit
+- **Closeout preflights the saved todo paths against the verified tree.** Every policy requires
+  the assigned active or configured finished name in that snapshot. A deletion policy permits the
+  todo's later absence from the working tree, including when a partial closeout continues. A mismatch
+  refuses before an agent starts, with the explicit
   verified-name recovery command. Adoption follows the
   [workflow's paused-update contract](../../../orchestration/docs/architecture/structure.md#invariants);
   the activity reads the host's Git evidence and never writes workflow state.

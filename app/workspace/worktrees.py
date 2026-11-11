@@ -325,8 +325,8 @@ def todo_paths(plan, done_dir):
 
 
 def closeout_todo_matches(worktree, tree, plan, done_dir):
-    """A retained todo is present under an assigned path; a deletion policy also permits its absence."""
-    return bool(holds(worktree, tree, todo_paths(plan, done_dir))) or not done_dir
+    """The verified snapshot identifies the assigned active or finished todo."""
+    return bool(holds(worktree, tree, todo_paths(plan, done_dir)))
 
 
 def adopt_todo_name(worktree, plan, verified_tree, name, done_dir=None):

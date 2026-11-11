@@ -462,13 +462,30 @@ class Closeout(unittest.TestCase):
         self.assertEqual(ran, [], "a missing recorded path is known before the agent starts")
         self.assertIn("--adopt-todo-name", said)
 
-    def test_preflight_preserves_closeout_of_todos_already_finished_in_the_verified_tree(self):
+    def test_a_renamed_todo_in_a_deletion_policy_is_refused_before_its_agent_starts(self):
+        os.rename(self.state["todo_path"], os.path.join(self.repo, "todo", "concise.md"))
+        self.state["verified_tree"] = worktrees.work_tree(self.repo)
+        before = worktrees.work_tree(self.repo), worktrees.guard(self.repo, self.run_id)
+        ran = []
+        with mock.patch.object(T, "run_upload") as upload:
+            said = self.refused(lambda: ran.append(True), todo_done_dir=None)
+        self.assertEqual(ran, [])
+        upload.assert_not_called()
+        self.assertIn("--adopt-todo-name", said)
+        self.assertEqual((worktrees.work_tree(self.repo), worktrees.guard(self.repo, self.run_id)), before)
+
+    def test_a_deleted_todo_can_continue_when_it_existed_in_the_verified_tree(self):
+        os.remove(self.state["todo_path"])
+        ran = []
+        result = self.turn(lambda: ran.append(True), todo_done_dir=None)
+        self.assertEqual(ran, [True])
+        self.assertEqual(result["final_tree"], worktrees.work_tree(self.repo))
+        self.assertEqual(self.state["verified_tree"], self.verified)
+
+    def test_preflight_preserves_retained_todos_already_finished_in_the_verified_tree(self):
         self.closes_out()
         self.state["verified_tree"] = worktrees.work_tree(self.repo)
         self.assertIn("final_tree", self.turn(lambda: None))
-        os.remove(os.path.join(self.repo, *self.DONE.split("/")))
-        self.state["verified_tree"] = worktrees.work_tree(self.repo)
-        self.assertIn("final_tree", self.turn(lambda: None, todo_done_dir=None))
 
     def test_adopting_a_todo_name_refuses_unsafe_missing_and_unverified_renames_without_mutation(self):
         self.write("todo/concise.md", "another todo\n")
