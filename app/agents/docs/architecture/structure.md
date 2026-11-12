@@ -71,8 +71,10 @@ decision. The addition does not replace the stage ask or the role's verdict cont
 
 Every role invocation refreshes the task, the run's snapshotted persona, the complete current-stage
 ask and its bound skill, using the adapter's native skill syntax. Session continuity preserves useful
-work, not the authority of old stage instructions. Feedback and guidance retain their incremental
-delivery; the todo is referenced, not copied. The same labelled parts own the recorded prompt and
+work, not the authority of old stage instructions. Reviewer findings remain incremental, while
+original operator notes follow the lifecycle owned by
+[orchestration](../../../orchestration/docs/architecture/structure.md). The todo is referenced, not copied.
+The same labelled parts own the recorded prompt and
 its vendor-specific projection, so no separate instruction store is reconstructed from a transcript.
 Pre-profile policies carry no persona snapshot and retain their existing host-resolved persona file.
 
@@ -93,12 +95,25 @@ work. The transport is consumed once, so later operator inputs remain ordinary s
 processes inherit neither the prompt path, its token nor the recorded-parts path.
 The bridge validates those parts against the full prompt, refusing a missing or mismatched task,
 persona or stage contract before input. Its `before_agent_start` hook sets one named native system
-section from the recorded contract, excluding feedback and guidance, with a reference to the full
-prompt for recovery. Pi retains that system section across compaction and replaces its current-stage
-contents on the next invocation. The bridge adds no reminder history, compaction model or autonomous
+section from the code-owned authority instructions, selected skill, persona and stage ask. Free-form
+task text, operator notes and agent evidence stay outside that system section. Its native `context`
+hook restores missing request parts as user context after compaction without appending session history
+or duplicating parts still present in user messages. Oversized parts retain their complete attachment
+and its reference; the system section names the recorded prompt for recovery. Pi retains the system
+section across compaction and replaces its current-stage contents on the next invocation.
+The bridge adds no compaction model or autonomous
 retry, and does not replace Pi's base prompt or other extensions' sections. Native settlement,
 verdict parsing and worktree guards remain the acceptance checks; context delivery cannot establish
 that a model obeyed its instructions.
+
+Prompt composition labels provenance and encodes the task, notes and agent evidence as JSON data,
+preserving exact strings without letting embedded headings create new prompt sections. Code-owned
+authority instructions stay inline and require every review to check the original task and applicable
+operator requests, including requests absent from a previous summary. An unresolved operator decision
+requires a blocker; assumptions and agreement between agents cannot supply approval. Streamed review
+parsing uses only the last assistant message, never an earlier draft verdict or a tool result.
+These are instruction-delivery and result-parsing controls. They do not make a model immune to prompt
+injection or add an operating-system boundary around an agent's tools.
 Pi profiles select their provider, model and thinking level. Their optional launcher names a managed
 wrapper instead of the default executable; preparation checks the same program that will run. Credentials
 stay with Pi's native authentication store or the worker's environment. Orchestra neither copies them nor

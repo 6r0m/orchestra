@@ -53,6 +53,10 @@ Settings composes the foundation's strict data validation with each selected kin
 then hands a checked snapshot to a new run. The Workbench reads, applies and starts runs from the
 same settings source; individual activities do not reload mutable settings.
 
+The role activity registers both the legacy entrypoint and the retained-operator-context entrypoint
+named by orchestration. Both delegate to the same execution owner. History and timing read both types;
+the distinct name makes an incompatible target fail before a model starts, rather than ignore input.
+
 Composition belongs here rather than inside a concern. `telemetry.final_diff(client, state,
 worktrees.review_diff)` is written that way on purpose: the trace records a change it is
 handed, and never learns how git reads one.

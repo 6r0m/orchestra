@@ -31,7 +31,9 @@ _VERDICT_ASK = ("End your final message with exactly one JSON object and nothing
                 '{"verdict": "...", "feedback": "..."}, where verdict is one '
                 "of PASS, PATCH, BLOCKER, UNVERIFIED; feedback lists each "
                 "required finding with evidence and the smallest safe fix, or ")
-_PASS_CONFIRMATION = "is a short confirmation on PASS."
+_PASS_CONFIRMATION = ("on PASS is a concise acceptance summary covering the original operator requests, "
+                      "any evidence-backed refutations, and material verification limitations. "
+                      "A required unresolved request prevents PASS; an unresolved operator decision needs BLOCKER.")
 # A plan's PASS stops the run for approval, and the operator approves from this
 # text alone, so it is written for that decision rather than as a confirmation.
 _PASS_PLAN_SUMMARY = ("on PASS is the summary a human reads before approving "

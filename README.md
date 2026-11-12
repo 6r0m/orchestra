@@ -86,7 +86,7 @@ Open the page — `http://127.0.0.1:8390` by default — and start a run on this
 your own repositories, copy `.orchestra/repos.example.json` to `.orchestra/repos.json` (ignored) and
 describe them there; the page can also start a run on any path you type.
 
-To use DeepSeek through Pi 1.1.0 or newer, configure DeepSeek authentication in Pi and select `deepseek-engineer`
+To use DeepSeek through Pi 1.5.0 or newer, configure DeepSeek authentication in Pi and select `deepseek-engineer`
 in Settings. A managed Pi installation can name its wrapper in that profile's optional `launcher`
 setting in the ignored `.orchestra/settings.local.json`; the default executable is `pi`.
 The engineer selection and per-turn limit, editable in hours, are saved in the local settings patch.

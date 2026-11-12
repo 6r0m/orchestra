@@ -125,7 +125,7 @@ def hosts():
     return _hosts
 
 
-def own_host(test, queue, script, git=None, telemetry=None):
+def own_host(test, queue, script, git=None, telemetry=None, activity_names=None):
     """A host of the test's own on `queue`, whose worker the test can take away: its activities, over a
     fake agent playing `script`, and the function that stops its worker — which the test's cleanup calls
     too, and which does nothing a second time."""
@@ -136,7 +136,10 @@ def own_host(test, queue, script, git=None, telemetry=None):
     connected = client()
 
     async def build():
-        return Worker(connected, task_queue=queue, activities=host.all(),
+        registered = host.all()
+        if activity_names is not None:
+            registered = [method for method in registered if method.__name__ in activity_names]
+        return Worker(connected, task_queue=queue, activities=registered,
                       activity_executor=concurrent.futures.ThreadPoolExecutor(max_workers=2))
     worker = run(build())
     run(worker.__aenter__())

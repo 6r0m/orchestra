@@ -16,6 +16,7 @@ export default function (pi) {
   const partsFile = process.env.ORCHESTRA_PI_PARTS_FILE;
   let controllerPrompt = null;
   let contract = null;
+  let requestParts = [];
   let awaitingController = Boolean(inputToken);
   try {
     if (Boolean(promptFile) !== Boolean(inputToken) || Boolean(promptFile) !== Boolean(partsFile))
@@ -33,10 +34,12 @@ export default function (pi) {
         const matches = parts.filter(part => part.part === name);
         if (matches.length !== 1 || !matches[0].text.trim()) throw new Error("missing turn contract");
       }
+      const systemParts = ["skill", "authority", "persona", "instructions", "recheck", "reflection", "handoff"];
       contract = "Use this current Orchestra contract rather than an earlier stage. If context is missing after "
         + "compaction, re-read the full controller prompt and its referenced instructions: " + promptFile + "\n\n"
-        + parts.filter(part => ["skill", "task", "persona", "instructions"].includes(part.part))
+        + parts.filter(part => systemParts.includes(part.part))
           .map(part => part.text).join("\n");
+      requestParts = parts.filter(part => !systemParts.includes(part.part)).map(part => part.text);
     }
   } catch {
     process.stderr.write("Pi could not load the controller prompt and matching turn contract before work\n");
@@ -49,6 +52,19 @@ export default function (pi) {
       process.exit(1);
     }
     event.systemPromptOptions.sections.orchestra_turn = contract;
+  });
+  pi.on("context", event => {
+    if (!requestParts.length) return;
+    const messages = event.messages.filter(message => message.role !== "custom"
+      || message.customType !== "orchestra_request_context");
+    const userText = messages.filter(message => message.role === "user").map(message =>
+      typeof message.content === "string" ? message.content : message.content
+        .filter(block => block.type === "text").map(block => block.text).join("\n")).join("\n");
+    const missing = requestParts.filter(text => !userText.includes(text));
+    if (!missing.length) return {messages};
+    // Request-only context survives compaction without putting free-form evidence in the system prompt.
+    return {messages: [{role: "custom", customType: "orchestra_request_context", display: false,
+      content: missing.join("\n"), timestamp: 0}, ...messages]};
   });
   pi.registerFlag("orchestra-resume-session", {type: "string", description: "The exact session the controller resumes"});
   function emit(hook, ctx, fields = {}) {

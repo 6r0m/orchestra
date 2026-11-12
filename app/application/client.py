@@ -340,6 +340,11 @@ async def answer(client, run_id, answer, check=True, only=None):
     action, _, role = (answer.get("action") or "").partition(":")
     if role:
         answer.update(action=action, role=role)
+    if current.get("operator_context_version") == WF.OPERATOR_CONTEXT_VERSION:
+        answer["operator_context_version"] = WF.OPERATOR_CONTEXT_VERSION
+    elif action in ("guide", "revise", "approve") and (answer.get("text") or "").strip():
+        raise NotAccepted("the workflow worker cannot preserve original operator notes; "
+                          "gracefully reload that worker before sending guidance")
     try:
         await client.get_workflow_handle(run_id).execute_update(
             WF.FeatureRun.answer, answer, id="answer:%s" % stop["id"])
@@ -521,7 +526,7 @@ async def history(client, run_id):
         async for event in client.get_workflow_handle(run_id).fetch_history_events():
             if event.HasField("activity_task_scheduled_event_attributes"):
                 attributes = event.activity_task_scheduled_event_attributes
-                if attributes.activity_type.name == "run_role":
+                if attributes.activity_type.name in WF.ROLE_ACTIVITIES:
                     args = await decoded(attributes.input.payloads)
                     scheduled[event.event_id] = (args, at(event))
                     state = args["state"]

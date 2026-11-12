@@ -115,9 +115,24 @@ change at the final gate, the blocker or the last finding, or the failure, whole
 At an approval your note goes with either answer. With *Revise*, it is what should change, for another round of
 the same work. With *Approve* — the button then reads *Approve with note* — the run goes on, and the note goes
 with it to the next step: the engineer building an approved plan reads it as your guidance, and so does the
-architect verifying that build; the review after that no longer carries it. An approval that ends the run has
+architect verifying that build. Accepted notes remain available in later rounds and phases, together with
+their original phase and recipient, so a reviewer summary cannot replace your requirements.
+An approval that ends the run has
 no next step, so it takes no note; nor does one in a run started before approvals took notes. There Approve
 stays *Approve*, and a note written beside it is not sent: the page says so, and you clear it or Revise with it.
+
+When revising, distinguish your decisions from quoted review advice: for example, "Adopt these public
+names; evaluate the quoted review against the remaining decisions." Each review must account for the
+material requests and identify anything refuted or unresolved. A genuine decision conflict should return
+to you as a blocker. A PASS does not prove that a model followed every instruction; inspect its evidence
+before merging.
+
+If guidance is refused because the workflow worker cannot preserve original notes, gracefully reload
+the workers and reload the Workbench service to load its shared client, using the existing stack and
+Workbench controls above. WSL itself stays running. The next accepted answer activates preservation for
+that run, including earlier accepted notes recovered from Temporal history; it does not rerun old turns.
+If a role step reports that `run_role_with_operator_context` is not registered, gracefully reload that
+run's target worker and press Continue. That refusal starts no agent and spends no model quota.
 
 A blocker, or rounds run out, comes from the architect's review of the engineer's work, and only you can say
 whom your guidance is for, so it takes it either way. *Guide the engineer* sends your note to the engineer, whose

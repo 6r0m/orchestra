@@ -338,7 +338,8 @@ class SettingsDelivery(unittest.TestCase):
                          ["build-e3-1", "verify-e3-1", "closeout-e4-1"])
         self.assertIn("fix the build gap", agent.calls[-3]["prompt"])
         self.assertNotIn("BUILD ENGINEER REFLECT", agent.calls[-3]["prompt"])
-        for said in ("fix the build gap", "BUILD ENGINEER REFLECT", "BUILD ENGINEER HANDOFF", "# Final budget handoff"):
+        self.assertIn("fix the build gap", agent.calls[-1]["prompt"], "the original operator note remains available")
+        for said in ("BUILD ENGINEER REFLECT", "BUILD ENGINEER HANDOFF", "# Final budget handoff"):
             self.assertNotIn(said, agent.calls[-1]["prompt"], "a closeout is no turn of the build's budgeted loop")
         self.answer(run_id, final["stop"], "discard", confirm=True)
         self.wait_until_discarded(run_id)

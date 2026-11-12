@@ -59,6 +59,8 @@ GUIDE_THE_ARCHITECT = "guide-the-architect"
 APPROVE_WITH_A_NOTE = "approve-with-a-note"
 NO_NOTE = ("this approval takes no note — it ends the run, or its run was recorded before approvals took one: "
            "approve without it, or revise with it")
+OPERATOR_CONTEXT_VERSION = 1
+ROLE_ACTIVITIES = ("run_role", "run_role_with_operator_context")
 HINTS = {
     "approval": "approve to start implementation, or revise with feedback for a new plan",
     "blocker": "guide with your decision to continue",
@@ -108,6 +110,7 @@ class FeatureRun:
         self.stopping = False
         self.conflict_reopens = True
         self.configuration_revision = 0
+        self.operator_notes = []
 
     @workflow.run
     async def run(self, start):
@@ -206,18 +209,16 @@ class FeatureRun:
                             return await self._end("DONE")
                         at += 1
                         await self._next(self.segments[at]["work"][1])
-                        # Your note, approving, is guidance to the stage approved into: its work, and the review
-                        # that judges it.
+                        # The legacy prompt path carried only the note approving this stage.
                         note = (answer.get("text") or "").strip()
-                        if note and workflow.patched(APPROVE_WITH_A_NOTE):
+                        if note and "operator_notes" not in s and workflow.patched(APPROVE_WITH_A_NOTE):
                             s["guidance"] = "The %s was approved, with this note for the work after it:\n\n%s" % (
                                 work, note)
                     review_next = not stands      # the plan changed: the architect judges it again
                     continue
-                # Guidance, or a revised plan or research: a new bounded episode. The operator's words
-                # survive the worker and are consumed by the architect that judges next — at once, with no
-                # work turn first, when they were sent to it.
-                s.update(guidance=answer["text"], round=0, gate_reason="", episode=s["episode"] + 1)
+                # Guidance starts a new bounded episode, with no work turn first when sent to the architect.
+                s.update(guidance="" if "operator_notes" in s else answer["text"],
+                         round=0, gate_reason="", episode=s["episode"] + 1)
                 if self.review_rounds:
                     s.update(convergence=None, convergence_seen=[])
                 review_next = bool(review) and answer.get("role") == "architect"
@@ -280,7 +281,8 @@ class FeatureRun:
         self._line("%s %s started" % (label, stages.STAGE_ROLE[stage]))
         self._doing(stage, stages.STAGE_ROLE[stage])
         result = await self._until_done(label, lambda: workflow.execute_activity(
-            "run_role", {"stage": stage, "state": s, "policy": self.policy, "gate": gate},
+            ROLE_ACTIVITIES[1] if "operator_notes" in s else ROLE_ACTIVITIES[0],
+            {"stage": stage, "state": s, "policy": self.policy, "gate": gate},
             task_queue=self.queue,
             start_to_close_timeout=timedelta(seconds=self.policy["timeout_seconds"] + 600),
             heartbeat_timeout=timedelta(seconds=self.policy["heartbeat_seconds"]),
@@ -382,7 +384,7 @@ class FeatureRun:
     async def _next(self, work):
         """On to the flow's next work stage, in a phase of its own."""
         s = self.state
-        # The operator's words were for the stage just approved, never for the next one.
+        # Routing hints and reviewer feedback end here; original operator notes retain their phase provenance.
         s.update(phase=work, round=0, feedback="", guidance="", gate_reason="", episode=s["episode"] + 1)
         if work not in stages.FINAL:
             # The work that makes a build final judges nothing, and a change sent back returns to that
@@ -413,7 +415,8 @@ class FeatureRun:
                 if not await self._reopened():
                     continue
                 # A defect found at the gate goes back into the run, to the role the operator names.
-                s.update(status="RUNNING", guidance=answer["text"], round=0, gate_reason="",
+                s.update(status="RUNNING", guidance="" if "operator_notes" in s else answer["text"],
+                         round=0, gate_reason="",
                          episode=s["episode"] + 1)
                 if self.review_rounds:
                     s.update(convergence=None, convergence_seen=[])
@@ -698,6 +701,15 @@ class FeatureRun:
 
     @workflow.update
     def answer(self, answer):
+        text = answer.get("text") or ""
+        if text.strip() and (answer["action"] in ("guide", "revise") or
+                             answer["action"] == "approve" and self.stop.get("noted")):
+            self.operator_notes.append({"stop": answer["stop"], "phase": self.state.get("phase"),
+                                        "action": answer["action"], "role": answer.get("role"), "text": text})
+        # Older accepted answers reconstruct the originals during replay without changing old commands.
+        # A newly recorded protocol version promotes them into subsequent activity inputs, including Continue.
+        if answer.get("operator_context_version") == OPERATOR_CONTEXT_VERSION:
+            self.state["operator_notes"] = list(self.operator_notes)
         self.answer_given = answer
         return {"stop": answer["stop"], "action": answer["action"]}
 
@@ -715,6 +727,11 @@ class FeatureRun:
             raise ValueError("%s needs the feedback to act on" % action)
         if action == "approve" and not stop.get("noted") and (answer.get("text") or "").strip():
             raise ValueError(NO_NOTE)
+        if action in ("guide", "revise", "approve") and (answer.get("text") or "").strip():
+            if (type(answer.get("operator_context_version")) is not int or
+                    answer["operator_context_version"] != OPERATOR_CONTEXT_VERSION):
+                raise ValueError("operator guidance was not accepted: reload the Workbench or use the current CLI "
+                                 "so the original notes are preserved")
         if action == "discard" and answer.get("confirm") is not True:
             raise ValueError("discard deletes the worktree and its branch, so it must be confirmed")
 
@@ -723,6 +740,7 @@ class FeatureRun:
         # Both queues the run needs: its target host's, and the one it runs on, its policy's own.
         return {"state": self.state, "stop": self.stop, "lines": self.lines, "timeline": self.timeline,
                 "queue": self.queue, "workflow_queue": workflow.info().task_queue,
+                "operator_context_version": OPERATOR_CONTEXT_VERSION,
                 "configuration": self._configuration()}
 
 

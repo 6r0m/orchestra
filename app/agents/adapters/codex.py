@@ -242,7 +242,7 @@ def final_message(out):
                 said.append(message_of(json.loads(line)))
             except ValueError:
                 pass
-    said = [message for message in said if message]
+    said = [message for message in said if message is not None]
     return said[-1] if said else ""
 
 

@@ -130,6 +130,29 @@ def to_ready():
 
 
 class NamedAnswers(Scenario):
+    def test_retained_notes_refuse_an_older_target_worker_before_an_agent_starts_and_continue_after_upgrade(self):
+        queue = "target:wsl:context-" + uuid.uuid4().hex[:10]
+        first, _ = codex_review_first("PASS")
+        script = [("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, first),
+                  ("build-e2-1", 0, "built\n"), ("verify-e2-1", 0, codex_review_resumed("PASS"))]
+        from app.application.activities import Activities
+        methods = {method.__name__ for method in Activities().all()} - {"run_role_with_operator_context"}
+        old, stop_old = E.own_host(self, queue, script, activity_names=methods)
+        run = E.Run(queue=queue)
+        self.addCleanup(run.cleanup)
+        self.assertEqual(run.answer("yes preserve the original public contract")[0], 2)
+        self.assertEqual(run.stop["reason"], "failed")
+        self.assertIn("run_role_with_operator_context", run.stop["feedback"])
+        self.assertEqual(len(old.runner.calls), 2, "no model starts on a worker that cannot honor the new input contract")
+        stop_old()
+        upgraded, _ = E.own_host(self, queue, script[2:])
+        self.assertEqual(run.answer("continue")[0], 0)
+        self.assertEqual(run.stop["reason"], "final")
+        for call in upgraded.runner.calls:
+            self.assertIn("preserve the original public contract", call["prompt"])
+        recorded = E.run(E.cli.runs.history(E.client(), run.run_id))
+        self.assertEqual([turn["stage"] for turn in recorded["turns"]], ["plan", "assess", "build", "verify"])
+
     """A stop takes only its named answers, and applies one answer once."""
 
     def blocked(self):
@@ -158,7 +181,8 @@ class NamedAnswers(Scenario):
 
     def test_the_same_answer_sent_twice_is_applied_once(self):
         run = self.blocked()
-        answer = {"stop": run.stop["id"], "action": "guide", "text": "use B"}
+        answer = {"stop": run.stop["id"], "action": "guide", "text": "use B",
+                  "operator_context_version": WF.OPERATOR_CONTEXT_VERSION}
         first = self.send(run, answer, "answer:%s" % answer["stop"])
         second = self.send(run, answer, "answer:%s" % answer["stop"])
         self.assertEqual(first, second)
@@ -166,6 +190,20 @@ class NamedAnswers(Scenario):
         self.assertEqual(run.stop["reason"], "approval")
         self.assertEqual([e.event_type for e in history(run.handle)].count(ACCEPTED), 1)
         self.assertEqual([c["name"] for c in self.agent.calls].count("plan-e2-1"), 1)
+        self.assertEqual(len(run.state["operator_notes"]), 1, "idempotence also covers retained operator input")
+
+    def test_a_note_without_the_retention_protocol_is_refused_without_mutating_the_run(self):
+        run = self.blocked()
+        before = json.loads(json.dumps(run.state))
+        accepted = [event.event_type for event in history(run.handle)].count(ACCEPTED)
+        for version in (None, True, 2):
+            with self.subTest(version=version), self.assertRaises(WorkflowUpdateFailedError):
+                self.send(run, {"stop": run.stop["id"], "action": "guide", "text": "keep all original requests",
+                                "operator_context_version": version}, uuid.uuid4().hex)
+        current = E.run(run.handle.query(WF.FeatureRun.status))
+        self.assertEqual(current["state"], before)
+        self.assertEqual(current["stop"]["id"], run.stop["id"])
+        self.assertEqual([event.event_type for event in history(run.handle)].count(ACCEPTED), accepted)
 
     def test_an_unrecognised_answer_through_the_cli_is_asked_again(self):
         a1, _ = codex_review_first("PASS")
@@ -203,6 +241,9 @@ class NamedAnswers(Scenario):
         with self.assertRaises(E.cli.runs.NotAccepted) as refused:
             E.run(E.cli.runs.answer(E.client(), run_id, noted, check=False))
         self.assertIn("takes no note", str(refused.exception))
+        with self.assertRaisesRegex(E.cli.runs.NotAccepted, "cannot preserve original operator notes"):
+            E.run(E.cli.runs.answer(E.client(), run_id,
+                                   {"stop": stop["id"], "action": "revise", "text": "keep every request"}, check=False))
         out = io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
             code = E.run(E.cli._answer(E.client(), run_id, "yes keep the API as it is", False, None, False))
@@ -227,14 +268,16 @@ class AnswersAsPublished(unittest.TestCase):
 
     def test_a_revise_at_the_final_gate_names_a_role_the_gate_published(self):
         final = self.at("final")
-        final._validate_answer({"stop": "r:1", "action": "revise", "role": "engineer", "text": "fix it"})
+        final._validate_answer({"stop": "r:1", "action": "revise", "role": "engineer", "text": "fix it",
+                                "operator_context_version": WF.OPERATOR_CONTEXT_VERSION})
         for role in (None, "someone"):
             with self.assertRaises(ValueError, msg=role):
                 final._validate_answer({"stop": "r:1", "action": "revise", "role": role, "text": "fix it"})
 
     def test_a_revise_at_the_plan_approval_names_no_role(self):
         approval = self.at("approval")
-        approval._validate_answer({"stop": "r:1", "action": "revise", "text": "plan it again"})
+        approval._validate_answer({"stop": "r:1", "action": "revise", "text": "plan it again",
+                                  "operator_context_version": WF.OPERATOR_CONTEXT_VERSION})
         with self.assertRaises(ValueError):
             approval._validate_answer({"stop": "r:1", "action": "revise", "role": "engineer", "text": "x"})
 
@@ -622,7 +665,8 @@ class Closeout(Scenario):
                          "undone once, to the tree the architect verified, before the engineer's next turn")
         by_name = {call["name"]: call for call in self.agent.calls}
         self.assertIn("tighten the guard", by_name["build-e4-1"]["prompt"])
-        self.assertNotIn("tighten the guard", by_name["closeout-e5-1"]["prompt"], "the words were the build's")
+        self.assertIn("tighten the guard", by_name["closeout-e5-1"]["prompt"],
+                      "closeout retains the original revision without changing its restricted stage contract")
         self.assertEqual([(entry["stage"], entry["phase"]) for entry in run.status["timeline"]][-3:],
                          [("build", "build"), ("verify", "build"), ("closeout", "closeout")])
         self.assertEqual(run.state["phase_rounds"], 2, "the build's judgements are counted on across its closeout")

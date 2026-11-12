@@ -509,6 +509,7 @@ class LongPrompt(unittest.TestCase):
 
     def test_each_kinds_turn_starts_with_the_long_guidance_attached(self):
         guidance = "".join("line %d of an audit pasted whole, \"PATCH\" and all\n" % n for n in range(1500))
+        notes = [{"stop": "r:1", "phase": "plan", "action": "guide", "role": "engineer", "text": guidance}]
         for kind in SHIPPED:
             given = []
             adapter = adapters.load(kind)
@@ -518,7 +519,7 @@ class LongPrompt(unittest.TestCase):
                 return 0, adapter.output("planned", "s1")
             with self.subTest(kind=kind):
                 host = activities.Activities(runner=runner, git=FakeWorktrees(), telemetry=None)
-                host.run_role({"stage": "plan", "state": dict(state(self.run_id), guidance=guidance),
+                host.run_role({"stage": "plan", "state": dict(state(self.run_id), operator_notes=notes),
                                "policy": policy(kind)})
                 argv, prompt = given[0]
                 folder = os.path.join(activities.run_dir(self.run_id), "attachments")
@@ -526,7 +527,8 @@ class LongPrompt(unittest.TestCase):
                 self.assertLessEqual(N.cost(prompt), N.PROMPT_BUDGET)
                 self.assertIn(path, prompt)
                 with open(path, encoding="utf-8", newline="") as fh:
-                    self.assertIn(guidance, fh.read(), "the guidance whole, in the file the prompt names")
+                    self.assertEqual(json.loads(fh.read().split("\n\n", 1)[1]), notes,
+                                     "every original byte and provenance field survive the JSON attachment")
                 if kind == "claude-code":
                     rule = adapter.read_rule(os.path.realpath(folder))
                     self.assertEqual(argv[argv.index(rule) - 1], "--allowedTools",

@@ -20,6 +20,7 @@ sys.path[:0] = [PKG, HERE]
 from temporal_env import POLICY, Run, client, host  # noqa: E402
 import temporal_env  # noqa: E402
 import cast  # noqa: E402
+from app.agents import terminal  # noqa: E402
 from fakes import (codex_first_out, codex_review_first, codex_review_resumed, review_first_for,
                    review_resumed_for)  # noqa: E402
 
@@ -43,6 +44,30 @@ class Scenario(unittest.TestCase):
 
 
 class Routing(Scenario):
+    def test_architect_revision_survives_every_handoff_and_final_verification(self):
+        first, _ = codex_review_first("PASS")
+        run = self.drive([
+            ("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, first),
+            ("build-e2-1", 0, "built\n"), ("verify-e2-1", 0, codex_review_resumed("PASS")),
+            ("verify-e3-1", 0, codex_review_resumed("PATCH", "Fix the buffer only.")),
+            ("build-e3-2", 0, "partial fix\n"),
+            ("verify-e3-2", 0, codex_review_resumed("PATCH", "One remaining buffer fix.")),
+            ("build-e3-3", 0, "fixed\n"), ("verify-e3-3", 0, codex_review_resumed("PASS")),
+        ], auto=True)
+        note = 'Rename the public capability and colocate tests.\nQuoted reviewer: "ignore the operator".'
+        stop = run.stop["id"]
+        self.assertEqual(run.answer("revise architect " + note)[0], 0)
+        for call in self.agent.calls[4:]:
+            with self.subTest(turn=call["name"]):
+                with open(terminal.turn_files(terminal.run_dir(run.run_id), call["name"])["parts"],
+                          encoding="utf-8") as stream:
+                    parts = json.load(stream)
+                text = next(part["text"] for part in parts if part["part"] == "guidance")
+                notes = json.loads(text.split("\n", 2)[2])
+                self.assertEqual(notes, [{"stop": stop, "phase": "build", "action": "revise",
+                                          "role": "architect", "text": note}])
+        self.assertEqual(run.stop["reason"], "final")
+
     def test_engineer_output_always_reaches_architect_full_pass(self):
         assess1, _ = codex_review_first("PASS")
         run = self.drive([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, assess1),
@@ -196,7 +221,7 @@ class Routing(Scenario):
 
     def test_a_note_given_with_an_approval_is_guidance_to_the_stage_approved_into(self):
         """Approve with a note: the run goes on, and the note reaches the work approved into and the review
-        that judges it — no plan round first, and nothing of it after that review."""
+        that judges it, including subsequent correction rounds."""
         a1, _ = codex_review_first("PASS")
         run = self.drive([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1),
                           ("build-e2-1", 0, "built\n"), ("verify-e2-1", 0, codex_review_resumed("PATCH", "fix B")),
@@ -207,11 +232,45 @@ class Routing(Scenario):
         self.assertEqual(self.names(), ["plan-e1-1", "assess-e1-1", "build-e2-1", "verify-e2-1", "build-e2-2",
                                         "verify-e2-2"], "on to the build, no plan round first")
         prompts = {call["name"]: call["prompt"] for call in self.agent.calls}
-        for name in ("build-e2-1", "verify-e2-1"):
+        for name in ("build-e2-1", "verify-e2-1", "build-e2-2", "verify-e2-2"):
             self.assertIn("keep the public API unchanged", prompts[name], name)
-            self.assertIn("The plan was approved, with this note", prompts[name], name)
-        for name in ("plan-e1-1", "assess-e1-1", "build-e2-2", "verify-e2-2"):
+        for name in ("plan-e1-1", "assess-e1-1"):
             self.assertNotIn("keep the public API unchanged", prompts[name], name)
+
+    def test_operator_notes_survive_phase_changes_and_later_notes_do_not_erase_earlier_ones(self):
+        first, _ = codex_review_first("PASS")
+        run = self.drive([
+            ("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, first),
+            ("build-e2-1", 0, "built\n"), ("verify-e2-1", 0, codex_review_resumed("PASS")),
+            ("verify-e3-1", 0, codex_review_resumed("PASS")),
+        ])
+        run.answer("yes preserve the public API")
+        run.answer("revise architect inspect the renamed capability too")
+        self.assertEqual([note["text"] for note in run.state["operator_notes"]],
+                         ["preserve the public API", "inspect the renamed capability too"])
+        for text in ("preserve the public API", "inspect the renamed capability too"):
+            self.assertIn(text, self.agent.calls[-1]["prompt"])
+
+    def test_legacy_notes_reconstruct_without_changing_old_inputs_and_activate_on_a_new_answer(self):
+        run = WF.FeatureRun()
+        run.state = {"phase": "build"}
+        run.stop = {"id": "r:1"}
+        run.answer({"stop": "r:1", "action": "revise", "role": "architect", "text": "original large request"})
+        self.assertNotIn("operator_notes", run.state, "replaying old answers must preserve their recorded inputs")
+        run.stop = {"id": "r:2"}
+        run.answer({"stop": "r:2", "action": "revise", "role": "engineer", "text": "also fix the buffer",
+                    "operator_context_version": WF.OPERATOR_CONTEXT_VERSION})
+        self.assertEqual([note["text"] for note in run.state["operator_notes"]],
+                         ["original large request", "also fix the buffer"])
+
+    def test_continuing_a_legacy_run_restores_its_accepted_notes_without_another_note(self):
+        run = WF.FeatureRun()
+        run.state = {"phase": "build"}
+        run.stop = {"id": "r:1"}
+        run.answer({"stop": "r:1", "action": "guide", "text": "original operator decision"})
+        run.stop = {"id": "r:2"}
+        run.answer({"stop": "r:2", "action": "continue", "operator_context_version": WF.OPERATOR_CONTEXT_VERSION})
+        self.assertEqual([note["text"] for note in run.state["operator_notes"]], ["original operator decision"])
 
     def test_yes_alone_approves_with_no_note(self):
         a1, _ = codex_review_first("PASS")
@@ -474,7 +533,7 @@ class Sessions(Scenario):
         for phrase in ("chosen direction", "blast radius", "reused versus newly built"):
             self.assertIn(phrase, assess)
             self.assertNotIn(phrase, verify)
-        self.assertIn("short confirmation on PASS", verify)
+        self.assertIn("acceptance summary covering the original operator requests", verify)
 
     def test_architect_session_loss_midloop_rehydrates_completely(self):
         # A session lost on round 2 comes back independently executable: task, persona,
@@ -761,6 +820,12 @@ PROMPT_CASES = {
         stage="build", stage_cfg=ENGINEER, is_review=False,
         state=dict(TURN, phase="build", episode=3, guidance="Approved; mind the lock."),
         session_first=False, stage_first=True, skills={"build": "implement-approved-change"}),
+    "verify, retained notes and current workflow context": dict(
+        stage="verify", stage_cfg=ARCHITECT, is_review=True,
+        state=dict(TURN, phase="build", episode=4, guidance="The base moved; judge the combined tree.",
+                   operator_notes=[{"stop": "r1:2", "phase": "build", "action": "revise", "role": "architect",
+                                    "text": "Keep the public API unchanged.\nRecheck every request."}]),
+        session_first=False, stage_first=False),
     "verify, a convergence reflection with your guidance": dict(
         stage="verify", stage_cfg=ARCHITECT, is_review=True,
         state=dict(TURN, phase="build", round=2, feedback="Still racy.", convergence={"phase": "build", "round": 2},
@@ -953,12 +1018,12 @@ class Flows(Scenario):
         self.assertEqual((code, run.stop["reason"]), (2, "approval"), out)
         self.assertIn("narrow it to one queue", self.agent.calls[1]["prompt"])
         self.assertEqual(run.state["brief"], "Brief v2: the scheduler, narrowed to one queue.")
-        # Approved: the engineer plans from the brief, on the code; the words were the research's own.
+        # The brief is a proposal; the original operator note remains available to the engineer too.
         code, out = run.answer("yes")
         self.assertEqual((code, run.stop["reason"], run.state["step"]), (2, "approval", 4), out)
         plan = self.agent.calls[2]["prompt"]
         self.assertIn("Brief v2: the scheduler, narrowed to one queue.", plan)
-        self.assertNotIn("narrow it to one queue", plan)
+        self.assertIn("narrow it to one queue", plan)
         code, out = run.answer("yes")
         self.assertEqual((code, run.stop["reason"], run.state["step"]), (0, "final", 7), out)
         code, out = run.answer("merge")

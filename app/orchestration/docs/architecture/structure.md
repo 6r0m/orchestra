@@ -43,6 +43,21 @@ the queue; what the activity does is the other side's.
 
 ## Invariants
 
+- **Accepted operator notes remain original inputs.** A revision, guidance or approval note retains its
+  exact text, originating stop, phase, action and chosen recipient. Subsequent work, review and closeout
+  receive the originals in order, across rounds and phases. A later note does not erase earlier choices;
+  applying a note still requires interpreting its scope and distinguishing quoted evidence from an
+  explicit operator decision. Workflow-generated routing context stays separate from those notes.
+  Notes are accepted human inputs, not accumulated prompts or vendor transcripts (D8).
+  Historical answers reconstruct this projection during replay without changing recorded activity
+  inputs. A new answer's recorded context-protocol version activates the projection for later work,
+  including an existing run's earlier notes when it Continues without another note.
+  Retained-context turns use a distinct role-activity type on the same target queue. A target worker
+  without that contract fails the activity before starting an agent; Continue retries it after the
+  worker is upgraded. The legacy activity type remains registered for recorded commands.
+  The status query advertises support; the shared client
+  refuses guidance to an older worker, and the validator refuses unversioned new notes. Rejected and
+  duplicate answers add no notes. No activity reads a vendor conversation to recover operator intent.
 - **The workflow is deterministic (D25).** A change to what it commands keeps the recorded histories in `tests/histories/` replaying — behind `workflow.patched(...)`, or behind what those histories themselves record — and `tests/orchestration/test_replay.py` is the guard, with a control.
 - **A stop waits here and nowhere else (D6).** Each stop publishes the actions it takes, a revise at the final gate named per role, and its answer arrives as an Update carrying one of them, with the stable id `answer:<stop-id>`, so an answer sent twice is applied once. No activity ever waits for a human.
 - **Adopting a verified todo name does not answer a stop.** At a failed closeout, an explicit operator

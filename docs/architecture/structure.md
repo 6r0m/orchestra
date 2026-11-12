@@ -53,7 +53,7 @@ in — its flow, one file in `flows/`.
   recorded boundary and routing. **Nothing runs twice on its own:** a role-run
   and every git side effect are single-attempt activities, and a failure stops
   the run for the operator.
-- **D8** **State stays compact and raw** (ids, refs, verdict, feedback —
+- **D8** **State stays compact and raw** (ids, refs, verdict, feedback, accepted operator notes —
   never transcripts/diffs/accumulated prompts); prompts are kept in named files
   and delivered through each CLI's adapter; per-role-run logs and terminal
   records own the bulky evidence.
@@ -589,8 +589,7 @@ still lands on a checkout.
   exactly those, owning only how each is labelled and typed. Its answer arrives
   as an Update carrying one of them, and a validator rejects anything else before
   it reaches history, so no unrecognised answer is ever read as a discard; guide
-  and revise carry the operator's words, an approve may — a note that goes on as guidance to the
-  work approved into and the review that judges it, only where its stop says it takes one
+  and revise carry the operator's words, an approve may — only where its stop says it takes one
   (`noted`): never at the run's end, nor in a run recorded before notes. Elsewhere a note is
   refused, by the validator and before it by the answer's path, so a worker from before notes,
   which would take one and drop it unsaid, is never sent one — and a discard must be confirmed. The
@@ -674,8 +673,11 @@ still lands on a checkout.
   nothing again, and the removal finishes it.
 - **D18b** **Every role invocation refreshes its current contract**:
   task, snapshotted persona, current stage ask and bound skill accompany both
-  new and resumed sessions. Feedback and guidance remain incremental; a new
-  session also receives the findings a continuing reviewer must re-check.
+  new and resumed sessions. The original operator notes accompany later work and
+  independent verification; reviewer summaries cannot replace them. Their lifetime and
+  replay compatibility belong to [orchestration](../../app/orchestration/docs/architecture/structure.md).
+  Reviewer findings remain incremental; a new session also receives the findings a
+  continuing reviewer must re-check.
   State plus the worktree remain sufficient to reconstruct a role, without
   depending on remembered instructions after compaction. Vendor-specific
   protection within a long turn belongs to [agents](../../app/agents/docs/architecture/structure.md).

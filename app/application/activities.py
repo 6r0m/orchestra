@@ -170,6 +170,7 @@ class Activities:
 
     def all(self):
         return [self.prepare, self.create_worktree, self.open_run, self.open_phase, self.run_role,
+                self.run_role_with_operator_context,
                 self.record_stop, self.record_answer, self.finish_trace, self.reconcile, self.reopen, self.merge,
                 self.discard,
                 self.worktree_view, self.review_diff, self.work_tree, self.adopt_todo_name]
@@ -259,6 +260,11 @@ class Activities:
         node = T.open_phase(client, args["state"], args["phase"])
         T.flush(client)
         return {"id": node}
+
+    @activity.defn
+    def run_role_with_operator_context(self, args):
+        """A distinct activity type prevents older hosts from silently ignoring retained operator input."""
+        return self.run_role(args)
 
     @activity.defn
     def run_role(self, args):
