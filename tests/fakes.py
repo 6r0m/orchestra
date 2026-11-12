@@ -97,6 +97,8 @@ class FakeWorktrees:
         self.diff_refusal = None
         # What each merge was handed to finish itself: the run's plan, or None when its closeout already had.
         self.finished = []
+        self.checkpoints = []
+        self.checkpoint_error = None
         # What a closeout changed outside its todo folders and its repository's documents, as `changed`
         # names it, and whether it left the todo where it found it.
         self.outside = []
@@ -124,6 +126,13 @@ class FakeWorktrees:
 
     def work_tree(self, path):
         return "verified-tree"
+
+    def review_checkpoint(self, path, owner, key, base):
+        self.checkpoints.append(key)
+        if self.checkpoint_error:
+            raise RuntimeError(self.checkpoint_error)
+        return {"base": base, "basis": base, "tree": self.work_tree(path),
+                "owner": owner, "ref": "refs/orchestra/review/synthetic/tree"}
 
     def changed(self, path, base, tree, folders=(), patterns=()):
         return list(self.outside)

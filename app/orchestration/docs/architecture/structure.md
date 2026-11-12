@@ -43,6 +43,15 @@ the queue; what the activity does is the other side's.
 
 ## Invariants
 
+- **Review checkpoints describe accepted actions; they never route work.** After consuming an accepted
+  stop answer, before reopening, reconciliation, another role or cleanup, an opted-in run asks its target
+  to retain an immutable Git sample. A failed or timed-out capture is explicitly unavailable and leaves
+  the accepted answer effective. Cancellation still interrupts the wait. The recorded answer protocol
+  activates this behavior on existing runs without adding commands while replaying older answers;
+  historical boundaries without a capture remain unknown. Copying, viewing and terminal typing create
+  no checkpoint. Git retention and release belong to
+  [workspace](../../../workspace/docs/architecture/structure.md#review-snapshot-retention).
+
 - **Accepted operator notes remain original inputs.** A revision, guidance or approval note retains its
   exact text, originating stop, phase, action and chosen recipient. Subsequent work, review and closeout
   receive the originals in order, across rounds and phases. A later note does not erase earlier choices;

@@ -8,7 +8,7 @@ import unittest
 
 @unittest.skipUnless(shutil.which("node"), "the browser module requires Node")
 class TerminalStream(unittest.TestCase):
-    def exercise(self, streaming, recorded=False):
+    def exercise(self, streaming, recorded=False, cache=False):
         path = Path(__file__).resolve().parents[2] / "app/interfaces/workbench/static/terminals.js"
         script = r"""
 import fs from 'node:fs';
@@ -19,13 +19,13 @@ function $(id) {
   if (!elements.has(id)) {
     const handlers={}; let open=false;
     elements.set(id,{textContent:'',classList:{contains:()=>false,toggle:()=>{}},
-      addEventListener:(name,fn)=>handlers[name]=fn, replaceChildren:()=>{},
+      addEventListener:(name,fn)=>handlers[name]=fn, replaceChildren:(...nodes)=>{},
       querySelector:()=>null,clientWidth:0,scrollIntoView:()=>{},
       get open(){return open},set open(value){if(value!==open){open=value;handlers.toggle?.()}}});
   }
   return elements.get(id);
 }
-globalThis.document={body:{classList:{toggle:()=>{}}}};
+globalThis.document={body:{classList:{toggle:()=>{}}},createElement:()=>({style:{},remove:()=>{}})};
 globalThis.window={addEventListener:()=>{}};
 globalThis.ResizeObserver=class{observe(){}};
 Object.defineProperty(globalThis,'navigator',{value:{},configurable:true});
@@ -49,7 +49,8 @@ replay.set(live,history.length+fragments.length);replay.set(later,initial);
 class Renderer {
   constructor(){terms.push(this);this.options={};this.parser={registerOscHandler:()=>{}};
     this.pending=0;this.maximum=0;this.parsed=0;this.text='';this.calls=0;}
-  open(){} attachCustomKeyEventHandler(){} onData(fn){this.input=fn;} dispose(){} focus(){}
+  open(){} attachCustomKeyEventHandler(){} onData(fn){this.input=fn;} dispose(){this.disposed=true;} focus(){}
+  scrollToBottom(){this.tailed=true;}
   write(data,done){
     this.calls++;
     if(this.pending>50000000)throw Error('write data discarded');
@@ -80,6 +81,51 @@ await module.link(async name=>{
 });
 await module.evaluate();
 const api=module.namespace;
+if(process.env.CACHE==='1'){
+  async function settle(){for(let n=0;n<4;n++)await new Promise(r=>setImmediate(r));}
+  const show=(id,target='windows')=>{
+    api.showTerminals(id,target);
+    api.updateTerminals({open:true,shown:'engineer',working:'engineer',since:id});
+  };
+  show('A');
+  const a=terms[0], first=sockets[0];
+  first.onmessage({data:JSON.stringify({live:true,replay:4})});
+  first.onmessage({data:new TextEncoder().encode('ABCD').buffer});
+  // Navigate before the parser callback: the confirmed cursor must finish advancing while parked.
+  show('B');await settle();
+  assert.equal(first.readyState,3);
+  assert(!a.disposed,'open runs must retain their parsed emulator');
+  api.noteTerminalRuns([]);
+  assert(!a.disposed,'an incomplete rail page cannot establish closure');
+  assert.equal(a.parsed,4);
+  const otherState=$('state-engineer').textContent;
+  first.onmessage({data:JSON.stringify({live:true,replay:999999})});
+  assert.equal($('state-engineer').textContent,otherState,'parked output must not change another run');
+  show('A');await settle();
+  assert.equal(terms.length,2,'returning must reuse the emulator');
+  const resumed=sockets.at(-1);resumed.onopen();
+  assert.equal(JSON.parse(new TextDecoder().decode(resumed.sent[0])).read,4);
+  resumed.onmessage({data:JSON.stringify({live:true,replay:4})});
+  a.input('A input');assert(resumed.sent.includes('A input'));
+  assert(a.tailed,'automatic restoration must show the latest screen');
+  show('C');show('D');
+  assert(terms[1].disposed,'least recently used hidden display must be evicted');
+  assert(!a.disposed,'recently used display must survive pressure');
+  api.noteTerminalRuns([{run_id:'A',state:'closed'},{run_id:'C',state:'waiting'}]);
+  assert(a.disposed,'confirmed closure must release hidden displays');
+  show('C','wsl');
+  assert.equal(terms.length,5,'another host must never reuse the same emulator');
+  const closed=terms.at(-1),closedSocket=sockets.at(-1);
+  closedSocket.onmessage({data:JSON.stringify({live:true,replay:0})});
+  api.noteTerminalRuns([{run_id:'C',state:'closed'}]);
+  api.updateTerminals({open:true,shown:'engineer',working:'engineer',since:'stale'});
+  closed.input('must not reach a closed run');
+  assert(!closedSocket.sent.includes('must not reach a closed run'),'stale open reads must not undo confirmed closure');
+  assert(!closed.disposed,'the currently visible record remains readable');
+  show('E');assert(closed.disposed,'closed displays must not survive navigation');
+  console.log('cached navigation, confirmed cursor, isolation, bounds and closure: PASS');
+  process.exit(0);
+}
 api.showTerminals('first','windows');
 api.updateTerminals({open:!recorded,shown:'engineer',working:recorded?null:'engineer',since:'now'});
 const first=sockets[0];first.onopen?.();
@@ -126,7 +172,8 @@ console.log('large replay, live output, confirmed reconnect and input: PASS');
 """
         result = subprocess.run([shutil.which("node"), "--experimental-vm-modules", "--input-type=module",
                                  "-e", script, path.as_uri()], env=dict(os.environ, STREAM="1" if streaming else "0",
-                                                                     RECORDED="1" if recorded else "0"),
+                                                                     RECORDED="1" if recorded else "0",
+                                                                     CACHE="1" if cache else "0"),
                                 capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -138,3 +185,6 @@ console.log('large replay, live output, confirmed reconnect and input: PASS');
 
     def test_recorded_partial_replay_reconnects_and_normal_eof_stays_closed(self):
         self.exercise(True, recorded=True)
+
+    def test_navigation_reuses_bounded_open_run_displays_and_evicts_only_confirmed_closed_runs(self):
+        self.exercise(True, cache=True)

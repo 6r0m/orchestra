@@ -210,7 +210,12 @@ never drawn again under you: after its worker restarts it keeps its record until
 which it then adds to. A terminal holds the whole session, including whatever you typed during a turn.
 
 Large terminal histories show catch-up progress while replaying, then live output. Reconnecting keeps
-the output already drawn. A worker marked *draining* is updating: its current work continues, and new
+the output already drawn. Navigating between open or waiting runs keeps a bounded cache of parsed screens;
+returning shows the tail and reads only new bytes. Hidden cached screens have no live socket. Closing a run
+or cache pressure releases its retained display; a full page reload replays the record. This browser cache
+does not keep the agent's CLI initialized.
+
+A worker marked *draining* is updating: its current work continues, and new
 steps wait for its replacement. This is an update notice, not a down-worker warning. An agent command
 that pipes its output through `tail` can still stay quiet until that command finishes.
 
@@ -242,6 +247,16 @@ them, until *Restore* puts back 48; Esc still reaches the agent. Scroll back thr
 which draws inline as Claude does, and shows its session's history again each time a turn resumes it. Select text
 and press Ctrl+C to copy it, say into your guidance; with nothing selected, Ctrl+C goes to the agent, as in any
 terminal.
+
+Change also contains **Review milestones**. Each accepted approval, revision, guidance or Continue closes
+an interval; copying or terminal typing creates none. Open an interval to copy that milestone, or choose an
+earlier checkpoint under **Compare from** to copy a larger net range. The copied text identifies its snapshots
+and then contains the full patch. **Copy all changes** continues to export the entire current run change.
+Current milestone exports are sampled at an operator stop and labelled unverified; while a role executes,
+Copy all changes remains available. Missing historical captures and ranges crossing a base update are
+explicitly unavailable. Existing runs acquire exact boundaries from future supported answers, not retroactively.
+Snapshots survive ordinary worktree cleanup and use disk until explicitly released through the
+[run-scoped retention procedure](../app/workspace/docs/architecture/structure.md#review-snapshot-retention).
 
 The history is the run as a transcript, phase by phase: each completed turn a row — its role, stage,
 round, verdict, how long it ran from when a worker took it, and when — and your answers rows of their own

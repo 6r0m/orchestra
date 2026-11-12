@@ -9,6 +9,7 @@ import { refreshRuns, runsListed, runsRead, select } from "./rail.js";
 import { refreshRun, show, unsent } from "./run.js";
 import { openWorktrees } from "./worktrees.js";
 import { openSettings, settingsUnsent } from "./settings.js";
+import { noteTerminalRuns } from "./terminals.js";
 
 const VIEWS = { empty: "view-empty", new: "view-new", worktrees: "view-worktrees", settings: "view-settings",
   run: "run" };
@@ -89,6 +90,7 @@ document.addEventListener("workbench:wrote", () => {
   refreshRun();
 });
 document.addEventListener("workbench:runs", () => {
+  noteTerminalRuns(runsListed());
   noteRuns(runsListed());
   noteStarts(runsListed());
   showEmpty();

@@ -51,6 +51,37 @@ the operator's own repositories, and a missing file means no descriptors rather 
 - **A change is one snapshot, read one way.** Reading the change makes its tree on a private copy of the index, staging nothing; the commit of its base the run stands on and that tree name it — for a run that recorded none, the worktree's HEAD, or the base merged into it after a conflict — and every later read — each part of its file list, one file, each part of its patch — names them again, so none mixes in what the live worktree did meanwhile. A file is read whole only when git's own sizes say each side is small enough, decided before any diff runs, and otherwise its changes alone. A round's change is the same read between two trees its reviews judged; a tree git has pruned is said gone. Every read passes the same diff options, so no repository or user setting runs an external diff or text conversion, colours the text or turns rename detection off; paths come from git's NUL-separated lists, and a file is named literally, never as a pattern.
 - **One authority per repository fact, refusing when there is none (D26).** A Windows target refuses a path Windows cannot use as a working directory, which it would otherwise silently replace with `C:\Windows`.
 
+## Review snapshot retention
+
+`review_checkpoint` samples through the private index and atomically creates a pair of private refs under
+`refs/orchestra/review/`, scoped to the exact Temporal execution and accepted action. The first complete
+pair wins; competing or repeated captures adopt it. Capture cannot stage the real index, move HEAD, alter
+branches or modify files. A snapshot samples files rather than proving filesystem-wide atomicity or review.
+
+These refs retain the original base object and sampled tree through worktree removal and Git garbage
+collection, so the recorded base commit remains an addressable export endpoint. They remain local,
+must never be pushed, and intentionally consume disk after merge/discard. Deleting disposable terminal caches
+does not release them. The history API exposes the execution owner with each captured boundary; it is a
+Temporal execution identity, not a provider conversation.
+
+For a closed execution, use the project environment to inspect an exact release manifest. Run from the
+Orchestra checkout, writing the manifest only under ignored `tmp/`:
+
+```sh
+python -c "import json,sys; from pathlib import Path; from app.workspace.worktrees import review_checkpoint_refs; Path(sys.argv[3]).write_text(json.dumps(review_checkpoint_refs(sys.argv[1],sys.argv[2]),indent=2),encoding='utf-8')" "/path/to/repo" "WORKFLOW_EXECUTION_ID" tmp/review-refs.json
+```
+
+Read that manifest before releasing it. Then, for that same repository and execution:
+
+```sh
+python -c "import json,sys; from app.workspace.worktrees import release_review_checkpoints; release_review_checkpoints(sys.argv[1],sys.argv[2],json.load(open(sys.argv[3],encoding='utf-8')))" "/path/to/repo" "WORKFLOW_EXECUTION_ID" tmp/review-refs.json
+```
+
+Release validates the exact owner namespace and object IDs against the current manifest and uses an atomic
+compare-and-swap deletion. A changed manifest, another execution's refs or a branch is refused without
+deletion. Ordinary Git GC may reclaim released objects later; Temporal's historical metadata remains,
+and an export whose objects are gone becomes explicitly unavailable. Never substitute a broad ref deletion.
+
 ## Accepted decisions
 
 An index. Each decision is written where the project's architecture states it, beside the

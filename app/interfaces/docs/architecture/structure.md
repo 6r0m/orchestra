@@ -15,7 +15,7 @@ page over every run — without any of them owning behaviour worth testing on it
 
 Any behaviour worth testing without a process. Everything an interface does belongs to
 [application](../../../application/README.md) or below; these modules parse arguments,
-print, serve and exit. The page holds no state of its own.
+print, serve and exit. The page holds no authoritative state of its own.
 
 ## Composition
 
@@ -89,6 +89,19 @@ patch — and a round's change as the pair of trees its turn was given. A turn r
 when the decision above moves on; nothing else of it is read again.
 
 ## Invariants
+
+The browser retains a bounded least-recently-used set of parsed xterm displays for open runs, keyed by run,
+host and role. Navigation detaches hidden displays and closes their sockets without disposing their parsed
+buffers; pending parsing may finish while hidden. Returning reconnects from the confirmed cursor and shows
+the tail. Background callbacks cannot alter another run's DOM or send its input. Confirmed closed runs are
+removed from retention; a visible closed record remains readable until navigation, with input disabled.
+Missing list rows are unknown, not closure. Pressure evicts hidden displays; a page reload replays the record.
+This display cache does not keep a vendor process initialized or alter its exact-session recovery.
+
+The Change disclosure also shows operator review intervals, with same-base milestone/range exports through
+the existing immutable diff reader. Clipboard output includes snapshot labels followed by the exact patch;
+whole-run Copy all changes remains independent. Interval bodies preserve selection and disclosure state,
+and earlier-checkpoint menus are populated on demand. Missing evidence is unavailable, never an empty patch.
 
 Terminal replay is paced by xterm's write-completion callback, including when an older worker sends
 its entire record in one frame. The browser counts parsed bytes rather than enqueued bytes and finishes

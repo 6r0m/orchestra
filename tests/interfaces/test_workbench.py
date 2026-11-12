@@ -1631,7 +1631,8 @@ class Runs(Scenario):
         self.assertIn("needs the feedback", refused["error"], "the role-named action reached the workflow's check")
         status, _ = request("POST", "/api/runs/%s/answer" % run_id, {"stop": final, "action": "merge", "text": "merge"})
         self.assertEqual(status, 200)
-        closed = self.wait_for(run_id, lambda body: body["state"]["status"] == "MERGED")
+        # The query can observe Git's result before Temporal publishes workflow closure.
+        closed = self.wait_for(run_id, lambda body: body["view"]["state"] == "closed")
         self.assertEqual((closed["view"]["state"], closed["view"]["status"]), ("closed", "MERGED"))
         self.assertEqual(request("GET", "/api/runs/no-such-run")[0], 404)
 

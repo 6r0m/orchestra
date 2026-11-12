@@ -1,6 +1,6 @@
 # Operator review milestones
 
-**Status:** REVIEW REQUIRED  
+**Status:** IMPLEMENTED AND VERIFIED — live activation not performed
 **Scope:** durable review checkpoints, operator-action history projection and milestone diff/copy UI  
 **Stable documentation owners:** [orchestration](../app/orchestration/docs/architecture/structure.md), [workspace](../app/workspace/docs/architecture/structure.md), [application](../app/application/docs/architecture/structure.md), and [interfaces](../app/interfaces/docs/architecture/structure.md)
 
@@ -28,6 +28,11 @@ Repeated external review should not require resending the entire accumulated pat
   - Effect: the plans are independently reviewable and neither file's existence approves implementation.
   - Reason: not stated.
   - Date/source: 2026-11-12, current investigate-change request.
+
+- **D4** Implement both todos through implement-approved-change.
+  - Effect: D3's investigation-only phase is complete; implement T1–T6 within the revised same-base and retention boundaries.
+  - Reason: not stated.
+  - Date/source: 2026-11-12, current operator implementation request.
 
 ### Operator gates
 
@@ -114,12 +119,12 @@ Knowingly give up tracking an external reviewer's actual memory and exact pre-fe
 
 ## Implementation tasks
 
-- [ ] **T1 — Contract and red fixtures:** define operator-interval versus per-review meaning, exact accepted-event identity, capture timing, pending/unavailable states and cross-base refusal. Add realistic approve/revise/continue/closeout histories and Git fixtures before production changes.
-- [ ] **T2 — Native snapshot retention:** extend the workspace owner with bounded private-index capture and run-scoped immutable ref retention. Establish idempotent retry/CAS behavior, safe identity validation and A4's ownership. Document a run-scoped release procedure which validates the exact namespace and expected object IDs, refuses other runs' refs, and never removes branches. Prove ref-backed reads after worktree removal and actual garbage collection, with the existing public scanner unchanged.
-- [ ] **T3 — Temporal boundary capture:** integrate capture after consuming an accepted stop answer and before advancing to reopen/reconcile/role/merge/discard effects. Record references or an explicit failure, preserve original notes and existing answer idempotence, and handle cancellation without a new state-machine layer. Publish/gate version compatibility for old and paused runs.
-- [ ] **T4 — History projection:** extend the existing history reader to associate accepted actions, checkpoint outcomes and reconciliation boundaries by recorded event order. Keep old per-turn changes intact. Produce initial, closed and open intervals with explicit evidence quality; omit no failed or zero-change stage merely because it has no new file.
-- [ ] **T5 — Workbench export:** keep the collapsed Change disclosure and Copy all changes. Add concise milestone selection, a per-milestone disclosure and Copy this milestone; allow a range from an earlier checkpoint without adding a graph editor. Reuse `fileList`/`copyPatch`, preserve navigation/disclosure state, show current/unverified/unavailable distinctions and avoid long operator text in default clipboard exports.
-- [ ] **T6 — Verification and docs:** prove the matrix, relevant consumers and replay; update only the stable owners below. Inspect the whole diff, preserve pre-existing work and leave staging/commits to the operator.
+- [x] **T1 — Contract and red fixtures:** defined accepted-action intervals, bounded capture and explicit unavailable/cross-base refusal; added operator-answer, closeout, cancellation and replay fixtures.
+- [x] **T2 — Native snapshot retention:** atomic, execution-scoped private refs retain the original recorded base object and sampled tree. Retry/CAS, unchanged protected Git state, actual garbage collection and safe release are covered; the existing scanner remains unchanged.
+- [x] **T3 — Temporal boundary capture:** accepted answers capture before reopen/reconcile/role/cleanup effects. Errors remain visible, cancellation starts no next role, duplicate answers remain idempotent, and the recorded protocol version preserves legacy replay.
+- [x] **T4 — History projection:** accepted actions and checkpoint results are associated by recorded stop identity. Initial, historical and current intervals retain explicit evidence quality; per-turn changes remain intact.
+- [x] **T5 — Workbench export:** collapsed milestone/range selection reuses the immutable diff and clipboard readers. Whole-run copy, disclosure/selection/focus, current-boundary advancement and explicit unavailable states are verified in the real browser.
+- [x] **T6 — Verification and docs:** host suites, focused regressions, replay, browser acceptance and public-safety checks passed. Stable owners are updated; staging and commits remain operator-owned.
 
 ## Test-first and verification plan
 
@@ -172,3 +177,15 @@ Use additive, versioned workflow behavior that replays old histories; existing p
 - Only accepted Temporal stop actions create milestones; terminal keystrokes and clipboard operations cannot supply workflow authority.
 - Same-base exact exports are the initial delivery. Cross-base ranges remain explicitly unavailable; multi-section bundles are deferred.
 - Private ref retention requires a safe per-run release procedure. Reviewer GO does not authorize implementation; status remains REVIEW REQUIRED.
+
+### 2026-11-12 — Approved implementation
+
+- D4 authorizes implementation. Git capture/ref retention, recorded-protocol workflow activation, history projection and same-base export are implemented through their existing owners. No milestone commits or parallel history store were introduced.
+- New accepted actions close intervals before reopen/cleanup. Refused/duplicate answers do not create another capture. Capture failure is visible without losing the answer; cancellation starts no follow-on role. Old histories still replay, and missing old captures remain unavailable.
+- Current endpoint exports require a stable operator stop, rechecked against Temporal execution status after sampling; busy current exports wait for a stop while Copy all changes remains available. This refines A3 without claiming an atomic filesystem snapshot.
+- Native Git tests cover unchanged protected state, competing capture, worktree removal, real garbage collection and safe owner-scoped release. Windows capture exposed CRLF translation in text-mode subprocess stdin; ref transactions use literal UTF-8 bytes on both hosts.
+- Targeted range/copy checks pass, including Unicode, missing/cross-base evidence, concurrent closure, page identity/progress validation and clipboard refusal. The real-browser fixture copied a large exact milestone and a larger net range, using native keyboard activation, and preserved whole-run copy.
+- Final review reproduced an additional retention failure: retaining only the base tree lets Git prune the original commit after replaced base history. The new regression failed with `ChangeRefused`; retaining the original base object makes the commit-addressed export survive real garbage collection.
+- Full acceptance: `bash run-tests.sh` passed 898 tests; `powershell -NoProfile -ExecutionPolicy Bypass -File run-tests.ps1` passed 671 tests. The initial WSL attempt exposed a stale test wait for queried MERGED status before native closure; waiting for the authoritative closed view fixed that test without weakening production state ownership.
+- After the final retention and UI-state corrections, the workspace checkpoint/diff, application-range and browser-copy/cache checks passed 22 tests on WSL and 23 on Windows, including real Edge acceptance. The full-suite counts precede the added base-retention regression.
+- Stable documentation is updated in orchestration, workspace, application, interfaces and usage. Public-safety scanning, its known-bad control and an isolated native-ref scanner check passed. No live activation, paid call, worker/WSL restart, staging or commit was performed.

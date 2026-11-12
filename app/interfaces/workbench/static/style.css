@@ -338,6 +338,7 @@ button.fold:hover { background: var(--raised); color: var(--ink); }
 summary:hover { color: var(--ink); }
 .terminal > summary .role { font-weight: 600; }
 .term-state { margin-left: 12px; color: var(--quiet); font-size: 13px; }
+#review-milestones details[data-run] { content-visibility: auto; contain-intrinsic-size: auto 40px; }
 /* Clipped, never scrolled: terminals.js fits the text across it, and xterm's own viewport scrolls the session. A
    box that scrolled too showed a second scrollbar for xterm's few hidden pixels below its rows, and its width then
    changed with the font it was fitted to. */

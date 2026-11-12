@@ -344,6 +344,12 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
                         if record is None:
                             return self._send(HTTPStatus.NOT_FOUND, {"error": "no run %r" % run_id})
                         return self._send(HTTPStatus.OK, record)
+                    if parts[2:] == ["milestone"]:
+                        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                        first = (query.get("from") or [""])[0]
+                        last = (query.get("through") or [""])[0]
+                        return self._send(HTTPStatus.OK, call(lambda client: runs.review_milestone(
+                            client, run_id, first, last)))
                     if parts[2:] == ["accounting"]:
                         timing = call(lambda client: runs.timings(client, run_id))
                         if timing is None:

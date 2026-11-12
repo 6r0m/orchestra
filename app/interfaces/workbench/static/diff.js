@@ -232,14 +232,27 @@ function fold(rows) {
 export async function copyPatch(runId, read, button, label = "Copy patch") {
   const whole = (async () => {
     const first = await read;
+    if (typeof first.patch !== "string" || !Number.isSafeInteger(first.total) || first.total < 0 ||
+        !Number.isSafeInteger(first.next) || first.next < 0 || first.next > first.total ||
+        new TextEncoder().encode(first.patch).length !== first.next)
+      throw new Error("The initial patch is incomplete or invalid; nothing was copied.");
     let patch = first.patch;
     let next = first.next;
     while (next < first.total) {
       const part = await api(diffPath(runId, { base: first.base, tree: first.tree, offset: next }));
+      if (part.base !== first.base || part.tree !== first.tree || part.total !== first.total ||
+          !Number.isSafeInteger(part.next) || part.next <= next || part.next > first.total)
+        throw new Error("The patch read changed snapshots or made no progress; nothing was copied.");
+      if (typeof part.patch !== "string" || new TextEncoder().encode(part.patch).length !== part.next - next)
+        throw new Error("The patch chunk is incomplete; nothing was copied.");
       patch += part.patch;
       next = part.next;
     }
-    return patch;
+    if (!first.review_range) return patch;
+    const range = first.review_range;
+    return "# Review range: " + (range.from ? "checkpoint " + range.from : "run start") + " to " +
+      (range.current ? "current, unverified" : "checkpoint " + range.through) + "\n# Snapshot: " +
+      first.base + " -> " + first.tree + "\n\n" + patch;
   })();
   button.disabled = true;
   try {

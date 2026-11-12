@@ -130,6 +130,77 @@ def to_ready():
             ("build-e2-1", 0, "built\n"), ("verify-e2-1", 0, codex_review_resumed("PASS"))]
 
 
+class ReviewMilestones(Scenario):
+    def test_accepted_revisions_and_approval_capture_distinct_boundaries_and_replay(self):
+        first, _ = codex_review_first("PASS")
+        run = self.drive([("plan-e1-1", 0, "first plan\n"), ("assess-e1-1", 0, first),
+                          ("plan-e2-1", 0, "second plan\n"),
+                          ("assess-e2-1", 0, codex_review_resumed("PASS")),
+                          ("plan-e3-1", 0, "third plan\n"),
+                          ("assess-e3-1", 0, codex_review_resumed("PASS")),
+                          ("build-e4-1", 0, "built\n"),
+                          ("verify-e4-1", 0, codex_review_resumed("PASS"))])
+        for answer in ("revise keep the API", "revise also fix ownership", "yes preserve both decisions"):
+            code, output = run.answer(answer)
+            self.assertEqual(code, 2 if answer.startswith("revise ") else 0, output)
+        recorded = E.run(runs.history(E.client(), run.run_id))
+        self.assertEqual(len(self.host.git.checkpoints), 3)
+        self.assertEqual(len(recorded["review"]["boundaries"]), 3)
+        self.assertEqual([row["action"] for row in recorded["review"]["boundaries"]],
+                         ["revise", "revise", "approve"])
+        self.assertTrue(all(row.get("tree") for row in recorded["review"]["boundaries"]))
+        self.assertEqual(run.stop["reason"], "final")
+        self.assertEqual(len(run.state["operator_notes"]), 3)
+        first_boundary = recorded["review"]["boundaries"][0]["stop"]
+        E.run(run.handle.execute_update(WF.FeatureRun.answer,
+              {"stop": first_boundary, "action": "revise", "text": "keep the API",
+               "operator_context_version": WF.OPERATOR_CONTEXT_VERSION,
+               "review_milestones_version": WF.REVIEW_MILESTONES_VERSION}, id="answer:" + first_boundary))
+        self.assertEqual(len(self.host.git.checkpoints), 3, "SDK idempotence also protects checkpoint capture")
+        E.run(Replayer(workflows=[WF.FeatureRun]).replay_workflow(E.run(run.handle.fetch_history())))
+
+    def test_checkpoint_failure_does_not_lose_the_accepted_answer_or_block_work(self):
+        git = FakeWorktrees()
+        git.checkpoint_error = "checkpoint storage unavailable"
+        first, _ = codex_review_first("PASS")
+        run = self.drive([("plan-e1-1", 0, "plan\n"), ("assess-e1-1", 0, first),
+                          ("build-e2-1", 0, "built\n"),
+                          ("verify-e2-1", 0, codex_review_resumed("PASS"))], git=git)
+        self.assertEqual(run.answer("yes preserve the API")[0], 0)
+        recorded = E.run(runs.history(E.client(), run.run_id))
+        boundary = recorded["review"]["boundaries"][0]
+        self.assertIn("checkpoint storage unavailable", boundary["unavailable"])
+        self.assertIn("checkpoint unavailable", "\n".join(E.run(run.handle.query(WF.FeatureRun.status))["lines"]))
+        self.assertEqual(run.state["operator_notes"][0]["text"], "preserve the API")
+        self.assertEqual(run.stop["reason"], "final")
+
+    def test_cancellation_during_capture_starts_no_follow_on_role(self):
+        git = FakeWorktrees()
+        entered, release = threading.Event(), threading.Event()
+        original = git.review_checkpoint
+        def held(*args):
+            entered.set()
+            if not release.wait(10):
+                raise RuntimeError("checkpoint fixture was not released")
+            return original(*args)
+        git.review_checkpoint = held
+        first, _ = codex_review_first("PASS")
+        run = self.drive([("plan-e1-1", 0, "plan\n"), ("assess-e1-1", 0, first)], git=git)
+        E.run(run.handle.execute_update(WF.FeatureRun.answer,
+              {"stop": run.stop["id"], "action": "approve", "review_milestones_version": WF.REVIEW_MILESTONES_VERSION},
+              id="answer:" + run.stop["id"]))
+        try:
+            self.assertTrue(entered.wait(5))
+            current = E.run(run.handle.query(WF.FeatureRun.status))["state"]["current"]
+            self.assertEqual((current["stage"], current["role"]), ("review-checkpoint", None))
+            E.run(run.handle.cancel())
+            with self.assertRaises(WorkflowFailureError):
+                E.run(run.handle.result())
+            self.assertEqual(len(self.agent.calls), 2)
+        finally:
+            release.set()
+
+
 class OperatorNoteBudget(unittest.TestCase):
     def paused(self):
         run = WF.FeatureRun()
@@ -729,6 +800,11 @@ class Closeout(Scenario):
         run = self.ready([("build-e4-1", 0, "tightened\n"), ("verify-e4-1", 0, codex_review_resumed("PASS")),
                           ("closeout-e5-1", 0, "closed out\n")])
         run.answer("revise engineer tighten the guard")
+        review = E.run(runs.history(E.client(), run.run_id))["review"]
+        self.assertEqual(review["boundaries"][0]["tree"], "final-tree", "capture must precede reopening")
+        scheduled = [event.activity_task_scheduled_event_attributes.activity_type.name for event in history(run.handle)
+                     if event.HasField("activity_task_scheduled_event_attributes")]
+        self.assertLess(scheduled.index("review_checkpoint"), scheduled.index("reopen"))
         run.status = E.run(E.cli.follow(run.handle))
         self.assertEqual((run.stop["reason"], run.state["final_tree"]), ("final", "final-tree"))
         self.assertEqual(self.names()[-3:], ["build-e4-1", "verify-e4-1", "closeout-e5-1"])

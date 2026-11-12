@@ -25,9 +25,14 @@ class MergeRefused(RuntimeError):
     """A guard or git refused the merge. Nothing was merged into the base branch."""
 
 
-def git(path, *args, check=True, env=None):
-    done = subprocess.run(["git", "-C", path] + list(args), capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", env=env, timeout=1800)
+def git(path, *args, check=True, env=None, timeout=1800, input=None):
+    # Ref transactions use literal LF; Windows text-mode stdin would change commands to CRLF.
+    options = {"input": input.encode("utf-8")} if input is not None else {
+        "text": True, "encoding": "utf-8", "errors": "replace"}
+    done = subprocess.run(["git", "-C", path] + list(args), capture_output=True,
+                          env=env, timeout=timeout, **options)
+    if input is not None:
+        done.stdout, done.stderr = (part.decode("utf-8", "replace") for part in (done.stdout, done.stderr))
     if check and done.returncode != 0:
         raise GitError("git %s in %s: rc=%d %s" % (" ".join(args[:2]), path, done.returncode,
                                                    (done.stderr or done.stdout).strip()[:500]))
@@ -281,9 +286,9 @@ def change_fingerprint(path, run=None):
     return hashlib.sha256("\0".join(parts).encode("utf-8", "surrogateescape")).hexdigest()
 
 
-def work_tree(path):
+def work_tree(path, *, timeout=1800):
     """The tree `git add -A` would commit, computed on a private copy of the index."""
-    index = git(path, "rev-parse", "--path-format=absolute", "--git-path", "index").stdout.strip()
+    index = git(path, "rev-parse", "--path-format=absolute", "--git-path", "index", timeout=timeout).stdout.strip()
     with tempfile.TemporaryDirectory(prefix="orchestra-index-") as private:
         env = dict(os.environ, GIT_INDEX_FILE=os.path.join(private, "index"))
         if os.path.exists(index):
@@ -292,8 +297,64 @@ def work_tree(path):
             # rewritten to the same size in the second the index was written, and leave that edit out of
             # the tree (measured).
             shutil.copy2(index, env["GIT_INDEX_FILE"])
-        git(path, "add", "-A", env=env)
-        return git(path, "write-tree", env=env).stdout.strip()
+        git(path, "add", "-A", env=env, timeout=timeout)
+        return git(path, "write-tree", env=env, timeout=timeout).stdout.strip()
+
+
+def _review_prefix(owner):
+    if not isinstance(owner, str) or not owner:
+        raise ValueError("a checkpoint needs its workflow execution owner")
+    return "refs/orchestra/review/" + hashlib.sha256(owner.encode("utf-8")).hexdigest() + "/"
+
+
+def review_checkpoint_refs(repo, owner):
+    """Private retention refs of exactly one workflow execution; a read, never a retrospective pin."""
+    output = git(repo, "for-each-ref", "--format=%(refname) %(objectname)", _review_prefix(owner), timeout=10)
+    return dict(line.split(" ", 1) for line in output.stdout.splitlines())
+
+
+def review_checkpoint(path, owner, key, base):
+    """Pin one sampled boundary and its base atomically; retries adopt the first complete pair."""
+    if not isinstance(key, str) or not key or not isinstance(base, str) or not OBJECT.fullmatch(base):
+        raise ValueError("a checkpoint needs an accepted action identity and recorded base object")
+    prefix = _review_prefix(owner) + hashlib.sha256(key.encode("utf-8")).hexdigest() + "/"
+    git(path, "rev-parse", "--verify", base + "^{tree}", timeout=10)
+    # Exports also name the original commit, which retaining only its tree would let Git prune.
+    initial = base
+
+    def existing():
+        refs = review_checkpoint_refs(path, owner)
+        pair = [refs.get(prefix + name) for name in ("base", "tree")]
+        if any(pair) and not all(pair):
+            raise GitError("incomplete review checkpoint refs")
+        if all(pair) and pair[0] != initial:
+            raise GitError("the checkpoint identity already belongs to a different recorded base")
+        return {"base": pair[0], "tree": pair[1], "ref": prefix + "tree",
+                "owner": owner, "basis": base} if all(pair) else None
+
+    held = existing()
+    if held:
+        return held
+    tree = work_tree(path, timeout=10)
+    transaction = "start\ncreate %sbase %s\ncreate %stree %s\nprepare\ncommit\n" % (prefix, initial, prefix, tree)
+    wrote = git(path, "update-ref", "--stdin", input=transaction, timeout=10, check=False)
+    held = existing()
+    if not held:
+        raise GitError("review checkpoint was not retained: " + wrote.stderr.strip()[:300])
+    return held
+
+
+def release_review_checkpoints(repo, owner, expected):
+    """Release a reviewed exact manifest using CAS; no other execution or branch can be named."""
+    prefix = _review_prefix(owner)
+    if (not isinstance(expected, dict) or any(not ref.startswith(prefix) or not OBJECT.fullmatch(oid)
+                                            for ref, oid in expected.items())):
+        raise ValueError("release must name only this execution's private review refs and exact object IDs")
+    if review_checkpoint_refs(repo, owner) != expected:
+        raise ValueError("review retention changed; inspect the refs again before releasing them")
+    if expected:
+        commands = "".join("delete %s %s\n" % (ref, oid) for ref, oid in sorted(expected.items()))
+        git(repo, "update-ref", "--stdin", input="start\n" + commands + "prepare\ncommit\n", timeout=10)
 
 
 def changed(path, base, tree, folders=(), patterns=()):

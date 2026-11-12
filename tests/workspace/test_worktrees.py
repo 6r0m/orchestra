@@ -529,6 +529,65 @@ class ReviewDiff(Repo):
             W.review_diff(self.path, base=base, tree=tree)
 
 
+class ReviewCheckpoints(Repo):
+    def test_recorded_base_commit_remains_readable_after_replaced_base_history_and_gc(self):
+        path = self.worktree("review-old-base")
+        base = git(path, "rev-parse", "HEAD").strip()
+        checkpoint = W.review_checkpoint(path, "old-base", "answer:1", base)
+        W.discard(self.repo, path, "review-old-base")
+        git(self.repo, "switch", "--orphan", "replacement")
+        write(os.path.join(self.repo, "new.txt"), "replacement base\n")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "replacement base")
+        git(self.repo, "branch", "-D", "develop")
+        git(self.repo, "reflog", "expire", "--expire=now", "--all")
+        git(self.repo, "gc", "--prune=now")
+        result = W.review_diff(path, base=base, tree=checkpoint["tree"], repo=self.repo)
+        self.assertEqual(result["base"], base, "Temporal's recorded base ID must remain an export endpoint")
+        self.assertIn("review-old-base", result["patch"])
+
+    def test_checkpoints_are_immutable_private_and_survive_cleanup_and_gc(self):
+        path = self.worktree("review-one")
+        base = git(path, "rev-parse", "HEAD").strip()
+        before = (W.guard(path, "review-one"), W.change_fingerprint(path))
+        first = W.review_checkpoint(path, "owner-one", "answer:1", base)
+        self.assertEqual((W.guard(path, "review-one"), W.change_fingerprint(path)), before,
+                         "capture must not change the real index or worktree")
+        write(os.path.join(path, "app.txt"), "later revision\n")
+        self.assertEqual(W.review_checkpoint(path, "owner-one", "answer:1", base), first)
+        second = W.review_checkpoint(path, "owner-two", "answer:1", base)
+        self.assertTrue(git(self.repo, "log", "--all", "--oneline"), "tree refs must preserve Git's scanner route")
+        W.discard(self.repo, path, "review-one")
+        git(self.repo, "reflog", "expire", "--expire=now", "--all")
+        git(self.repo, "gc", "--prune=now")
+        read = W.review_diff(path, base=first["base"], tree=first["tree"], repo=self.repo)
+        self.assertIn("review-one", read["patch"])
+        self.assertNotIn("later revision", read["patch"])
+        own = W.review_checkpoint_refs(self.repo, "owner-one")
+        other = W.review_checkpoint_refs(self.repo, "owner-two")
+        with self.assertRaises(ValueError):
+            W.release_review_checkpoints(self.repo, "owner-one", dict(own, **{next(iter(own)): "0" * 40}))
+        with self.assertRaises(ValueError):
+            W.release_review_checkpoints(self.repo, "owner-one", other)
+        with self.assertRaises(ValueError):
+            W.release_review_checkpoints(self.repo, "owner-one", {"refs/heads/develop": base})
+        self.assertEqual(W.review_checkpoint_refs(self.repo, "owner-one"), own)
+        self.assertEqual(W.review_checkpoint_refs(self.repo, "owner-two"), other)
+        W.release_review_checkpoints(self.repo, "owner-one", own)
+        self.assertEqual(W.review_checkpoint_refs(self.repo, "owner-one"), {})
+        self.assertEqual(W.review_checkpoint_refs(self.repo, "owner-two"), other)
+        self.assertEqual(git(self.repo, "rev-parse", second["tree"]).strip(), second["tree"])
+
+    def test_competing_capture_adopts_the_first_complete_ref_transaction(self):
+        from concurrent.futures import ThreadPoolExecutor
+        path = self.worktree("review-race")
+        base = git(path, "rev-parse", "HEAD").strip()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda _: W.review_checkpoint(path, "race", "answer:1", base), range(2)))
+        self.assertEqual(results[0], results[1])
+        self.assertEqual(len(W.review_checkpoint_refs(self.repo, "race")), 2)
+
+
 class Merge(Repo):
     """The approved merge — one work commit, an explicit merge commit, then everything the run owned goes."""
 

@@ -62,6 +62,7 @@ NO_NOTE = ("this approval takes no note — it ends the run, or its run was reco
            "approve without it, or revise with it")
 OPERATOR_CONTEXT_VERSION = 1
 OPERATOR_NOTES_BUDGET = 64 * 1024
+REVIEW_MILESTONES_VERSION = 1
 ROLE_ACTIVITIES = ("run_role", "run_role_with_operator_context")
 HINTS = {
     "approval": "approve to start implementation, or revise with feedback for a new plan",
@@ -113,6 +114,7 @@ class FeatureRun:
         self.conflict_reopens = True
         self.configuration_revision = 0
         self.operator_notes = []
+        self.review_milestones = False
 
     @workflow.run
     async def run(self, start):
@@ -535,6 +537,20 @@ class FeatureRun:
             await self._trace("record_stop", {"state": s, "stop": self.stop})
         await workflow.wait_condition(lambda: self.answer_given is not None)
         answer, self.answer_given, self.stop = self.answer_given, None, None
+        if self.review_milestones:
+            self._doing("review-checkpoint")
+            try:
+                checkpoint = await workflow.execute_activity(
+                    "review_checkpoint", {"worktree_path": s.get("worktree_path"), "base": s.get("base_tip"),
+                                          "owner": workflow.info().run_id, "stop": answer["stop"]},
+                    task_queue=self.queue, retry_policy=ONCE, start_to_close_timeout=timedelta(seconds=90),
+                    schedule_to_start_timeout=timedelta(seconds=10))
+            except ActivityError as error:
+                if is_cancelled_exception(error):
+                    raise
+                checkpoint = {"unavailable": _message(error)}
+            if checkpoint.get("unavailable"):
+                self._line("review checkpoint unavailable: " + checkpoint["unavailable"])
         if reason in TRACED_STOPS:
             said = answer.get("text") or answer["action"]
             if answer["action"] == "approve" and answer.get("text"):
@@ -718,11 +734,17 @@ class FeatureRun:
         # A newly recorded protocol version promotes them into subsequent activity inputs, including Continue.
         if answer.get("operator_context_version") == OPERATOR_CONTEXT_VERSION:
             self.state["operator_notes"] = list(self.operator_notes)
+        if (type(answer.get("review_milestones_version")) is int and
+                answer["review_milestones_version"] == REVIEW_MILESTONES_VERSION):
+            self.review_milestones = True
         self.answer_given = answer
         return {"stop": answer["stop"], "action": answer["action"]}
 
     @answer.validator
     def _validate_answer(self, answer):
+        if "review_milestones_version" in answer and (type(answer["review_milestones_version"]) is not int or
+                answer["review_milestones_version"] != REVIEW_MILESTONES_VERSION):
+            raise ValueError("unsupported review checkpoint protocol; reload the Workbench or use the current CLI")
         stop = self.stop
         if stop is None or self.answer_given is not None or answer.get("stop") != stop["id"]:
             raise ValueError("run %s is not waiting at stop %s" % (self.state.get("run_id"), answer.get("stop")))
@@ -758,6 +780,7 @@ class FeatureRun:
         return {"state": self.state, "stop": self.stop, "lines": self.lines, "timeline": self.timeline,
                 "queue": self.queue, "workflow_queue": workflow.info().task_queue,
                 "operator_context_version": OPERATOR_CONTEXT_VERSION,
+                "review_milestones_version": REVIEW_MILESTONES_VERSION,
                 "configuration": self._configuration()}
 
 

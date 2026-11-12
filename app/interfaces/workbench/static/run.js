@@ -8,7 +8,7 @@ import { $, PARTS, at, blockedBy, clock, code, confirmAction, copyButton, decisi
   lasted, outcome, report, score, unchanged, wrote } from "./ui.js";
 import { stackButton, stackReading } from "./stack.js";
 import { interrupt, showTerminals, updateTerminals } from "./terminals.js";
-import { placeChange, readOnceFor, showChangeFor, watchChange } from "./change.js";
+import { placeChange, readOnceFor, showChangeFor, showReviews, watchChange } from "./change.js";
 import { chevron, fileList } from "./diff.js";
 import { markdown, markdownLine } from "./markdown.js";
 import { removeKept } from "./worktrees.js";
@@ -123,6 +123,7 @@ export function show(runId) {
   for (const id of ["run-control-result", "run-kept-result", "run-blocked-result"]) report($(id), "");
   showTerminals(null);
   showChangeFor(runId);
+  showReviews(null, null, false);
   placeChange("none");
   if (runId) refreshRun();
 }
@@ -566,11 +567,11 @@ async function readRecord(runId, key) {
   try {
     const read = await api("/api/runs/" + encodeURIComponent(runId) + "/history");
     if (runId !== selected || record.key !== key) return;
-    record = { key: key, turns: read.turns, answers: read.answers, said: "" };
+    record = { key: key, turns: read.turns, answers: read.answers, review: read.review, said: "" };
   } catch (error) {
     if (runId !== selected || record.key !== key) return;
     // Read again at the page's next read of the run.
-    record = { key: null, turns: record.turns, answers: record.answers,
+    record = { key: null, turns: record.turns, answers: record.answers, review: record.review,
       said: "Your answers and each round's change cannot be read now: " + error.message
         + ". The page tries again as it reads the run." };
   }
@@ -581,6 +582,7 @@ async function readRecord(runId, key) {
 // it took, when — opening to what it received and what it produced; your answers rows of their own between.
 function drawHistory() {
   const { view, timeline } = drawn;
+  showReviews(selected, record.review, view && view.state !== "closed");
   const root = $("timeline");
   if (!view || unchanged(root, [timeline, record.turns, record.answers, record.said, [...shownAbove]])) return;
   const openDetails = new Set([...root.querySelectorAll("details[open][data-history-detail]")]

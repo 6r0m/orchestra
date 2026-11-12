@@ -194,7 +194,7 @@ const DOING = { research: "researching", plan: "planning", assess: "assessing th
 // What the run does in a step no role takes.
 const HOLDING = { setup: "Setting up its worktree", reconcile: "Checking its base for changes",
   reopen: "Reopening the change", merge: "Merging",
-  discard: "Discarding", cleanup: "Cleaning up" };
+  discard: "Discarding", cleanup: "Cleaning up", "review-checkpoint": "Recording a review checkpoint" };
 
 export function doing(stage) {
   return DOING[stage] || stage;

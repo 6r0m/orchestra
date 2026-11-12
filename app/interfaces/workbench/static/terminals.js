@@ -15,7 +15,10 @@ export const ROLES = ["engineer", "architect"];
 // sent: a clean prompt is chosen over those chords.
 const REPORT = new RegExp("^(?:\\x1b\\[[?>]?[\\d;]*c|\\x1b\\[\\??[\\d;]*n|\\x1b\\[\\??\\d+;\\d+R|" +
   "\\x1b\\[\\??[\\d;]+\\$y|\\x1b\\[[\\d;]+t|\\x1b\\][\\s\\S]*?(?:\\x07|\\x1b\\\\)|\\x1bP[\\s\\S]*?\\x1b\\\\)+$");
-const terminals = {};
+let terminals = {};
+// Six emulators at most, each with bounded scrollback; hidden views own no live socket.
+const RUN_CACHE_LIMIT = 3;
+const retained = new Map();
 // The run these terminals are of, whether it can still get a new terminal, the role last shown, and since
 // when the run last read has done what it does.
 let run = null;
@@ -140,17 +143,85 @@ function fit(role) {
   }
 }
 
-// The terminals of run `runId` on host `target`; another run's are disposed of, the same run's kept.
+function disconnect(entry) {
+  clearTimeout(entry.timer);
+  entry.timer = null;
+  const socket = entry.socket;
+  entry.socket = null;
+  entry.live = false;
+  entry.size = null;
+  if (socket) socket.close();
+}
+
+function dispose(entry) {
+  entry.disposed = true;
+  disconnect(entry);
+  entry.term.dispose();
+}
+
+function forget(key) {
+  const saved = retained.get(key);
+  retained.delete(key);
+  if (saved === run) {
+    saved.retain = active = false;
+    saved.closed = true;
+    for (const [role, entry] of Object.entries(terminals)) say(role, entry);
+    return;
+  }
+  for (const entry of Object.values(saved.roles)) dispose(entry);
+}
+
+// Missing rows are unknown, not closed: the rail may have read only one page of history.
+export function noteTerminalRuns(rows) {
+  for (const row of rows) {
+    if (row.state !== "closed") continue;
+    for (const [key, saved] of retained) if (saved.id === row.run_id) forget(key);
+  }
+}
+
+// Restore parsed displays across navigation; vendor sessions and recorded output stay worker-owned.
 export function showTerminals(runId, target) {
   if (run && runId && run.id === runId && run.target === target) return;
-  for (const role of ROLES) close(role);
-  run = runId ? { id: runId, target: target } : null;
-  lastShown = undefined;
-  lastSince = undefined;
+  if (run) {
+    Object.assign(run, { active, lastShown, lastSince,
+      opened: Object.fromEntries(ROLES.map((role) => [role, $("terminal-" + role).open])) });
+    for (const entry of Object.values(terminals)) {
+      if (run.retain) disconnect(entry);
+      else dispose(entry);
+    }
+  }
+  run = null;
+  terminals = {};
   for (const role of ROLES) {
-    maximize(role, false);
+    $("terminal-" + role).classList.toggle("maximized", false);
+    $("size-" + role).textContent = "Maximize";
+    $("size-" + role).title = MAXIMIZE;
     $("terminal-" + role).open = false;
+    $("term-" + role).replaceChildren();
     $("state-" + role).textContent = "";
+  }
+  document.body.classList.toggle("terminal-maximized", false);
+  lastShown = lastSince = undefined;
+  if (!runId) return;
+  const key = JSON.stringify([runId, target]);
+  run = retained.get(key) || { id: runId, target, roles: {}, retain: true, opened: {} };
+  retained.delete(key);
+  retained.set(key, run);
+  terminals = run.roles;
+  active = run.active ?? true;
+  lastShown = run.lastShown;
+  lastSince = run.lastSince;
+  while (retained.size > RUN_CACHE_LIMIT) forget(retained.keys().next().value);
+  for (const role of ROLES) {
+    const entry = terminals[role];
+    if (entry) {
+      $("term-" + role).replaceChildren(entry.node);
+      say(role, entry);
+      entry.term.scrollToBottom();
+      connect(role, entry, target);
+    }
+    $("terminal-" + role).open = Boolean(run.opened[role]);
+    fit(role);
   }
 }
 
@@ -161,13 +232,19 @@ export function showTerminals(runId, target) {
 // work — its turn has begun, on a worker that may have restarted since — and once whenever the run moves
 // on, for a turn shorter than the time between two reads.
 export function updateTerminals({ open, shown, working, since }) {
-  active = open;
+  if (run && !open) run.closed = true;
+  active = open && !run?.closed;
+  if (run && !open) {
+    run.retain = false;
+    retained.delete(JSON.stringify([run.id, run.target]));
+  }
   const movedOn = since !== lastSince;
   lastSince = since;
   if (shown !== lastShown) {
     lastShown = shown;
     if (shown && ROLES.includes(shown)) {
       for (const role of ROLES) $("terminal-" + role).open = role === shown;
+      terminals[shown]?.term.scrollToBottom();
     }
   }
   for (const role of ROLES) {
@@ -185,7 +262,7 @@ export function updateTerminals({ open, shown, working, since }) {
 // keyboard, so what is typed next reaches the agent with no click. True once sent; false when no agent is
 // under that terminal to hear it within a moment.
 export async function interrupt(role) {
-  if (!run || !ROLES.includes(role)) return false;
+  if (!run || !active || !ROLES.includes(role)) return false;
   $("terminal-" + role).open = true;
   make(role);
   const entry = terminals[role];
@@ -216,7 +293,9 @@ function make(role) {
     navigator.clipboard.writeText(term.getSelection()).then(() => term.clearSelection(), () => {});
     return false;
   });
-  term.open(mount);
+  const node = document.createElement("div");
+  mount.replaceChildren(node);
+  term.open(node);
   // The worker's mark of a new size, where it begins in the record: what follows is drawn at it. The parser waits
   // for the resize, made outside its own pass, and a mark that is not a size this terminal takes is dropped.
   term.parser.registerOscHandler(SIZE_MARK, (data) => new Promise((resolve) => {
@@ -224,14 +303,15 @@ function make(role) {
     setTimeout(() => {
       if (cols === COLS && rows >= MIN_ROWS && rows <= MAX_ROWS && rows !== term.rows) {
         term.resize(cols, rows);
-        fit(role);
+        if (terminals[role]?.term === term) fit(role);
       }
       resolve(true);
     }, 0);
   }));
   // `shown` counts parsed record bytes: streaming workers resume there, and legacy replay skips them.
   // `size` is the worker's, as it last said — none from a worker that takes no size.
-  const entry = { runId: run.id, term: term, socket: null, timer: null, live: false, shown: 0, skip: 0, size: null,
+  const entry = { runId: run.id, term: term, node, disposed: false,
+    socket: null, timer: null, live: false, shown: 0, skip: 0, size: null,
     writing: Promise.resolve(), buffer: [], rendering: false, pending: 0,
     connecting: false, failed: false, catchingUp: false, replayUntil: 0 };
   terminals[role] = entry;
@@ -239,17 +319,19 @@ function make(role) {
   // The agent is sent what the operator types and presses, and never this terminal's own answers.
   term.onData((data) => {
     if (REPORT.test(data)) return;
-    if (entry.live && entry.socket && entry.socket.readyState === WebSocket.OPEN) entry.socket.send(data);
+    if (active && terminals[role] === entry && entry.live && entry.socket && entry.socket.readyState === WebSocket.OPEN)
+      entry.socket.send(data);
   });
   connect(role, entry, run.target);
 }
 
 function say(role, entry) {
+  if (terminals[role] !== entry) return;
   const remaining = Math.max(entry.pending, entry.replayUntil - entry.shown);
   const text = entry.failed ? "terminal display failed; reload this page"
     : entry.catchingUp || remaining > WRITE_CHUNK * 4
       ? "catching up terminal output… " + Math.max(1, Math.ceil(remaining / 1048576)).toLocaleString() + "\u00a0MB remaining"
-    : entry.live ? "live: Esc interrupts it, and typing reaches it"
+    : entry.live && active ? "live: Esc interrupts it, and typing reaches it"
     : active ? "recorded, until its next turn" : "recorded";
   if ($("state-" + role).textContent !== text) $("state-" + role).textContent = text;
 }
@@ -264,7 +346,7 @@ function draw(role, entry, data) {
   const parsed = Promise.resolve().then(async () => {
     let head = 0;
     while (entry.pending) {
-      if (terminals[role] !== entry || entry.failed) return;
+      if (entry.disposed || entry.failed) return;
       // A CLI's redraw can arrive as thousands of tiny frames. Join them before asking xterm to parse,
       // so its scheduled write callbacks cost one per bounded chunk rather than one per frame.
       const length = Math.min(WRITE_CHUNK, entry.pending);
@@ -279,7 +361,7 @@ function draw(role, entry, data) {
         else entry.buffer[head] = first.subarray(take);
       }
       await new Promise((resolve) => entry.term.write(part, resolve));
-      if (terminals[role] !== entry) return;
+      if (entry.disposed) return;
       // Only parsed bytes may be skipped or acknowledged after reconnecting.
       entry.shown += part.length;
       entry.pending -= part.length;
@@ -328,7 +410,7 @@ function connect(role, entry, target) {
       read();
     }
   };
-  if (!entry.shown) $("state-" + role).textContent = "connecting…";
+  $("state-" + role).textContent = entry.shown ? "cached screen; reconnecting…" : "connecting…";
   socket.onmessage = (event) => {
     if (terminals[role] !== entry || entry.socket !== socket || entry.failed) return;
     if (typeof event.data === "string") {
@@ -377,14 +459,4 @@ function connect(role, entry, target) {
       say(role, entry);
     }
   };
-}
-
-function close(role) {
-  const entry = terminals[role];
-  if (!entry) return;
-  delete terminals[role];
-  clearTimeout(entry.timer);
-  if (entry.socket) entry.socket.close();
-  entry.term.dispose();
-  $("term-" + role).replaceChildren();
 }

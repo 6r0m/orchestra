@@ -173,7 +173,7 @@ class Activities:
                 self.run_role_with_operator_context,
                 self.record_stop, self.record_answer, self.finish_trace, self.reconcile, self.reopen, self.merge,
                 self.discard,
-                self.worktree_view, self.review_diff, self.work_tree, self.adopt_todo_name]
+                self.worktree_view, self.review_diff, self.review_checkpoint, self.work_tree, self.adopt_todo_name]
 
     def client(self):
         if not self._resolved:
@@ -568,6 +568,13 @@ class Activities:
             raise ApplicationError(str(exc), type="ChangeRefused", non_retryable=True) from exc
         except Exception as exc:
             raise _failure(exc) from exc
+
+    @activity.defn
+    def review_checkpoint(self, args):
+        try:
+            return self.git.review_checkpoint(args["worktree_path"], args["owner"], args["stop"], args["base"])
+        except Exception as exc:
+            return {"unavailable": "%s: %s" % (type(exc).__name__, exc)}
 
     @activity.defn
     def work_tree(self, args):

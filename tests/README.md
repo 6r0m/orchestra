@@ -122,11 +122,15 @@ root, because it belongs to no single concern.
 | `interfaces/` | [app/interfaces](../app/interfaces/README.md): the workbench's API over real runs, and how the command line types a stop's answers |
 | this root | `test_architecture.py`, the live acceptance, and the harness every folder shares |
 
-The client of runs and foundation path derivation have no tests of their own: each is proven through
-the concerns that use it, and `test_architecture.py` owns what is true of the packages themselves. Add a folder when a concern gains tests that are its own rather than its consumers'.
+The client of runs is proven through its consumers and focused application contracts. Foundation path
+derivation is checked by `test_architecture.py`, which owns what is true of the packages themselves.
+Add a folder when a concern gains tests that are its own rather than its consumers'.
 
 | file | proves |
 |---|---|
+| `application/test_reviews.py` | exact milestone endpoints, legacy/cross-base refusal, and stable-stop current snapshots including concurrent closure |
+| `interfaces/test_diff_browser.py` | the actual JavaScript copy reader preserves immutable UTF-8 pages, rejects incomplete/mismatched chunks and preserves the clipboard on failure |
+| `interfaces/test_review_browser.py` | Windows real-browser acceptance through `demo_press` on disposable Git snapshots: parsed xterm reuse, keyboard copy, large milestone/range exports, cross-base refusal and whole-run copy; no live stack or model |
 | `test_public_check.py` | disposable Git controls prove the public check scans staged index and tracked working-tree bytes separately, including each side holding the control while the other is clean, a deleted working file and a skip-worktree entry; a safe unstaged deletion is allowed and a copy failure refuses. As git's pre-push hook it judges each commit a push carries — its files, what it tracks and the history it descends from — whatever the checkout holds, a deleted ref publishing nothing and a line that names no commit refused; installed, it refuses a real push from the clone and from a worktree of it — one holding a copy of the gate that passes anything — is stated once however often installed, and is not left behind for a git that would not run it; on Windows, run by git's own shell from such a worktree, it is handed to WSL in the main checkout. The script's own Gitleaks control verifies the real scanner. |
 | `interfaces/test_settings_delivery.py` | a Settings Apply reaching new runs through the Workbench API, client, Temporal and fake role turns: profile creation, binding, model and effort, personas, every stage skill, both shipped flows, plan and build budgets, per-role guidance, the exact 10+10 Plan and Build boundaries and prompt delivery, later Apply leaving an open run unchanged, new runs taking restored settings, refusal of a broken local patch, and Discard |
 | `orchestration/test_round_boundaries.py` | a PASS or BLOCKER on the 10th or 20th review taking its verdict route even at the configured 10+10 boundary; the exhausted route and reflection content remain in `orchestration/test_workflow.py` |

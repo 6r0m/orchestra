@@ -1,6 +1,6 @@
 # Warm role terminals
 
-**Status:** REVIEW REQUIRED  
+**Status:** IN PROGRESS — browser retention implemented; native reuse proof awaits probe-hook trust
 **Scope:** browser terminal retention and safe reuse of idle role-agent processes  
 **Stable documentation owners:** [agents](../app/agents/docs/architecture/structure.md), [interfaces](../app/interfaces/docs/architecture/structure.md), and the [execution contract](../docs/architecture/structure.md)
 
@@ -33,9 +33,15 @@ Switching between roles or active runs immediately restores the latest terminal 
   - Reason: not stated.
   - Date/source: 2026-11-12, current request invoking investigate-change.
 
+- **D5** Implement both todos through implement-approved-change.
+  - Effect: D4's investigation-only phase is complete; implement this plan under its native feasibility gate, preserving D1–D3.
+  - Reason: not stated.
+  - Date/source: 2026-11-12, current operator implementation request.
+
 ### Operator gates
 
 - **Q1 [OPEN - NON-BLOCKING]:** Must browser display snapshots survive a full page reload as well as navigation? Default while open: A1. This does not gate investigation of process reuse.
+- **Q2 [OPEN - BLOCKING FOR NATIVE REUSE]:** The isolated native Codex profiles require review of two probe hooks before fresh destination/correlation evidence can run. The operator has been asked whether to trust those two test hooks. Do not answer the native trust prompt or promote a warm process pool while that answer is pending. Browser retention and review milestones are independent.
 
 ### Working assumptions
 
@@ -112,7 +118,7 @@ Deliver browser retention first as an independently verified improvement. It doe
 - [ ] **T1 — Baseline and capability proof:** measure cold launch/MCP initialization and real xterm replay separately. With local fake providers and blocked external networking, prove two controlled turns in one contained native process for Codex and managed Pi on both hosts. Verify native TUI, exact session, refreshed notes/skill/stage, unique turn admission, hook trust and trace attribution. Queue exit status is not acceptance evidence. If no compatible primitive exists, stop this branch for renewed architectural review; do not substitute a headless UI or silently call the whole todo complete.
 - [ ] **T2 — Adapter admission contract:** define the smallest optional warm capability in the existing adapter contract. Separate stable reuse identity from fresh per-turn control data; implement acknowledged admission and explicit unavailable/unsupported/failed outcomes. Preserve cold behavior for unproven adapters and invalidation cases.
 - [ ] **T3 — Worker retention, after native feasibility:** extend the existing terminal registry with bounded idle reuse and confirmed-close observation. Choose closure observation from measured need rather than preselecting per-run watchers. Integrate normal merge/discard/end, force termination, cancellation, failure, worker drain and identity changes. Keep execution admission and account admission outside this cache.
-- [ ] **T4 — Browser retention:** retain emulator, DOM state, confirmed cursor and selected geometry by full run/host/role identity. Reuse existing run-list lifecycle reads for browser eviction. Background entry updates must not write into another run's DOM or keyboard path. Apply A1 and A4 without adding another timer service.
+- [x] **T4 — Browser retention:** retained emulators by run/host/role; hidden sockets disconnect, parsing finishes before cursor resume, and confirmed closure/hidden LRU pressure release retained displays. A stale open read cannot re-enable closed-run input. A1 applies.
 - [ ] **T5 — Correct display and cleanup:** distinguish reconnect/replay, cached display, warm execution and cold startup where useful to the operator. Release all cache-owned sockets/listeners/timers on eviction; preserve shared sizing and existing record streaming. An optional serialization dependency requires pinned provenance/license and restore proof against the shipped xterm version.
 - [ ] **T6 — Verification and durable documentation:** complete the matrix below, update the owners listed under Documentation, inspect the complete diff, and keep the index and commits operator-owned.
 
@@ -165,3 +171,13 @@ Activate only through existing graceful Orchestra-owned reloads, preserving D3. 
 - Browser retention is the first independent delivery; native process reuse remains behind T1's hard proof gate.
 - Closure tests remain binding, but the proposal no longer preselects a Temporal watcher per cached run.
 - Reviewer GO is technical input, not operator authorization to implement either workstream. Status remains REVIEW REQUIRED.
+
+### 2026-11-12 — Approved implementation
+
+- D5 authorizes implementation. Browser work is implemented in the existing terminal owner and rail event, without a new service, persistent browser store or dependency.
+- Red: `tests.interfaces.test_terminal_browser.TerminalStream.test_navigation_reuses_bounded_open_run_displays_and_evicts_only_confirmed_closed_runs` failed because navigation disposed the emulator. The module's four stream/cache tests pass after the change.
+- Native admission/MCP preservation was observed with local-only fake responses on installed Codex 0.159.0 and 0.167.0: two completed tasks, refreshed second prompt and second answer in the original terminal, with one MCP initialization. Provider-request counts alone were not used as turn evidence.
+- Fresh hook-destination and completion-correlation proof is blocked by the native review of the isolated probe hooks (Q2). No production native reuse, worker idle pool or D17 lifetime change has been enabled. Exact-session cold resumption remains current behavior.
+- Real-browser acceptance is reproducible through `tests.interfaces.test_review_browser`: actual xterm A/B/A node reuse and confirmed-cursor reconnect passed alongside milestone exports. Browser cache coverage includes hidden pending parses, LRU eviction, closure, stale responses and isolated input.
+- Full host suites passed 898 WSL and 671 Windows tests. Final focused workspace/export/cache tests passed 22 WSL and 23 Windows tests, including the real Edge scenario. Public-safety checks passed; live activation was not performed.
+- Independent managed Pi proof used native extension submission with a local fake provider on both hosts: two settled turns in one live process and session, a refreshed stage contract, all original/new notes, separate event destinations/parent markers and the second answer in the original terminal. This prototype establishes feasibility only; it does not yet prove production bridge rebinding, native skill changes, MCP preservation or real uploader attribution. T1 remains open alongside Codex's hook-trust gate.

@@ -345,6 +345,8 @@ async def answer(client, run_id, answer, check=True, only=None):
     elif action in ("guide", "revise", "approve") and (answer.get("text") or "").strip():
         raise NotAccepted("the workflow worker cannot preserve original operator notes; "
                           "gracefully reload that worker before sending guidance")
+    if current.get("review_milestones_version") == WF.REVIEW_MILESTONES_VERSION:
+        answer["review_milestones_version"] = WF.REVIEW_MILESTONES_VERSION
     try:
         await client.get_workflow_handle(run_id).execute_update(
             WF.FeatureRun.answer, answer, id="answer:%s" % stop["id"])
@@ -522,6 +524,7 @@ async def history(client, run_id):
     attempts = {}
     trace_id = None
     steps, began, came = {}, None, []
+    checkpoints, captures = {}, {}
     try:
         async for event in client.get_workflow_handle(run_id).fetch_history_events():
             if event.HasField("activity_task_scheduled_event_attributes"):
@@ -538,6 +541,8 @@ async def history(client, run_id):
                     if role:
                         attempts[event.event_id]["agent"] = {key: role[key] for key in ("agent", "kind", "brain") if key in role}
                     phase = args["state"].get("phase") or phase
+                elif attributes.activity_type.name == "review_checkpoint":
+                    captures[event.event_id] = await decoded(attributes.input.payloads)
                 elif attributes.activity_type.name in ("create_worktree", "reconcile", "open_run"):
                     steps[event.event_id] = attributes.activity_type.name
             elif event.HasField("activity_task_started_event_attributes"):
@@ -559,6 +564,9 @@ async def history(client, run_id):
                     if tree:
                         turn["tree"] = tree
                     turns.append(turn)
+                elif attributes.scheduled_event_id in captures:
+                    capture = captures.pop(attributes.scheduled_event_id)
+                    checkpoints[capture["stop"]] = await decoded(attributes.result.payloads)
                 elif attributes.scheduled_event_id in steps:
                     result = await decoded(attributes.result.payloads)
                     step = steps.pop(attributes.scheduled_event_id)
@@ -576,9 +584,12 @@ async def history(client, run_id):
                         key = getattr(event, field).scheduled_event_id
                         if key in attempts:
                             attempts[key].update(ended=at(event), status=name)
+                        if key in captures:
+                            capture = captures.pop(key)
+                            checkpoints[capture["stop"]] = {"unavailable": "checkpoint activity " + name}
             elif event.HasField("workflow_execution_update_accepted_event_attributes"):
                 request = event.workflow_execution_update_accepted_event_attributes.accepted_request
-                if request.meta.update_id.startswith("answer:"):
+                if request.input.name == "answer":
                     answer = await decoded(request.input.args.payloads)
                     answers.append({"stop": answer.get("stop"), "action": answer.get("action"),
                                     "role": answer.get("role"), "text": answer.get("text"), "at": at(event),
@@ -588,7 +599,49 @@ async def history(client, run_id):
             return None
         raise
     _changes(turns, began, came)
-    return {"turns": turns, "answers": answers, "attempts": list(attempts.values()), "trace_id": trace_id}
+    boundaries = [dict({key: answer.get(key) for key in ("stop", "action", "role", "at", "phase")},
+                       **checkpoints.get(answer["stop"], {"unavailable": "no checkpoint was recorded"}))
+                  for answer in answers]
+    return {"turns": turns, "answers": answers, "attempts": list(attempts.values()), "trace_id": trace_id,
+            "review": {"initial": began, "boundaries": boundaries}}
+
+
+async def review_milestone(client, run_id, first, last):
+    """One same-base net change; current endpoints are sampled only at a stable operator stop."""
+    record = await history(client, run_id)
+    if record is None:
+        raise Refusal("no run %r" % run_id)
+    review = record["review"]
+    endpoints = [{"stop": "start", "tree": review["initial"], "basis": review["initial"]}] + review["boundaries"]
+    keys = [row["stop"] for row in endpoints] + ["current"]
+    if first not in keys[:-1] or last not in keys or keys.index(first) >= keys.index(last):
+        raise Refusal("select review checkpoints in their recorded order")
+    start = endpoints[keys.index(first)]
+    current = None
+    if last == "current":
+        current = await readable_status(client, run_id)
+        if not current or not current.get("stop"):
+            raise Refusal("current milestone export is available at the next operator stop; Copy all changes stays available")
+        snapshot = await review_diff(client, run_id)
+        after = await readable_status(client, run_id)
+        described = await execution(client, run_id)
+        if (not after or after.get("stop") != current["stop"] or
+                after["state"].get("base_tip") != snapshot["base"] or
+                not described or described["execution"] != "RUNNING"):
+            raise Refusal("the run moved during this snapshot; read it again at an operator stop")
+        end = {"tree": snapshot["tree"], "basis": snapshot["base"]}
+    else:
+        end = endpoints[keys.index(last)]
+    for endpoint in (start, end):
+        if endpoint.get("unavailable") or not endpoint.get("tree"):
+            raise Refusal(endpoint.get("unavailable") or "the run recorded no initial base")
+        if not endpoint.get("basis"):
+            raise Refusal("the checkpoint has no recorded base")
+    if start["basis"] != end["basis"]:
+        raise Refusal("this range crosses a base update; select checkpoints within the same base")
+    read = await review_diff(client, run_id, base=start["tree"], tree=end["tree"])
+    return dict(read, review_range={"from": keys.index(first), "through": keys.index(last),
+                                   "current": current is not None})
 
 
 async def timings(client, run_id):

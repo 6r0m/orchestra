@@ -1153,6 +1153,119 @@ def accounting(page, run_id):
     return 0
 
 
+def review_components(page):
+    """Isolated Git fixture: real xterms, cached DOM and paged milestone exports; no live run is answered."""
+    result = page.call("Runtime.evaluate", expression="""(async () => {
+      const terminal = await import('/terminals.js');
+      const change = await import('/change.js');
+      const fixture = await (await fetch('/fixture')).json();
+      document.querySelector('#run').hidden = false;
+      document.querySelector('#change').hidden = false;
+      document.querySelector('#change').open = true;
+      document.querySelector('#run-task').textContent = 'Disposable review acceptance';
+      window.__reviewCopied = '';
+      Object.defineProperty(window, 'ClipboardItem', {value:undefined, configurable:true});
+      Object.defineProperty(navigator, 'clipboard', {value:{writeText:async text => {window.__reviewCopied=text}}, configurable:true});
+      window.__terminalSockets = [];
+      class Socket {
+        static OPEN=1;
+        constructor(url) {
+          this.url=url; this.readyState=1; this.protocol='workbench.v2'; this.sent=[];
+          this.offsets=[]; window.__terminalSockets.push(this);
+          const words=url.split('/').slice(-2).join(' ');
+          this.record=new TextEncoder().encode(Array.from({length:1800},(_,i)=>words+' line '+i+'\\r\\n').join('')
+            +'TAIL '+words+'\\r\\n');
+          setTimeout(()=>{this.onmessage?.({data:JSON.stringify({live:true,replay:this.record.length,size:[160,48]})});
+            this.onopen?.()},0);
+        }
+        send(value) {
+          this.sent.push(value);
+          if(typeof value==='string')return;
+          const request=JSON.parse(new TextDecoder().decode(value));
+          if(!Number.isSafeInteger(request.read))return;
+          this.offsets.push(request.read);
+          if(request.read<this.record.length)setTimeout(()=>{if(this.readyState===1)
+            this.onmessage?.({data:this.record.slice(request.read,Math.min(this.record.length,request.read+65536)).buffer})},0);
+        }
+        close(code=1000){this.readyState=3;this.onclose?.({code});}
+      }
+      window.WebSocket=Socket;
+      window.__reviewFixture=fixture;
+      window.__reviewTerminal=terminal;
+      const show=id=>{terminal.showTerminals(id,'windows');terminal.updateTerminals({open:true,shown:'engineer',working:'engineer',since:id});};
+      window.__reviewShow=show;
+      show('run-a');
+      change.showReviews('run-a',fixture.review,true);
+      return true;
+    })()""", awaitPromise=True, returnByValue=True)
+    if not result.get("result", {}).get("value"):
+        raise SystemExit("component setup failed: %r" % result)
+    wait(lambda: page.value("document.querySelector('#term-engineer .xterm-rows')?.innerText.includes('TAIL run-a engineer')"),
+         15, "the first real terminal replay")
+    page.value("window.__firstTerminal=document.querySelector('#term-engineer .xterm');window.__reviewShow('run-b');true")
+    wait(lambda: page.value("document.querySelector('#term-engineer .xterm-rows')?.innerText.includes('TAIL run-b engineer')"),
+         15, "the other run's independent terminal")
+    page.value("window.__reviewShow('run-a');true")
+    wait(lambda: page.value("window.__terminalSockets.length===3 && window.__terminalSockets[2].offsets.length>0"),
+         10, "cached terminal reconnect")
+    cache = page.value("({same:window.__firstTerminal===document.querySelector('#term-engineer .xterm'),"
+                       "cursor:window.__terminalSockets[2].offsets[0],total:window.__terminalSockets[0].record.length})")
+    if not cache["same"] or cache["cursor"] != cache["total"]:
+        raise SystemExit("terminal cache lost its screen or confirmed cursor: %r" % cache)
+    page.value("document.querySelector('#review-milestones>details').open=true;"
+               "document.querySelectorAll('#review-milestones details[data-run]')[1].open=true;true")
+    # Native keyboard activation of the new copy control.
+    page.call("Page.bringToFront")
+    page.value("[...document.querySelectorAll('#review-milestones details[data-run]')[1].querySelectorAll('button')]"
+               ".find(b=>b.textContent==='Copy milestone').focus();true")
+    wait(lambda: page.value("document.activeElement?.textContent === 'Copy milestone'"), 10, "the copy control's keyboard focus")
+    page.call("Input.dispatchKeyEvent", type="keyDown", key="Enter", code="Enter", windowsVirtualKeyCode=13,
+              nativeVirtualKeyCode=13, text="\r")
+    page.call("Input.dispatchKeyEvent", type="keyUp", key="Enter", code="Enter", windowsVirtualKeyCode=13,
+              nativeVirtualKeyCode=13)
+    try:
+        wait(lambda: page.value("window.__reviewCopied.endsWith(window.__reviewFixture.delta)"), 20, "the complete milestone patch")
+    except SystemExit:
+        print(page.value("({focus:document.activeElement?.tagName,hasFocus:document.hasFocus(),"
+                         "copied:window.__reviewCopied.length,expected:window.__reviewFixture.delta.length,"
+                         "buttons:[...document.querySelectorAll('#review-milestones button')].map(b=>({text:b.textContent,title:b.title}))})"))
+        raise
+    if not page.value("window.__reviewCopied.startsWith('# Review range:') && "
+                      "!window.__reviewCopied.includes('diff --git a/first-only.txt')"):
+        raise SystemExit("milestone copied earlier work or lost its snapshot labels")
+    # Re-select an earlier endpoint: copy the net range, not concatenated interval patches.
+    page.value("(()=>{const box=document.querySelectorAll('#review-milestones details[data-run]')[1];"
+               "const select=box.querySelector('select');select.value='start';select.dispatchEvent(new Event('change'));"
+               "window.__reviewCopied='';[...box.querySelectorAll('button')].find(b=>b.textContent==='Copy range').click();return true})()")
+    wait(lambda: page.value("window.__reviewCopied.endsWith(window.__reviewFixture.whole)"), 20, "the complete multi-milestone range")
+    page.value("(()=>{const box=document.querySelectorAll('#review-milestones details[data-run]')[2];box.open=true;"
+               "[...box.querySelectorAll('button')].find(b=>b.textContent==='Read changes').click();return true})()")
+    wait(lambda: page.value("document.querySelectorAll('#review-milestones details[data-run]')[2].innerText.includes('crosses a base update')"),
+         10, "an explicit cross-base refusal")
+    # Existing all-changes copy stays independent of the selected milestone range.
+    page.call("Runtime.evaluate", expression="(async()=>{const change=await import('/change.js');change.showChangeFor('run-a');return true})()",
+              awaitPromise=True, returnByValue=True)
+    page.value("window.__reviewCopied='';document.querySelector('#change-copy').click();true")
+    wait(lambda: page.value("window.__reviewCopied===window.__reviewFixture.whole"), 20, "the existing whole-run export")
+    updated = page.call("Runtime.evaluate", expression="""(async()=>{
+      const change=await import('/change.js');
+      document.querySelector('#change').open=true;
+      const past=document.querySelectorAll('#review-milestones details[data-run]')[1];
+      const select=past.querySelector('select');select.focus();
+      const fixture=window.__reviewFixture;
+      change.showReviews('run-a',{...fixture.review,boundaries:[...fixture.review.boundaries,
+        {stop:'s4',basis:'another-base',tree:'new-tree',action:'guide',at:'2026-11-12T12:00:00Z'}]},true);
+      const boxes=document.querySelectorAll('#review-milestones details[data-run]');
+      return {past:boxes[1]===past,value:boxes[1].querySelector('select').value,
+        current:boxes[boxes.length-1].querySelector('select').value};
+    })()""", awaitPromise=True, returnByValue=True)["result"].get("value")
+    if updated != {"past": True, "value": "start", "current": "s4"}:
+        raise SystemExit("a new operator boundary reused stale current-range state: %r" % updated)
+    print("PASS: real xterm A/B/A reuses DOM and confirmed cursor; keyboard milestone copy and earlier-range copy "
+          "match immutable Git patches; cross-base refusal and Copy all changes preserved")
+    return 0
+
+
 def main(url, run_id, label, said, note=None):
     profile = tempfile.mkdtemp(prefix="orchestra-demo-edge-")
     # A layout is read at the window size it names; every press at the browser's own.
@@ -1201,6 +1314,9 @@ def main(url, run_id, label, said, note=None):
                 page.call("Page.enable")
                 page.call("Page.addScriptToEvaluateOnNewDocument", source=CLIPBOARD_STAND_IN)
             page.call("Page.navigate", url=url)
+            if label == "review-components":
+                wait(lambda: page.value("document.readyState === 'complete'"), 30, "the isolated component fixture")
+                return review_components(page)
             if label == "settings-policy":
                 wait(lambda: page.value("document.readyState === 'complete'"), 30, "the Workbench page")
                 return settings_policy(page)
