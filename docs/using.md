@@ -216,10 +216,16 @@ never drawn again under you: after its worker restarts it keeps its record until
 which it then adds to. A terminal holds the whole session, including whatever you typed during a turn.
 
 Large terminal histories show catch-up progress while replaying, then live output. Reconnecting keeps
-the output already drawn. Navigating between open or waiting runs keeps a bounded cache of parsed screens;
-returning shows the tail and reads only new bytes. Hidden cached screens have no live socket. Closing a run
-or cache pressure releases its retained display; a full page reload replays the record. This browser cache
-does not keep the agent's CLI initialized.
+the output already drawn. Viewing an open or waiting run warms both role displays even when their panels
+are collapsed, so the next role can show its parsed tail without starting replay at the switch.
+Navigating between open or waiting runs keeps a bounded cache of parsed screens;
+returning shows the tail and reads only new bytes. Cached runs you navigate away from have no live socket.
+Committed screen snapshots also survive refresh and browser reopening on the same Workbench address and
+browser profile, resuming from the saved parsed position rather than replaying the entire recording.
+Confirmed run closure clears them, including closure discovered when you return after being away.
+Cache pressure can evict older screens. Missing, incompatible or unreadable snapshots fall back to the
+recording; a storage failure is shown beside the terminal. Unsaved recent output may need a short replay.
+This browser cache does not keep the agent's CLI initialized.
 
 A worker marked *draining* is updating: its current work continues, and new
 steps wait for its replacement. This is an update notice, not a down-worker warning. An agent command
@@ -259,8 +265,10 @@ an interval; copying or terminal typing creates none. Open an interval to copy t
 earlier checkpoint under **Compare from** to copy a larger net range. The copied text identifies its snapshots
 and then contains the full patch. **Copy all changes** exports the entire current run change while its worktree
 is retained. After merge or discard removes it, historical milestones remain accessible under Change.
-Current milestone exports are sampled at an operator stop and labelled unverified; while a role executes,
-Copy all changes remains available. Missing historical captures and ranges crossing a base update are
+The **Current changes** interval appears first and starts after your latest accepted answer. Open Change
+to see its live file list while either role works. **Copy live snapshot** reads an immutable current endpoint;
+its files are not independently verified. A stage or base transition during that read asks you to refresh.
+**Copy all changes** remains independent. Missing historical captures and ranges crossing a base update are
 explicitly unavailable. Existing runs acquire exact boundaries from future supported answers, not retroactively.
 Snapshots survive ordinary worktree cleanup and use disk until explicitly released through the
 [run-scoped retention procedure](../app/workspace/docs/architecture/structure.md#review-snapshot-retention).

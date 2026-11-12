@@ -1178,7 +1178,11 @@ def review_closed(page, run_id, expected):
 
 def review_components(page):
     """Isolated Git fixture: real xterms, cached DOM and paged milestone exports; no live run is answered."""
-    result = page.call("Runtime.evaluate", expression="""(async () => {
+    proof = page.call("Runtime.evaluate", expression="(async()=>await (await import('/cache-probe.js')).run())()",
+                      awaitPromise=True, returnByValue=True)
+    if proof.get("result", {}).get("value") is not True:
+        raise SystemExit("native persistent-cache contracts failed: %r" % proof)
+    setup = """(async () => {
       const terminal = await import('/terminals.js');
       const change = await import('/change.js');
       const fixture = await (await fetch('/fixture')).json();
@@ -1195,9 +1199,11 @@ def review_components(page):
         constructor(url) {
           this.url=url; this.readyState=1; this.protocol='workbench.v2'; this.sent=[];
           this.offsets=[]; window.__terminalSockets.push(this);
+          if(url.endsWith('/change'))return;
           const words=url.split('/').slice(-2).join(' ');
           this.record=new TextEncoder().encode(Array.from({length:1800},(_,i)=>words+' line '+i+'\\r\\n').join('')
             +'TAIL '+words+'\\r\\n');
+          if(window.__truncateTerminal && url.endsWith('/engineer'))this.record=new TextEncoder().encode('REPLACED_RECORD\\r\\n');
           setTimeout(()=>{this.onmessage?.({data:JSON.stringify({live:true,replay:this.record.length,size:[160,48]})});
             this.onopen?.()},0);
         }
@@ -1215,31 +1221,70 @@ def review_components(page):
       window.WebSocket=Socket;
       window.__reviewFixture=fixture;
       window.__reviewTerminal=terminal;
+      window.__warmFocus=document.activeElement;
       const show=id=>{terminal.showTerminals(id,'windows');terminal.updateTerminals({open:true,shown:'engineer',working:'engineer',since:id});};
       window.__reviewShow=show;
-      show('run-a');
+      terminal.showTerminals('run-a','windows');
+      terminal.updateTerminals({open:true,shown:'architect',working:'architect',since:'review'});
       change.showReviews('run-a',fixture.review,true);
       return true;
-    })()""", awaitPromise=True, returnByValue=True)
+    })()"""
+    result = page.call("Runtime.evaluate", expression=setup, awaitPromise=True, returnByValue=True)
     if not result.get("result", {}).get("value"):
         raise SystemExit("component setup failed: %r" % result)
-    wait(lambda: page.value("document.querySelector('#term-engineer .xterm-rows')?.innerText.includes('TAIL run-a engineer')"),
-         15, "the first real terminal replay")
-    page.value("window.__firstTerminal=document.querySelector('#term-engineer .xterm');window.__reviewShow('run-b');true")
+    wait(lambda: page.value("!document.querySelector('#terminal-engineer').open && "
+                            "document.querySelector('#term-engineer .xterm-rows')?.textContent.includes('TAIL run-a engineer')"),
+         15, "the unopened engineer's real terminal replay during architect review")
+    page.value("window.__firstTerminal=document.querySelector('#term-engineer .xterm');"
+               "window.__warmSockets=window.__terminalSockets.length;"
+               "window.__reviewTerminal.updateTerminals({open:true,shown:'engineer',working:'engineer',since:'build'});true")
+    if not page.value("window.__firstTerminal===document.querySelector('#term-engineer .xterm') && "
+                      "window.__terminalSockets.length===window.__warmSockets && "
+                      "document.activeElement===window.__warmFocus && "
+                      "document.querySelector('#terminal-engineer').open"):
+        raise SystemExit("switching from architect to the unopened engineer lost its warm screen or connection")
+    page.value("window.__reviewShow('run-b');true")
     wait(lambda: page.value("document.querySelector('#term-engineer .xterm-rows')?.innerText.includes('TAIL run-b engineer')"),
          15, "the other run's independent terminal")
     page.value("window.__reviewShow('run-a');true")
-    wait(lambda: page.value("window.__terminalSockets.length===3 && window.__terminalSockets[2].offsets.length>0"),
+    wait(lambda: page.value("window.__terminalSockets.filter(s=>s.url.endsWith('/engineer')).length===3 && "
+                            "window.__terminalSockets.filter(s=>s.url.endsWith('/engineer'))[2].offsets.length>0"),
          10, "cached terminal reconnect")
     cache = page.value("({same:window.__firstTerminal===document.querySelector('#term-engineer .xterm'),"
-                       "cursor:window.__terminalSockets[2].offsets[0],total:window.__terminalSockets[0].record.length})")
+                       "cursor:window.__terminalSockets.filter(s=>s.url.endsWith('/engineer'))[2].offsets[0],"
+                       "total:window.__terminalSockets.filter(s=>s.url.endsWith('/engineer'))[0].record.length})")
     if not cache["same"] or cache["cursor"] != cache["total"]:
         raise SystemExit("terminal cache lost its screen or confirmed cursor: %r" % cache)
+    wait(lambda: page.value("document.querySelector('#review-milestones details[data-review=current]')?.open && "
+                            "document.querySelector('#review-milestones details[data-review=current]').innerText.includes('No files differ')"),
+         15, "the current interval opening automatically with an initial live sample")
+    live = page.call("Runtime.evaluate", expression="""(async()=>{
+      const change=await import('/change.js');change.watchChange('run-a','windows');
+      const next=await(await fetch('/advance',{method:'POST'})).json();
+      window.__livePatch=next.patch;
+      window.__terminalSockets.find(s=>s.url.endsWith('/change')).onmessage({data:JSON.stringify(next.summary)});
+      return true;
+    })()""", awaitPromise=True, returnByValue=True)
+    wait(lambda: page.value("document.querySelector('#review-milestones details[data-review=current]').innerText.includes('live-revision.txt')"),
+         15, "live changes after the latest accepted operator checkpoint")
+    page.value("document.querySelector('#review-milestones details[data-review=current] button:last-child').click();true")
+    wait(lambda: page.value("window.__reviewCopied.endsWith(window.__livePatch)"), 20, "the exact live-interval export")
+    if not page.value("!window.__reviewCopied.includes('diff --git a/first-only.txt') && "
+                      "!window.__reviewCopied.includes('diff --git a/large.txt')"):
+        raise SystemExit("the current interval included work preceding its operator boundary")
+    page.call("Runtime.evaluate", expression="""(async()=>{
+      await fetch('/finalize',{method:'POST'});
+      const change=await import('/change.js');
+      change.showReviews('run-a',window.__reviewFixture.review,true,'operator-stop');
+      return true;
+    })()""", awaitPromise=True, returnByValue=True)
+    wait(lambda: page.value("document.querySelector('#review-milestones details[data-review=current]').innerText.includes('finished-revision.txt')"),
+         15, "final role edits sampled at the stop without another feed event")
     page.value("document.querySelector('#review-milestones>details').open=true;"
-               "document.querySelectorAll('#review-milestones details[data-run]')[1].open=true;true")
+               "document.querySelector('#review-milestones details[data-review=s2]').open=true;true")
     # Native keyboard activation of the new copy control.
     page.call("Page.bringToFront")
-    page.value("[...document.querySelectorAll('#review-milestones details[data-run]')[1].querySelectorAll('button')]"
+    page.value("[...document.querySelector('#review-milestones details[data-review=s2]').querySelectorAll('button')]"
                ".find(b=>b.textContent==='Copy milestone').focus();true")
     wait(lambda: page.value("document.activeElement?.textContent === 'Copy milestone'"), 10, "the copy control's keyboard focus")
     page.call("Input.dispatchKeyEvent", type="keyDown", key="Enter", code="Enter", windowsVirtualKeyCode=13,
@@ -1257,13 +1302,16 @@ def review_components(page):
                       "!window.__reviewCopied.includes('diff --git a/first-only.txt')"):
         raise SystemExit("milestone copied earlier work or lost its snapshot labels")
     # Re-select an earlier endpoint: copy the net range, not concatenated interval patches.
-    page.value("(()=>{const box=document.querySelectorAll('#review-milestones details[data-run]')[1];"
+    page.value("(()=>{const box=document.querySelector('#review-milestones details[data-review=s2]');"
                "const select=box.querySelector('select');select.value='start';select.dispatchEvent(new Event('change'));"
                "window.__reviewCopied='';[...box.querySelectorAll('button')].find(b=>b.textContent==='Copy range').click();return true})()")
     wait(lambda: page.value("window.__reviewCopied.endsWith(window.__reviewFixture.whole)"), 20, "the complete multi-milestone range")
-    page.value("(()=>{const box=document.querySelectorAll('#review-milestones details[data-run]')[2];box.open=true;"
+    page.call("Runtime.evaluate", expression="(async()=>{const c=await import('/change.js');const f=window.__reviewFixture;"
+              "c.showReviews('run-a',{...f.review,boundaries:[...f.review.boundaries,f.cross]},true);return true})()",
+              awaitPromise=True, returnByValue=True)
+    page.value("(()=>{const box=document.querySelector('#review-milestones details[data-review=s3]');box.open=true;"
                "[...box.querySelectorAll('button')].find(b=>b.textContent==='Read changes').click();return true})()")
-    wait(lambda: page.value("document.querySelectorAll('#review-milestones details[data-run]')[2].innerText.includes('crosses a base update')"),
+    wait(lambda: page.value("document.querySelector('#review-milestones details[data-review=s3]').innerText.includes('crosses a base update')"),
          10, "an explicit cross-base refusal")
     # Existing all-changes copy stays independent of the selected milestone range.
     page.call("Runtime.evaluate", expression="(async()=>{const change=await import('/change.js');change.showChangeFor('run-a');return true})()",
@@ -1273,20 +1321,70 @@ def review_components(page):
     updated = page.call("Runtime.evaluate", expression="""(async()=>{
       const change=await import('/change.js');
       document.querySelector('#change').open=true;
-      const past=document.querySelectorAll('#review-milestones details[data-run]')[1];
+      const past=document.querySelector('#review-milestones details[data-review=s2]');
       const select=past.querySelector('select');select.focus();
       const fixture=window.__reviewFixture;
       change.showReviews('run-a',{...fixture.review,boundaries:[...fixture.review.boundaries,
         {stop:'s4',basis:'another-base',tree:'new-tree',action:'guide',at:'2026-11-12T12:00:00Z'}]},true);
-      const boxes=document.querySelectorAll('#review-milestones details[data-run]');
-      return {past:boxes[1]===past,value:boxes[1].querySelector('select').value,
-        current:boxes[boxes.length-1].querySelector('select').value};
+      const kept=document.querySelector('#review-milestones details[data-review=s2]');
+      return {past:kept===past,value:kept.querySelector('select').value,
+        current:document.querySelector('#review-milestones details[data-review=current] select').value};
     })()""", awaitPromise=True, returnByValue=True)["result"].get("value")
     if updated != {"past": True, "value": "start", "current": "s4"}:
         raise SystemExit("a new operator boundary reused stale current-range state: %r" % updated)
+    page.call("Runtime.evaluate", expression="""(async()=>{
+      window.__originalFetch=window.fetch;window.__historyReads=0;
+      window.__phase='review-checkpoint';
+      window.fetch=async(url,...args)=>{
+        if(url==='/api/runs/history-run/history') {
+          window.__historyReads++;
+          const f=window.__reviewFixture;
+          const row={...f.review.boundaries[1]};
+          if(window.__phase==='review-checkpoint'){delete row.tree;row.unavailable='capture pending';}
+          return Response.json({turns:[],answers:[],review:{initial:f.review.initial,boundaries:[row]}});
+        }
+        if(url==='/api/runs/history-run') return Response.json({stop:null,timeline:[],lines:[],links:{},
+          state:{target:'windows'},view:{state:'running',stage:window.__phase,since:window.__phase,
+          host:'windows',goal:'History refresh acceptance',blocked_by:[],draining_by:[],
+          role:window.__phase==='build'?'engineer':null}});
+        return window.__originalFetch(url,...args);
+      };
+      const run=await import('/run.js');run.show('history-run');return true;
+    })()""", awaitPromise=True, returnByValue=True)
+    wait(lambda: page.value("window.__historyReads===1 && document.querySelector('#review-milestones details[data-review=s2]')"
+                            "?.dataset.evidence.includes('capture pending')"), 10, "pending capture through the normal run renderer")
+    page.call("Runtime.evaluate", expression="(async()=>{window.__phase='build';await(await import('/run.js')).refreshRun();return true})()",
+              awaitPromise=True, returnByValue=True)
+    wait(lambda: page.value("window.__historyReads===2 && !document.querySelector('#review-milestones details[data-review=s2]')"
+                            "?.dataset.evidence.includes('capture pending')"), 10, "checkpoint metadata refreshed when a role starts")
+    page.call("Runtime.evaluate", expression="(async()=>{(await import('/run.js')).show(null);"
+              "window.fetch=window.__originalFetch;return true})()", awaitPromise=True, returnByValue=True)
+    totals = page.value("Object.fromEntries(['engineer','architect'].map(role=>[role,"
+                        "window.__terminalSockets.find(s=>s.url.endsWith('/'+role)).record.length]))")
+    page.call("Runtime.evaluate", expression="(async()=>await(await import('/terminal-cache.js')).flush())()",
+              awaitPromise=True, returnByValue=True)
+    page.call("Page.reload")
+    wait(lambda: page.value("document.readyState==='complete' && !window.__reviewFixture"),
+         15, "the fresh document")
+    review_restored(page, setup, totals)
     print("PASS: real xterm A/B/A reuses DOM and confirmed cursor; keyboard milestone copy and earlier-range copy "
-          "match immutable Git patches; cross-base refusal and Copy all changes preserved")
-    return 0
+          "match immutable Git patches; cross-base refusal, Copy all changes and refresh restoration preserved")
+    return setup, totals
+
+
+def review_restored(page, setup, totals):
+    result = page.call("Runtime.evaluate", expression=setup, awaitPromise=True, returnByValue=True)
+    if not result.get("result", {}).get("value"):
+        raise SystemExit("restored component setup failed: %r" % result)
+    for role, total in totals.items():
+        prefix = "window.__terminalSockets.find(s=>s.url.endsWith('/%s'))" % role
+        wait(lambda: page.value(prefix + "?.offsets.length>0"), 15, "the restored %s connection" % role)
+        offset = page.value(prefix + ".offsets[0]")
+        if offset != total:
+            raise SystemExit("refresh/reopen replayed %s instead of resuming its cached screen: %r != %r"
+                             % (role, offset, total))
+        wait(lambda: page.value("document.querySelector('#term-%s .xterm-rows')?.textContent.includes('TAIL run-a %s')"
+                                % (role, role)), 15, "the restored %s screen" % role)
 
 
 def main(url, run_id, label, said, note=None):
@@ -1339,7 +1437,38 @@ def main(url, run_id, label, said, note=None):
             page.call("Page.navigate", url=url)
             if label == "review-components":
                 wait(lambda: page.value("document.readyState === 'complete'"), 30, "the isolated component fixture")
-                return review_components(page)
+                setup, totals = review_components(page)
+                page.call("Browser.close")
+                edge.wait(10)
+                port_file = os.path.join(profile, "DevToolsActivePort")
+                if os.path.exists(port_file):
+                    os.remove(port_file)
+                edge = subprocess.Popen(edge.args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                reopened_port = wait(lambda: open(port_file).readline().strip(), 30, "the reopened browser's port")
+                reopened_target = wait(lambda: next(tab["webSocketDebuggerUrl"] for tab in json.load(urllib.request.urlopen(
+                    "http://127.0.0.1:%s/json/list" % reopened_port)) if tab.get("type") == "page"),
+                    30, "the reopened browser's page")
+                with connect(reopened_target, max_size=None) as reopened_socket:
+                    reopened = Page(reopened_socket)
+                    reopened.call("Page.navigate", url=url)
+                    wait(lambda: reopened.value("document.readyState==='complete' && typeof Terminal==='function'"),
+                         30, "the reopened fixture")
+                    review_restored(reopened, setup, totals)
+                    reopened.call("Page.reload")
+                    wait(lambda: reopened.value("document.readyState==='complete' && !window.__reviewFixture"),
+                         15, "the truncation-control document")
+                    reopened.value("window.__truncateTerminal=true")
+                    control = reopened.call("Runtime.evaluate", expression=setup, awaitPromise=True, returnByValue=True)
+                    if control.get("result", {}).get("value") is not True:
+                        raise SystemExit("truncation-control setup failed: %r" % control)
+                    wait(lambda: reopened.value("window.__terminalSockets.find(s=>s.url.endsWith('/engineer'))?.offsets.length>0"),
+                         15, "the truncated-record cursor")
+                    if reopened.value("window.__terminalSockets.find(s=>s.url.endsWith('/engineer')).offsets[0]") != 0:
+                        raise SystemExit("a truncated recording accepted the stale persistent cursor")
+                    wait(lambda: reopened.value("document.querySelector('#term-engineer .xterm-rows')?.textContent.includes('REPLACED_RECORD')"),
+                         15, "cold recovery of the replaced recording")
+                print("PASS: both native role screens and confirmed cursors survive an actual browser restart")
+                return 0
             if label == "settings-policy":
                 wait(lambda: page.value("document.readyState === 'complete'"), 30, "the Workbench page")
                 return settings_policy(page)

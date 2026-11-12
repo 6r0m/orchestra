@@ -73,8 +73,10 @@ No new note store or vendor-session reader supplies operator intent.
 The history reader associates checkpoint results with accepted operator actions by their recorded identity,
 including explicit capture failures. Same-base milestone exports use the net change between retained trees,
 never concatenated turn patches. Legacy missing samples and cross-base ranges are refused explicitly.
-A current endpoint is sampled at a stable operator stop, rechecked after the read, and frozen for all later
-file reads and patch chunks. Whole-run live diff remains available independently. Private checkpoint refs
+A current endpoint can be sampled during a role turn or an operator stop. The stage, stop, worktree and
+base must remain unchanged across the read; setup and Git transitions are refused. The sampled tree is
+frozen for all later file reads and patch chunks and conveys no approval. Whole-run live diff remains
+available independently. Private checkpoint refs
 survive ordinary worktree cleanup; the workspace owner defines their retention and release.
 
 - **A role-run and every git side effect are single-attempt (D5).** A failure stops the run for the operator; there is no automatic retry and no retry ledger (D16).

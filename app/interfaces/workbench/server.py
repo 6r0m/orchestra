@@ -61,6 +61,7 @@ STATIC = {"/": ("index.html", "text/html; charset=utf-8"),
           "/change.js": ("change.js", JS),
           "/diff.js": ("diff.js", JS),
           "/terminals.js": ("terminals.js", JS),
+          "/terminal-cache.js": ("terminal-cache.js", JS),
           "/markdown.js": ("markdown.js", JS),
           "/worktrees.js": ("worktrees.js", JS),
           "/settings.js": ("settings.js", JS),
@@ -68,6 +69,7 @@ STATIC = {"/": ("index.html", "text/html; charset=utf-8"),
           # browser asks for a `/favicon.ico` this server does not hold.
           "/favicon.svg": ("favicon.svg", "image/svg+xml"),
           "/vendor/xterm.js": ("vendor/xterm/xterm.js", JS),
+          "/vendor/xterm-serialize.js": ("vendor/xterm-serialize/addon-serialize.js", JS),
           "/vendor/xterm.css": ("vendor/xterm/xterm.css", "text/css; charset=utf-8"),
           "/vendor/markdown-it.js": ("vendor/markdown-it/markdown-it.esm.min.mjs", JS)}
 RUN_ID = re.compile(r"^[\w-]{1,64}$")

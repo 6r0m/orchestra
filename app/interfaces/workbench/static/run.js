@@ -555,7 +555,7 @@ let drawn = { view: null, timeline: [] };
 
 function renderHistory(view, timeline, stop) {
   drawn = { view: view, timeline: timeline, stop: stop };
-  const key = JSON.stringify([selected, timeline.length, stop && stop.id, view.state]);
+  const key = JSON.stringify([selected, timeline.length, stop && stop.id, view.state, view.stage, view.since]);
   if (record.key !== key) {
     record.key = key;
     readRecord(selected, key);
@@ -583,7 +583,7 @@ async function readRecord(runId, key) {
 function drawHistory() {
   const { view, timeline, stop } = drawn;
   if (view) renderChange(view, stop);
-  showReviews(selected, record.review, view && view.state !== "closed");
+  showReviews(selected, record.review, view && view.state !== "closed", [view?.stage, view?.since, stop?.id]);
   const root = $("timeline");
   if (!view || unchanged(root, [timeline, record.turns, record.answers, record.said, [...shownAbove]])) return;
   const openDetails = new Set([...root.querySelectorAll("details[open][data-history-detail]")]

@@ -644,7 +644,8 @@ async def history(client, run_id):
 
 
 async def review_milestone(client, run_id, first, last):
-    """One same-base net change; current endpoints are sampled only at a stable operator stop."""
+    """One same-base net change; a current sample never changes its baseline or execution stage mid-read."""
+    current = await readable_status(client, run_id) if last == "current" else None
     record = await history(client, run_id)
     if record is None:
         raise Refusal("no run %r" % run_id)
@@ -654,29 +655,39 @@ async def review_milestone(client, run_id, first, last):
     if first not in keys[:-1] or last not in keys or keys.index(first) >= keys.index(last):
         raise Refusal("select review checkpoints in their recorded order")
     start = endpoints[keys.index(first)]
-    current = None
+    def checked(endpoint, name):
+        if endpoint.get("unavailable") or not endpoint.get("tree"):
+            raise Refusal(name + " unavailable: " + (endpoint.get("unavailable") or "no recorded tree"))
+        if not endpoint.get("basis"):
+            raise Refusal(name + " has no recorded base")
+
+    checked(start, "starting checkpoint")
     if last == "current":
-        current = await readable_status(client, run_id)
-        if not current or not current.get("stop"):
-            raise Refusal("current milestone export is available at the next operator stop; Copy all changes stays available")
-        snapshot = await review_diff(client, run_id)
+        def identity(status):
+            if not status:
+                return None
+            state = status.get("state", {})
+            return (status.get("stop"), state.get("current"), state.get("base_tip"),
+                    state.get("worktree_path"), state.get("repo_path"), status.get("queue"))
+
+        state = (current or {}).get("state", {})
+        if (not state.get("worktree_path") or not (current.get("stop") or
+                (state.get("current") or {}).get("role") in ("engineer", "architect"))):
+            raise Refusal("current milestone needs a role or operator stop; read again after the transition")
+        if start["basis"] != state.get("base_tip"):
+            raise Refusal("this range crosses a base update; select checkpoints within the same base")
+        read = await review_diff(client, run_id, base=start["tree"])
         after = await readable_status(client, run_id)
         described = await execution(client, run_id)
-        if (not after or after.get("stop") != current["stop"] or
-                after["state"].get("base_tip") != snapshot["base"] or
+        if (identity(after) != identity(current) or read.get("base") != start["tree"] or
                 not described or described["execution"] != "RUNNING"):
-            raise Refusal("the run moved during this snapshot; read it again at an operator stop")
-        end = {"tree": snapshot["tree"], "basis": snapshot["base"]}
+            raise Refusal("the run moved during this snapshot; read it again")
     else:
         end = endpoints[keys.index(last)]
-    for endpoint in (start, end):
-        if endpoint.get("unavailable") or not endpoint.get("tree"):
-            raise Refusal(endpoint.get("unavailable") or "the run recorded no initial base")
-        if not endpoint.get("basis"):
-            raise Refusal("the checkpoint has no recorded base")
-    if start["basis"] != end["basis"]:
-        raise Refusal("this range crosses a base update; select checkpoints within the same base")
-    read = await review_diff(client, run_id, base=start["tree"], tree=end["tree"])
+        checked(end, "ending checkpoint")
+        if start["basis"] != end["basis"]:
+            raise Refusal("this range crosses a base update; select checkpoints within the same base")
+        read = await review_diff(client, run_id, base=start["tree"], tree=end["tree"])
     return dict(read, review_range={"from": keys.index(first), "through": keys.index(last),
                                    "current": current is not None})
 

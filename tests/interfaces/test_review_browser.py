@@ -11,6 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
 
 from app.interfaces.workbench.server import PAGE, STATIC
+from app.agents import terminal
 from app.workspace import worktrees as W
 from tests.workspace.test_worktrees import Repo, TARGET, git, write
 
@@ -90,7 +91,7 @@ class ReviewBrowser(Repo):
                       {"stop": "s2", "basis": base, "tree": second, "action": "approve", "at": "2026-11-12T10:00:00Z"},
                       {"stop": "s3", "basis": "another-base", "tree": second, "action": "revise", "at": "2026-11-12T11:00:00Z"}]
         points = {"start": {"tree": base, "basis": base}, **{row["stop"]: row for row in boundaries}}
-        fixture = {"review": {"initial": base, "boundaries": boundaries},
+        fixture = {"review": {"initial": base, "boundaries": boundaries[:2]}, "cross": boundaries[2],
                    "delta": git(path, "diff", *W.DIFF, first, second), "whole": git(path, "diff", *W.DIFF, base, second)}
 
         class Handler(BaseHTTPRequestHandler):
@@ -106,18 +107,30 @@ class ReviewBrowser(Repo):
                 self.end_headers()
                 self.wfile.write(data)
 
+            def do_POST(self):
+                if self.path not in ("/advance", "/finalize"):
+                    return self.send({"error": "isolated fixture"}, 404)
+                write(os.path.join(path, "live-revision.txt" if self.path == "/advance" else "finished-revision.txt"),
+                      "LIVE_AFTER_OPERATOR_REVISION\n")
+                snapshot = W.review_diff(path, base=second)
+                self.send({"summary": W.change_summary(path, base), "patch": snapshot["patch"]})
+
             def do_GET(self):
                 url = urllib.parse.urlsplit(self.path)
                 query = {key: rows[0] for key, rows in urllib.parse.parse_qs(url.query).items()}
+                if url.path == "/cache-probe.js":
+                    return self.send(Path(__file__).with_name("terminal_cache_probe.js").read_bytes(), kind="text/javascript")
                 if url.path == "/fixture":
                     return self.send(fixture)
                 if url.path.endswith("/milestone"):
                     start, end = query["from"], query["through"]
-                    if points[start]["basis"] != points[end]["basis"]:
+                    if points[start]["basis"] != (base if end == "current" else points[end]["basis"]):
                         return self.send({"error": "this range crosses a base update; select checkpoints within the same base"}, 400)
-                    result = W.review_diff(path, base=points[start]["tree"], tree=points[end]["tree"])
+                    result = W.review_diff(path, base=points[start]["tree"],
+                                           tree=None if end == "current" else points[end]["tree"])
                     return self.send(dict(result, review_range={"from": list(points).index(start),
-                        "through": list(points).index(end), "current": False}))
+                        "through": len(points) if end == "current" else list(points).index(end),
+                        "current": end == "current"}))
                 if url.path.endswith("/diff"):
                     return self.send(W.review_diff(path, int(query.get("offset", 0)), base=query.get("base", base),
                                                   tree=query.get("tree", second), file=query.get("file")))
@@ -125,7 +138,9 @@ class ReviewBrowser(Repo):
                     name, kind = STATIC[url.path]
                     data = (Path(PAGE) / name).read_bytes()
                     if name == "index.html":
-                        data = data.replace(b'{{CONFIG}}', json.dumps({"token": "synthetic", "terminal_size": {"cols": 160, "rows": 48},
+                        data = data.replace(b'{{CONFIG}}', json.dumps({"token": "synthetic", "terminal_size": {
+                            "cols": terminal.COLS, "rows": terminal.ROWS,
+                            "min_rows": terminal.MIN_ROWS, "max_rows": terminal.MAX_ROWS},
                             "terminal_ports": {"windows": 1, "wsl": 1}}).encode())
                         data = data.replace(b'<script type="module" src="/app.js"></script>', b'')
                     return self.send(data, kind=kind)

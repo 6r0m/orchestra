@@ -58,6 +58,8 @@ using the resize protocol's original row bounds when they are absent. A worker r
 resizing while the Workbench still serves its earlier configuration. New Settings controls or server behavior
 still require reloading the Workbench process. Worker updates use the application's
 [scoped reload procedure](../../../application/docs/architecture/structure.md#updating-running-orchestra-code).
+Persistent snapshot validation requires the complete geometry bounds; legacy page configuration keeps
+ordinary replay without restoring persisted snapshots.
 Settings exposes the per-turn cap in hours and a profile's
 optional provider; the application settings owner stores their validated values for new runs.
 Its Operator action list also projects a waiting vendor dialog from the active turn's local
@@ -91,17 +93,40 @@ when the decision above moves on; nothing else of it is read again.
 ## Invariants
 
 The browser retains a bounded least-recently-used set of parsed xterm displays for open runs, keyed by run,
-host and role. Navigation detaches hidden displays and closes their sockets without disposing their parsed
-buffers; pending parsing may finish while hidden. Returning reconnects from the confirmed cursor and shows
-the tail. Background callbacks cannot alter another run's DOM or send its input. Confirmed closed runs are
+host and role. The selected open run prepares both roles, including unopened or collapsed panels, so idle
+review time also warms the next role's recorded screen. Parsing uses explicit terminal dimensions; fitting
+waits for a visible panel and never opens it or takes focus. Navigation detaches parked displays and closes
+their sockets without disposing their parsed buffers; pending parsing may finish while hidden.
+Returning reconnects from the confirmed cursor and shows the tail. Background callbacks cannot alter
+another run's DOM or send its input. Confirmed closed runs are
 removed from retention; a visible closed record remains readable until navigation, with input disabled.
-Missing list rows are unknown, not closure. Pressure evicts hidden displays; a page reload replays the record.
-This display cache does not keep a vendor process initialized or alter its exact-session recovery.
+Missing list rows are unknown, not closure. Pressure evicts hidden displays.
+
+[The terminal cache](../../workbench/static/terminal-cache.js) owns browser-local IndexedDB snapshots and their global retention bounds. Native
+xterm serialization and a version-bound continuation adapter retain the buffers, geometry and terminal
+modes alongside the original confirmed byte cursor. Snapshots are captured only between completed writes
+at complete parser/UTF-8 boundaries, hashed with their identity, and restored before incremental reads.
+Refresh and browser reopening reuse committed snapshots on the same Workbench origin and browser profile.
+The cursor remains a position in the worker's append-only record, never in the serialized display.
+Corrupt/incompatible snapshots, truncated records and older workers recover through normal record replay.
+Storage failure is visible and never prevents workflow execution or terminal observation.
+
+IndexedDB transactions prevent one tab overwriting a newer cursor or recreating a recently closed run's
+snapshot after another tab clears it. Confirmed closure releases persisted screens; a bounded closed-run
+marker prevents late saves. The rail supplies normal closure events; on page startup, retained runs absent
+from that page are checked through the existing status API to reconcile closure while the browser was away.
+Unreadable status remains unknown. Browser eviction, storage loss or a missed final write can require replay
+from an earlier cursor. This cache does not keep a vendor process initialized or alter its exact-session recovery.
 
 The Change disclosure also shows operator review intervals, with same-base milestone/range exports through
 the existing immutable diff reader. Clipboard output includes snapshot labels followed by the exact patch;
 whole-run Copy all changes remains independent. Interval bodies preserve selection and disclosure state,
 and earlier-checkpoint menus are populated on demand. Missing evidence is unavailable, never an empty patch.
+The current interval appears first, starting from the latest accepted action's checkpoint. While its
+disclosures are open, the existing worktree feed refreshes its sampled tree, with at most one automatic
+read in flight. Stage transitions also refresh the current sample, including the final edits before a stop.
+Copy samples a fresh immutable endpoint. History metadata is refreshed on stage changes
+so a pending checkpoint is read again when its subsequent role begins; no display action creates a boundary.
 Retained intervals remain accessible on a closed run's page after its worktree is removed. The whole-worktree
 reader and its actions are shown only while the worktree is retained, independently of historical exports.
 
@@ -136,5 +161,10 @@ The invariants above name the ones that bind this package.
 
 The page's token keeps other sites and other users out, not other processes of the same
 user, which can read it (D28). The page is plain HTML, CSS and JavaScript with no build
-step, which is deliberate; the cost is that its two vendored dependencies, xterm.js and markdown-it, are pinned
+step, which is deliberate; its vendored renderer, serialization addon and Markdown parser are pinned
 by hand, each with its version, source and integrity in its `VERSION`.
+
+Persistent screen restoration uses version-bound native continuation fields in addition to the serializer.
+Upgrading either terminal dependency requires snapshot-format invalidation and the native continuation,
+refresh and browser-restart checks. Browser storage is disposable and may be evicted; the worker record
+remains the complete recovery source.

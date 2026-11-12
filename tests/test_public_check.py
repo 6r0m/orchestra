@@ -25,6 +25,7 @@ class Gate(unittest.TestCase):
         self.repo = self.scratch / "repo"
         (self.repo / "tools").mkdir(parents=True)
         shutil.copyfile(SOURCE, self.repo / "tools" / "public_check.sh")
+        shutil.copyfile(SOURCE.parent.parent / ".gitleaks.toml", self.repo / ".gitleaks.toml")
         bin_dir = self.scratch / "bin"
         bin_dir.mkdir()
         docker = bin_dir / "docker"
@@ -41,6 +42,15 @@ for arg in "$@"; do
 done
 if [ "$no_git" = true ]; then
     if grep -R -E -q 'ghp_|STAGED_CONTROL' "$scan"; then exit 1; fi
+    if [ "${CONTROL_IGNORE_GENERIC:-}" != 1 ] && grep -R -E -q 'api_key = "[A-Za-z0-9]{32}"' "$scan"; then exit 1; fi
+    while IFS= read -r -d '' file; do
+        case "$file" in
+            "$scan/app/interfaces/workbench/static/vendor/xterm-serialize/addon-serialize.js") ;;
+            "$scan/app/interfaces/workbench/static/vendor/xterm/xterm.js") ;;
+            "$scan/workbench/vendor/xterm/xterm.js") ;;
+            *) exit 1 ;;
+        esac
+    done < <(grep -R -l -Z --exclude=.gitleaks.toml 't[.]FourKeyMap=t[.]TwoKeyMap=void' "$scan")
 elif git -C "$scan" log -p "$log" 2>/dev/null | grep -q '^+.*STAGED_CONTROL'; then
     exit 1
 fi
@@ -103,6 +113,11 @@ def ref(commit, to="refs/heads/main"):
 
 @unittest.skipUnless(os.name == "posix", "the public gate's shell controls run on WSL")
 class PublicCheckSnapshots(Gate):
+    def test_vendor_export_exception_cannot_hide_a_real_generic_key(self):
+        result = self.check(CONTROL_IGNORE_GENERIC="1")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("generic-key control in the vendored path was not rejected", result.stdout)
+
     def test_staged_control_survives_a_clean_worktree(self):
         path = self.stage("STAGED_CONTROL")
         path.write_text("clean", encoding="utf-8")

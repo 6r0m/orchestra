@@ -1,6 +1,6 @@
 # Operator review milestones
 
-**Status:** IMPLEMENTED AND VERIFIED — live activation confirmed
+**Status:** IMPLEMENTED AND VERIFIED — live current intervals active
 **Scope:** durable review checkpoints, operator-action history projection and milestone diff/copy UI  
 **Stable documentation owners:** [orchestration](../app/orchestration/docs/architecture/structure.md), [workspace](../app/workspace/docs/architecture/structure.md), [application](../app/application/docs/architecture/structure.md), and [interfaces](../app/interfaces/docs/architecture/structure.md)
 
@@ -33,6 +33,10 @@ Repeated external review should not require resending the entire accumulated pat
   - Effect: D3's investigation-only phase is complete; implement T1–T6 within the revised same-base and retention boundaries.
   - Reason: not stated.
   - Date/source: 2026-11-12, current operator implementation request.
+- **D5** Show the interval after a submitted revision live while roles work.
+  - Effect: the current interval is visible first and follows worktree changes without waiting for another operator stop.
+  - Reason: the operator needs to see work responding to their latest submission.
+  - Date/source: 2026-11-12, operator follow-up.
 
 ### Operator gates
 
@@ -200,3 +204,14 @@ Use additive, versioned workflow behavior that replays old histories; existing p
 
 - Operator requested activation for the existing paused workflow. Preflight confirmed no pending activities and settled role turns. `make reload` gracefully replaced both Orchestra workers; `make workbench-restart` loaded the shared client and server. `make check` confirmed the service and each assigned queue polling. WSL, Temporal and unrelated workloads were not restarted.
 - The existing workflow now advertises the milestone protocol. A hash comparison of its state, stop and configuration is unchanged across activation. Its live Workbench page exposes Review milestones and Current milestone, and the new endpoint returns its expected range-validation refusal. No answer, model call or retrospective snapshot was submitted. Future accepted revisions capture their own baseline; missing earlier snapshots remain unavailable.
+
+### 2026-11-12 — Live current-interval follow-up
+
+- The latest accepted revision has a valid retained checkpoint. The previous historical interval cannot export from its missing legacy start; that does not invalidate the latest checkpoint. No historical capture is fabricated.
+- The original stop-only current export did not satisfy D5. Current reads now sample during a stable role or stop, refuse changed stage/base/worktree identity, and freeze the resulting tree for subsequent file and patch reads.
+- The current interval appears first and opens on a new accepted boundary. Visible updates reuse the existing worktree feed, coalesce in-flight reads, and retain historical controls. The normal run renderer reloads history on stage changes to resolve pending capture metadata.
+- Regression-first evidence: application tests rejected running-role reads under the old stop-only implementation; the real Edge fixture failed waiting for automatic current-interval display. Both pass after their respective changes. The fixture adds a real Git file after the boundary, observes it via the change feed, copies its exact patch excluding earlier work, and checks pending-to-recorded metadata through the normal run renderer.
+- Full suites passed: 919 WSL tests and 692 Windows tests. A subsequent browser-only refinement refreshes on stage transitions as well as feed events, so the final edits cannot be missed before a stop. Its regression failed without that refresh; the final application/Edge run passed all 10 tests, including exact live copy, metadata completion, closed-history exports and persistent terminal restoration. No broad suite was repeated for those three UI lines.
+- The existing Workbench service loaded the application reader without replacing either worker. Live browser checks confirmed the current interval is first and open, has the latest accepted checkpoint as its base, lists the actual revision's files, and matches immutable patch readback. The workflow state, stop and configuration hash stayed unchanged across activation. Health checks confirmed both assigned queues polling; no WSL restart, agent interruption, answer submission or paid call occurred.
+- Public-safety checks and diff validation passed. Native process reuse and account admission remain outside this scope.
+- Subsequent live acceptance observed another operator Merge capture a valid checkpoint; the new current interval correctly showed no additional files. The Git commit stopped on missing author configuration, independently of checkpoint capture; no identity or repository configuration was changed during this work.

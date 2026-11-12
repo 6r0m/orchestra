@@ -15,6 +15,7 @@ flowchart LR
     accounting_ext[("observability.accounting")]
     temporal_ext[("Temporal server")]
     socket_ext[("a worker's terminal socket")]
+    browser_cache_ext[("browser-local IndexedDB")]
     operator_ext[("the operator")]
     cli -->|"the shared client"| client_ext
     server -->|"the shared client"| client_ext
@@ -25,6 +26,7 @@ flowchart LR
     server -->|"the page it serves"| static
     worker -->|"polls its host's queue"| temporal_ext
     static -->|"the terminal WebSocket"| socket_ext
+    static -->|"derived terminal screen snapshots"| browser_cache_ext
     operator_ext -->|"a browser on 127.0.0.1"| server
     operator_ext -->|"a terminal"| cli
 ```

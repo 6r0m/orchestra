@@ -13,7 +13,10 @@ class ReviewRanges(unittest.IsolatedAsyncioTestCase):
             {"stop": "three", "basis": "new-base", "tree": "third"}]}}
         self.history = AsyncMock(return_value=self.record)
         self.diff = AsyncMock(return_value={"base": "first", "tree": "second", "patch": "exact net change"})
-        self.status = AsyncMock(return_value={"stop": {"id": "waiting"}, "state": {"base_tip": "base"}})
+        self.waiting = {"stop": {"id": "waiting"}, "state": {"base_tip": "base", "worktree_path": "worktree"}}
+        self.working = {"stop": None, "state": {"base_tip": "base", "worktree_path": "worktree",
+                        "current": {"stage": "build", "role": "engineer", "since": "now"}}}
+        self.status = AsyncMock(return_value=self.waiting)
         self.execution = AsyncMock(return_value={"execution": "RUNNING"})
         for name, mock in (("history", self.history), ("review_diff", self.diff), ("readable_status", self.status),
                            ("execution", self.execution)):
@@ -35,28 +38,53 @@ class ReviewRanges(unittest.IsolatedAsyncioTestCase):
         self.diff.assert_not_awaited()
 
     async def test_current_range_freezes_one_sample_at_a_stable_stop(self):
-        self.diff.side_effect = [{"base": "base", "tree": "sample"},
-                                 {"base": "first", "tree": "sample", "patch": "sampled net change"}]
+        self.diff.return_value = {"base": "first", "tree": "sample", "patch": "sampled net change"}
         result = await runs.review_milestone(None, "run", "one", "current")
         self.assertEqual(result["tree"], "sample")
         self.assertTrue(result["review_range"]["current"])
-        self.diff.assert_awaited_with(None, "run", base="first", tree="sample")
+        self.diff.assert_awaited_once_with(None, "run", base="first")
 
-    async def test_current_export_refuses_an_executing_or_concurrently_answered_stop(self):
+    async def test_current_interval_is_readable_during_either_role_without_an_operator_stop(self):
+        self.status.return_value = self.working
+        for role in ("engineer", "architect"):
+            self.working["state"]["current"]["role"] = role
+            with self.subTest(role=role):
+                result = await runs.review_milestone(None, "run", "one", "current")
+                self.assertTrue(result["review_range"]["current"])
+                self.assertEqual(result["base"], "first")
+                self.diff.assert_awaited_with(None, "run", base="first")
+
+    async def test_missing_or_cross_base_start_refuses_before_sampling_the_worktree(self):
+        self.record["review"]["boundaries"][0] = {"stop": "one", "unavailable": "no checkpoint was recorded"}
+        with self.assertRaisesRegex(runs.Refusal, "starting checkpoint.*no checkpoint"):
+            await runs.review_milestone(None, "run", "one", "current")
+        with self.assertRaisesRegex(runs.Refusal, "crosses a base update"):
+            await runs.review_milestone(None, "run", "three", "current")
+        self.diff.assert_not_awaited()
+
+    async def test_current_export_refuses_setup_or_concurrently_answered_stop(self):
         self.status.return_value = {"stop": None}
-        with self.assertRaisesRegex(runs.Refusal, "next operator stop"):
+        with self.assertRaisesRegex(runs.Refusal, "role or operator stop"):
             await runs.review_milestone(None, "run", "one", "current")
         self.diff.assert_not_awaited()
         self.status.return_value = None
-        self.status.side_effect = [{"stop": {"id": "old"}, "state": {"base_tip": "base"}}, {"stop": None}]
-        self.diff.return_value = {"base": "base", "tree": "sample"}
+        self.status.side_effect = [self.waiting, self.working]
         with self.assertRaisesRegex(runs.Refusal, "run moved"):
             await runs.review_milestone(None, "run", "one", "current")
         self.assertEqual(self.diff.await_count, 1)
 
+    async def test_stage_base_or_worktree_changes_invalidate_a_live_sample(self):
+        import copy
+        for field, value in (("base_tip", "new-base"), ("worktree_path", "other"),
+                             ("current", {"stage": "merge", "since": "later"})):
+            after = copy.deepcopy(self.working)
+            after["state"][field] = value
+            self.status.side_effect = [self.working, after]
+            with self.subTest(field=field), self.assertRaisesRegex(runs.Refusal, "run moved"):
+                await runs.review_milestone(None, "run", "one", "current")
+
     async def test_a_closed_workflow_query_cannot_supply_a_current_operator_stop(self):
         self.execution.return_value = {"execution": "TERMINATED"}
-        self.diff.return_value = {"base": "base", "tree": "sample"}
         with self.assertRaisesRegex(runs.Refusal, "run moved"):
             await runs.review_milestone(None, "run", "one", "current")
         self.assertEqual(self.diff.await_count, 1)

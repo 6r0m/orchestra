@@ -190,6 +190,35 @@ else
     pass "the scanner rejects a known-bad control"
 fi
 
+# The compiled-export exception must never exempt an entire vendor file or another source path.
+vendor_probe="$control/vendor"
+vendor_path="app/interfaces/workbench/static/vendor/xterm-serialize/addon-serialize.js"
+mkdir -p "$vendor_probe/$(dirname "$vendor_path")"
+if cp "$REPO/.gitleaks.toml" "$vendor_probe/.gitleaks.toml"; then
+    printf 't.%s=t.%s=void 0;\n' FourKeyMap TwoKeyMap > "$vendor_probe/$vendor_path"
+    if gitleaks "$vendor_probe" detect --no-git --no-banner --redact >"$control/gitleaks-vendor.txt" 2>&1; then
+        pass "the scanner accepts the inspected compiled export"
+    else
+        fail "the scanner rejected the inspected compiled export"
+        sed 's/^/     /' "$control/gitleaks-vendor.txt" | head -12
+    fi
+    cp "$vendor_probe/$vendor_path" "$vendor_probe/outside.js"
+    if gitleaks "$vendor_probe" detect --no-git --no-banner --redact >/dev/null 2>&1; then
+        fail "the compiled-export exception reached another source path"
+    else
+        pass "the compiled-export exception stays within its vendor paths"
+    fi
+    rm "$vendor_probe/outside.js"
+    printf 'api_key = "%s%s"\n' a1B2c3D4e5F6g7H8 j9K0m1N2p3Q4r5S6 >> "$vendor_probe/$vendor_path"
+    if gitleaks "$vendor_probe" detect --no-git --no-banner --redact >/dev/null 2>&1; then
+        fail "the generic-key control in the vendored path was not rejected"
+    else
+        pass "the scanner still rejects a generic key inside the vendor bundle"
+    fi
+else
+    fail "the compiled-export control could not load this checkout's scanner configuration"
+fi
+
 # The index is a separate snapshot: a staged secret can differ from a clean or deleted worktree file.
 # Export it without changing the index, and fail if any entry cannot be exported or scanned. For a
 # commit the index is that commit's files, and the scanner's configuration this checkout's.

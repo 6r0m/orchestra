@@ -115,6 +115,7 @@ function listen(watch) {
 // gets a new row, open again, and so read again, when the operator had opened it. A diff is read only when its row
 // opens: as the change is now, since a live summary writes no snapshot.
 function showLive(watch, summary) {
+  if (currentReview?.runId === watch.runId) currentReview.refresh();
   watch.seen = true;
   shown = summary;
   $("change-count").textContent = fileCount(summary.files_total);
@@ -202,12 +203,17 @@ $("change-copy").onclick = () => runId && copyPatch(runId, api("/api/runs/" + en
 
 // Operator review intervals come from Temporal; their bytes use the same immutable diff reader.
 let drawn = null;
+let currentReview = null;
+let currentBoundary = null;
+const refreshCurrent = () => currentReview?.refresh();
+$("change").addEventListener("toggle", refreshCurrent);
+document.addEventListener("visibilitychange", refreshCurrent);
 const action = (row) => ({ approve: "approval", revise: "revision", guide: "guidance", continue: "Continue",
   merge: "Merge", discard: "Discard" }[row.action] || row.action) + (row.role ? " to " + row.role : "");
 
-export function showReviews(runId, review, open) {
+export function showReviews(runId, review, open, stage = null) {
   const root = $("review-milestones");
-  const key = JSON.stringify([runId, review, open]);
+  const key = JSON.stringify([runId, review, open, stage]);
   if (drawn === key) return;
   drawn = key;
   const focused = root.contains(document.activeElement) ? document.activeElement : null;
@@ -215,26 +221,40 @@ export function showReviews(runId, review, open) {
   const bodies = new Map([...root.querySelectorAll("details[data-review]")]
     .filter((box) => box.dataset.run === runId).map((box) => [box.dataset.review, box]));
   root.replaceChildren();
-  if (!runId || !review) return;
+  if (!runId || !review) { currentReview = null; currentBoundary = null; return; }
   const endpoints = [{ stop: "start", label: "Run start" }, ...review.boundaries.map((row, index) =>
     ({ ...row, label: (index + 1) + " · After " + action(row) }))];
-  const intervals = review.boundaries.map((row, index) => ({ stop: row.stop, at: row.at,
+  const intervals = review.boundaries.map((row, index) => ({ stop: row.stop, at: row.at, index: index,
     label: "Milestone " + (index + 1) + " · Through " + action(row) }));
-  if (open) intervals.push({ stop: "current", label: "Current milestone · not independently verified" });
+  const boundary = JSON.stringify([runId, endpoints.at(-1).stop]);
+  const newCurrent = open && currentBoundary !== boundary;
+  currentBoundary = open ? boundary : null;
+  if (open) intervals.unshift({ stop: "current", index: endpoints.length - 1,
+    label: "Milestone " + endpoints.length + " · Current changes · live, not independently verified" });
+  currentReview = null;
   if (!intervals.length) return;
   const all = el("details", null, "round-change");
   all.dataset.review = "all";
-  all.open = expanded.has("all");
+  all.open = newCurrent || expanded.has("all");
+  all.addEventListener("toggle", refreshCurrent);
   all.append(el("summary", "Review milestones · " + intervals.length));
   all.append(el("p", "Copy one review iteration, or compare from an earlier checkpoint. Retained snapshots consume "
     + "disk space after closure until explicitly released; opening or copying creates no milestone.", "hint"));
-  for (const [index, interval] of intervals.entries()) {
-    const saved = interval.stop === "current" ? null : bodies.get(interval.stop);
-    if (saved) { all.append(saved); continue; }
+  for (const interval of intervals) {
+    const index = interval.index;
+    const live = interval.stop === "current";
+    const evidence = JSON.stringify([endpoints[index], live ? "current" : endpoints[index + 1]]);
+    const saved = bodies.get(interval.stop);
+    if (saved?.dataset.evidence === evidence) {
+      all.append(saved);
+      if (live) currentReview = { runId: runId, refresh: saved.refreshReview };
+      continue;
+    }
     const box = el("details", null, "round-change");
     box.dataset.review = interval.stop;
     box.dataset.run = runId;
-    box.open = expanded.has(interval.stop);
+    box.dataset.evidence = evidence;
+    box.open = (live && newCurrent) || expanded.has(interval.stop);
     const summary = el("summary", interval.label);
     if (interval.at) summary.append(el("span", " · " + new Date(interval.at).toLocaleString(), "hint"));
     const body = el("div", null, "round-change-body");
@@ -259,42 +279,69 @@ export function showReviews(runId, review, open) {
     label.append(from);
     const controls = el("div", null, "section-head");
     const read = el("button", "Read changes");
-    const copy = el("button", "Copy milestone");
+    const copyLabel = () => live ? "Copy live snapshot" : from.value === endpoints[index].stop ? "Copy milestone" : "Copy range";
+    const copy = el("button", copyLabel());
     read.type = copy.type = "button";
     const status = el("p", "Snapshots show sampled files, not approval or proof of who wrote each line.", "hint");
     status.setAttribute("role", "status");
     const files = el("div");
     let snapshot = null;
+    let busy = false, dirty = false;
+    const visible = () => box.isConnected && box.open && box.parentElement.open &&
+      !$("change").hidden && $("change").open && document.visibilityState === "visible";
     const fetchSnapshot = () => api("/api/runs/" + encodeURIComponent(runId) + "/milestone?" +
       new URLSearchParams({ from: from.value, through: interval.stop }));
     from.onchange = () => {
       snapshot = null;
       files.replaceChildren();
-      copy.textContent = from.value === endpoints[index].stop ? "Copy milestone" : "Copy range";
+      copy.textContent = copyLabel();
       read.textContent = "Read changes";
       status.textContent = "Read or copy the selected range.";
+      if (live) refresh(true);
     };
-    read.onclick = async () => {
-      read.disabled = true;
+    const refresh = async (automatic = false) => {
+      if (automatic && !visible()) return;
+      if (busy) { dirty = true; return; }
+      busy = true;
+      read.disabled = !automatic;
       const selected = from.value;
       status.textContent = "Reading the selected snapshots…";
       try {
         const result = await fetchSnapshot();
         if (!box.isConnected || from.value !== selected) return;
+        if (!snapshot || snapshot.base !== result.base || snapshot.tree !== result.tree) {
+          const opened = new Set([...files.querySelectorAll("details.file[open]")].map((file) => file.dataset.path));
+          const focusedFile = files.contains(document.activeElement) && document.activeElement.closest("details.file")?.dataset.path;
+          files.replaceChildren(...(result.files_total ? [fileList(runId, result, result.files, result.files_total)] : []));
+          for (const file of files.querySelectorAll("details.file")) {
+            file.open = opened.has(file.dataset.path);
+            if (file.dataset.path === focusedFile) file.querySelector("summary").focus({ preventScroll: true });
+          }
+        }
         snapshot = result;
-        files.replaceChildren(...(result.files_total ? [fileList(runId, result, result.files, result.files_total)] : []));
         status.textContent = result.files_total ? result.files_total + " files changed in this snapshot."
           : "No files differ between these snapshots.";
+        if (live) status.append(" Sampled ", clock(new Date().toISOString(), "ago"),
+          "; refreshes with worktree updates while open. Not independently verified.");
         read.textContent = "Refresh";
       } catch (error) {
         if (box.isConnected && from.value === selected) status.textContent = "Unavailable: " + error.message;
-      } finally { read.disabled = false; }
+      } finally {
+        busy = false;
+        read.disabled = false;
+        if (dirty) { dirty = false; refresh(true); }
+      }
     };
+    read.onclick = () => refresh();
+    if (live) {
+      box.refreshReview = () => refresh(true);
+      currentReview = { runId: runId, refresh: box.refreshReview };
+      box.addEventListener("toggle", box.refreshReview);
+    }
     copy.onclick = async () => {
       from.disabled = read.disabled = true;
       try {
-        await copyPatch(runId, snapshot || fetchSnapshot(), copy,
-          from.value === endpoints[index].stop ? "Copy milestone" : "Copy range");
+        await copyPatch(runId, live ? fetchSnapshot() : snapshot || fetchSnapshot(), copy, copyLabel());
       } finally { from.disabled = read.disabled = false; }
     };
     controls.append(label, read, copy);
@@ -303,5 +350,6 @@ export function showReviews(runId, review, open) {
     all.append(box);
   }
   root.append(all);
+  refreshCurrent();
   if (focused?.isConnected) focused.focus({ preventScroll: true });
 }

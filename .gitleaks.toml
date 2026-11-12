@@ -1,23 +1,22 @@
-# Gitleaks configuration for Orchestra. It extends the tool's own rules and narrows nothing about
-# them; the only allowlist here is one file, at the two paths it has lived at, for one investigated
-# reason.
+# Extend the default rules. The exception matches one investigated compiled export, not whole files.
 [extend]
 useDefault = true
 
 [[allowlists]]
 description = """
-The vendored xterm.js is minified upstream code, and one of its identifiers has enough entropy to
-match the generic-api-key rule. The match is `t.FourKeyMap=t.TwoKeyMap`, a minified export
-assignment, and it is not a credential: the directory is @xterm/xterm 5.5.0 exactly as published —
-xterm.js, xterm.css and LICENSE compare byte for byte against the registry tarball, whose sha512 is
-recorded in VERSION beside them.
-
-Two paths, one file. The page moved to app/interfaces/workbench/static/ with the server that serves
-it (D30), and the history a push carries still holds the same bytes under workbench/vendor/xterm/ —
-identical sha256, so the second path allowlists no file the first did not. Both entries are that
-directory and nothing else, so a real secret anywhere in this repository is still a failure.
+The pinned xterm renderer and its native serialization addon share a compiled map-export initializer
+that triggers generic-api-key. Both bundles are unmodified registry artifacts, with source and integrity
+recorded in their VERSION files. This exact match is JavaScript export syntax, not a credential.
+The renderer's historical location holds identical bytes. Only the named rule, exact export match and
+specific bundle paths qualify together; real credentials in these files remain failures. The public
+gate tests the same-path generic-key refusal and rejection of the export outside these paths.
 """
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "match"
+regexes = ['''^t\.FourKeyMap=t\.TwoKeyMap=void[ ]$''']
 paths = [
-    '''^app/interfaces/workbench/static/vendor/xterm/''',
-    '''^workbench/vendor/xterm/''',
+    '''^app/interfaces/workbench/static/vendor/xterm/xterm\.js$''',
+    '''^workbench/vendor/xterm/xterm\.js$''',
+    '''^app/interfaces/workbench/static/vendor/xterm-serialize/addon-serialize\.js$''',
 ]

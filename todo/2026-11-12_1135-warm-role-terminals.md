@@ -1,6 +1,6 @@
 # Warm role terminals
 
-**Status:** IN PROGRESS — browser retention implemented; native reuse proof awaits probe-hook trust
+**Status:** IN PROGRESS — browser persistence verified and activated; native reuse proof awaits probe-hook trust
 **Scope:** browser terminal retention and safe reuse of idle role-agent processes  
 **Stable documentation owners:** [agents](../app/agents/docs/architecture/structure.md), [interfaces](../app/interfaces/docs/architecture/structure.md), and the [execution contract](../docs/architecture/structure.md)
 
@@ -38,14 +38,22 @@ Switching between roles or active runs immediately restores the latest terminal 
   - Reason: not stated.
   - Date/source: 2026-11-12, current operator implementation request.
 
+- **D6** Browser display caches must survive refresh and reopening while a run remains open.
+  - Effect: retain bounded native serialized screens and confirmed cursors in browser-local storage;
+    release them on confirmed closure and preserve record replay as recovery. This extends browser
+    retention, not native agent-process reuse.
+  - Reason: repeated replay is too slow while the operator continues reviewing the same work.
+  - Date/source: 2026-11-12, operator clarification that caching must survive throughout ongoing work.
+
 ### Operator gates
 
-- **Q1 [OPEN - NON-BLOCKING]:** Must browser display snapshots survive a full page reload as well as navigation? Default while open: A1. This does not gate investigation of process reuse.
+- **Q1 [RESOLVED]:** D6 requires persistent browser snapshots across refresh/reopening.
 - **Q2 [OPEN - BLOCKING FOR NATIVE REUSE]:** The isolated native Codex profiles require review of two probe hooks before fresh destination/correlation evidence can run. The operator has been asked whether to trust those two test hooks. Do not answer the native trust prompt or promote a warm process pool while that answer is pending. Browser retention and review milestones are independent.
 
 ### Working assumptions
 
-- **A1 [ACTIVE]:** Retain browser xterm instances in memory across role/run navigation first. Full-reload persistence is not required for initial acceptance; if selected, use the compatible native serialize addon rather than inventing a terminal format.
+- **A1 [SUPERSEDED by D6]:** The initial browser-only delivery retained xterm instances across navigation.
+  Persistent delivery uses the compatible native serialize addon, not an alternative terminal emulator.
 - **A2 [ACTIVE]:** Native interactive terminal display, keyboard/interrupt behavior and managed launchers remain required. Warm reuse must work for the current Codex/Pi role combination before the whole goal is called complete; other adapters may retain explicitly documented cold-resume behavior until proven compatible.
 - **A3 [ACTIVE]:** Waiting includes approval, blocker, exhaustion, failed-step recovery and the final merge gate while the workflow remains open. Cache pressure may evict only idle reusable state; running work is protected.
 - **A4 [ACTIVE]:** Browser and worker resources have separate bounded pools at their natural owners, with least-recently-used idle eviction. Choose and justify concrete limits from measurements; do not add a distributed cache manager or an account-admission mechanism.
@@ -79,7 +87,10 @@ The current project decision D17 explicitly describes a fresh process per turn. 
 
 ## Problem and root cause
 
-Two lifecycles incur different work: browser navigation discards already parsed display state, while controller invocation discards initialized agent runtime state. The screenshot's MCP initialization is evidence of the latter, not a terminal replay diagnosis. Current per-turn environment and bridge state make blind process reuse incorrect.
+The investigation identified two costs: browser navigation discarded parsed display state, while controller
+invocation discarded initialized agent runtime state. The screenshot's MCP initialization evidenced the
+latter. Browser delivery now follows D6; per-turn environment and bridge state still make blind native
+process reuse incorrect.
 
 ## Decision
 
@@ -89,7 +100,9 @@ Use the existing owners: retain their objects rather than introduce a terminal s
 
 The proposal adds bounded cache bookkeeping and a turn-rebinding contract inside existing components. Prefer Codex's native exact-thread queue or supported local lifecycle interface and Pi's existing native extension facilities over simulated blind typing. Any native backend required for TUI attachment must remain inside the role's existing containment, with private local transport and the same permissions; do not attach Orchestra to a user's shared daemon.
 
-Knowingly give up guaranteed zero-startup behavior after eviction, configuration change, process failure or worker reload. Under A1, a full browser reload may replay the record. These are explicit cache misses, not session loss.
+Knowingly give up guaranteed zero-startup behavior after eviction, configuration change, process failure or
+worker reload. D6 preserves committed browser screens across refresh/reopening; missing or incompatible
+snapshots recover from the recording. These cache misses do not lose the native session.
 
 ### Alternatives considered
 
@@ -118,8 +131,13 @@ Deliver browser retention first as an independently verified improvement. It doe
 - [ ] **T1 — Baseline and capability proof:** measure cold launch/MCP initialization and real xterm replay separately. With local fake providers and blocked external networking, prove two controlled turns in one contained native process for Codex and managed Pi on both hosts. Verify native TUI, exact session, refreshed notes/skill/stage, unique turn admission, hook trust and trace attribution. Queue exit status is not acceptance evidence. If no compatible primitive exists, stop this branch for renewed architectural review; do not substitute a headless UI or silently call the whole todo complete.
 - [ ] **T2 — Adapter admission contract:** define the smallest optional warm capability in the existing adapter contract. Separate stable reuse identity from fresh per-turn control data; implement acknowledged admission and explicit unavailable/unsupported/failed outcomes. Preserve cold behavior for unproven adapters and invalidation cases.
 - [ ] **T3 — Worker retention, after native feasibility:** extend the existing terminal registry with bounded idle reuse and confirmed-close observation. Choose closure observation from measured need rather than preselecting per-run watchers. Integrate normal merge/discard/end, force termination, cancellation, failure, worker drain and identity changes. Keep execution admission and account admission outside this cache.
-- [x] **T4 — Browser retention:** retained emulators by run/host/role; hidden sockets disconnect, parsing finishes before cursor resume, and confirmed closure/hidden LRU pressure release retained displays. A stale open read cannot re-enable closed-run input. A1 applies.
-- [ ] **T5 — Correct display and cleanup:** distinguish reconnect/replay, cached display, warm execution and cold startup where useful to the operator. Release all cache-owned sockets/listeners/timers on eviction; preserve shared sizing and existing record streaming. An optional serialization dependency requires pinned provenance/license and restore proof against the shipped xterm version.
+- [x] **T4 — Browser retention:** retained emulators by run/host/role; parked runs disconnect, unopened roles warm,
+  and committed native snapshots survive refresh/browser restart under D6. Confirmed closure and LRU pressure
+  release retained displays. Original byte cursors and isolated input are preserved; stale open reads cannot
+  re-enable closed-run input. Browser-only completion does not claim native process reuse.
+- [ ] **T5 — Correct display and cleanup:** browser reconnect/replay, persistence, cleanup, shared sizing and
+  streaming are verified with the pinned native serializer. Native warm-execution labels and cleanup
+  remain subject to T1's feasibility proof.
 - [ ] **T6 — Verification and durable documentation:** complete the matrix below, update the owners listed under Documentation, inspect the complete diff, and keep the index and commits operator-owned.
 
 ## Test-first and verification plan
@@ -185,3 +203,78 @@ Activate only through existing graceful Orchestra-owned reloads, preserving D3. 
 ### 2026-11-12 — Authorized browser activation
 
 - The operator requested live activation. Scoped graceful worker reloads and the independent Workbench service reload completed while the workflow waited, preserving its state and stop. The live page loads the browser retention code. Native process reuse remains disabled and its feasibility/trust gate remains open; activation did not approve probe hooks or enable a worker pool.
+
+### 2026-11-12 — Unopened-role replay correction
+
+- The reported large catch-up was inspected in the live browser: retention code was loaded, and both
+  displays had caught up through nonzero confirmed cursors. The screenshot alone does not establish a
+  cursor reset. A distinct reproducible gap existed: a role's first unopened panel had no emulator or
+  connection, so it could stay cold through an entire review and begin replay only when its turn started.
+- Both open-run roles now begin parsing on selection, including while waiting for operator action.
+  Closed panels stay closed, focus stays put, and closed runs do not prefetch unopened roles. The existing
+  run/host/role identities, bounded retention, navigation disconnect and confirmed-byte resume remain.
+- Red evidence: the unopened-role regression found no engineer connection during architect review;
+  actual Edge acceptance timed out waiting for its hidden replay. Both passed after the local correction.
+  The stream fixture distinguishes manually injected cache data from automatic replay; connection and
+  renderer counts are asserted per role now that both are initialized.
+- Full-page reload remains a cold replay under A1; this correction uses review and operator-wait time
+  to warm the selected run, rather than promising persisted browser snapshots. No native process-reuse gate is crossed.
+
+### 2026-11-12 — Persistent browser scope approved
+
+- D6 resolves Q1. Implement the native xterm 5.5-compatible serializer with bounded IndexedDB snapshots,
+  original run/host/role keys, monotonic confirmed cursors and closed-run invalidation. This cache stores
+  display evidence only; Temporal, workers and native sessions retain their existing ownership.
+- Snapshot only complete parser/UTF-8 boundaries, validate compatibility and bounds before restoration,
+  and account for native state the serializer does not preserve. Restore before requesting incremental
+  bytes; reject stale/truncated or unsupported cached state through cold replay, without sending cached
+  terminal responses as operator input. Storage failure must remain observable and never stop the run.
+- Prove actual refresh/new-page restoration, independent roles/runs/hosts, multi-tab monotonic writes,
+  closure racing a pending save, cache pressure, partial ANSI/UTF-8 and native mode/size continuity.
+  Reuse the existing real-browser fixture and stream tests. No paid calls or worker/WSL restart.
+
+### 2026-11-12 — Persistent browser delivery
+
+- Red: refreshing the real browser requested cursor zero rather than the completed recording's cursor.
+  The corrected acceptance now survives both refresh and an actual isolated Edge shutdown/restart.
+- The pinned native serialization addon is used with a version-bound continuation adapter. Independent
+  native comparisons cover normal/alternate buffers, color, cursor, character sets, mouse modes, scrolling
+  regions, saved positions, resized geometry and subsequent output. Fragmented UTF-8/ANSI and unfinished
+  parser callbacks cannot advance a stored cursor. Corrupt identity is refused before restoration.
+- Browser-local IndexedDB retains bounded screen snapshots rather than copying complete recordings.
+  Transaction controls prove monotonic cross-tab writes, host/role isolation, late-write refusal after
+  closure, independent screen-count and byte-pressure eviction, quota-abort preservation and observable
+  denied/hung storage. Startup reconciliation checks cached runs missing from the rail instead of treating
+  missing rows as closed. A truncated recording recovers through a fresh cursor-zero replay.
+- The initial narrow green fixture mixed manually injected bytes with automatic replay; separating those
+  transport modes corrected its byte assertion. Final focused Windows acceptance passed 15 tests.
+- Full browser-delivery acceptance passed 688 Windows tests and 915 WSL tests. A subsequent investigated
+  scanner false positive required a local public-gate correction, verified by focused checks below.
+  No production worker/WSL restart or paid call was made; operator answers and repository staging/commits
+  were left to the operator.
+- Workbench's independent HTTP service was reloaded to expose the new static assets. Existing parsed live
+  displays seeded their native snapshots before page activation, avoiding a new full-record replay.
+  A disposable verification probe failed on a timer absent from its tool sandbox after the first refresh;
+  the page remained live. A corrected temporary send observer was then removed after proving that both
+  role streams resumed from nonzero saved cursors in about one second. The same engineer build turn
+  remained running and browser storage reported no failure. No terminal contents entered repository files.
+- These results close the browser delivery under D6. T1–T3 and native portions of T5/T6 remain open behind
+  their original native feasibility/trust gate; no warm process pool or account-admission guarantee is enabled.
+
+### 2026-11-12 — Public dependency acceptance
+
+- The separate new-file scan detected the pinned serializer's minified map-export initializer as a
+  generic API key. This is the same inspected JavaScript initializer already present in the renderer;
+  registry integrity and unmodified bundle bytes establish its provenance, not a credential exemption.
+- The prior whole-directory renderer exception is narrowed to the exact inspected match, named rule and
+  three exact bundle paths, including the historical renderer path. Other findings inside those files
+  are scanned. The public gate proves acceptance of that export, rejection outside its vendor path,
+  and refusal of a real generic-key-shaped control in the same bundle. No folder is exempted.
+- Red: the gate did not detect a scanner that ignored the same-file generic-key control. Adding that
+  control fixed the gap. An initial test-double shell pattern used invalid multi-line case alternatives;
+  separate case arms corrected it. The subsequent focused checks passed 22 WSL tests (public gate,
+  architecture routing and shell checks) and 19 Windows public-gate tests. The real scanner and separate
+  new-file scan passed. The full host suites above preceded this scanner-only correction.
+- Vendored addon files retain published LF bytes on either host. The native artifact and its license
+  remain version-pinned, with provenance recorded beside the dependency. No bundled code was rewritten
+  to change scanner results.

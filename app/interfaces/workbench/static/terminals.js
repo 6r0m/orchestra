@@ -1,9 +1,10 @@
 // Each role's live terminal, straight from the worker of the run's host. This module alone owns a
-// terminal's <details>, its xterm and its socket: no redraw of the run replaces them. An xterm measures
-// its parent as it opens, so a terminal is made only when its <details> is open, never while hidden.
+// terminal's <details>, its xterm and its socket: no redraw of the run replaces them. Open runs parse
+// both roles even behind closed disclosures; fitting waits until the panel has measurable dimensions.
 
-import { CONFIG } from "./api.js";
+import { api, CONFIG } from "./api.js";
 import { $ } from "./ui.js";
+import * as cache from "./terminal-cache.js";
 
 export const ROLES = ["engineer", "architect"];
 // What a terminal emulator answers a query with: its device attributes, a status or cursor report, a mode it
@@ -16,9 +17,10 @@ export const ROLES = ["engineer", "architect"];
 const REPORT = new RegExp("^(?:\\x1b\\[[?>]?[\\d;]*c|\\x1b\\[\\??[\\d;]*n|\\x1b\\[\\??\\d+;\\d+R|" +
   "\\x1b\\[\\??[\\d;]+\\$y|\\x1b\\[[\\d;]+t|\\x1b\\][\\s\\S]*?(?:\\x07|\\x1b\\\\)|\\x1bP[\\s\\S]*?\\x1b\\\\)+$");
 let terminals = {};
-// Six emulators at most, each with bounded scrollback; hidden views own no live socket.
+// Six emulators at most, each with bounded scrollback; parked runs own no live socket.
 const RUN_CACHE_LIMIT = 3;
 const retained = new Map();
+let reconciledCache = false;
 // The run these terminals are of, whether it can still get a new terminal, the role last shown, and since
 // when the run last read has done what it does.
 let run = null;
@@ -43,6 +45,34 @@ const MAXIMIZE = "Fill the window with this terminal: the agent's terminal takes
 const RESTORE = "Put this terminal back in its place on the page, at its usual rows";
 const WRITE_CHUNK = 65536;
 const STREAM_PROTOCOL = "workbench.v2";
+const CHECKPOINT_MS = 2000;
+
+function checkpoint(entry, force = false) {
+  if (entry.disposed || entry.failed || entry.inWrite || entry.restoring || !entry.owner.retain ||
+      entry.owner.closed || !entry.shown || entry.lastSaved === entry.shown) return;
+  const wait = CHECKPOINT_MS - (Date.now() - entry.lastCheckpoint);
+  if (!force && wait > 0) {
+    if (!entry.cacheTimer) entry.cacheTimer = setTimeout(() => {
+      entry.cacheTimer = null;
+      checkpoint(entry, true);
+    }, wait);
+    return;
+  }
+  clearTimeout(entry.cacheTimer);
+  entry.cacheTimer = null;
+  entry.lastCheckpoint = Date.now();
+  const cursor = entry.shown;
+  cache.save(entry.runId, entry.target, entry.role, cursor, entry.term).then((saved) => {
+    if (saved) entry.lastSaved = Math.max(entry.lastSaved, cursor);
+    say(entry.role, entry);
+  });
+}
+
+function checkpointVisible() {
+  for (const entry of Object.values(terminals)) checkpoint(entry, true);
+}
+window.addEventListener("pagehide", checkpointVisible);
+document.addEventListener("visibilitychange", () => { if (document.hidden) checkpointVisible(); });
 
 for (const role of ROLES) {
   const box = $("terminal-" + role);
@@ -144,6 +174,7 @@ function fit(role) {
 }
 
 function disconnect(entry) {
+  checkpoint(entry, true);
   clearTimeout(entry.timer);
   entry.timer = null;
   const socket = entry.socket;
@@ -154,7 +185,9 @@ function disconnect(entry) {
 }
 
 function dispose(entry) {
+  checkpoint(entry, true);
   entry.disposed = true;
+  clearTimeout(entry.cacheTimer);
   disconnect(entry);
   entry.term.dispose();
 }
@@ -175,7 +208,18 @@ function forget(key) {
 export function noteTerminalRuns(rows) {
   for (const row of rows) {
     if (row.state !== "closed") continue;
+    cache.close(row.run_id);
     for (const [key, saved] of retained) if (saved.id === row.run_id) forget(key);
+  }
+  if (!reconciledCache) {
+    reconciledCache = true;
+    const known = new Set(rows.map((row) => row.run_id));
+    // A run can close while this browser is away, and its old cache may outlive the rail's first page.
+    for (const id of cache.runs().filter((id) => !known.has(id))) {
+      api("/api/runs/" + encodeURIComponent(id)).then((status) => {
+        if (status.view?.state === "closed") noteTerminalRuns([{ run_id: id, state: "closed" }]);
+      }).catch((error) => console.warn("Terminal cache lifecycle could not be checked", id, error));
+    }
   }
 }
 
@@ -235,6 +279,7 @@ export function updateTerminals({ open, shown, working, since }) {
   if (run && !open) run.closed = true;
   active = open && !run?.closed;
   if (run && !open) {
+    cache.close(run.id);
     run.retain = false;
     retained.delete(JSON.stringify([run.id, run.target]));
   }
@@ -248,6 +293,8 @@ export function updateTerminals({ open, shown, working, since }) {
     }
   }
   for (const role of ROLES) {
+    // Warm the other role before its next turn, without opening its panel or taking focus.
+    if (active) make(role);
     const entry = terminals[role];
     if (!entry) {
       $("state-" + role).textContent = active ? "open it to watch its turns" : "open it to see its record";
@@ -310,10 +357,11 @@ function make(role) {
   }));
   // `shown` counts parsed record bytes: streaming workers resume there, and legacy replay skips them.
   // `size` is the worker's, as it last said — none from a worker that takes no size.
-  const entry = { runId: run.id, term: term, node, disposed: false,
+  const entry = { runId: run.id, target: run.target, role, owner: run, term: term, node, disposed: false,
     socket: null, timer: null, live: false, shown: 0, skip: 0, size: null,
     writing: Promise.resolve(), buffer: [], rendering: false, pending: 0,
-    connecting: false, failed: false, catchingUp: false, replayUntil: 0 };
+    connecting: false, failed: false, catchingUp: false, replayUntil: 0,
+    cacheTimer: null, lastCheckpoint: 0, lastSaved: 0, inWrite: false, restoring: false, saved: null };
   terminals[role] = entry;
   fit(role);
   // The agent is sent what the operator types and presses, and never this terminal's own answers.
@@ -322,17 +370,41 @@ function make(role) {
     if (active && terminals[role] === entry && entry.live && entry.socket && entry.socket.readyState === WebSocket.OPEN)
       entry.socket.send(data);
   });
-  connect(role, entry, run.target);
+  const saved = active && !run.closed ? cache.read(run.id, run.target, role) : null;
+  if (saved) {
+    entry.saved = saved;
+    entry.restoring = true;
+    say(role, entry);
+    entry.writing = cache.restore(term, saved).then((cursor) => {
+      entry.shown = entry.lastSaved = cursor;
+    }).catch((error) => {
+      console.warn("Cached terminal could not be restored; replaying its record", error);
+      resetCached(entry);
+    }).finally(() => {
+      entry.restoring = false;
+      if (terminals[role] === entry && !entry.disposed) { fit(role); connect(role, entry, entry.target); }
+    });
+  } else connect(role, entry, run.target);
+}
+
+function resetCached(entry) {
+  cache.remove(entry.runId, entry.target, entry.role);
+  entry.saved = null;
+  entry.shown = entry.skip = entry.lastSaved = entry.replayUntil = 0;
+  entry.term.reset();
+  entry.term.resize(COLS, ROWS);
 }
 
 function say(role, entry) {
   if (terminals[role] !== entry) return;
   const remaining = Math.max(entry.pending, entry.replayUntil - entry.shown);
-  const text = entry.failed ? "terminal display failed; reload this page"
+  let text = entry.failed ? "terminal display failed; reload this page"
+    : entry.restoring ? "restoring cached terminal…"
     : entry.catchingUp || remaining > WRITE_CHUNK * 4
       ? "catching up terminal output… " + Math.max(1, Math.ceil(remaining / 1048576)).toLocaleString() + "\u00a0MB remaining"
     : entry.live && active ? "live: Esc interrupts it, and typing reaches it"
     : active ? "recorded, until its next turn" : "recorded";
+  if (cache.issue()) text += " · " + cache.issue();
   if ($("state-" + role).textContent !== text) $("state-" + role).textContent = text;
 }
 
@@ -360,11 +432,14 @@ function draw(role, entry, data) {
         if (take === first.length) entry.buffer[head++] = null;
         else entry.buffer[head] = first.subarray(take);
       }
+      entry.inWrite = true;
       await new Promise((resolve) => entry.term.write(part, resolve));
+      entry.inWrite = false;
       if (entry.disposed) return;
       // Only parsed bytes may be skipped or acknowledged after reconnecting.
       entry.shown += part.length;
       entry.pending -= part.length;
+      checkpoint(entry);
       if (!entry.pending && entry.shown >= entry.replayUntil) entry.catchingUp = false;
       say(role, entry);
     }
@@ -382,7 +457,7 @@ function draw(role, entry, data) {
 }
 
 function connect(role, entry, target) {
-  if (entry.failed || entry.connecting || terminals[role] !== entry) return;
+  if (entry.failed || entry.restoring || entry.connecting || terminals[role] !== entry) return;
   if (entry.pending) {
     entry.connecting = true;
     entry.writing.then(() => {
@@ -400,14 +475,20 @@ function connect(role, entry, target) {
   socket.binaryType = "arraybuffer";
   entry.socket = socket;
   entry.skip = entry.shown;
+  let requested = false;
   const read = () => {
-    if (!entry.failed && entry.socket === socket && socket.readyState === WebSocket.OPEN)
+    if (!entry.failed && entry.socket === socket && socket.readyState === WebSocket.OPEN) {
+      requested = true;
       socket.send(new TextEncoder().encode(JSON.stringify({ read: entry.shown })));
+    }
   };
   socket.onopen = () => {
     if (socket.protocol === STREAM_PROTOCOL) {
       entry.skip = 0;
-      read();
+      if (!entry.saved && !requested) read();
+    } else if (entry.saved) {
+      // Legacy workers cannot validate a persistent cursor against their replay length.
+      resetCached(entry);
     }
   };
   $("state-" + role).textContent = entry.shown ? "cached screen; reconnecting…" : "connecting…";
@@ -417,6 +498,11 @@ function connect(role, entry, target) {
       // The first state comes before the record; each later one says an agent started or ended, or the size
       // changed. A terminal maximized here before its worker said its size asks for its rows now.
       const state = JSON.parse(event.data);
+      if (entry.saved && socket.protocol === STREAM_PROTOCOL) {
+        if (!Number.isSafeInteger(state.replay) || state.replay < entry.shown) resetCached(entry);
+        entry.saved = null;
+        read();
+      }
       entry.live = state.live;
       const first = !entry.size && state.size;
       entry.size = state.size || null;
@@ -445,7 +531,10 @@ function connect(role, entry, target) {
     // The next worker says its size again — or, older, says none and is asked nothing: one that does not name it
     // would take a size's frame for keys.
     entry.size = null;
-    if (event.code === 1008) entry.failed = true;
+    if (event.code === 1008) {
+      entry.failed = true;
+      cache.remove(entry.runId, entry.target, entry.role);
+    }
     // An unfinished replay needs the same reconnect as live output, even after the run has closed.
     // A fully drawn record stays closed until the role works again or the run moves on.
     const unfinished = entry.pending > 0 || entry.shown < entry.replayUntil;

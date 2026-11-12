@@ -2,3 +2,6 @@
 # run's worktree on Windows. Left to its own setting, Git for Windows checks them out with CRLF, which
 # bash refuses.
 *.sh text eol=lf
+
+# Preserve the native addon's published bytes on either host.
+app/interfaces/workbench/static/vendor/xterm-serialize/* text eol=lf
