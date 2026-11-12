@@ -108,6 +108,7 @@ def _start_workers():
         made = [Worker(env().client, task_queue=WORKFLOW_QUEUE, workflows=workflows())]
         for queue in (WSL_QUEUE, WINDOWS_QUEUE, SHARED_QUEUE):
             _hosts.setdefault(queue, A.Activities(runner=_unexpected, telemetry=None))
+            _hosts[queue].bind(env().client, asyncio.get_running_loop())
             made.append(Worker(env().client, task_queue=queue, activities=_hosts[queue].all(),
                                activity_executor=concurrent.futures.ThreadPoolExecutor(max_workers=4)))
         return made
@@ -136,6 +137,7 @@ def own_host(test, queue, script, git=None, telemetry=None, activity_names=None)
     connected = client()
 
     async def build():
+        host.bind(connected, asyncio.get_running_loop())
         registered = host.all()
         if activity_names is not None:
             registered = [method for method in registered if method.__name__ in activity_names]

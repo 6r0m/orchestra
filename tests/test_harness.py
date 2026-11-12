@@ -313,11 +313,28 @@ class Parallel(unittest.TestCase):
         code, said = self.run_parallel(folder, [module])
         self.assertEqual(code, 0, said)
         if os.name == "nt":
+            # Held handles identify the original processes even if their PIDs are reused.
             self.assertTrue(holding, "the orphan was held before its end")
             self.assertEqual([pid for pid, handle in holding.items() if not ended_now(handle)], [],
                              "each process of the class's tree had ended when the run returned")
-        self.assertEqual(self.still_running(folder, [module], grace=0 if os.name == "nt" else 5), [],
-                         "the class and its orphan both ended")
+        else:
+            self.assertEqual(self.still_running(folder, [module], grace=5), [],
+                             "the class and its orphan both ended")
+
+    @unittest.skipUnless(os.name == "nt", "Windows keeps process identity in held handles")
+    def test_finished_class_uses_held_identity_when_a_stale_pid_resolves_to_another_process(self):
+        from unittest import mock
+        from app.agents import launch
+        tree = launch._Tree()
+        self.addCleanup(tree.close)
+        victim = tree.start([sys.executable, "-c", "import time; time.sleep(120)"], PKG,
+                            subprocess.DEVNULL, subprocess.DEVNULL, subprocess.DEVNULL, None)
+        try:
+            with mock.patch.object(self, "still_running", return_value=[victim.pid]):
+                self.test_a_class_that_finished_leaves_nothing_running_its_orphan_included()
+            self.assertIsNone(victim.wait(0), "the unrelated process must remain untouched")
+        finally:
+            tree.kill()
 
     def test_a_class_whose_end_is_not_proved_fails_the_run_and_says_so(self):
         folder, name = self.standins("passing")

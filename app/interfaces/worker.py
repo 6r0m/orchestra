@@ -72,6 +72,7 @@ async def main(target):
         change.bind(client, asyncio.get_running_loop())
         queue = P.queue(policy, target)
         host = activities.Activities()
+        host.bind(client, asyncio.get_running_loop())
         # Runs sequence their own roles; different runs share this pool. Admit work only when a thread
         # can execute it, so overflow cannot lose its heartbeat while still waiting for a thread.
         activity_slots = 8

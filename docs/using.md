@@ -135,7 +135,13 @@ If guidance is refused because the workflow worker cannot preserve original note
 the workers and reload the Workbench service to load its shared client, using the existing stack and
 Workbench controls above. WSL itself stays running. The next accepted answer activates preservation for
 that run, including earlier accepted notes recovered from Temporal history; it does not rerun old turns.
-If a role step reports that `run_role_with_operator_context` is not registered, gracefully reload that
+Long retained guidance automatically uses references to accepted Temporal answers and the existing prompt
+attachments. It is not limited to the inline allowance for all notes combined. Both roles still receive
+the exact accepted originals. Individual requests and reference metadata remain bounded; an oversized
+request is refused without changing the stop or earlier notes. Guidance recorded before this transport
+was available is preserved and can migrate with the next supported answer.
+
+If a role step reports that `run_role_with_operator_context` or `run_role_with_operator_history` is not registered, gracefully reload that
 run's target worker and press Continue. That refusal starts no agent and spends no model quota.
 
 A blocker, or rounds run out, comes from the architect's review of the engineer's work, and only you can say

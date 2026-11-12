@@ -63,6 +63,13 @@ handed, and never learns how git reads one.
 
 ## Invariants
 
+Large retained operator context is resolved from accepted Update events in the exact Temporal execution
+that scheduled the role. The worker uses its own connection, validates each reference's stop, action,
+recipient and text hash, and restores the ordered original provenance for normal prompt composition and
+file attachment. Missing, corrupt or unreadable evidence fails before any agent starts. The bounded read
+heartbeats and cancels its pending request on Stop; it uses the existing activity executor and role lifecycle.
+No new note store or vendor-session reader supplies operator intent.
+
 The history reader associates checkpoint results with accepted operator actions by their recorded identity,
 including explicit capture failures. Same-base milestone exports use the net change between retained trees,
 never concatenated turn patches. Legacy missing samples and cross-base ranges are refused explicitly.

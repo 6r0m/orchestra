@@ -9,15 +9,19 @@ Temporal would retry an activity without limit by default. A role-run and every 
 side effect run once instead: a failure stops the run for the
 operator, and the operator's Continue is the only way anything runs again.
 """
+import asyncio
+import concurrent.futures
 import contextlib
 import os
 import shutil
 import threading
+import time
 
 from temporalio import activity
-from temporalio.exceptions import ApplicationError
+from temporalio.exceptions import ApplicationError, CancelledError, is_cancelled_exception
 
 from app.agents import adapters
+from app.application import client as runs
 from app.agents import launch
 from app.agents import nodes as N
 from app.foundation import paths
@@ -153,6 +157,11 @@ class Activities:
         # The runs a Stop ended on this host, marked by its cleanup before it ends their agents: a step
         # those agents' end cuts short was stopped, and did not fail.
         self._stopped = set()
+        self._workflow_client = self._workflow_loop = None
+
+    def bind(self, client, loop):
+        """Read accepted history through this worker's own Temporal connection and event loop."""
+        self._workflow_client, self._workflow_loop = client, loop
 
     @contextlib.contextmanager
     def _git_step(self, run_id, what):
@@ -170,7 +179,7 @@ class Activities:
 
     def all(self):
         return [self.prepare, self.create_worktree, self.open_run, self.open_phase, self.run_role,
-                self.run_role_with_operator_context,
+                self.run_role_with_operator_context, self.run_role_with_operator_history,
                 self.record_stop, self.record_answer, self.finish_trace, self.reconcile, self.reopen, self.merge,
                 self.discard,
                 self.worktree_view, self.review_diff, self.review_checkpoint, self.work_tree, self.adopt_todo_name]
@@ -265,6 +274,43 @@ class Activities:
     def run_role_with_operator_context(self, args):
         """A distinct activity type prevents older hosts from silently ignoring retained operator input."""
         return self.run_role(args)
+
+    @activity.defn
+    def run_role_with_operator_history(self, args):
+        """Resolve large retained notes before work, without changing the synchronous role lifecycle."""
+        if self._workflow_client is None or self._workflow_loop is None:
+            raise _failure(N.ContentError("the worker cannot resolve original operator-note history"))
+        state = args["state"]
+        if "operator_notes" in state or not state.get("operator_note_refs"):
+            raise _failure(N.ContentError("missing or mixed operator-note history references"))
+        info = activity.info()
+        if state.get("run_id") != info.workflow_id:
+            raise _failure(N.ContentError("operator notes belong to another workflow"))
+        future = asyncio.run_coroutine_threadsafe(runs.resolve_operator_notes(
+            self._workflow_client, info.workflow_id, info.workflow_run_id, state["operator_note_refs"]),
+            self._workflow_loop)
+        deadline = time.monotonic() + 30
+        try:
+            while True:
+                activity.heartbeat()
+                if activity.is_cancelled() or state["run_id"] in self._stopped:
+                    raise CancelledError("operator context loading interrupted before work")
+                try:
+                    notes = future.result(timeout=min(1, max(0, deadline - time.monotonic())))
+                    break
+                except concurrent.futures.TimeoutError:
+                    if future.done() or time.monotonic() >= deadline:
+                        raise N.TransportError("operator-note history could not be read within 30 seconds")
+            if activity.is_cancelled() or state["run_id"] in self._stopped:
+                raise CancelledError("operator context loading interrupted before work")
+        except Exception as exc:
+            if is_cancelled_exception(exc):
+                raise
+            raise _failure(exc) from exc
+        finally:
+            if not future.done():
+                future.cancel()
+        return self.run_role(dict(args, state=dict(state, operator_notes=notes)))
 
     @activity.defn
     def run_role(self, args):

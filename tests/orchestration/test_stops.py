@@ -31,6 +31,7 @@ from temporalio.api.enums.v1 import EventType  # noqa: E402
 from temporalio.client import WorkflowFailureError, WorkflowUpdateFailedError  # noqa: E402
 from temporalio.converter import JSONPlainPayloadConverter  # noqa: E402
 from temporalio.worker import Replayer  # noqa: E402
+from unittest import mock
 
 import temporal_env as E  # noqa: E402
 from fakes import FakeRepos, FakeWorktrees, codex_review_first, codex_review_resumed  # noqa: E402
@@ -202,6 +203,54 @@ class ReviewMilestones(Scenario):
 
 
 class OperatorNoteBudget(unittest.TestCase):
+    def test_history_transport_bounds_each_request_and_reference_metadata_without_mutation(self):
+        run = self.paused()
+        answer = {"stop":"r:1","action":"guide","operator_context_version":WF.OPERATOR_CONTEXT_VERSION,
+                  "operator_history_version":WF.OPERATOR_HISTORY_VERSION,"text":"x"*WF.OPERATOR_NOTE_MAX_BYTES}
+        before = json.dumps((run.state,run.operator_notes,run.answer_given))
+        with self.assertRaisesRegex(ValueError,"single operator note"):
+            run._validate_answer(answer)
+        self.assertEqual(json.dumps((run.state,run.operator_notes,run.answer_given)),before)
+        run.operator_notes = [{"stop":"r:old-%d"%i,"phase":"plan","action":"guide","role":None,"text":"x"*100}
+                              for i in range(1000)]
+        before = json.dumps((run.state,run.operator_notes,run.answer_given))
+        with self.assertRaisesRegex(ValueError,"too many retained operator-note references"):
+            run._validate_answer(dict(answer,text="new decision"))
+        self.assertEqual(json.dumps((run.state,run.operator_notes,run.answer_given)),before)
+        for action in ("continue", "approve", "discard"):
+            run._validate_answer(dict(answer, action=action, text="", confirm=True))
+
+    def test_note_free_continue_migrates_legacy_overflow_and_old_clients_cannot_restore_inline_bodies(self):
+        run = self.paused()
+        original = {"stop":"r:old","phase":"plan","action":"guide","role":None,"text":"x"*100000}
+        run.operator_notes = [original]
+        run.state["operator_notes"] = [original]
+        answer = {"stop":"r:1","action":"continue","operator_context_version":WF.OPERATOR_CONTEXT_VERSION,
+                  "operator_history_version":WF.OPERATOR_HISTORY_VERSION}
+        run._validate_answer(answer)
+        run.answer(answer)
+        run.answer_given = None
+        answer.pop("operator_history_version")
+        run._validate_answer(answer)
+        run.answer(answer)
+        self.assertNotIn("operator_notes",run.state)
+        self.assertEqual(run.state["operator_note_refs"],WF._note_refs([original]))
+        self.assertEqual(run.operator_notes,[original])
+
+    def test_large_legacy_context_accepts_new_guidance_through_history_references(self):
+        run = self.paused()
+        original = "original operator decision\n" * 6000
+        run.answer({"stop":"r:0", "action":"guide", "text":original})
+        run.answer_given = None
+        answer = {"stop":"r:1", "action":"guide", "text":"Keep every earlier decision and fix the API",
+                  "operator_context_version":WF.OPERATOR_CONTEXT_VERSION, "operator_history_version":1}
+        run._validate_answer(answer)
+        run.answer(answer)
+        self.assertNotIn("operator_notes",run.state)
+        self.assertEqual([note["text"] for note in run.operator_notes],[original,answer["text"]])
+        self.assertEqual(len(run.state["operator_note_refs"]),2)
+        self.assertLess(len(JSONPlainPayloadConverter().to_payload(run.state).data),2000)
+
     def paused(self):
         run = WF.FeatureRun()
         run.state = {"phase": "build"}
@@ -246,6 +295,84 @@ class OperatorNoteBudget(unittest.TestCase):
 
 
 class NamedAnswers(Scenario):
+    def test_previously_rejected_stop_update_can_retry_with_large_note_transport(self):
+        first, _ = codex_review_first("BLOCKER", "choose the scope")
+        run = self.drive([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, first),
+                          ("plan-e2-1", 0, "revised\n"), ("assess-e2-1", 0, codex_review_resumed("PASS"))])
+        note = "Original decision\n" * 5000 + "END"
+        with self.assertRaises(WorkflowUpdateFailedError):
+            self.send(run, {"stop": run.stop["id"], "action": "guide", "text": note,
+                            "operator_context_version": WF.OPERATOR_CONTEXT_VERSION}, "answer:" + run.stop["id"])
+        self.assertEqual(run.answer("guide " + note)[0], 2)
+        self.assertEqual(run.stop["reason"], "approval")
+        self.assertEqual(len(self.agent.calls), 4)
+
+    def test_unreadable_operator_history_starts_no_agent_and_continue_recovers_exact_notes(self):
+        first, _ = codex_review_first("BLOCKER", "choose the scope")
+        run = self.drive([("plan-e1-1",0,"planned\n"),("assess-e1-1",0,first),
+                          ("plan-e2-1",0,"revised\n"),("assess-e2-1",0,codex_review_resumed("PASS"))])
+        note = "Original decision\n"*5000 + "END"
+        with mock.patch.object(runs,"resolve_operator_notes",mock.AsyncMock(side_effect=runs.Refusal("history unavailable"))):
+            self.assertEqual(run.answer("guide "+note)[0],2)
+        self.assertEqual(run.stop["reason"],"failed")
+        self.assertIn("history unavailable",run.stop["feedback"])
+        self.assertEqual(len(self.agent.calls),2,"failed history resolution must start no agent")
+        self.assertEqual(run.answer("continue")[0],2)
+        self.assertEqual(run.stop["reason"],"approval")
+        self.assertEqual(len(self.agent.calls),4)
+        with open(os.path.join(terminal.run_dir(run.run_id),"attachments","plan-e2-1-guidance.md"),encoding="utf-8") as stream:
+            self.assertIn(note,json.loads(stream.read().split("\n",2)[2])[0]["text"])
+
+    def test_cancel_during_history_read_cancels_the_read_and_never_starts_an_agent(self):
+        first, _ = codex_review_first("BLOCKER","choose the scope")
+        run = self.drive([("plan-e1-1",0,"planned\n"),("assess-e1-1",0,first)])
+        entered, ended = threading.Event(),threading.Event()
+        async def held(*args):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                ended.set()
+        with mock.patch.object(runs,"resolve_operator_notes",held):
+            E.run(run.handle.execute_update(WF.FeatureRun.answer,
+                {"stop":run.stop["id"],"action":"guide","text":"x"*100000,
+                 "operator_context_version":WF.OPERATOR_CONTEXT_VERSION,"operator_history_version":WF.OPERATOR_HISTORY_VERSION},
+                id="answer:"+run.stop["id"]))
+            self.assertTrue(entered.wait(10))
+            E.run(run.handle.cancel())
+            with self.assertRaises(WorkflowFailureError):
+                E.run(run.handle.result())
+            self.assertTrue(ended.wait(10),"the pending history RPC must be cancelled")
+        self.assertEqual(len(self.agent.calls),2)
+
+    def test_large_notes_reach_both_roles_as_files_with_compact_activity_inputs_and_replay(self):
+        first, _ = codex_review_first("BLOCKER", "choose the scope")
+        run = self.drive([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, first),
+                          ("plan-e2-1", 0, "revised\n"),
+                          ("assess-e2-1", 0, codex_review_resumed("BLOCKER", "another decision")),
+                          ("plan-e3-1", 0, "revised again\n"),
+                          ("assess-e3-1", 0, codex_review_resumed("PASS"))])
+        originals = ["FIRST_ORIGINAL_" + "\u00e9\n" * 16000 + "END", "SECOND_ORIGINAL_" + "x\n" * 40000 + "END"]
+        for text in originals:
+            self.assertEqual(run.answer("guide " + text)[0], 2)
+        self.assertEqual(run.stop["reason"], "approval")
+        self.assertNotIn("operator_notes", run.state)
+        self.assertEqual(len(run.state["operator_note_refs"]),2)
+        for name in ("plan-e3-1", "assess-e3-1"):
+            attachment = os.path.join(terminal.run_dir(run.run_id),"attachments",name+"-guidance.md")
+            with open(attachment,encoding="utf-8") as stream:
+                notes = json.loads(stream.read().split("\n",2)[2])
+            self.assertEqual([note["text"] for note in notes], originals)
+        events = history(run.handle)
+        retained = [event.activity_task_scheduled_event_attributes for event in events
+                    if event.HasField("activity_task_scheduled_event_attributes") and
+                    event.activity_task_scheduled_event_attributes.activity_type.name == "run_role_with_operator_history"]
+        self.assertEqual(len(retained),4)
+        self.assertTrue(all(len(row.input.payloads[0].data)<40000 for row in retained))
+        self.assertEqual([turn["stage"] for turn in E.run(runs.history(E.client(),run.run_id))["turns"]],
+                         ["plan","assess"]*3)
+        E.run(Replayer(workflows=[WF.FeatureRun]).replay_workflow(E.run(run.handle.fetch_history())))
+
     def test_aggregate_note_budget_refuses_a_new_update_without_acceptance_or_work(self):
         first, _ = codex_review_first("BLOCKER", "choose the scope")
         run = self.drive([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, first),

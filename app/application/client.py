@@ -7,6 +7,7 @@ validators, or Temporal's own lifecycle. Nothing here prints.
 """
 import asyncio
 import datetime
+import hashlib
 import os
 import time
 
@@ -345,6 +346,8 @@ async def answer(client, run_id, answer, check=True, only=None):
     elif action in ("guide", "revise", "approve") and (answer.get("text") or "").strip():
         raise NotAccepted("the workflow worker cannot preserve original operator notes; "
                           "gracefully reload that worker before sending guidance")
+    if current.get("operator_history_version") == WF.OPERATOR_HISTORY_VERSION:
+        answer["operator_history_version"] = WF.OPERATOR_HISTORY_VERSION
     if current.get("review_milestones_version") == WF.REVIEW_MILESTONES_VERSION:
         answer["review_milestones_version"] = WF.REVIEW_MILESTONES_VERSION
     try:
@@ -495,6 +498,40 @@ async def review_diff(client, run_id, offset=0, base=None, tree=None, file=None,
         if isinstance(cause, ApplicationError) and cause.type == "ChangeRefused":
             raise Refusal(cause.message) from error
         raise
+
+
+async def resolve_operator_notes(client, run_id, execution_id, refs):
+    """Resolve only the referenced accepted answers of this exact execution, checking original text hashes."""
+    if (not isinstance(refs, list) or not refs or any(not isinstance(ref, dict) or
+            set(ref) != {"stop", "phase", "action", "role", "sha256"} or
+            not isinstance(ref["stop"], str) or not ref["stop"].startswith(run_id + ":") or
+            ref["action"] not in ("guide", "revise", "approve") or
+            not isinstance(ref["sha256"], str) or len(ref["sha256"]) != 64 for ref in refs)):
+        raise Refusal("invalid operator-note history references; no agent started")
+    expected = {ref["stop"]: ref for ref in refs}
+    if len(expected) != len(refs):
+        raise Refusal("duplicate operator-note history references; no agent started")
+    found = {}
+    handle = client.get_workflow_handle(run_id, run_id=execution_id)
+    async for event in handle.fetch_history_events():
+        if not event.HasField("workflow_execution_update_accepted_event_attributes"):
+            continue
+        request = event.workflow_execution_update_accepted_event_attributes.accepted_request
+        if request.input.name != "answer":
+            continue
+        answer = (await client.data_converter.decode(request.input.args.payloads))[0]
+        ref = expected.get(answer.get("stop"))
+        if ref is None:
+            continue
+        text = answer.get("text")
+        if (not isinstance(text, str) or answer.get("action") != ref["action"] or
+                answer.get("role") != ref["role"] or
+                hashlib.sha256(text.encode("utf-8")).hexdigest() != ref["sha256"]):
+            raise Refusal("operator-note history does not match its recorded reference; no agent started")
+        found[ref["stop"]] = dict({key: ref[key] for key in ("stop", "phase", "action", "role")}, text=text)
+        if len(found) == len(expected):
+            return [found[ref["stop"]] for ref in refs]
+    raise Refusal("accepted operator-note history is incomplete; no agent started")
 
 
 async def history(client, run_id):

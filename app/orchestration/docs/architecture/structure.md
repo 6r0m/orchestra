@@ -67,12 +67,17 @@ the queue; what the activity does is the other side's.
   The status query advertises support; the shared client
   refuses guidance to an older worker, and the validator refuses unversioned new notes. Rejected and
   duplicate answers add no notes. No activity reads a vendor conversation to recover operator intent.
-  The Update validator bounds new additions by `OPERATOR_NOTES_BUDGET` in
-  [workflow.py](../../workflow.py), counting the full retained list as compact, ASCII-escaped JSON,
-  including provenance. Overflow rejects the answer before acceptance and leaves the stop, notes and
-  execution unchanged; nothing is truncated or summarized. Historical accepted notes replay unchanged
-  even if already over budget. Such runs may still take note-free answers but cannot add another note.
-  This bounds retained-note payload growth, not total workflow-history size or unrelated payloads.
+  The recorded history-transport protocol lets notes outgrow the inline allowance in
+  [workflow.py](../../workflow.py): state then carries ordered references with original provenance and text
+  hashes, while the accepted Updates retain the full originals. The target resolves those references
+  through a distinct activity type before any agent starts. This also permits a new revision or a
+  note-free Continue to migrate legacy oversized context without dropping earlier notes. Once selected,
+  reference transport remains in use. Older accepted answers and activity inputs replay unchanged;
+  older callers cannot initiate the transition and receive an upgrade instruction when inline input overflows.
+  The validator bounds each new serialized note and the reference metadata before accepting it. Refusal
+  leaves the stop, accepted notes and execution unchanged. Neither transport truncates or summarizes text.
+  Note-free actions remain available even when legacy reference metadata already exceeds the new allowance.
+  These bounds protect individual payloads, not total workflow-history size or unrelated payloads.
 - **The workflow is deterministic (D25).** A change to what it commands keeps the recorded histories in `tests/histories/` replaying — behind `workflow.patched(...)`, or behind what those histories themselves record — and `tests/orchestration/test_replay.py` is the guard, with a control.
 - **A stop waits here and nowhere else (D6).** Each stop publishes the actions it takes, a revise at the final gate named per role, and its answer arrives as an Update carrying one of them, with the stable id `answer:<stop-id>`, so an answer sent twice is applied once. No activity ever waits for a human.
 - **Adopting a verified todo name does not answer a stop.** At a failed closeout, an explicit operator

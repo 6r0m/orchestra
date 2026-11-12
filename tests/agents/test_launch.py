@@ -109,6 +109,8 @@ class ProcessTree(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="orchestra-launch-")
+        import shutil
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         for name, text in (("child.py", CHILD), ("grandchild.py", GRANDCHILD)):
             with open(os.path.join(self.tmp, name), "w", encoding="utf-8") as fh:
                 fh.write(text)
@@ -118,10 +120,10 @@ class ProcessTree(unittest.TestCase):
         self.leftovers = []
 
     def tearDown(self):
-        for pid in self.leftovers + self._grandchild(optional=True):
-            force_kill(pid)
-        import shutil
-        shutil.rmtree(self.tmp, ignore_errors=True)
+        # Windows jobs own these processes; a recorded PID can already belong to another test.
+        if not WINDOWS:
+            for pid in self.leftovers + self._grandchild(optional=True):
+                force_kill(pid)
 
     def _grandchild(self, optional=False):
         try:
@@ -160,10 +162,36 @@ class ProcessTree(unittest.TestCase):
             if os.path.exists(self.marker) and open(self.marker).read():
                 raise Stop()
 
-        with self.assertRaises(Stop):
-            self._run("sleep", timeout=60, on_tick=on_tick)
+        try:
+            rc = self._run("sleep", timeout=60, on_tick=on_tick)
+        except Stop:
+            pass
+        else:
+            with open(os.path.join(self.tmp, "out"), encoding="utf-8", errors="replace") as stream:
+                out = stream.read()
+            with open(os.path.join(self.tmp, "err"), encoding="utf-8", errors="replace") as stream:
+                err = stream.read()
+            self.fail("Stop not raised: fixture exited rc=%s; stdout=%r; stderr=%r; marker=%r"
+                      % (rc, out, err, self._grandchild(optional=True)))
         pid = self._grandchild()[0]
         self.assertTrue(gone_within(pid, 5), "the grandchild outlived Stop")
+
+    @unittest.skipUnless(WINDOWS, "Windows job handles own fixture cleanup")
+    def test_cleanup_does_not_kill_a_different_fixture_using_a_stale_pid(self):
+        tree = launch._Tree()
+        self.addCleanup(tree.close)
+        victim = tree.start([sys.executable, "-c", "import time; time.sleep(120)"], self.tmp,
+                            subprocess.DEVNULL, subprocess.DEVNULL, subprocess.DEVNULL, None)
+        stale = ProcessTree("test_stop_ends_the_whole_tree")
+        stale.setUp()
+        # A recorded PID now belongs to another fixture: deterministic PID-reuse control.
+        stale.leftovers.append(victim.pid)
+        try:
+            stale.tearDown()
+            self.assertIsNone(victim.wait(0), "stale cleanup terminated another fixture's process")
+        finally:
+            stale.doCleanups()
+            tree.kill()
 
     @unittest.skipUnless(WINDOWS, "Windows removes no directory a process still works in")
     def test_the_tree_is_gone_when_its_end_returns(self):
@@ -271,7 +299,11 @@ class ProcessTree(unittest.TestCase):
                      % (PKG, self._argv("sleep"), self.tmp, self.stdin,
                         os.path.join(self.tmp, "out"), os.path.join(self.tmp, "err")))
         owner = subprocess.Popen([sys.executable, owner_script])
-        self.leftovers.append(owner.pid)
+        def end_owner():
+            if owner.poll() is None:
+                owner.kill()
+            owner.wait()
+        self.addCleanup(end_owner)
         deadline = time.monotonic() + 30
         while not self._grandchild(optional=True) and time.monotonic() < deadline:
             time.sleep(0.1)

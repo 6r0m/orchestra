@@ -13,7 +13,8 @@ flowchart LR
     concerns_ext[("agents · workspace · observability")]
     scripts_ext[("workers.sh · workers.ps1")]
     activities -->|"each concern's own contract"| concerns_ext
-    client -->|"start, Update, cancel, terminate, status query"| temporal_ext
+    activities -->|"resolve accepted operator notes"| client
+    client -->|"start, Update, cancel, terminate, status query, history"| temporal_ext
     stack -->|"who polls each queue"| client
     stack -->|"one part's start, stop, status, sweep"| scripts_ext
     temporal_ext -->|"an activity on this host's queue"| activities

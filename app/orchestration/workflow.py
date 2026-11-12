@@ -17,6 +17,7 @@ lands first and decides how the run ends. One that says the operator rejected th
 it `REJECTED` instead, and is otherwise the same Stop.
 """
 import asyncio
+import hashlib
 import json
 from datetime import timedelta
 
@@ -62,8 +63,25 @@ NO_NOTE = ("this approval takes no note — it ends the run, or its run was reco
            "approve without it, or revise with it")
 OPERATOR_CONTEXT_VERSION = 1
 OPERATOR_NOTES_BUDGET = 64 * 1024
+OPERATOR_HISTORY_VERSION = 1
+OPERATOR_NOTE_MAX_BYTES = 1024 * 1024
 REVIEW_MILESTONES_VERSION = 1
-ROLE_ACTIVITIES = ("run_role", "run_role_with_operator_context")
+ROLE_ACTIVITIES = ("run_role", "run_role_with_operator_context", "run_role_with_operator_history")
+
+
+def _note_size(value):
+    return len(json.dumps(value, separators=(",", ":"), sort_keys=True).encode("utf-8"))
+
+
+def _note_refs(notes):
+    return [dict({key: note[key] for key in ("stop", "phase", "action", "role")},
+                 sha256=hashlib.sha256(note["text"].encode("utf-8")).hexdigest()) for note in notes]
+
+
+def _has_operator_context(state):
+    return "operator_notes" in state or "operator_note_refs" in state
+
+
 HINTS = {
     "approval": "approve to start implementation, or revise with feedback for a new plan",
     "blocker": "guide with your decision to continue",
@@ -215,13 +233,13 @@ class FeatureRun:
                         await self._next(self.segments[at]["work"][1])
                         # The legacy prompt path carried only the note approving this stage.
                         note = (answer.get("text") or "").strip()
-                        if note and "operator_notes" not in s and workflow.patched(APPROVE_WITH_A_NOTE):
+                        if note and not _has_operator_context(s) and workflow.patched(APPROVE_WITH_A_NOTE):
                             s["guidance"] = "The %s was approved, with this note for the work after it:\n\n%s" % (
                                 work, note)
                     review_next = not stands      # the plan changed: the architect judges it again
                     continue
                 # Guidance starts a new bounded episode, with no work turn first when sent to the architect.
-                s.update(guidance="" if "operator_notes" in s else answer["text"],
+                s.update(guidance="" if _has_operator_context(s) else answer["text"],
                          round=0, gate_reason="", episode=s["episode"] + 1)
                 if self.review_rounds:
                     s.update(convergence=None, convergence_seen=[])
@@ -285,6 +303,7 @@ class FeatureRun:
         self._line("%s %s started" % (label, stages.STAGE_ROLE[stage]))
         self._doing(stage, stages.STAGE_ROLE[stage])
         result = await self._until_done(label, lambda: workflow.execute_activity(
+            ROLE_ACTIVITIES[2] if "operator_note_refs" in s else
             ROLE_ACTIVITIES[1] if "operator_notes" in s else ROLE_ACTIVITIES[0],
             {"stage": stage, "state": s, "policy": self.policy, "gate": gate},
             task_queue=self.queue,
@@ -419,7 +438,7 @@ class FeatureRun:
                 if not await self._reopened():
                     continue
                 # A defect found at the gate goes back into the run, to the role the operator names.
-                s.update(status="RUNNING", guidance="" if "operator_notes" in s else answer["text"],
+                s.update(status="RUNNING", guidance="" if _has_operator_context(s) else answer["text"],
                          round=0, gate_reason="",
                          episode=s["episode"] + 1)
                 if self.review_rounds:
@@ -733,15 +752,31 @@ class FeatureRun:
         # Older accepted answers reconstruct the originals during replay without changing old commands.
         # A newly recorded protocol version promotes them into subsequent activity inputs, including Continue.
         if answer.get("operator_context_version") == OPERATOR_CONTEXT_VERSION:
-            self.state["operator_notes"] = list(self.operator_notes)
+            refs = self._history_refs(answer, self.operator_notes)
+            if refs is not None:
+                self.state.pop("operator_notes", None)
+                self.state["operator_note_refs"] = refs
+            else:
+                self.state["operator_notes"] = list(self.operator_notes)
         if (type(answer.get("review_milestones_version")) is int and
                 answer["review_milestones_version"] == REVIEW_MILESTONES_VERSION):
             self.review_milestones = True
         self.answer_given = answer
         return {"stop": answer["stop"], "action": answer["action"]}
 
+    def _history_refs(self, answer, notes):
+        if ("operator_note_refs" in self.state or
+                type(answer.get("operator_history_version")) is int and
+                answer["operator_history_version"] == OPERATOR_HISTORY_VERSION and
+                _note_size(notes) > OPERATOR_NOTES_BUDGET):
+            return _note_refs(notes)
+        return None
+
     @answer.validator
     def _validate_answer(self, answer):
+        if "operator_history_version" in answer and (type(answer["operator_history_version"]) is not int or
+                answer["operator_history_version"] != OPERATOR_HISTORY_VERSION):
+            raise ValueError("unsupported operator-note history transport; reload the Workbench or use the current CLI")
         if "review_milestones_version" in answer and (type(answer["review_milestones_version"]) is not int or
                 answer["review_milestones_version"] != REVIEW_MILESTONES_VERSION):
             raise ValueError("unsupported review checkpoint protocol; reload the Workbench or use the current CLI")
@@ -763,14 +798,21 @@ class FeatureRun:
                 raise ValueError("operator guidance was not accepted: reload the Workbench or use the current CLI "
                                  "so the original notes are preserved")
         note = self._operator_note(answer)
+        notes = self.operator_notes + ([note] if note is not None else [])
+        refs = self._history_refs(answer, notes)
+        if note is not None and refs is not None and _note_size(refs) > OPERATOR_NOTES_BUDGET:
+            raise ValueError("too many retained operator-note references for this workflow execution; "
+                             "this answer was not accepted and earlier notes remain unchanged")
         if note is not None:
-            # Match Temporal's compact, ASCII-escaped JSON representation, including note provenance.
-            size = len(json.dumps(self.operator_notes + [note], separators=(",", ":"),
-                                  sort_keys=True).encode("utf-8"))
-            if size > OPERATOR_NOTES_BUDGET:
+            if refs is not None and _note_size(note) > OPERATOR_NOTE_MAX_BYTES:
+                raise ValueError("this single operator note exceeds the serialized request limit of %d bytes; "
+                                 "this answer was not accepted and earlier notes remain unchanged" % OPERATOR_NOTE_MAX_BYTES)
+            size = _note_size(notes)
+            if refs is None and size > OPERATOR_NOTES_BUDGET:
                 raise ValueError("retained operator notes would use %d bytes; the aggregate limit is %d bytes. "
                                  "This answer was not accepted and earlier notes remain unchanged; "
-                                 "shorten the new note or start a separate run" % (size, OPERATOR_NOTES_BUDGET))
+                                 "reload the Workbench and workers to enable large-note history transport"
+                                 % (size, OPERATOR_NOTES_BUDGET))
         if action == "discard" and answer.get("confirm") is not True:
             raise ValueError("discard deletes the worktree and its branch, so it must be confirmed")
 
@@ -780,6 +822,7 @@ class FeatureRun:
         return {"state": self.state, "stop": self.stop, "lines": self.lines, "timeline": self.timeline,
                 "queue": self.queue, "workflow_queue": workflow.info().task_queue,
                 "operator_context_version": OPERATOR_CONTEXT_VERSION,
+                "operator_history_version": OPERATOR_HISTORY_VERSION,
                 "review_milestones_version": REVIEW_MILESTONES_VERSION,
                 "configuration": self._configuration()}
 
