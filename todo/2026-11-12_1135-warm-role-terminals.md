@@ -181,3 +181,7 @@ Activate only through existing graceful Orchestra-owned reloads, preserving D3. 
 - Real-browser acceptance is reproducible through `tests.interfaces.test_review_browser`: actual xterm A/B/A node reuse and confirmed-cursor reconnect passed alongside milestone exports. Browser cache coverage includes hidden pending parses, LRU eviction, closure, stale responses and isolated input.
 - Full host suites passed 898 WSL and 671 Windows tests. Final focused workspace/export/cache tests passed 22 WSL and 23 Windows tests, including the real Edge scenario. Public-safety checks passed; live activation was not performed.
 - Independent managed Pi proof used native extension submission with a local fake provider on both hosts: two settled turns in one live process and session, a refreshed stage contract, all original/new notes, separate event destinations/parent markers and the second answer in the original terminal. This prototype establishes feasibility only; it does not yet prove production bridge rebinding, native skill changes, MCP preservation or real uploader attribution. T1 remains open alongside Codex's hook-trust gate.
+
+### 2026-11-12 — Authorized browser activation
+
+- The operator requested live activation. Scoped graceful worker reloads and the independent Workbench service reload completed while the workflow waited, preserving its state and stop. The live page loads the browser retention code. Native process reuse remains disabled and its feasibility/trust gate remains open; activation did not approve probe hooks or enable a worker pool.

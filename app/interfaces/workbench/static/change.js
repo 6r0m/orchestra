@@ -36,10 +36,12 @@ export function showChangeFor(run) {
 }
 
 // Where the change sits: the run's result, so first after what the run does now — after a decision that does
-// not judge it — and under the decision that does; or nowhere while the run has no worktree to read.
-export function placeChange(where) {
+// not judge it — and under the decision that does. Retained milestones outlive the worktree reader.
+export function placeChange(where, worktree = true) {
   const section = $("change");
   section.hidden = where === "none";
+  $("change-worktree").hidden = !worktree;
+  if (!worktree) $("change-count").textContent = "Review milestones";
   if (where !== "none" && section.previousElementSibling !== $("stop")) $("stop").after(section);
 }
 

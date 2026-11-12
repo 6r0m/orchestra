@@ -1,6 +1,6 @@
 # Operator review milestones
 
-**Status:** IMPLEMENTED AND VERIFIED — live activation not performed
+**Status:** IMPLEMENTED AND VERIFIED — live activation confirmed
 **Scope:** durable review checkpoints, operator-action history projection and milestone diff/copy UI  
 **Stable documentation owners:** [orchestration](../app/orchestration/docs/architecture/structure.md), [workspace](../app/workspace/docs/architecture/structure.md), [application](../app/application/docs/architecture/structure.md), and [interfaces](../app/interfaces/docs/architecture/structure.md)
 
@@ -189,3 +189,14 @@ Use additive, versioned workflow behavior that replays old histories; existing p
 - Full acceptance: `bash run-tests.sh` passed 898 tests; `powershell -NoProfile -ExecutionPolicy Bypass -File run-tests.ps1` passed 671 tests. The initial WSL attempt exposed a stale test wait for queried MERGED status before native closure; waiting for the authoritative closed view fixed that test without weakening production state ownership.
 - After the final retention and UI-state corrections, the workspace checkpoint/diff, application-range and browser-copy/cache checks passed 22 tests on WSL and 23 on Windows, including real Edge acceptance. The full-suite counts precede the added base-retention regression.
 - Stable documentation is updated in orchestration, workspace, application, interfaces and usage. Public-safety scanning, its known-bad control and an isolated native-ref scanner check passed. No live activation, paid call, worker/WSL restart, staging or commit was performed.
+
+### 2026-11-12 — Completed-run visibility correction
+
+- Confirmed the reviewer finding: the worktree-only visibility gate also hid historical milestones after cleanup. The disclosure now remains available for recorded intervals; only the live-worktree reader and actions depend on retaining the worktree. Visibility is refreshed when asynchronous history arrives.
+- Red: `tests.interfaces.test_review_browser.ReviewBrowser.test_discarded_run_keeps_historical_exports_on_its_normal_page_after_cleanup` reached a genuinely closed DISCARDED Temporal execution, removed its real Git worktree and failed because the ordinary page hid retained milestones. The corrected implementation passes the same scenario and copies the retained patch with worktree actions hidden. The test server's unsupported listing API is substituted with that real execution's description; run status, history, Git lifecycle and exports use their production owners.
+- Focused verification: 26 WSL tests and 28 Windows tests passed across history, milestone ranges, clipboard, terminal caching and real Edge scenarios. Earlier full-suite results remain the baseline; no execution contract or native process-reuse code changed. Stable interface and usage documentation now states historical visibility after cleanup.
+
+### 2026-11-12 — Authorized live activation
+
+- Operator requested activation for the existing paused workflow. Preflight confirmed no pending activities and settled role turns. `make reload` gracefully replaced both Orchestra workers; `make workbench-restart` loaded the shared client and server. `make check` confirmed the service and each assigned queue polling. WSL, Temporal and unrelated workloads were not restarted.
+- The existing workflow now advertises the milestone protocol. A hash comparison of its state, stop and configuration is unchanged across activation. Its live Workbench page exposes Review milestones and Current milestone, and the new endpoint returns its expected range-validation refusal. No answer, model call or retrospective snapshot was submitted. Future accepted revisions capture their own baseline; missing earlier snapshots remain unavailable.

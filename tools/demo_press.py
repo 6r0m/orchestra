@@ -1153,6 +1153,29 @@ def accounting(page, run_id):
     return 0
 
 
+def review_closed(page, run_id, expected):
+    """A genuinely closed run's ordinary page exports retained snapshots after worktree cleanup."""
+    page.value(OPEN % json.dumps(run_id))
+    wait(lambda: page.value(OPENED), 30, "the closed run")
+    wait(lambda: page.value("document.querySelectorAll('#review-milestones details[data-run]').length>0"),
+         20, "the retained milestone history")
+    if page.value("document.querySelector('#change').hidden"):
+        raise SystemExit("retained milestones are hidden with the removed worktree on the closed-run page")
+    page.value("document.querySelector('#change>summary').click();true")
+    page.value("document.querySelector('#review-milestones>details>summary').click();true")
+    page.value("document.querySelector('#review-milestones details[data-run]>summary').click();true")
+    if not page.value("document.querySelector('#review-milestones select').checkVisibility()"):
+        raise SystemExit("the historical milestone selector is inaccessible")
+    if page.value("['diff-load','change-copy','diff-files','diff-raw'].some(id=>document.getElementById(id).checkVisibility())"):
+        raise SystemExit("removed-worktree controls are still visible on the closed-run page")
+    page.value("[...document.querySelectorAll('#review-milestones button')].find(b=>b.textContent==='Copy milestone').click();true")
+    copied = wait(lambda: next(iter(page.value("window.__copied") or []), None), 20, "the retained milestone export")
+    if not copied.startswith("# Review range:") or copied.partition("\n\n")[2] != expected:
+        raise SystemExit("closed-run milestone export does not match its retained Git snapshot")
+    print("PASS: a closed DISCARDED run exposes historical milestone copy after actual worktree removal; live-worktree controls stay hidden")
+    return 0
+
+
 def review_components(page):
     """Isolated Git fixture: real xterms, cached DOM and paged milestone exports; no live run is answered."""
     result = page.call("Runtime.evaluate", expression="""(async () => {
@@ -1310,7 +1333,7 @@ def main(url, run_id, label, said, note=None):
             if label == "approval-notes":
                 page.call("Page.enable")
                 page.call("Page.addScriptToEvaluateOnNewDocument", source=APPROVAL_STAND_IN)
-            if label.startswith("change:"):
+            if label.startswith("change:") or label == "review-closed":
                 page.call("Page.enable")
                 page.call("Page.addScriptToEvaluateOnNewDocument", source=CLIPBOARD_STAND_IN)
             page.call("Page.navigate", url=url)
@@ -1330,6 +1353,8 @@ def main(url, run_id, label, said, note=None):
                 return laid_out(page, run_id, size, said)
             if label == "accounting":
                 return accounting(page, run_id)
+            if label == "review-closed":
+                return review_closed(page, run_id, said)
             if run_id == "start" and label.startswith("refused:"):
                 repo, task = label.split(":", 2)[1:]
                 return refused(page, repo, task, said)

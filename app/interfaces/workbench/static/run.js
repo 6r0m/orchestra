@@ -160,7 +160,6 @@ export async function refreshRun() {
   renderStop(status.stop, status.timeline, to);
   renderReply(status.stop, view.reply, to);
   renderKept(runId, view);
-  renderChange(view, status.stop);
   renderHistory(view, status.timeline, status.stop);
   if (!unchanged($("lines"), status.lines)) $("lines").textContent = status.lines.join("\n");
   showTerminals(runId, state.target);
@@ -536,16 +535,17 @@ async function answer(stop, action, button, words) {
 // The run's change, its result, first on its page: live from its host's worker while a role works on it — and only
 // then, since nothing else moves it; the snapshot a decision judges, under that decision; otherwise — waiting at a
 // blocker or a failed step, or closed — what was last seen, and what its worktree holds now by the button.
+// Historical intervals remain accessible after cleanup; the whole-worktree reader does not.
 function renderChange(view, stop) {
   const judged = stop && ((stop.reason === "approval" && ["plan", "build"].includes(stop.phase)) || stop.reason === "final");
   const exists = view.worktree && (view.state !== "closed" || view.kept);
-  placeChange(exists ? "first" : "none");
+  placeChange(exists || record.review?.boundaries?.length ? "first" : "none", Boolean(exists));
   if (exists && view.state === "running" && view.role) {
     watchChange(selected, view.host);
     return;
   }
   watchChange(null);
-  if (judged) readOnceFor(stop);
+  if (exists && judged) readOnceFor(stop);
 }
 
 // What the run's Temporal history adds to its timeline — when each turn started, the tree each review judged, and
@@ -554,7 +554,7 @@ let record = { key: null, turns: [], answers: [], said: "" };
 let drawn = { view: null, timeline: [] };
 
 function renderHistory(view, timeline, stop) {
-  drawn = { view: view, timeline: timeline };
+  drawn = { view: view, timeline: timeline, stop: stop };
   const key = JSON.stringify([selected, timeline.length, stop && stop.id, view.state]);
   if (record.key !== key) {
     record.key = key;
@@ -581,7 +581,8 @@ async function readRecord(runId, key) {
 // One transcript in the run's order, by phase: each turn a row — who, which stage and round, its verdict, how long
 // it took, when — opening to what it received and what it produced; your answers rows of their own between.
 function drawHistory() {
-  const { view, timeline } = drawn;
+  const { view, timeline, stop } = drawn;
+  if (view) renderChange(view, stop);
   showReviews(selected, record.review, view && view.state !== "closed");
   const root = $("timeline");
   if (!view || unchanged(root, [timeline, record.turns, record.answers, record.said, [...shownAbove]])) return;

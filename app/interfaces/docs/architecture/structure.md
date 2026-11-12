@@ -102,6 +102,8 @@ The Change disclosure also shows operator review intervals, with same-base miles
 the existing immutable diff reader. Clipboard output includes snapshot labels followed by the exact patch;
 whole-run Copy all changes remains independent. Interval bodies preserve selection and disclosure state,
 and earlier-checkpoint menus are populated on demand. Missing evidence is unavailable, never an empty patch.
+Retained intervals remain accessible on a closed run's page after its worktree is removed. The whole-worktree
+reader and its actions are shown only while the worktree is retained, independently of historical exports.
 
 Terminal replay is paced by xterm's write-completion callback, including when an older worker sends
 its entire record in one frame. The browser counts parsed bytes rather than enqueued bytes and finishes

@@ -307,20 +307,22 @@
           <span class="hint" id="change-count">Files and patch</span></h2></summary>
         <div class="change-body">
           <div id="review-milestones"></div>
-          <div class="section-head">
-            <button type="button" id="diff-load"
-              title="Read what the worktree holds now against the run's base: each file, and the whole patch">Read the change</button>
-            <button type="button" class="copy" id="change-copy"
-              title="Copy the whole change as the worktree holds it now — every file, however long — as one patch">Copy all changes</button>
-            <p class="result" id="change-result" role="status"></p>
-          </div>
-          <p class="hint" id="change-said"></p>
-          <div id="diff-files"></div>
-          <div class="raw-patch" id="diff-raw" hidden>
-            <div class="evidence-label"><span>Patch</span><span class="hint" id="diff-size"></span>
-              <button type="button" class="copy" id="diff-copy"
-                title="Copy the whole patch of the change shown, however long">Copy patch</button></div>
-            <pre class="patch-raw" id="diff-patch" tabindex="0" translate="no" aria-label="The change's patch"></pre>
+          <div class="change-body" id="change-worktree">
+            <div class="section-head">
+              <button type="button" id="diff-load"
+                title="Read what the worktree holds now against the run's base: each file, and the whole patch">Read the change</button>
+              <button type="button" class="copy" id="change-copy"
+                title="Copy the whole change as the worktree holds it now — every file, however long — as one patch">Copy all changes</button>
+              <p class="result" id="change-result" role="status"></p>
+            </div>
+            <p class="hint" id="change-said"></p>
+            <div id="diff-files"></div>
+            <div class="raw-patch" id="diff-raw" hidden>
+              <div class="evidence-label"><span>Patch</span><span class="hint" id="diff-size"></span>
+                <button type="button" class="copy" id="diff-copy"
+                  title="Copy the whole patch of the change shown, however long">Copy patch</button></div>
+              <pre class="patch-raw" id="diff-patch" tabindex="0" translate="no" aria-label="The change's patch"></pre>
+            </div>
           </div>
         </div>
       </details>

@@ -251,7 +251,8 @@ terminal.
 Change also contains **Review milestones**. Each accepted approval, revision, guidance or Continue closes
 an interval; copying or terminal typing creates none. Open an interval to copy that milestone, or choose an
 earlier checkpoint under **Compare from** to copy a larger net range. The copied text identifies its snapshots
-and then contains the full patch. **Copy all changes** continues to export the entire current run change.
+and then contains the full patch. **Copy all changes** exports the entire current run change while its worktree
+is retained. After merge or discard removes it, historical milestones remain accessible under Change.
 Current milestone exports are sampled at an operator stop and labelled unverified; while a role executes,
 Copy all changes remains available. Missing historical captures and ranges crossing a base update are
 explicitly unavailable. Existing runs acquire exact boundaries from future supported answers, not retroactively.
