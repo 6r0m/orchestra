@@ -100,16 +100,18 @@ Knowingly give up guaranteed zero-startup behavior after eviction, configuration
 4. No automatic paid warm-up or retry after uncertain admission/work. Unknown settlement fails closed through existing recovery; a definitively unavailable idle cache may cold-resume by exact session.
 5. Preserve native trust decisions, read-only enforcement, process-tree containment, worker-death cleanup, Git guards and final merge checks. Never use broader access or a global daemon to obtain reuse.
 6. Budget eviction never interrupts active work. Confirmed workflow closure follows normal termination/cleanup semantics; unavailable lifecycle information is not treated as confirmed closure.
-7. Observe closed runs even when no browser is open, including force termination which cannot execute a workflow finalizer. Prefer a worker-owned native Temporal close-event watch per cached run, cancelled with the worker, plus normal existing cleanup events; add no cleanup daemon.
+7. Observe closed runs even when no browser is open, including force termination which cannot execute a workflow finalizer. After native reuse passes its feasibility gate, select the smallest mechanism that satisfies the closure tests, reusing normal cleanup events first. A native Temporal close-event watch is a candidate, not a required watcher per cached run; add no cleanup daemon.
 8. Browser snapshots/cursors advance only after complete parsing. Restore geometry before state and replay; stale identity, truncation or invalid cursor discards the cache and performs an honest replay. Never claim cached content is live before the worker confirms it.
 9. Keep current-role tail following on automatic activation; preserve deliberate scrollback while that view stays open. Resizing, maximize, copy, Esc and report filtering continue to work.
 10. Closed-run eviction disposes cache objects and idle processes, not durable records. Cache metadata contains no copied authentication or environment settings.
 
 ## Implementation tasks
 
+Deliver browser retention first as an independently verified improvement. It does not require native process reuse. Run T1's native feasibility research separately; T2 and the worker warm pool in T3 are blocked until that proof passes. If native reuse is unsupported, keep exact-session cold resumption and report the startup portion as unsupported rather than calling the entire goal complete.
+
 - [ ] **T1 — Baseline and capability proof:** measure cold launch/MCP initialization and real xterm replay separately. With local fake providers and blocked external networking, prove two controlled turns in one contained native process for Codex and managed Pi on both hosts. Verify native TUI, exact session, refreshed notes/skill/stage, unique turn admission, hook trust and trace attribution. Queue exit status is not acceptance evidence. If no compatible primitive exists, stop this branch for renewed architectural review; do not substitute a headless UI or silently call the whole todo complete.
 - [ ] **T2 — Adapter admission contract:** define the smallest optional warm capability in the existing adapter contract. Separate stable reuse identity from fresh per-turn control data; implement acknowledged admission and explicit unavailable/unsupported/failed outcomes. Preserve cold behavior for unproven adapters and invalidation cases.
-- [ ] **T3 — Worker retention:** extend the existing terminal registry with bounded idle reuse and confirmed-close observation. Integrate normal merge/discard/end, force termination, cancellation, failure, worker drain and identity changes. Keep execution admission and account admission outside this cache.
+- [ ] **T3 — Worker retention, after native feasibility:** extend the existing terminal registry with bounded idle reuse and confirmed-close observation. Choose closure observation from measured need rather than preselecting per-run watchers. Integrate normal merge/discard/end, force termination, cancellation, failure, worker drain and identity changes. Keep execution admission and account admission outside this cache.
 - [ ] **T4 — Browser retention:** retain emulator, DOM state, confirmed cursor and selected geometry by full run/host/role identity. Reuse existing run-list lifecycle reads for browser eviction. Background entry updates must not write into another run's DOM or keyboard path. Apply A1 and A4 without adding another timer service.
 - [ ] **T5 — Correct display and cleanup:** distinguish reconnect/replay, cached display, warm execution and cold startup where useful to the operator. Release all cache-owned sockets/listeners/timers on eviction; preserve shared sizing and existing record streaming. An optional serialization dependency requires pinned provenance/license and restore proof against the shipped xterm version.
 - [ ] **T6 — Verification and durable documentation:** complete the matrix below, update the owners listed under Documentation, inspect the complete diff, and keep the index and commits operator-owned.
@@ -157,3 +159,9 @@ Activate only through existing graceful Orchestra-owned reloads, preserving D3. 
 - Authority D1–D4 recorded; Q1 remains non-blocking under A1.
 - Two distinct causes established from the browser and worker owners. Installed CLI help and upstream native interfaces establish candidates, not an end-to-end warm implementation.
 - The 29-test baseline passes. New red/green acceptance remains implementation work. No production change, live-run answer or worker restart is part of this investigation.
+
+### 2026-11-12 — Review reconciliation
+
+- Browser retention is the first independent delivery; native process reuse remains behind T1's hard proof gate.
+- Closure tests remain binding, but the proposal no longer preselects a Temporal watcher per cached run.
+- Reviewer GO is technical input, not operator authorization to implement either workstream. Status remains REVIEW REQUIRED.

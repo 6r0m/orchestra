@@ -36,7 +36,7 @@ Repeated external review should not require resending the entire accumulated pat
 
 ### Working assumptions
 
-- **A1 [ACTIVE]:** Boundaries follow accepted stop answers: approve, revise, guide and continue, plus terminal answers when a usable snapshot exists. Reading, scrolling, Refresh and Copy do not themselves change workflow history. Rejected or duplicate answers create no new milestone.
+- **A1 [ACTIVE]:** Boundaries follow accepted Temporal stop answers: approve, revise, guide and continue, plus merge/discard answers when a usable snapshot exists. Terminal keystrokes, reading, scrolling, Refresh and Copy create no milestone. Rejected or duplicate answers create no new milestone.
 - **A2 [ACTIVE]:** A milestone is an operator-action interval, not every architect round, phase or episode. Automatic PATCH loops remain together unless another human action separates them. The original all-changes view remains available.
 - **A3 [ACTIVE]:** Capture the worktree at an accepted answer before reopening, reconciliation, another role or destructive cleanup can change it. The last interval can show a clearly labelled current snapshot while still open. A capture is an immutable Git sample, not a claim of filesystem-wide atomicity or architect approval.
 - **A4 [ACTIVE]:** Preserve new checkpoint trees with private repository-local Git refs, including after ordinary merge/worktree cleanup. Do not add an automatic expiry service; retain refs until an explicit artifact-retention/purge operation removes them. Document the disk-retention consequence and keep this policy separate from browser/agent cache eviction.
@@ -89,7 +89,7 @@ Knowingly give up tracking an external reviewer's actual memory and exact pre-fe
 3. A revision at the final gate snapshots the offered closeout tree before `reopen` restores the verified todo. The next interval includes the net work through the following boundary; it does not rewrite that original checkpoint.
 4. An open interval can be copied to a newly read immutable endpoint. Freeze that endpoint for all chunks/file reads and identify it as current/unverified where appropriate. Do not silently move the export baseline after Copy or claim it equals an external reviewer's last paste.
 5. An exact milestone diff is the net Git change between its endpoints: repeated edits/reverts collapse naturally. A selectable earlier checkpoint supports skipped/intermediate review stages; whole-run copy keeps its established current-base meaning.
-6. A range crossing recorded base reconciliation is split into labelled base-consistent sections using the existing reconciliation history. Identify the base update separately; never silently attribute upstream changes to the engineer or manufacture a rebased single patch. A multi-section review bundle is labelled as such.
+6. Initially, selection and exact copy support ranges within one recorded base. A range crossing base reconciliation is explicitly unavailable, with the base boundary identified; never silently attribute upstream changes to the engineer or manufacture a rebased single patch. Multi-section cross-base export is deferred until a concrete need justifies it.
 7. Identical available endpoints mean a proven empty change. Missing, failed or pruned endpoints mean unavailable, not empty. Preserve existing per-review history for old runs and label any legacy reconstructed review boundary accurately rather than inventing an operator-time sample.
 
 ### Alternatives considered
@@ -114,8 +114,8 @@ Knowingly give up tracking an external reviewer's actual memory and exact pre-fe
 
 ## Implementation tasks
 
-- [ ] **T1 — Contract and red fixtures:** define operator-interval versus per-review meaning, exact accepted-event identity, capture timing, pending/unavailable states and cross-base exports. Add realistic approve/revise/continue/closeout histories and Git fixtures before production changes.
-- [ ] **T2 — Native snapshot retention:** extend the workspace owner with bounded private-index capture and run-scoped immutable ref retention. Establish idempotent retry/CAS behavior, safe identity validation and A4's ownership. Prove ref-backed reads after worktree removal and actual garbage collection, with the existing public scanner unchanged.
+- [ ] **T1 — Contract and red fixtures:** define operator-interval versus per-review meaning, exact accepted-event identity, capture timing, pending/unavailable states and cross-base refusal. Add realistic approve/revise/continue/closeout histories and Git fixtures before production changes.
+- [ ] **T2 — Native snapshot retention:** extend the workspace owner with bounded private-index capture and run-scoped immutable ref retention. Establish idempotent retry/CAS behavior, safe identity validation and A4's ownership. Document a run-scoped release procedure which validates the exact namespace and expected object IDs, refuses other runs' refs, and never removes branches. Prove ref-backed reads after worktree removal and actual garbage collection, with the existing public scanner unchanged.
 - [ ] **T3 — Temporal boundary capture:** integrate capture after consuming an accepted stop answer and before advancing to reopen/reconcile/role/merge/discard effects. Record references or an explicit failure, preserve original notes and existing answer idempotence, and handle cancellation without a new state-machine layer. Publish/gate version compatibility for old and paused runs.
 - [ ] **T4 — History projection:** extend the existing history reader to associate accepted actions, checkpoint outcomes and reconciliation boundaries by recorded event order. Keep old per-turn changes intact. Produce initial, closed and open intervals with explicit evidence quality; omit no failed or zero-change stage merely because it has no new file.
 - [ ] **T5 — Workbench export:** keep the collapsed Change disclosure and Copy all changes. Add concise milestone selection, a per-milestone disclosure and Copy this milestone; allow a range from an earlier checkpoint without adding a graph editor. Reuse `fileList`/`copyPatch`, preserve navigation/disclosure state, show current/unverified/unavailable distinctions and avoid long operator text in default clipboard exports.
@@ -132,7 +132,7 @@ Observe each permanent guard failing against current code before its production 
 | Duplicate/refused answer | no milestone contract exists | one boundary for idempotent acceptance, none for refusal; protected state and notes unchanged by rejected capture requests |
 | Concurrent editing/copy | live snapshot can change between separate reads | one immutable sample throughout pagination, file opening and clipboard completion; cancellation/failure never yields a successful partial copy |
 | Closeout and reopen | existing history exposes closeout separately, not an operator span | the accepted revision freezes the offered tree first; later todo restoration/closeout is attributed to the correct interval without losing prior work |
-| Base reconciliation | a naive endpoint diff includes upstream changes | labelled base-consistent sections; no upstream change misreported as engineer-only and no hidden rebasing |
+| Base reconciliation | a naive endpoint diff includes upstream changes | cross-base selection/copy explicitly unavailable with its boundary identified; same-base exports remain exact and no hidden rebasing occurs |
 | Snapshot failure/legacy | absence cannot prove no change | unavailable/read-only legacy states stay explicit; failure does not discard the answer, block execution indefinitely or invoke a model |
 | Retention and isolation | hashes alone do not pin snapshots | milestone survives worktree removal and real `git gc`; same repository/two runs stay independent; releasing one approved ref cannot remove another |
 
@@ -166,3 +166,9 @@ Use additive, versioned workflow behavior that replays old histories; existing p
 - Authority D1–D3 recorded. Q1/Q2 remain non-blocking under A1/A4; they are explicit defaults for review, not inferred operator decisions.
 - Existing event history, reviewed trees and diff components provide most of the mechanism. Exact operator boundary capture, aggregation/export and GC-safe retention are the identified additions.
 - The 29-test baseline passes. New milestone and GC-pin regressions remain implementation work. No production code, live workflow or external review service was changed.
+
+### 2026-11-12 — Review reconciliation
+
+- Only accepted Temporal stop actions create milestones; terminal keystrokes and clipboard operations cannot supply workflow authority.
+- Same-base exact exports are the initial delivery. Cross-base ranges remain explicitly unavailable; multi-section bundles are deferred.
+- Private ref retention requires a safe per-run release procedure. Reviewer GO does not authorize implementation; status remains REVIEW REQUIRED.

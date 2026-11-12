@@ -29,6 +29,7 @@ sys.path[:0] = [PKG, HERE]
 
 from temporalio.api.enums.v1 import EventType  # noqa: E402
 from temporalio.client import WorkflowFailureError, WorkflowUpdateFailedError  # noqa: E402
+from temporalio.converter import JSONPlainPayloadConverter  # noqa: E402
 from temporalio.worker import Replayer  # noqa: E402
 
 import temporal_env as E  # noqa: E402
@@ -129,7 +130,77 @@ def to_ready():
             ("build-e2-1", 0, "built\n"), ("verify-e2-1", 0, codex_review_resumed("PASS"))]
 
 
+class OperatorNoteBudget(unittest.TestCase):
+    def paused(self):
+        run = WF.FeatureRun()
+        run.state = {"phase": "build"}
+        run.stop = {"id": "r:1", "actions": ["guide", "approve", "continue", "discard"], "noted": True}
+        return run
+
+    def test_serialized_budget_counts_metadata_and_unicode_and_accepts_its_exact_boundary(self):
+        run = self.paused()
+        note = {"stop": "r:1", "phase": "build", "action": "guide", "role": None, "text": "\U0001f9e9\n"}
+        encoded = len(JSONPlainPayloadConverter().to_payload([note]).data)
+        text = note["text"] + "x" * (WF.OPERATOR_NOTES_BUDGET - encoded)
+        answer = {"stop": "r:1", "action": "guide", "text": text,
+                  "operator_context_version": WF.OPERATOR_CONTEXT_VERSION}
+        run._validate_answer(answer)
+        before = json.dumps((run.state, run.operator_notes, run.answer_given))
+        with self.assertRaisesRegex(ValueError, "retained operator notes"):
+            run._validate_answer(dict(answer, text=text + "x"))
+        self.assertEqual(json.dumps((run.state, run.operator_notes, run.answer_given)), before)
+        run.answer(answer)
+        self.assertEqual(run.state["operator_notes"][0]["text"], text)
+        self.assertEqual(len(JSONPlainPayloadConverter().to_payload(run.operator_notes).data),
+                         WF.OPERATOR_NOTES_BUDGET)
+
+    def test_legacy_over_budget_notes_are_preserved_and_only_new_notes_are_refused(self):
+        run = self.paused()
+        original = "original decision\n" * 5000
+        # Accepted Update handlers replay without rerunning their validators.
+        run.answer({"stop": "r:1", "action": "guide", "text": original})
+        self.assertNotIn("operator_notes", run.state)
+        run.answer_given = None
+        run.stop["id"] = "r:2"
+        for action in ("guide", "approve"):
+            with self.subTest(action=action), self.assertRaisesRegex(ValueError, "retained operator notes"):
+                run._validate_answer({"stop": "r:2", "action": action, "text": "another decision",
+                                      "operator_context_version": WF.OPERATOR_CONTEXT_VERSION})
+        before = list(run.operator_notes)
+        for answer in ({"action": "continue"}, {"action": "approve"}, {"action": "discard", "confirm": True}):
+            run._validate_answer(dict(answer, stop="r:2", operator_context_version=WF.OPERATOR_CONTEXT_VERSION))
+        run.answer({"stop": "r:2", "action": "continue", "operator_context_version": WF.OPERATOR_CONTEXT_VERSION})
+        self.assertEqual(run.operator_notes, before)
+        self.assertEqual(run.state["operator_notes"][0]["text"], original)
+
+
 class NamedAnswers(Scenario):
+    def test_aggregate_note_budget_refuses_a_new_update_without_acceptance_or_work(self):
+        first, _ = codex_review_first("BLOCKER", "choose the scope")
+        run = self.drive([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, first),
+                          ("plan-e2-1", 0, "revised\n"),
+                          ("assess-e2-1", 0, codex_review_resumed("BLOCKER", "another decision")),
+                          ("plan-e3-1", 0, "revised again\n"),
+                          ("assess-e3-1", 0, codex_review_resumed("BLOCKER", "one more decision"))])
+        # Two notes fit separately and together; the third crosses the serialized aggregate budget.
+        text = "\u00e9" * 4000
+        for _ in range(2):
+            prior_stop = run.stop["id"]
+            self.assertEqual(run.answer("guide " + text)[0], 2, "the next review is another blocker")
+            self.assertNotEqual(run.stop["id"], prior_stop)
+        before = E.run(run.handle.query(WF.FeatureRun.status))
+        accepted = [event.event_type for event in history(run.handle)].count(ACCEPTED)
+        calls = len(self.agent.calls)
+        with self.assertRaises(WorkflowUpdateFailedError) as raised:
+            self.send(run, {"stop": run.stop["id"], "action": "guide", "text": text,
+                            "operator_context_version": WF.OPERATOR_CONTEXT_VERSION}, uuid.uuid4().hex)
+        self.assertIn("retained operator notes", str(raised.exception.cause))
+        self.assertEqual(E.run(run.handle.query(WF.FeatureRun.status)), before)
+        self.assertEqual([event.event_type for event in history(run.handle)].count(ACCEPTED), accepted)
+        self.assertEqual(len(self.agent.calls), calls)
+        self.assertEqual([note["text"] for note in before["state"]["operator_notes"]], [text, text])
+        E.run(Replayer(workflows=[WF.FeatureRun]).replay_workflow(E.run(run.handle.fetch_history())))
+
     def test_retained_notes_refuse_an_older_target_worker_before_an_agent_starts_and_continue_after_upgrade(self):
         queue = "target:wsl:context-" + uuid.uuid4().hex[:10]
         first, _ = codex_review_first("PASS")

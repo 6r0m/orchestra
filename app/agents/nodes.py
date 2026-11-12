@@ -159,11 +159,13 @@ def error_type(exc):
 
 
 def parse_review(role, rc, out):
-    """Read the verdict only from the final assistant message, or a legacy plain-text answer."""
+    """Read the verdict only from the adapter's final assistant message."""
     if rc != 0:
         raise TransportError("reviewer exited rc=%d" % rc)
     message = adapters.for_role(role).final_message(out)
-    payload = _verdict_object(message or out)
+    if not message:
+        raise ContentError("reviewer returned no final assistant message")
+    payload = _verdict_object(message)
     if payload is None:
         raise ContentError("reviewer returned no parseable {verdict, feedback}")
     if payload["verdict"] not in stages.VERDICTS or not isinstance(payload["feedback"], str):

@@ -17,6 +17,7 @@ lands first and decides how the run ends. One that says the operator rejected th
 it `REJECTED` instead, and is otherwise the same Stop.
 """
 import asyncio
+import json
 from datetime import timedelta
 
 from temporalio import workflow
@@ -60,6 +61,7 @@ APPROVE_WITH_A_NOTE = "approve-with-a-note"
 NO_NOTE = ("this approval takes no note — it ends the run, or its run was recorded before approvals took one: "
            "approve without it, or revise with it")
 OPERATOR_CONTEXT_VERSION = 1
+OPERATOR_NOTES_BUDGET = 64 * 1024
 ROLE_ACTIVITIES = ("run_role", "run_role_with_operator_context")
 HINTS = {
     "approval": "approve to start implementation, or revise with feedback for a new plan",
@@ -699,13 +701,19 @@ class FeatureRun:
         if not isinstance(request["name"], str) or not 1 <= len(request["name"]) <= 255:
             raise ValueError("name the verified todo's filename")
 
-    @workflow.update
-    def answer(self, answer):
+    def _operator_note(self, answer):
         text = answer.get("text") or ""
         if text.strip() and (answer["action"] in ("guide", "revise") or
                              answer["action"] == "approve" and self.stop.get("noted")):
-            self.operator_notes.append({"stop": answer["stop"], "phase": self.state.get("phase"),
-                                        "action": answer["action"], "role": answer.get("role"), "text": text})
+            return {"stop": answer["stop"], "phase": self.state.get("phase"),
+                    "action": answer["action"], "role": answer.get("role"), "text": text}
+        return None
+
+    @workflow.update
+    def answer(self, answer):
+        note = self._operator_note(answer)
+        if note is not None:
+            self.operator_notes.append(note)
         # Older accepted answers reconstruct the originals during replay without changing old commands.
         # A newly recorded protocol version promotes them into subsequent activity inputs, including Continue.
         if answer.get("operator_context_version") == OPERATOR_CONTEXT_VERSION:
@@ -732,6 +740,15 @@ class FeatureRun:
                     answer["operator_context_version"] != OPERATOR_CONTEXT_VERSION):
                 raise ValueError("operator guidance was not accepted: reload the Workbench or use the current CLI "
                                  "so the original notes are preserved")
+        note = self._operator_note(answer)
+        if note is not None:
+            # Match Temporal's compact, ASCII-escaped JSON representation, including note provenance.
+            size = len(json.dumps(self.operator_notes + [note], separators=(",", ":"),
+                                  sort_keys=True).encode("utf-8"))
+            if size > OPERATOR_NOTES_BUDGET:
+                raise ValueError("retained operator notes would use %d bytes; the aggregate limit is %d bytes. "
+                                 "This answer was not accepted and earlier notes remain unchanged; "
+                                 "shorten the new note or start a separate run" % (size, OPERATOR_NOTES_BUDGET))
         if action == "discard" and answer.get("confirm") is not True:
             raise ValueError("discard deletes the worktree and its branch, so it must be confirmed")
 

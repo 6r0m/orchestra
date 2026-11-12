@@ -23,7 +23,8 @@ def codex_review_first(verdict, feedback="fb", thread_id=None):
 
 
 def codex_review_resumed(verdict, feedback="fb"):
-    return "thinking...\n" + json.dumps({"verdict": verdict, "feedback": feedback}) + "\n"
+    return "thinking...\n" + json.dumps({"type": "item.completed", "item": {"type": "agent_message",
+        "text": json.dumps({"verdict": verdict, "feedback": feedback})}}) + "\n"
 
 
 def first_message_for(settings, role, message):

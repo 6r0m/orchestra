@@ -117,6 +117,10 @@ the same work. With *Approve* — the button then reads *Approve with note* — 
 with it to the next step: the engineer building an approved plan reads it as your guidance, and so does the
 architect verifying that build. Accepted notes remain available in later rounds and phases, together with
 their original phase and recipient, so a reviewer summary cannot replace your requirements.
+If a new note exceeds the [aggregate retained-note budget](../app/orchestration/docs/architecture/structure.md#invariants),
+the answer is refused and the run stays at its stop. Shorten the new note or start a separate run;
+earlier accepted notes are kept whole. The budget includes JSON escaping and provenance, so it is not
+a character count. Older runs already over budget preserve their notes and still accept note-free answers.
 An approval that ends the run has
 no next step, so it takes no note; nor does one in a run started before approvals took notes. There Approve
 stays *Approve*, and a note written beside it is not sent: the page says so, and you clear it or Revise with it.
