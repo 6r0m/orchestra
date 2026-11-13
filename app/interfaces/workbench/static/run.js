@@ -81,6 +81,8 @@ const STAGE_ROLES = { research: "architect", plan: "engineer", assess: "architec
   verify: "architect", closeout: "engineer" };
 
 let selected = null;
+let taskExpanded = false;
+let taskObserver = null;
 let shownStop = null;
 // Where the shown run's merge lands when its base is a remote's — `origin/main` — which its confirmation says.
 let landsOn = null;
@@ -109,9 +111,21 @@ let shownAbove = new Set();
 export function show(runId) {
   if (selected === runId) return;
   selected = runId;
+  taskExpanded = false;
+  taskObserver?.disconnect();
+  taskObserver = null;
   mergeState = null;
   $("merge-options").hidden = true;
   showAccounting(runId);
+  $("stop-skills").onclick = async () => {
+    const runId = selected, stop = shownStop;
+    try {
+      const { pickSkills } = await import("./skills.js");
+      if (selected !== runId || shownStop !== stop || $("stop-note-field").hidden) return;
+      await pickSkills({ run: runId, input: $("stop-note"),
+        stages: (drawn.view?.flow?.steps || []).filter((step) => !step.startsWith("you:")) });
+    } catch (error) { report($("stop-note-alert"), "Skill picker unavailable; reload the Workbench service. " + error.message, true); }
+  };
   shownStop = null;
   shownAbove = new Set();
   record = { key: null, turns: [], answers: [], said: "" };
@@ -198,17 +212,43 @@ function renderFacts(runId, view, state, links, timeline, configuration) {
     ["Open in", openIn(links)],
   ];
   const list = $("run-facts");
-  if (unchanged(list, [runId, view.repo, view.host, view.flow && view.flow.name, view.worktree, planned,
+  if (unchanged(list, [runId, view.repo, view.goal, state.short_name, view.host, view.flow && view.flow.name, view.worktree, planned,
     state.plan, view.started, links, configuration])) return;
+  const taskFocused = document.activeElement?.id === "run-task-toggle";
+  taskObserver?.disconnect();
+  taskObserver = null;
   list.replaceChildren(...facts.filter(([, value]) => value).map(([term, value]) => {
     const pair = el("div");
     const shown = el("dd");
     shown.append(...[].concat(value));
     if (term === "Repository") pair.className = "repo-fact";
+    if (term === "Task") {
+      pair.className = "task-fact";
+      const text = el("p", value, "task-text");
+      text.id = "run-task-text";
+      const toggle = el("button", null, "quiet");
+      toggle.id = "run-task-toggle";
+      toggle.type = "button";
+      toggle.setAttribute("aria-controls", text.id);
+      const label = () => {
+        text.classList.toggle("expanded", taskExpanded);
+        toggle.textContent = taskExpanded ? "Show less" : "Show full task";
+        toggle.setAttribute("aria-expanded", String(taskExpanded));
+      };
+      const measure = () => { toggle.hidden = !taskExpanded && text.scrollHeight <= text.clientHeight + 1; };
+      toggle.hidden = !taskExpanded;
+      toggle.title = "Expand or collapse the complete original task";
+      toggle.onclick = () => { taskExpanded = !taskExpanded; label(); measure(); };
+      label();
+      shown.replaceChildren(text, toggle);
+      taskObserver = new ResizeObserver(measure);
+      taskObserver.observe(text);
+    }
     if (term === "Flow") pair.className = "flow-fact";
     pair.append(el("dt", term), shown);
     return pair;
   }));
+  if (taskFocused) $("run-task-toggle")?.focus({ preventScroll: true });
 }
 
 function openIn(links) {
@@ -524,7 +564,7 @@ function renderMerge(status) {
     return api("/api/runs/" + encodeURIComponent(run) + "/landing").then((result) => {
       if (selected !== run || panel.dataset.key !== key || panel.hidden) return;
       if (!Array.isArray(result.choices)) throw new Error("the target worker needs a graceful reload for destination selection");
-      const wanted = mergeDrafts.get(key)?.destination || JSON.stringify({ branch: state.base_branch, remote: state.remote || null });
+      const wanted = mergeDrafts.get(key)?.destination || JSON.stringify(state.merge_preference || { branch: state.base_branch, remote: state.remote || null });
       select.replaceChildren();
       for (const destination of result.choices) {
         const option = el("option", destination.remote ? destination.remote + "/" + destination.branch + " — pushed"

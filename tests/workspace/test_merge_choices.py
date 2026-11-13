@@ -22,6 +22,39 @@ class Names(unittest.TestCase):
 
 
 class Choices(Repo):
+    def test_skill_catalog_reads_the_runs_worktree_instead_of_the_main_checkout(self):
+        from app.application import activities as A
+        from app.agents import adapters
+        from app.agents.adapters import codex
+        from fakes import FakeRepos
+
+        path = self.worktree('skill-catalog', change=False)
+        write(os.path.join(path, '.agents', 'skills', 'repo-only', 'SKILL.md'), 'Fixture skill.\n')
+        repo = self.repo
+        class Here(FakeRepos):
+            def resolve(inner, selected, root):
+                return dict(super().resolve(selected, root), repo_path=repo)
+        with mock.patch.object(adapters, 'usable', return_value=[codex]), \
+             mock.patch.object(codex, 'skill_roots', side_effect=lambda folder: [os.path.join(folder, '.agents', 'skills')]):
+            result = A.Activities(git=W, repositories=Here()).worktree_view(
+                {'repository': {}, 'worktree_root': self.root, 'skill_catalog': True, 'skill_root': path})
+        self.assertEqual([row['name'] for row in result['skills']['codex']], ['repo-only'])
+        self.assertEqual(result['skills']['codex'][0]['scope'], 'repository')
+    def test_start_preview_lists_exact_cached_targets_without_moving_refs(self):
+        from app.application import activities as A
+        from fakes import FakeRepos
+
+        git(self.repo, 'branch', 'release')
+        repo = self.repo
+        class Here(FakeRepos):
+            def resolve(inner, selected, root):
+                return dict(super().resolve(selected, root), repo_path=repo, base_branch='develop')
+        refs = git(self.repo, 'show-ref')
+        result = A.Activities(git=W, repositories=Here()).worktree_view(
+            {'repository': {}, 'worktree_root': self.root, 'landing_preview': True})
+        self.assertEqual(result['version'], 1)
+        self.assertEqual({row['branch'] for row in result['choices']}, {'develop', 'release'})
+        self.assertEqual(git(self.repo, 'show-ref'), refs)
     def test_a_selected_branch_conflict_reconciles_that_branch_without_moving_refs(self):
         from app.application import activities as A
 

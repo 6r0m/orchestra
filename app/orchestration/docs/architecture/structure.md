@@ -48,8 +48,10 @@ the queue; what the activity does is the other side's.
   destination, then revalidates the stop after that asynchronous read. No accepted answer or effective target
   changes when validation fails. A recorded selection changes this run only. The attempt freezes its target,
   messages and recovery identity across refusals and Continue; revision reopens the change before retargeting.
-  A new recorded start opts into short names, pre-role remote pins and closeout message proposals. Missing or
-  malformed proposals remain visibly unavailable; valid manual text needs no additional role turn. Native
+  A new recorded start opts into short names, pre-role remote pins and closeout message proposals.
+  A setup preference is recorded separately from the starting base and never authorizes landing or push;
+  only the final accepted Merge selection changes the effective destination.
+  Missing or malformed proposals remain visibly unavailable; valid manual text needs no additional role turn. Native
   settlement and final-tree checks remain mandatory. Old starts and ordinary answers replay unchanged.
 
 - **Review checkpoints describe accepted actions; they never route work.** After consuming an accepted

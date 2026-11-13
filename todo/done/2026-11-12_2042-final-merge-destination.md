@@ -1,6 +1,6 @@
 # Public names and final Merge
 
-**Status:** DONE 2026-11-13 — implementation and isolated paid browser acceptance verified; activation of the main stack is separate.
+**Status:** DONE 2026-11-13 — implementation, isolated paid acceptance and main Workbench/worker activation verified.
 
 **Scope:** public-facing run/branch/worktree names, destination visibility, final Merge selection and messages, Temporal admission and Git landing
 
@@ -366,3 +366,15 @@ D1–D5 work through actual new-run admission, final gate and target-host Git on
   The earlier full-suite results remain the baseline; no broad rerun or new paid flow was required.
   Public-safety and whitespace checks passed. Main-stack activation remains separately unverified;
   no WSL/service restart, external push, Git identity change, staging or commit was performed.
+
+### 2026-11-13 — Main Workbench activation
+
+- The main page served current static files but its old Python process returned `not found` for landing
+  preview. An already-open browser tab also retained the former task-derived naming form.
+- Verified all retained runs were closed, gracefully reloaded Orchestra's WSL worker, restarted only
+  the Workbench service and started the stopped Windows worker through the existing stack controls.
+  Temporal and WSL remained running; no run was started or answered and no paid request was made.
+- Main-stack checks proved Temporal answering and both replacement workers polling their assigned queues.
+  The normal browser form exposes **Short name** and the real local destination/upstream warning.
+  Destination selection and both commit-message controls remain at the final gate. Existing tabs need
+  refreshing; unsent task text must be preserved first. No source change was needed for this activation.

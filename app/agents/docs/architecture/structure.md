@@ -86,6 +86,10 @@ when preparing a run; no vendor path crosses the Settings API. What holds a turn
 runs with — the vendor's sandbox, or the vendor's own rules alone — is each kind's to state, and
 Settings shows a role the words of the kind chosen for it.
 
+The instruction catalog uses those same adapter-owned roots on the execution host. It reports exact native
+file references with repository/global scope, deduplicates aliases and never executes skill content.
+Unavailable directories are omitted; unreadable roots surface an error instead of claiming an empty catalog.
+
 The Pi adapter requires Pi 1.5.0 or newer for its native structured system-prompt API and explicit
 aborted settlement. The bridge refuses older or unrecognizable releases before work; missing abort
 status never means success.

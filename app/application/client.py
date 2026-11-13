@@ -23,6 +23,7 @@ from temporalio.service import RPCError, RPCStatusCode
 from app.application import settings as S
 from app.foundation import flows
 from app.foundation import paths
+from app.agents import adapters
 from app.foundation import policy as policy_mod
 from app.foundation import stages
 from app.workspace import repos
@@ -237,7 +238,7 @@ def view(listed, status, health):
 
 
 async def start(client, task, repo=None, auto_proceed=False, settings_path=None, check=True, flow=None,
-                settings_root=paths.REPO, settings_environ=os.environ, short_name=None):
+                settings_root=paths.REPO, settings_environ=os.environ, short_name=None, merge_preference=None):
     """Start a run on `repo` (a descriptor's name, a path, or this repository), following `flow` (a file in
     `flows/`, the settings' `default_flow` when none is named); returns its handle.
 
@@ -259,14 +260,24 @@ async def start(client, task, repo=None, auto_proceed=False, settings_path=None,
     pol = S.run_policy(settings, chosen["steps"] if chosen else None)
     if check:
         await preflight(client, queues(policy_mod.workflow_queue(pol), queue))
+    if merge_preference is not None:
+        if (short_name is None or not isinstance(merge_preference, dict) or
+                set(merge_preference) != {"branch", "remote"}):
+            raise Refusal("choose an existing preferred Merge destination for this named run")
+        options = await landing_options(client, repo=repo, check=check, settings=settings)
+        if not any({key: row[key] for key in ("branch", "remote")} == merge_preference for row in options["choices"]):
+            raise Refusal("the preferred Merge destination is unavailable or incompatible")
     if short_name is not None:
         capability = await client.execute_workflow(WF.WorktreeView.run,
             {"protocol_probe": 1, "repository": selected, "queue": queue,
+             **({"merge_preference_probe": 1} if merge_preference is not None else {}),
              "worktree_root": pol["targets"][selected["target"]]["worktree_root"]},
             id="named-start-probe-%s" % os.urandom(6).hex(), task_queue=policy_mod.workflow_queue(pol),
             run_timeout=datetime.timedelta(seconds=20))
         if not isinstance(capability, dict) or capability.get("merge_version") != 1:
             raise Refusal("the workflow worker needs a graceful reload before it supports named starts")
+        if merge_preference is not None and capability.get("merge_preference_version") != 1:
+            raise Refusal("the workflow worker needs a graceful reload before it supports Merge preferences")
     now = datetime.datetime.now()
     for attempt in range(START_ATTEMPTS):
         run_id = worktrees.run_id(task, name=short_name) if short_name is not None else worktrees.run_id(task)
@@ -280,6 +291,8 @@ async def start(client, task, repo=None, auto_proceed=False, settings_path=None,
         if short_name is not None:
             start_input.update(short_name=short_name, merge_version=1,
                                label=work_item_label(run_id, short_name, now))
+        if merge_preference is not None:
+            start_input["merge_preference"] = dict(merge_preference)
         try:
             return await client.start_workflow(
                 WF.FeatureRun.run, start_input, id=run_id, task_queue=policy_mod.workflow_queue(pol),
@@ -865,7 +878,7 @@ async def worktrees_of(client, repo=None, settings_path=None, check=True):
     return selected, view
 
 
-async def landing_options(client, run_id=None, repo=None, check=True):
+async def landing_options(client, run_id=None, repo=None, check=True, settings=None):
     """Ask the target host for landing facts; dropdown reads never fetch or mutate Git."""
     if run_id:
         current = await (readable_status(client, run_id) if check else status(client, run_id))
@@ -874,7 +887,7 @@ async def landing_options(client, run_id=None, repo=None, check=True):
         queue, workflow_queue = current["queue"], current["workflow_queue"]
         args = {"merge_state": current["state"], "queue": queue}
     else:
-        settings = S.load()
+        settings = settings or S.load()
         selected = repos.select(repo)
         queue, workflow_queue = policy_mod.queue(settings, selected["target"]), policy_mod.workflow_queue(settings)
         args = {"repository": selected, "queue": queue, "landing_preview": True,
@@ -883,3 +896,33 @@ async def landing_options(client, run_id=None, repo=None, check=True):
         await preflight(client, queues(workflow_queue, queue))
     return await client.execute_workflow(WF.WorktreeView.run, args,
         id="landing-%s" % os.urandom(6).hex(), task_queue=workflow_queue)
+
+
+async def skill_catalog(client, repo=None, run_id=None):
+    """Read native roots on the selected execution host; never scan the Workbench's unrelated checkout."""
+    skill_root = None
+    if run_id:
+        current = await readable_status(client, run_id)
+        initial = await started(client, run_id)
+        if not current or not initial:
+            raise Refusal("this run's original repository and policy cannot be read")
+        selected, configured = initial["repository"], initial["policy"]
+        skill_root = current["state"].get("worktree_path")
+        engineer = (current.get("configuration") or {}).get("engineer")
+        if engineer:
+            configured = dict(configured, roles=dict(configured["roles"], engineer=engineer))
+        queue, workflow_queue = current["queue"], current["workflow_queue"]
+    else:
+        settings = S.load()
+        selected, configured = repos.select(repo), S.run_policy(settings)
+        queue, workflow_queue = policy_mod.queue(settings, selected["target"]), policy_mod.workflow_queue(settings)
+    await preflight(client, queues(workflow_queue, queue))
+    result = await client.execute_workflow(WF.WorktreeView.run,
+        {"repository": selected, "queue": queue, "skill_catalog": True,
+         **({"skill_root": skill_root} if skill_root else {}),
+         "worktree_root": configured["targets"][selected["target"]]["worktree_root"]},
+        id="skills-%s" % os.urandom(6).hex(), task_queue=workflow_queue)
+    if result.get("version") != 1 or not isinstance(result.get("skills"), dict):
+        raise Refusal("the target worker needs a graceful reload before it can list repository skills")
+    return dict(result, roles={role: adapters.kind_name(adapters.for_role(value)) for role, value in configured["roles"].items()},
+                stage_skills=configured.get("stage_skills") or {})

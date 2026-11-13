@@ -83,10 +83,28 @@ repository named in `.orchestra/repos.json` or in the file named by `ORCHESTRA_R
 reads the file again each time it is opened, and a name that
 carries its owners, `work/platform/service`, is found under `work`, then `platform`, each opening in
 view as you hover it — or on any other one given as its path as WSL sees it (`/mnt/e/...` for a Windows
-drive); only the one chosen is sent. Give a meaningful **Short name** for the branch and worktree:
+drive); only the one chosen is sent. Give a meaningful **Run and worktree name** for the temporary Git branch and folder:
 1–16 ASCII letters/digits with internal hyphens, for example `terminal-cache`. The form previews the
 complete name with its random suffix; it never shortens a name silently. The full task still reaches
-both roles. Existing runs keep their original names and sessions. It follows the
+both roles. Commit messages are separate: they describe the completed change and are proposed and edited
+at the final Merge gate. Existing runs keep their original names and sessions.
+
+The run page's **Task** field shows an eight-line preview for long descriptions. **Show full task** expands the original
+text and **Show less** collapses it again; this changes only the display, not the instructions sent to roles.
+
+The form shows the starting base and a **Preferred Merge destination** list of compatible local and cached
+remote branches. This preference does not change the base the work starts from, authorize a push or freeze
+the final destination. Review it again at the final gate. **Refresh destinations** recovers failed reads
+without discarding the task or name; an unknown destination cannot silently become another target.
+
+**Add skills to instructions** opens repository and global skills from the selected execution host, grouped
+by the agent that can use them. Choose a flow stage or the current request, select several checkboxes, and
+add their exact references to the editable task. The same control appears with revision/guidance notes at
+operator stops. These are operator-authored instructions, retained through the existing task and note
+delivery to both roles; the picker neither changes global stage bindings nor grants permissions. Inspect
+the inserted references and add your own instructions before sending. Cancel changes no task or note.
+
+The run follows the
 flow chosen in its Flow list, whose steps show under it: `engineer-code`, the default — `default_flow`
 in `.orchestra/settings.json` — has the engineer plan from the code; `architect-research` has the architect research
 first and its brief wait for your approval. With no `default_flow`, a run that names no flow takes the

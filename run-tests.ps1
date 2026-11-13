@@ -21,6 +21,8 @@ $hostTests = @(
     "tests.interfaces.test_terminal_browser", "tests.interfaces.test_diff_browser", "tests.interfaces.test_review_browser",
     "tests.interfaces.test_merge_browser",
     "tests.interfaces.test_start_browser",
+    "tests.interfaces.test_skill_instructions",
+    "tests.application.test_setup",
     "tests.application.test_reviews", "tests.application.test_operator_history", "tests.interfaces.test_workbench.View"
 )
 if (-not $Tests) { $Tests = $hostTests }

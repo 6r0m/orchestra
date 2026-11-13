@@ -163,6 +163,35 @@ def skill_names(repo):
     return found
 
 
+def skill_catalog(repo):
+    """Native skill references on this host, with repository/global origins for the instruction picker."""
+    found = {}
+    repository = os.path.normcase(os.path.abspath(repo))
+    for module in usable():
+        rows, seen = [], set()
+        for root in module.skill_roots(repo):
+            try:
+                local = os.path.commonpath([repository, os.path.normcase(os.path.abspath(root))]) == repository
+            except ValueError:
+                local = False
+            try:
+                with os.scandir(root) as children:
+                    for child in children:
+                        source = os.path.join(child.path, "SKILL.md")
+                        if not P.skill_name(child.name) or not os.path.isfile(source):
+                            continue
+                        identity = os.path.normcase(os.path.realpath(source))
+                        if identity in seen:
+                            continue
+                        seen.add(identity)
+                        rows.append({"name": child.name, "scope": "repository" if local else "global",
+                                     "reference": os.path.abspath(source)})
+            except FileNotFoundError:
+                continue
+        found[kind_name(module)] = sorted(rows, key=lambda row: (row["name"], row["scope"]))
+    return found
+
+
 def usable():
     """The modules of every kind that loads."""
     return [load(entry["kind"]) for entry in available() if entry["refused"] is None]

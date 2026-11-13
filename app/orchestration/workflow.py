@@ -163,6 +163,8 @@ class FeatureRun:
             return s
         if start.get("merge_version") == landing.VERSION:
             s.update(short_name=start["short_name"], merge_version=landing.VERSION)
+            if "merge_preference" in start:
+                s["merge_preference"] = start["merge_preference"]
         # A start with no flow at all is a run started before flows, which follows the order that code took.
         legacy = "flow" not in start
         flow = start.get("flow")
@@ -909,7 +911,8 @@ class WorktreeView:
     @workflow.run
     async def run(self, args):
         if args.get("protocol_probe") == landing.VERSION:
-            return {"merge_version": landing.VERSION}
+            return dict({"merge_version": landing.VERSION},
+                        **({"merge_preference_version": 1} if args.get("merge_preference_probe") == 1 else {}))
         return await workflow.execute_activity(
             "worktree_view", args, task_queue=args["queue"], start_to_close_timeout=SHORT_TIMEOUT,
             retry_policy=READS)

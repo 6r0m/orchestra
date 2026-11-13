@@ -55,6 +55,7 @@ STATIC = {"/": ("index.html", "text/html; charset=utf-8"),
           "/stack.js": ("stack.js", JS),
           "/picker.js": ("picker.js", JS),
           "/start.js": ("start.js", JS),
+          "/skills.js": ("skills.js", JS),
           "/rail.js": ("rail.js", JS),
           "/run.js": ("run.js", JS),
           "/accounting.js": ("accounting.js", JS),
@@ -328,6 +329,10 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
                     query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
                     return self._send(HTTPStatus.OK, call(lambda client: runs.landing_options(
                         client, repo=(query.get("repo") or [None])[0])))
+                if parts == ["skills"]:
+                    query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                    return self._send(HTTPStatus.OK, call(lambda client: runs.skill_catalog(
+                        client, repo=(query.get("repo") or [None])[0], run_id=(query.get("run") or [None])[0])))
                 if parts == ["repos"]:
                     return self._send(HTTPStatus.OK, [{"id": name, "target": entry.get("target") or (
                         "windows" if repos.windows_path(entry["path"]) else "wsl")}
@@ -405,6 +410,7 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
                                                             auto_proceed=bool(body.get("auto_proceed")),
                                                             flow=body.get("flow") or None,
                                                             short_name=body.get("short_name"),
+                                                            merge_preference=body.get("merge_preference"),
                                                             settings_root=root, settings_environ=environ))
                     return self._send(HTTPStatus.OK, {"run_id": handle.id})
                 if len(parts) == 3 and parts[0] == "runs" and RUN_ID.match(parts[1]) and parts[2] == "answer":

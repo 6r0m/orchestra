@@ -8,21 +8,47 @@ import { sourceChoice, reposRead } from "./picker.js";
 const chosenRepo = sourceChoice("start");
 $("start-name").oninput = () => { $("start-name-preview").textContent = $("start-name").value.toLowerCase() || "your-name"; };
 let previewRequest = 0;
+let previewRepo = null;
+$("start-skills").onclick = async () => {
+  const repo = chosenRepo(), flow = $("start-flow").value, from = location.hash;
+  try {
+    const { pickSkills } = await import("./skills.js");
+    if (from !== location.hash || repo !== chosenRepo() || flow !== $("start-flow").value) return;
+    await pickSkills({ repo, input: $("start-task"),
+      stages: (listedFlows.find((row) => row.name === flow)?.steps || []).filter((step) => !step.startsWith("you:")) });
+  } catch (error) { report($("start-result"), "Skill picker unavailable; reload the Workbench service. " + error.message, true); }
+};
+$("start-landing-retry").onclick = () => previewLanding();
 async function previewLanding() {
   const request = ++previewRequest, repo = chosenRepo();
   if (!repo) return;
+  const select = $("start-destination"), previous = previewRepo === repo ? select.value : "";
+  previewRepo = repo;
+  select.disabled = true;
+  $("start-landing").textContent = "Reading destinations…";
   try {
     const result = await api("/api/landing?repo=" + encodeURIComponent(repo));
     if (request !== previewRequest) return;
-    if (typeof result.branch !== "string") throw new Error("the target worker needs a graceful reload for landing preview");
-    const target = result.remote ? result.remote + "/" + result.branch + " (pushed)"
-      : result.branch + " (local; nothing is pushed)";
-    $("start-landing").textContent = "Merge lands on: " + target +
+    if (typeof result.branch !== "string" || !Array.isArray(result.choices)) throw new Error("the target worker needs a graceful reload for destination selection");
+    const target = result.remote ? result.remote + "/" + result.branch + " (remote base)"
+      : result.branch + " (local base)";
+    $("start-landing").textContent = "Work starts from: " + target +
       (!result.remote && result.upstream ? ". This branch tracks " + result.upstream +
         "; tracking does not authorize pushing. Choose a prepared remote at the final gate to push." : "") +
       (result.identity_ready ? "" : ". Git commit identity needs configuration before Merge.");
+    select.replaceChildren();
+    for (const destination of result.choices || []) {
+      const option = el("option", destination.remote ? destination.remote + "/" + destination.branch + " (remote; push only after Merge confirmation)"
+        : destination.branch + " (local; nothing pushed)");
+      option.value = JSON.stringify({ branch: destination.branch, remote: destination.remote });
+      select.append(option);
+    }
+    const wanted = previous || JSON.stringify({ branch: result.branch, remote: result.remote || null });
+    select.value = [...(select.options || [])].some((option) => option.value === wanted) ? wanted : "";
+    select.disabled = !select.options?.length;
+    $("start-landing").textContent += " The preferred Merge destination remains editable at the final gate. Nothing is pushed without confirmation.";
   } catch (error) {
-    if (request === previewRequest) $("start-landing").textContent = "Merge destination unavailable: " + error.message;
+    if (request === previewRequest) $("start-landing").textContent = "Merge destination unavailable: " + error.message + ". Refresh destinations when the worker is available; your task and name stay unchanged.";
   }
 }
 $("start-source").addEventListener("change", previewLanding);
@@ -127,8 +153,10 @@ $("start").onsubmit = async (event) => {
   report($("start-result"), "starting…");
   try {
     const support = await api("/api/landing?repo=" + encodeURIComponent(repo));
-    if (support.version !== 1) throw Object.assign(new Error("Reload the Workbench and target worker before starting a named run."), { status: 409 });
+    if (support.version !== 1 || !Array.isArray(support.choices)) throw Object.assign(new Error("Reload the Workbench and target worker before choosing a Merge destination."), { status: 409 });
+    if ($("start-destination").disabled || !$("start-destination").value) throw Object.assign(new Error("Choose a preferred Merge destination; use Refresh destinations if its last read failed."), { status: 409 });
     const started = await api("/api/runs", { task: $("start-task").value, repo: repo,
+      ...(!$("start-destination").disabled && $("start-destination").value ? { merge_preference: JSON.parse($("start-destination").value) } : {}),
       short_name: $("start-name").value, flow: $("start-flow").value, auto_proceed: $("start-auto").checked });
     report($("start-result"), "started " + started.run_id);
     starting.set(started.run_id, { repo: repo });

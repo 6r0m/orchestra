@@ -70,6 +70,11 @@ handed, and never learns how git reads one.
   validation before state promotion. Closeout reads a proposal solely from the native final assistant product;
   an unavailable proposal cannot invalidate independently valid closeout evidence or trigger a paid retry.
 
+The setup reader asks the selected host for cached compatible destinations and native skill references
+through the existing read workflow. Repository scope comes from the selected repository, not the Workbench
+checkout. Existing runs use their recorded repository and currently selected engineer kind. A Merge
+preference is validated before start and remains display input until the final approved landing choice.
+
 Large retained operator context is resolved from accepted Update events in the exact Temporal execution
 that scheduled the role. The worker uses its own connection, validates each reference's stop, action,
 recipient and text hash, and restores the ordered original provenance for normal prompt composition and

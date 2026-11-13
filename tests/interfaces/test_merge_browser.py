@@ -27,6 +27,12 @@ class MergeBrowser(Repo):
     def test_selected_destination_conflict_returns_to_the_engineer_without_landing(self):
         self.landing('merge-conflict')
 
+    def test_multiple_instruction_skills_reach_both_roles_after_revision(self):
+        self.landing('instruction-skills')
+
+    def test_long_task_has_a_reversible_preview_that_survives_polling(self):
+        self.landing('task-disclosure')
+
     def landing(self, scenario):
         import cast
         import temporal_env as E
@@ -39,6 +45,7 @@ class MergeBrowser(Repo):
         git(repo, 'branch', 'release')
         seen = {'engineer': 0, 'architect': 0}
         conflict_prompts = []
+        prompts = []
         plan = W.plan_path('todo', '%Y-%m-%d_%H%M-{slug}', '2026-09-15T12:00', 'cache-screens')
 
         class DiskRepo(FakeRepos):
@@ -46,6 +53,7 @@ class MergeBrowser(Repo):
                 return dict(super().resolve(selected, worktree_root), repo_path=repo, worktree_root=root)
 
         def runner(worktree, argv, directory, name, prompt, timeout, env, **kwargs):
+            prompts.append((name, prompt))
             role = 'architect' if name.startswith(('assess-', 'verify-')) else 'engineer'
             if scenario == 'merge-conflict' and name.startswith('build-') and seen['engineer'] >= 3:
                 conflict_prompts.append(prompt)
@@ -78,11 +86,18 @@ class MergeBrowser(Repo):
                                   policy=S.run_policy(settings), flow=['engineer:plan', 'architect:assess', 'you:approve',
                                   'engineer:build', 'architect:verify', 'engineer:closeout', 'you:merge'])
             start.update(short_name='cache-screens', merge_version=1)
+            if scenario == 'task-disclosure':
+                start['task'] = 'Original task\n' + 'Keep every instruction intact. ' * 200 + '\nFINAL_TASK_INSTRUCTION'
+            if scenario == 'merge-choice':
+                start['merge_preference'] = {'branch': 'release', 'remote': None}
             handle = E.run(E.client().start_workflow(WF.FeatureRun.run, start, id=run_id, task_queue=E.WORKFLOW_QUEUE))
             run = E.Run(handle=handle)
             self.addCleanup(run.cleanup)
             self.assertEqual(run.stop['reason'], 'final', run.status)
             final_tree = run.state['final_tree']
+            if scenario == 'merge-choice':
+                state = E.run(handle.query(WF.FeatureRun.status))['state']
+                self.assertEqual(state['base_branch'], 'develop')
 
             if scenario == 'merge-conflict':
                 checkout = os.path.join(self.tmp, 'release-checkout')
@@ -115,7 +130,12 @@ class MergeBrowser(Repo):
                 return [runs._listed(await client.get_workflow_handle(run_id).describe())], None
 
             script = Path(__file__).resolve().parents[2] / 'tools/demo_press.py'
-            with patch.object(runs, 'runs', listed):
+            from unittest.mock import AsyncMock
+            catalog = {'version': 1, 'roles': {'architect': 'codex', 'engineer': 'pi'}, 'stage_skills': {},
+                       'skills': {kind: [dict(name='review-method', scope='global', reference='/fixture/global/review-method/SKILL.md'),
+                                         dict(name='repo-checks', scope='repository', reference='/fixture/repo/repo-checks/SKILL.md')]
+                                  for kind in ('codex', 'pi')}}
+            with patch.object(runs, 'runs', listed), patch.object(runs, 'skill_catalog', AsyncMock(return_value=catalog)):
                 result = subprocess.run([sys.executable, str(script), 'http://127.0.0.1:%d' % port(), run_id,
                                          scenario, 'release'], capture_output=True, text=True, timeout=90)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -129,3 +149,9 @@ class MergeBrowser(Repo):
             history = E.run(runs.history(E.client(), run_id))
             self.assertEqual(history['answers'][-1]['action'], 'merge')
             self.assertEqual(history['review']['boundaries'][-1]['tree'], final_tree)
+            if scenario == 'instruction-skills':
+                for stage in ('verify-', 'closeout-'):
+                    delivered = [text for name, text in prompts if name.startswith(stage) and 'Keep this operator note' in text]
+                    self.assertTrue(delivered, stage)
+                    self.assertIn('/fixture/global/review-method/SKILL.md', delivered[-1])
+                    self.assertIn('/fixture/repo/repo-checks/SKILL.md', delivered[-1])

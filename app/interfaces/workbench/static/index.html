@@ -73,11 +73,14 @@
           <p class="hint" id="start-task-hint">Say what should be true when it is done. The complete task reaches both roles.</p>
         </div>
         <div class="field">
-          <label for="start-name">Short name</label>
-          <input id="start-name" name="short_name" required maxlength="16" pattern="[A-Za-z0-9]+(-[A-Za-z0-9]+)*"
+          <label for="start-name">Run and worktree name</label>
+          <input id="start-name" name="short_name" type="text" required maxlength="16" pattern="[A-Za-z0-9]+(-[A-Za-z0-9]+)*"
             autocomplete="off" spellcheck="false" placeholder="terminal-cache" aria-describedby="start-name-hint">
-          <p class="hint" id="start-name-hint">Branch and folder: <span id="start-name-preview">your-name</span>-xxxxxxxx. Up to 16 letters, digits and internal hyphens.</p>
+          <p class="hint" id="start-name-hint">Temporary worktree folder and Git branch: <span id="start-name-preview">your-name</span>-xxxxxxxx. Up to 16 letters, digits and internal hyphens. Commit messages are proposed after the work is complete; review and edit them before Merge.</p>
           <p class="hint" id="start-landing" role="status">Choose a repository to see where Merge lands.</p>
+          <label for="start-destination">Preferred Merge destination</label>
+          <select id="start-destination" name="merge_preference" disabled></select>
+          <button type="button" id="start-landing-retry">Refresh destinations</button>
         </div>
         <fieldset class="field source" id="start-source">
           <legend>Repository</legend>
@@ -106,6 +109,7 @@
             step and the merge still wait for you.</p>
         </div>
         <div class="form-end">
+          <button type="button" id="start-skills">Add skills to instructions</button>
           <button type="submit" class="primary"
             title="Start this task as a new run on the chosen repository, in the chosen flow">Start run</button>
           <p class="result" id="start-result" role="status"></p>
@@ -313,6 +317,7 @@
         <div class="field" id="stop-note-field">
           <label for="stop-note" id="stop-note-label">Your note</label>
           <textarea id="stop-note" name="note" rows="3" autocomplete="off"></textarea>
+          <button type="button" id="stop-skills">Add skills to instructions</button>
           <p class="alert" id="stop-note-alert" role="alert"></p>
         </div>
         <div class="actions" id="stop-actions"></div>
@@ -404,6 +409,17 @@
       <button type="submit" class="primary" id="refusal-close" value="close">Close</button>
     </div>
   </form>
+</dialog>
+<dialog class="confirm" id="instruction-skills" aria-labelledby="instruction-skills-title">
+  <h2 id="instruction-skills-title">Skills for your instructions</h2>
+  <p class="hint">Choose a stage, select skills, and add their exact references to your task or note. You can edit the instructions before sending. Shared defaults stay unchanged.</p>
+  <label for="instruction-skills-stage">Use during</label>
+  <select id="instruction-skills-stage" name="skill_stage"></select>
+  <label for="instruction-skills-search">Find a skill</label>
+  <input id="instruction-skills-search" name="skill_search" type="search" autocomplete="off" spellcheck="false">
+  <p id="instruction-skills-status" role="status"></p>
+  <div id="instruction-skills-options"></div>
+  <div class="actions"><button type="button" id="instruction-skills-add">Add selected skills</button><button type="button" id="instruction-skills-cancel">Cancel</button></div>
 </dialog>
 <script src="/vendor/xterm.js"></script>
 <script src="/vendor/xterm-serialize.js"></script>

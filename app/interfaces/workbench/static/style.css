@@ -76,7 +76,7 @@ button.copy { min-height: 24px; padding: 1px 8px; font-size: 12px; font-weight: 
 .field { display: grid; gap: 6px; min-width: 0; }
 fieldset.field { border: 0; margin: 0; padding: 0; }
 .field > label, legend { font-weight: 600; padding: 0; }
-input[type="text"], input[type="number"], select, textarea { width: 100%; background: var(--surface); color: var(--ink);
+input[type="text"], input[type="search"], input[type="number"], select, textarea { width: 100%; background: var(--surface); color: var(--ink);
   border: 1px solid var(--control); border-radius: 6px; padding: 7px 9px; font: inherit; }
 textarea { resize: vertical; min-height: 64px; }
 input:disabled, select:disabled, textarea:disabled { opacity: 0.6; cursor: default; }
@@ -212,6 +212,10 @@ main:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .facts dd code { font-size: 12.5px; }
 .facts .repo-fact { flex-basis: 100%; padding: 0 0 8px; border-bottom: 1px solid var(--rule); }
 .facts .repo-fact dd code { color: var(--ink); font-size: 16px; font-weight: 700; overflow-wrap: anywhere; }
+.facts .task-fact { flex-basis: 100%; }
+.facts .task-fact dd { display: block; }
+.task-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.task-text:not(.expanded) { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 8; overflow: hidden; }
 .facts .flow-fact dd { color: var(--ink); font-weight: 600; }
 .now { font-size: 15px; }
 .accounting { margin: 14px 0 18px; max-width: 960px; font-variant-numeric: tabular-nums; }
@@ -603,3 +607,6 @@ details.answer > .answer-words { margin: 4px 0 10px calc(10px + 1em + 6px); }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+#instruction-skills { max-width: min(48rem, 90vw); max-height: 85vh; overflow: auto; overscroll-behavior: contain; }
+#instruction-skills-options { max-height: 40vh; overflow: auto; margin-block: 1rem; }
+.skill-choice { display: flex; gap: .6rem; align-items: center; padding: .4rem; content-visibility: auto; }

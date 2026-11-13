@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 # The suite's own folder, reached from this concern's folder inside it, and the
 # checkout above both: the shared harness and the fixtures live at the suite root.
@@ -21,6 +22,34 @@ from app.agents import adapters  # noqa: E402
 import stand_in  # noqa: E402
 
 SHIPPED = ("claude-code", "codex", "pi")
+
+
+class SkillCatalog(unittest.TestCase):
+    def test_catalog_keeps_scope_and_exact_references_without_loading_skill_content(self):
+        from app.agents.adapters import codex
+        with tempfile.TemporaryDirectory(prefix='orchestra-catalog-') as root:
+            repo = os.path.join(root, 'repo')
+            global_root = os.path.join(root, 'global-skills')
+            repo_root = os.path.join(repo, '.agents', 'skills')
+            for folder in (global_root, repo_root):
+                os.makedirs(os.path.join(folder, 'review'))
+                with open(os.path.join(folder, 'review', 'SKILL.md'), 'w') as stream:
+                    stream.write('---\nname: review\n---\nFixture instructions.\n')
+                os.makedirs(os.path.join(folder, 'not-a-skill'))
+            with mock.patch.object(adapters, 'usable', return_value=[codex]), \
+                 mock.patch.object(codex, 'skill_roots', return_value=[global_root, repo_root, global_root]):
+                rows = adapters.skill_catalog(repo)['codex']
+            self.assertEqual(len(rows), 2)
+            self.assertEqual({row['scope'] for row in rows}, {'global', 'repository'})
+            self.assertTrue(all(row['name'] == 'review' and os.path.isfile(row['reference']) for row in rows))
+
+    def test_unreadable_roots_are_unknown_instead_of_an_empty_success(self):
+        from app.agents.adapters import codex
+        with mock.patch.object(adapters, 'usable', return_value=[codex]), \
+             mock.patch.object(codex, 'skill_roots', return_value=['/unreadable']), \
+             mock.patch.object(os, 'scandir', side_effect=PermissionError('fixture refusal')):
+            with self.assertRaises(PermissionError):
+                adapters.skill_catalog('/repository')
 
 # What `available()` answers in a process of its own, with the folder of planted kinds on its search path.
 LIST = """

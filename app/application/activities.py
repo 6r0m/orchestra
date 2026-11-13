@@ -689,11 +689,21 @@ class Activities:
                 return self.git.merge_destinations(state["repo_path"], state["base_tip"], state["run_id"],
                                                    _merge_pins(state))
             resolved = self.repositories.resolve(args["repository"], args["worktree_root"])
+            if args.get("skill_catalog"):
+                root = args.get("skill_root") or resolved["repo_path"]
+                if args.get("skill_root"):
+                    common = [W.git(path, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
+                              for path in (root, resolved["repo_path"])]
+                    if not os.path.samefile(*common):
+                        raise repos.Refused("the run's skill worktree does not belong to its recorded repository")
+                return {"version": 1, "skills": adapters.skill_catalog(root)}
             if args.get("landing_preview"):
                 repo, branch, remote = resolved["repo_path"], resolved["base_branch"], resolved.get("remote")
                 tracking = W.git(repo, "for-each-ref", "--format=%(upstream:short)", "refs/heads/" + branch).stdout.strip()
-                return {"version": landing.VERSION, "branch": branch, "remote": remote, "upstream": tracking or None,
-                        "identity_ready": W.identity_ready(repo)}
+                reference = "refs/remotes/%s/%s" % (remote, branch) if remote else "refs/heads/" + branch
+                basis = W.git(repo, "rev-parse", "--verify", reference).stdout.strip()
+                choices = self.git.merge_destinations(repo, basis, pins=self.git.landing_pins(repo))
+                return dict(choices, version=landing.VERSION, branch=branch, remote=remote, upstream=tracking or None)
             return {"base_branch": resolved["base_branch"],
                     "rows": self.git.view(resolved["repo_path"], resolved["base_branch"], resolved.get("remote"))}
         except repos.Refused as exc:

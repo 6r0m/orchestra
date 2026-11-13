@@ -1178,6 +1178,10 @@ def review_closed(page, run_id, expected):
 
 def review_components(page):
     """Isolated Git fixture: real xterms, cached DOM and paged milestone exports; no live run is answered."""
+    # Parallel headless browsers can lose activation; this scenario exercises a foreground operator page.
+    page.call("Emulation.setFocusEmulationEnabled", enabled=True)
+    page.call("Page.bringToFront")
+    wait(lambda: page.value("document.visibilityState==='visible'"), 10, "the visible review page")
     proof = page.call("Runtime.evaluate", expression="(async()=>await (await import('/cache-probe.js')).run())()",
                       awaitPromise=True, returnByValue=True)
     if proof.get("result", {}).get("value") is not True:
@@ -1232,9 +1236,10 @@ def review_components(page):
     result = page.call("Runtime.evaluate", expression=setup, awaitPromise=True, returnByValue=True)
     if not result.get("result", {}).get("value"):
         raise SystemExit("component setup failed: %r" % result)
-    wait(lambda: page.value("!document.querySelector('#terminal-engineer').open && "
-                            "document.querySelector('#term-engineer .xterm-rows')?.textContent.includes('TAIL run-a engineer')"),
-         15, "the unopened engineer's real terminal replay during architect review")
+    wait(lambda: page.value("(()=>{const s=window.__terminalSockets.find(s=>s.url.endsWith('/engineer'));"
+                            "return !document.querySelector('#terminal-engineer').open && "
+                            "s?.offsets.at(-1)===s?.record.length})()"),
+         15, "the unopened engineer's xterm-confirmed replay during architect review")
     page.value("window.__firstTerminal=document.querySelector('#term-engineer .xterm');"
                "window.__warmSockets=window.__terminalSockets.length;"
                "window.__reviewTerminal.updateTerminals({open:true,shown:'engineer',working:'engineer',since:'build'});true")
@@ -1243,6 +1248,8 @@ def review_components(page):
                       "document.activeElement===window.__warmFocus && "
                       "document.querySelector('#terminal-engineer').open"):
         raise SystemExit("switching from architect to the unopened engineer lost its warm screen or connection")
+    wait(lambda: page.value("document.querySelector('#term-engineer .xterm-rows')?.textContent.includes('TAIL run-a engineer')"),
+         15, "the warm engineer screen after opening its panel")
     page.value("window.__reviewShow('run-b');true")
     wait(lambda: page.value("document.querySelector('#term-engineer .xterm-rows')?.innerText.includes('TAIL run-b engineer')"),
          15, "the other run's independent terminal")
@@ -1265,21 +1272,31 @@ def review_components(page):
       window.__terminalSockets.find(s=>s.url.endsWith('/change')).onmessage({data:JSON.stringify(next.summary)});
       return true;
     })()""", awaitPromise=True, returnByValue=True)
-    wait(lambda: page.value("document.querySelector('#review-milestones details[data-review=current]').innerText.includes('live-revision.txt')"),
+    wait(lambda: page.value("document.querySelector('#review-milestones details[data-review=current] details.file[data-path=\"live-revision.txt\"]')!==null"),
          15, "live changes after the latest accepted operator checkpoint")
     page.value("document.querySelector('#review-milestones details[data-review=current] button:last-child').click();true")
     wait(lambda: page.value("window.__reviewCopied.endsWith(window.__livePatch)"), 20, "the exact live-interval export")
     if not page.value("!window.__reviewCopied.includes('diff --git a/first-only.txt') && "
                       "!window.__reviewCopied.includes('diff --git a/large.txt')"):
         raise SystemExit("the current interval included work preceding its operator boundary")
+    page.call("Page.bringToFront")
+    wait(lambda: page.value("document.visibilityState==='visible'"), 10, "the visible stop before final sampling")
     page.call("Runtime.evaluate", expression="""(async()=>{
       await fetch('/finalize',{method:'POST'});
       const change=await import('/change.js');
       change.showReviews('run-a',window.__reviewFixture.review,true,'operator-stop');
       return true;
     })()""", awaitPromise=True, returnByValue=True)
-    wait(lambda: page.value("document.querySelector('#review-milestones details[data-review=current]').innerText.includes('finished-revision.txt')"),
-         15, "final role edits sampled at the stop without another feed event")
+    try:
+        wait(lambda: page.value("document.querySelector('#review-milestones details[data-review=current] details.file[data-path=\"finished-revision.txt\"]')!==null"),
+             15, "final role edits sampled at the stop without another feed event")
+    except SystemExit:
+        print(page.value("({visibility:document.visibilityState,changeOpen:document.querySelector('#change').open,"
+                         "changeHidden:document.querySelector('#change').hidden,"
+                         "groups:[...document.querySelectorAll('#review-milestones details[data-review]')].map(b=>"
+                         "({review:b.dataset.review,open:b.open,status:b.querySelector('[role=status]')?.textContent,"
+                         "files:[...b.querySelectorAll('details.file')].map(f=>f.dataset.path)}))})"))
+        raise
     page.value("document.querySelector('#review-milestones>details').open=true;"
                "document.querySelector('#review-milestones details[data-review=s2]').open=true;true")
     # Native keyboard activation of the new copy control.
@@ -1373,6 +1390,9 @@ def review_components(page):
 
 
 def review_restored(page, setup, totals):
+    page.call("Emulation.setFocusEmulationEnabled", enabled=True)
+    page.call("Page.bringToFront")
+    wait(lambda: page.value("document.visibilityState==='visible'"), 10, "the visible restored page")
     result = page.call("Runtime.evaluate", expression=setup, awaitPromise=True, returnByValue=True)
     if not result.get("result", {}).get("value"):
         raise SystemExit("restored component setup failed: %r" % result)
@@ -1383,8 +1403,115 @@ def review_restored(page, setup, totals):
         if offset != total:
             raise SystemExit("refresh/reopen replayed %s instead of resuming its cached screen: %r != %r"
                              % (role, offset, total))
-        wait(lambda: page.value("document.querySelector('#term-%s .xterm-rows')?.textContent.includes('TAIL run-a %s')"
-                                % (role, role)), 15, "the restored %s screen" % role)
+        # xterm may defer DOM painting behind a closed disclosure; the cursor above proves warm parsing.
+        page.value("document.querySelector('#terminal-%s').open=true;true" % role)
+        try:
+            wait(lambda: page.value("document.querySelector('#term-%s .xterm-rows')?.textContent.includes('TAIL run-a %s')"
+                                    % (role, role)), 15, "the restored %s screen" % role)
+        except SystemExit:
+            print(page.value("({visibility:document.visibilityState,role:" + json.dumps(role) + ","
+                             "terminal:document.querySelector('#terminal-" + role + "').outerHTML.slice(0,600),"
+                             "rows:document.querySelector('#term-" + role + " .xterm-rows')?.textContent.slice(-500)})"))
+            raise
+
+
+def task_disclosure(page, run_id):
+    page.call("Emulation.setFocusEmulationEnabled", enabled=True)
+    page.call("Page.bringToFront")
+    page.value("location.hash='#run='+" + json.dumps(run_id))
+    wait(lambda: page.value("document.querySelector('#run-task-toggle')?.textContent==='Show full task' && "
+                            "!document.querySelector('#run-task-toggle').hidden"), 10, 'the collapsed task control')
+    def clipped():
+        return page.value("(()=>{const p=document.querySelector('#run-task-text');"
+                          "return p.scrollHeight>p.clientHeight && p.clientHeight<=8*parseFloat(getComputedStyle(p).lineHeight)+1})()")
+    if not clipped():
+        raise SystemExit('the initial task preview exceeds eight lines or is not clipped')
+    control = page.value("(()=>{const p=document.querySelector('#run-task-text');p.style.webkitLineClamp='unset';"
+                         "const full=p.clientHeight>8*parseFloat(getComputedStyle(p).lineHeight)+1;"
+                         "p.style.removeProperty('-webkit-line-clamp');return full})()")
+    if not control or not clipped():
+        raise SystemExit('the preview height check did not reject an unclamped task')
+    page.call("Runtime.evaluate", expression="""(async()=>{
+      const {api}=await import('/api.js');
+      window.__taskExpected=(await api('/api/runs/'+%s)).view.goal;
+      document.querySelector('#run-task-toggle').focus();return true;
+    })()""" % json.dumps(run_id), awaitPromise=True, returnByValue=True)
+    page.call("Input.dispatchKeyEvent", type="keyDown", key="Enter", code="Enter", windowsVirtualKeyCode=13,
+              nativeVirtualKeyCode=13, text="\r")
+    page.call("Input.dispatchKeyEvent", type="keyUp", key="Enter", code="Enter", windowsVirtualKeyCode=13,
+              nativeVirtualKeyCode=13)
+    wait(lambda: page.value("document.querySelector('#run-task-toggle').getAttribute('aria-expanded')==='true'"),
+         5, 'keyboard expansion of the task')
+    page.call("Runtime.evaluate", expression="""(async()=>{
+      window.__taskFetch=window.fetch;
+      window.fetch=async(url,...args)=>{
+        const response=await window.__taskFetch(url,...args);
+        if(url==='/api/runs/'+%s){const body=await response.json();
+          body.configuration={...body.configuration,timeout_seconds:12345};return Response.json(body);}
+        return response;
+      };
+      await(await import('/run.js')).refreshRun();return true;
+    })()""" % json.dumps(run_id), awaitPromise=True, returnByValue=True)
+    if not page.value("document.querySelector('#run-task-toggle').textContent==='Show less' && "
+                      "document.querySelector('#run-task-text').textContent===window.__taskExpected && "
+                      "document.querySelector('#run-task-text').clientHeight>=document.querySelector('#run-task-text').scrollHeight-1 && "
+                      "document.activeElement===document.querySelector('#run-task-toggle')"):
+        raise SystemExit('polling lost the full task, expansion state or keyboard focus')
+    page.value("document.querySelector('#run-task-toggle').click();true")
+    if not clipped():
+        raise SystemExit('the full task could not be collapsed again')
+    page.call("Runtime.evaluate", expression="(async()=>{const r=await import('/run.js');r.show(null);r.show(%s);return true})()"
+              % json.dumps(run_id), awaitPromise=True, returnByValue=True)
+    wait(lambda: page.value("document.querySelector('#run-task-toggle')?.getAttribute('aria-expanded')==='false'"),
+         10, 'the collapsed task after navigation')
+    page.call("Runtime.evaluate", expression="""(async()=>{
+      window.fetch=async(url,...args)=>{
+        const response=await window.__taskFetch(url,...args);
+        if(url==='/api/runs/'+%s){const body=await response.json();body.view.goal='Short task.';return Response.json(body);}
+        return response;
+      };
+      await(await import('/run.js')).refreshRun();return true;
+    })()""" % json.dumps(run_id), awaitPromise=True, returnByValue=True)
+    wait(lambda: page.value("document.querySelector('#run-task-toggle')?.hidden && "
+                            "document.querySelector('#run-task-text').textContent==='Short task.'"),
+         5, 'a short task without an unnecessary toggle')
+    page.call("Runtime.evaluate", expression="(async()=>{window.fetch=window.__taskFetch;"
+              "await(await import('/run.js')).refreshRun();return true})()", awaitPromise=True, returnByValue=True)
+    wait(lambda: page.value("!document.querySelector('#run-task-toggle').hidden"), 5, 'the original long task')
+    page.call("Emulation.setDeviceMetricsOverride", width=320, height=800, deviceScaleFactor=1, mobile=False)
+    wait(clipped, 5, 'the eight-line mobile preview')
+    page.call("Emulation.clearDeviceMetricsOverride")
+    print('PASS: eight-line task preview, exact full text, keyboard expansion, polling and collapse; mobile and navigation preserved')
+
+
+def instruction_skills(page, run_id):
+    def choose(button, field, stage):
+        page.value("document.querySelector(%s).click()" % json.dumps(button))
+        wait(lambda: page.value("document.querySelector('#instruction-skills').open && "
+                                "document.querySelectorAll('#instruction-skills-options input').length===2"), 15, 'both skill origins')
+        page.value("(()=>{const s=document.querySelector('#instruction-skills-stage');s.value=%s;s.dispatchEvent(new Event('change'));"
+                   "document.querySelectorAll('#instruction-skills-options input').forEach(x=>{x.checked=true;x.dispatchEvent(new Event('change'));});"
+                   "document.querySelector('#instruction-skills-add').click();return true;})()" % json.dumps(stage))
+        text = page.value("document.querySelector(%s).value" % json.dumps(field))
+        if '/fixture/global/review-method/SKILL.md' not in text or '/fixture/repo/repo-checks/SKILL.md' not in text:
+            raise SystemExit('multiple exact skill references did not reach the operator field')
+
+    page.value("location.hash='#new'")
+    wait(lambda: page.value("!document.querySelector('#view-new').hidden"), 10, 'new-run form')
+    page.value("document.querySelector('#start-task').value='Keep this original task';"
+               "document.querySelector('#start-path').value='/fixture/repository';"
+               "document.querySelector('#start-source input[value=path]').click()")
+    choose('#start-skills', '#start-task', 'This request')
+    if not page.value("document.querySelector('#start-task').value.startsWith('Keep this original task')"):
+        raise SystemExit('skill insertion replaced the original task')
+    page.value("location.hash='#run='+" + json.dumps(run_id))
+    wait(lambda: page.value("!document.querySelector('#merge-options').hidden"), 15, 'final note controls')
+    page.value("document.querySelector('#stop-note').value='Keep this operator note';"
+               "document.querySelector('#stop-note').dispatchEvent(new Event('input'))")
+    choose('#stop-skills', '#stop-note', 'architect:verify')
+    page.value("[...document.querySelectorAll('#stop-actions button')].find(x=>x.textContent==='Revise (architect)').click()")
+    wait(lambda: page.value("!document.querySelector('#stop').hidden && document.querySelector('#stop-note').value==='' && "
+                            "document.querySelector('#stop-title').textContent==='Ready to merge'"), 30, 'revision with both selected skills')
 
 
 def main(url, run_id, label, said, note=None):
@@ -1472,6 +1599,8 @@ def main(url, run_id, label, said, note=None):
                     reopened.call("Page.reload")
                     wait(lambda: reopened.value("document.readyState==='complete' && !window.__reviewFixture"),
                          15, "the truncation-control document")
+                    reopened.call("Page.bringToFront")
+                    wait(lambda: reopened.value("document.visibilityState==='visible'"), 10, "the visible truncation control")
                     reopened.value("window.__truncateTerminal=true")
                     control = reopened.call("Runtime.evaluate", expression=setup, awaitPromise=True, returnByValue=True)
                     if control.get("result", {}).get("value") is not True:
@@ -1480,6 +1609,7 @@ def main(url, run_id, label, said, note=None):
                          15, "the truncated-record cursor")
                     if reopened.value("window.__terminalSockets.find(s=>s.url.endsWith('/engineer')).offsets[0]") != 0:
                         raise SystemExit("a truncated recording accepted the stale persistent cursor")
+                    reopened.value("document.querySelector('#terminal-engineer').open=true;true")
                     wait(lambda: reopened.value("document.querySelector('#term-engineer .xterm-rows')?.textContent.includes('REPLACED_RECORD')"),
                          15, "cold recovery of the replaced recording")
                 print("PASS: both native role screens and confirmed cursors survive an actual browser restart")
@@ -1499,7 +1629,11 @@ def main(url, run_id, label, said, note=None):
                 return accounting(page, run_id)
             if label == "review-closed":
                 return review_closed(page, run_id, said)
-            if label in ("merge-choice", "merge-retry"):
+            if label == "instruction-skills":
+                instruction_skills(page, run_id)
+            if label == "task-disclosure":
+                task_disclosure(page, run_id)
+            if label in ("merge-choice", "merge-retry", "instruction-skills", "task-disclosure"):
                 page.value("location.hash='#run='+" + json.dumps(run_id))
                 if label == "merge-retry":
                     wait(lambda: page.value("document.querySelector('#merge-destination-hint').textContent.includes('fixture worker unavailable')"),
@@ -1529,6 +1663,8 @@ def main(url, run_id, label, said, note=None):
                 if page.value("document.querySelector('.row[data-run=' + CSS.escape(" + json.dumps(run_id) + ") + '] .row-task').textContent") != run_id[:-9]:
                     raise SystemExit('the run list omitted the approved short name')
                 branch = json.dumps(said)
+                if label == 'merge-choice' and not page.value("JSON.parse(document.querySelector('#merge-destination').value).branch===" + branch):
+                    raise SystemExit('the saved pre-start Merge preference was not selected at the final gate')
                 page.value("(()=>{const s=document.querySelector('#merge-destination');s.value=[...s.options].find(o=>JSON.parse(o.value).branch===" +
                            branch + " && JSON.parse(o.value).remote===null).value;s.dispatchEvent(new Event('change',{bubbles:true}));"
                            "document.querySelector('#merge-work-message').value='Retain terminal screens';"

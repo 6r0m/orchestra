@@ -97,6 +97,12 @@ when the decision above moves on; nothing else of it is read again.
   a tracking upstream is a warning, never push permission. The final gate lists compatible existing destinations,
   retains operator message edits across polling and confirms the actual target and both commit messages.
   Failed destination discovery exposes an explicit retry that refreshes choices without discarding drafts.
+  New-run setup separately names its starting base and preferred compatible Merge destination. The preference
+  seeds the final selector, whose confirmation remains mandatory. Failed setup discovery is explicitly
+  refreshable and cannot silently drop the preferred target when starting.
+  The instruction skill picker reads the execution host's native roots and inserts selected exact references
+  into the visible task or note. It is a typing aid, not a second stage-binding or workflow authority.
+  Search, multiple selection and cancellation preserve the existing operator input; global settings stay unchanged.
   Missing agent proposals allow manual entry at that gate. Drafts and dropdown selections cannot change workflow
   state until the confirmed answer is accepted; failed Merge attempts retain their frozen destination/messages.
 
