@@ -19,6 +19,15 @@ EDGE = Path(os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)')) / 'M
 @unittest.skipUnless(sys.platform.startswith('win') and EDGE.is_file(), 'native Edge acceptance runs on Windows')
 class MergeBrowser(Repo):
     def test_the_normal_gate_preserves_messages_then_lands_on_the_selected_branch(self):
+        self.landing('merge-choice')
+
+    def test_destination_discovery_can_be_retried_without_losing_operator_edits(self):
+        self.landing('merge-retry')
+
+    def test_selected_destination_conflict_returns_to_the_engineer_without_landing(self):
+        self.landing('merge-conflict')
+
+    def landing(self, scenario):
         import cast
         import temporal_env as E
         from fakes import FakeRepos, first_message_for, review_first_for, review_resumed_for
@@ -29,6 +38,7 @@ class MergeBrowser(Repo):
         initial = W.started_from(repo)
         git(repo, 'branch', 'release')
         seen = {'engineer': 0, 'architect': 0}
+        conflict_prompts = []
         plan = W.plan_path('todo', '%Y-%m-%d_%H%M-{slug}', '2026-09-15T12:00', 'cache-screens')
 
         class DiskRepo(FakeRepos):
@@ -37,6 +47,9 @@ class MergeBrowser(Repo):
 
         def runner(worktree, argv, directory, name, prompt, timeout, env, **kwargs):
             role = 'architect' if name.startswith(('assess-', 'verify-')) else 'engineer'
+            if scenario == 'merge-conflict' and name.startswith('build-') and seen['engineer'] >= 3:
+                conflict_prompts.append(prompt)
+                return 1, 'Fixture pauses the engineer after conflict routing.'
             if name.startswith('plan-'):
                 write(os.path.join(worktree, plan), '**Status:** DRAFT\nKeep terminal screens.\n')
             if name.startswith('build-'):
@@ -71,13 +84,40 @@ class MergeBrowser(Repo):
             self.assertEqual(run.stop['reason'], 'final', run.status)
             final_tree = run.state['final_tree']
 
+            if scenario == 'merge-conflict':
+                checkout = os.path.join(self.tmp, 'release-checkout')
+                git(repo, 'worktree', 'add', checkout, 'release')
+                write(os.path.join(checkout, 'app.txt'), 'RELEASE_CONFLICT\n')
+                git(checkout, 'add', '-A')
+                git(checkout, 'commit', '-qm', 'Advance selected destination')
+                target_tip = git(repo, 'rev-parse', 'release').strip()
+                answer = dict(stop=run.stop['id'], action='merge', confirm=True,
+                              landing=dict(version=1, branch='release', remote=None, basis=run.state['base_tip'],
+                                           tree=final_tree, messages={'work': 'Retain terminal screens',
+                                                                     'merge': 'Merge retained terminal screens'}))
+                E.run(runs.answer(E.client(), run_id, answer))
+                status = E.run(E.cli.follow(handle))
+                state = status['state']
+                self.assertEqual(status['stop']['reason'], 'failed')
+                self.assertEqual(state['current']['stage'], 'build')
+                self.assertEqual(state['base_branch'], 'release')
+                self.assertEqual(state['base_tip'], target_tip)
+                self.assertNotIn('merge_commit', state)
+                self.assertEqual(W.started_from(repo), initial)
+                self.assertEqual(git(repo, 'rev-parse', 'release').strip(), target_tip)
+                self.assertEqual(git(state['worktree_path'], 'rev-parse', 'MERGE_HEAD').strip(), target_tip)
+                self.assertEqual(len(conflict_prompts), 1)
+                self.assertIn('release', conflict_prompts[0])
+                self.assertIn('app.txt', conflict_prompts[0])
+                return
+
             async def listed(client, limit=200, cursor=None):
                 return [runs._listed(await client.get_workflow_handle(run_id).describe())], None
 
             script = Path(__file__).resolve().parents[2] / 'tools/demo_press.py'
             with patch.object(runs, 'runs', listed):
                 result = subprocess.run([sys.executable, str(script), 'http://127.0.0.1:%d' % port(), run_id,
-                                         'merge-choice', 'release'], capture_output=True, text=True, timeout=90)
+                                         scenario, 'release'], capture_output=True, text=True, timeout=90)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             state = E.run(handle.query(WF.FeatureRun.status))['state']
             self.assertEqual(state['status'], 'MERGED')

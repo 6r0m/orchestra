@@ -172,6 +172,8 @@ base. Local choices push nothing. Remote choices require endpoint and pre-push e
 the agents ran; an older run without it cannot silently gain a new remote. Previewed remote refs are cached,
 and the selected remote is fetched and checked again before landing. Review the two commit messages and
 edit them as needed; if the agent proposal is unavailable, enter them here without another model turn.
+If destination discovery fails, use **Retry destinations** once the worker is available; your unsent message
+edits stay in the page. Reloading the page discards those unsent edits.
 The confirmation names the exact destination and messages. Git identity must be configured in the intended
 repository before committing; Orchestra never invents it or changes global Git settings. A failed attempt
 keeps its target/messages on Continue; revise the change before retargeting. The selected push runs the

@@ -22,6 +22,72 @@ class Names(unittest.TestCase):
 
 
 class Choices(Repo):
+    def test_a_selected_branch_conflict_reconciles_that_branch_without_moving_refs(self):
+        from app.application import activities as A
+
+        initial = W.started_from(self.repo)
+        git(self.repo, 'branch', 'release')
+        selected = os.path.join(self.tmp, 'release-checkout')
+        git(self.repo, 'worktree', 'add', selected, 'release')
+        write(os.path.join(selected, 'app.txt'), 'release version\n')
+        write(os.path.join(selected, 'release-only.txt'), 'selected destination\n')
+        git(selected, 'add', '-A')
+        git(selected, 'commit', '-qm', 'Advance selected destination')
+        release = git(self.repo, 'rev-parse', 'release').strip()
+        path = self.worktree('conflicting-run')
+        tree, before = W.work_tree(path), W.guard(path, 'conflicting-run')
+        refs = git(self.repo, 'show-ref')
+        result = W.merge(self.repo, path, 'conflicting-run', 'release', tree, None, None,
+                         'Correct behavior', 'Merge behavior correction', tip=initial,
+                         recovery=hashlib.sha256(b'conflicting-execution').hexdigest())
+        self.assertEqual(result['result'], 'moved')
+        self.assertEqual(git(self.repo, 'show-ref'), refs)
+        self.assertEqual(W.guard(path, 'conflicting-run'), before)
+
+        state = dict(run_id='conflicting-run', repo_path=self.repo, worktree_path=path,
+                     base_branch='release', base_tip=initial)
+        reconciled = A.Activities(git=W).reconcile({'state': state})
+        self.assertTrue(reconciled['moved'])
+        self.assertEqual(reconciled['base_tip'], release)
+        self.assertIn('app.txt', reconciled['files'])
+        self.assertEqual(git(path, 'rev-parse', 'MERGE_HEAD').strip(), release)
+        self.assertTrue(os.path.isfile(os.path.join(path, 'release-only.txt')))
+        protected = lambda listing: [line for line in listing.splitlines() if not line.endswith(' refs/heads/conflicting-run')]
+        self.assertEqual(protected(git(self.repo, 'show-ref')), protected(refs))
+        self.assertEqual(W.started_from(self.repo), initial)
+
+    def test_identical_subjects_and_trees_cannot_adopt_another_executions_merge(self):
+        from app.application import activities as A
+
+        initial = W.started_from(self.repo)
+        git(self.repo, 'branch', 'release')
+        states = []
+        for label in ('first-run', 'second-run'):
+            path = self.worktree(label, change=False)
+            write(os.path.join(path, 'app.txt'), 'one\nshared change\n')
+            tree = W.work_tree(path)
+            choice = dict(version=1, branch='release', remote=None, basis=initial, tree=tree,
+                          messages={'work': 'Correct behavior', 'merge': 'Merge behavior correction'})
+            states.append(dict(run_id=label, repo_path=self.repo, worktree_path=path, base_branch='release',
+                               base_tip=initial, final_tree=tree, plan='todo/plan.md', todo_done_dir='todo/done',
+                               task='Correct behavior', merge_choice=choice, merge_attempt='final-stop',
+                               merge_execution='execution-' + label))
+        self.assertEqual(states[0]['final_tree'], states[1]['final_tree'])
+        host = A.Activities(git=W)
+        first = host.merge({'state': states[0]})
+        self.assertEqual(first['result'], 'merged')
+        self.assertEqual(host.merge({'state': states[0]})['commit'], first['commit'])
+        before = W.guard(states[1]['worktree_path'], states[1]['run_id'])
+        refs = git(self.repo, 'show-ref')
+        second = host.merge({'state': states[1]})
+        self.assertEqual(second['result'], 'refused')
+        self.assertIn('no change', second['reason'])
+        self.assertEqual(W.guard(states[1]['worktree_path'], states[1]['run_id']), before)
+        self.assertEqual(git(self.repo, 'show-ref'), refs)
+        self.assertTrue(os.path.isdir(states[1]['worktree_path']))
+        self.assertEqual(host.merge({'state': states[0]})['commit'], first['commit'])
+        self.assertEqual(W.started_from(self.repo), initial)
+
     def test_configured_remote_names_with_slashes_are_not_guessed_from_ref_segments(self):
         remote = os.path.join(self.tmp, 'remote.git')
         git(self.repo, 'clone', '--bare', self.repo, remote)

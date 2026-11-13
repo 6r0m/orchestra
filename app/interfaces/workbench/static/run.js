@@ -506,10 +506,10 @@ function renderMerge(status) {
     : "No valid agent proposal. Enter both messages here; another agent turn is unnecessary.";
   const select = $("merge-destination");
   select.replaceChildren();
-  $("merge-destination-hint").textContent = "Reading compatible destinations…";
+  const retry = $("merge-retry");
   const run = selected;
   const remember = () => {
-    mergeDrafts.set(key, { destination: select.value, work: $("merge-work-message").value,
+    mergeDrafts.set(key, { destination: select.value || mergeDrafts.get(key)?.destination || saved?.destination || "", work: $("merge-work-message").value,
       merge: $("merge-merge-message").value });
     const destination = select.value && JSON.parse(select.value);
     if (destination) $("merge-destination-hint").textContent = destination.remote
@@ -518,27 +518,37 @@ function renderMerge(status) {
   };
   for (const id of ["merge-work-message", "merge-merge-message"]) $(id).oninput = remember;
   select.onchange = remember;
-  api("/api/runs/" + encodeURIComponent(run) + "/landing").then((result) => {
-    if (selected !== run || panel.dataset.key !== key || panel.hidden) return;
-    if (!Array.isArray(result.choices)) throw new Error("the target worker needs a graceful reload for destination selection");
-    const wanted = saved && saved.destination || JSON.stringify({ branch: state.base_branch, remote: state.remote || null });
-    for (const destination of result.choices) {
-      const option = el("option", destination.remote ? destination.remote + "/" + destination.branch + " — pushed"
-        : destination.branch + " — local");
-      option.value = JSON.stringify({ branch: destination.branch, remote: destination.remote });
-      select.append(option);
-    }
-    if (![...select.options].some((option) => option.value === wanted)) {
-      const missing = el("option", "Saved destination unavailable — choose a compatible destination");
-      missing.value = "";
-      select.prepend(missing);
-    }
-    select.value = [...select.options].some((option) => option.value === wanted) ? wanted : "";
-    remember();
-    if (!result.identity_ready) $("merge-destination-hint").textContent += " Configure the intended repository Git identity before Merge.";
-  }).catch((error) => {
-    if (selected === run && panel.dataset.key === key) $("merge-destination-hint").textContent = "Destination unavailable: " + error.message;
-  });
+  const discover = () => {
+    retry.hidden = true;
+    $("merge-destination-hint").textContent = "Reading compatible destinations…";
+    return api("/api/runs/" + encodeURIComponent(run) + "/landing").then((result) => {
+      if (selected !== run || panel.dataset.key !== key || panel.hidden) return;
+      if (!Array.isArray(result.choices)) throw new Error("the target worker needs a graceful reload for destination selection");
+      const wanted = mergeDrafts.get(key)?.destination || JSON.stringify({ branch: state.base_branch, remote: state.remote || null });
+      select.replaceChildren();
+      for (const destination of result.choices) {
+        const option = el("option", destination.remote ? destination.remote + "/" + destination.branch + " — pushed"
+          : destination.branch + " — local");
+        option.value = JSON.stringify({ branch: destination.branch, remote: destination.remote });
+        select.append(option);
+      }
+      if (![...select.options].some((option) => option.value === wanted)) {
+        const missing = el("option", "Saved destination unavailable — choose a compatible destination");
+        missing.value = "";
+        select.prepend(missing);
+      }
+      select.value = [...select.options].some((option) => option.value === wanted) ? wanted : "";
+      remember();
+      if (!result.identity_ready) $("merge-destination-hint").textContent += " Configure the intended repository Git identity before Merge.";
+    }).catch((error) => {
+      if (selected === run && panel.dataset.key === key && !panel.hidden) {
+        $("merge-destination-hint").textContent = "Destination unavailable: " + error.message + ". Retry destinations when the worker is available.";
+        retry.hidden = false;
+      }
+    });
+  };
+  retry.onclick = discover;
+  discover();
 }
 
 async function answer(stop, action, button, words) {

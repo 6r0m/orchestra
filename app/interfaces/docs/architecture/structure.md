@@ -96,6 +96,7 @@ when the decision above moves on; nothing else of it is read again.
   Landing preview and run facts distinguish a local branch from an explicitly selected pushed destination;
   a tracking upstream is a warning, never push permission. The final gate lists compatible existing destinations,
   retains operator message edits across polling and confirms the actual target and both commit messages.
+  Failed destination discovery exposes an explicit retry that refreshes choices without discarding drafts.
   Missing agent proposals allow manual entry at that gate. Drafts and dropdown selections cannot change workflow
   state until the confirmed answer is accepted; failed Merge attempts retain their frozen destination/messages.
 

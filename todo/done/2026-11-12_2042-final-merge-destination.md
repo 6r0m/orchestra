@@ -341,3 +341,28 @@ D1–D5 work through actual new-run admission, final gate and target-host Git on
   discovery. Native sessions, request-level audit and the labelled Langfuse trace are retained as private
   ignored/runtime evidence. The main stack's activation and existing D10 account-admission limitation
   remain separate from this completed acceptance.
+
+### 2026-11-13 — Destination retry and missing acceptance proofs
+
+- Confirmed the discovery latch: a failed request left the final gate's render key populated, so later
+  polling never refreshed its choices. The page now offers **Retry destinations** after failure. It
+  refreshes only destination discovery, preserves the current draft selection/messages, and does not
+  answer the stop or add an automatic retry loop. Stable usage and presentation documentation are updated.
+- Regression-first Edge acceptance failed because the retry action was absent. The corrected normal
+  page survives a first failed request, edits before retry, further edits while the second read is held,
+  a successful response, polling, selection of the alternate branch and actual disposable Git landing.
+- Real Git proves that an alternate `release` conflict returns `moved` before changing refs or worktree
+  state. Reconciliation brings in that selected branch's exact tip and conflict markers, preserving
+  destination/default refs. A real Temporal workflow independently selects that branch through its Merge
+  Update, encounters the conflict and routes back to the engineer with the selected base and file evidence.
+- Two runs with identical subjects, base and final tree have distinct execution bindings. The first
+  can adopt its own completed attempt; the second cannot adopt it and instead reports that no new change
+  remains, preserving its own worktree and refs. No Git production correction was needed.
+- Initial Git test expectations were corrected against the existing lifecycle: reconciliation may
+  checkpoint the run branch, and an already-present identical change must refuse rather than produce an
+  empty landing. The final tests protect destination/default refs and cross-run ownership explicitly.
+- Final focused checks passed: 27 Windows tests, including actual Edge retry/landing, plus 24 executed
+  WSL tests with three Windows-only cases skipped. Replay, final admission and history regressions passed.
+  The earlier full-suite results remain the baseline; no broad rerun or new paid flow was required.
+  Public-safety and whitespace checks passed. Main-stack activation remains separately unverified;
+  no WSL/service restart, external push, Git identity change, staging or commit was performed.

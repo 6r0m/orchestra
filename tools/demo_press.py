@@ -1434,6 +1434,21 @@ def main(url, run_id, label, said, note=None):
             if label.startswith("change:") or label == "review-closed":
                 page.call("Page.enable")
                 page.call("Page.addScriptToEvaluateOnNewDocument", source=CLIPBOARD_STAND_IN)
+            if label == "merge-retry":
+                page.call("Page.enable")
+                page.call("Page.addScriptToEvaluateOnNewDocument", source="""(() => {
+                  const real = window.fetch;
+                  const probe = window.__landingProbe = { calls: 0 };
+                  window.fetch = async (path, options) => {
+                    if (String(path).endsWith('/landing') && String(path).includes('/api/runs/')) {
+                      probe.calls++;
+                      if (probe.calls === 1) return new Response(JSON.stringify({ error: 'fixture worker unavailable' }),
+                        { status: 503, headers: { 'Content-Type': 'application/json' } });
+                      if (probe.calls === 2) await new Promise(resolve => { probe.release = resolve; });
+                    }
+                    return real(path, options);
+                  };
+                })();""")
             page.call("Page.navigate", url=url)
             if label == "review-components":
                 wait(lambda: page.value("document.readyState === 'complete'"), 30, "the isolated component fixture")
@@ -1484,10 +1499,33 @@ def main(url, run_id, label, said, note=None):
                 return accounting(page, run_id)
             if label == "review-closed":
                 return review_closed(page, run_id, said)
-            if label == "merge-choice":
+            if label in ("merge-choice", "merge-retry"):
                 page.value("location.hash='#run='+" + json.dumps(run_id))
+                if label == "merge-retry":
+                    wait(lambda: page.value("document.querySelector('#merge-destination-hint').textContent.includes('fixture worker unavailable')"),
+                         15, "the failed destination discovery")
+                    page.value("""(() => {
+                      const work = document.querySelector('#merge-work-message');
+                      const merge = document.querySelector('#merge-merge-message');
+                      work.value = 'Retain terminal screens'; work.dispatchEvent(new Event('input'));
+                      merge.value = 'Merge retained terminal screens'; merge.dispatchEvent(new Event('input'));
+                    })()""")
+                    page.call("Runtime.evaluate", expression="new Promise(resolve=>setTimeout(resolve,2500))", awaitPromise=True)
+                    if page.value("window.__landingProbe.calls") != 1:
+                        raise SystemExit('polling retried discovery without an operator action')
+                    wait(lambda: page.value("document.querySelector('#merge-retry') && !document.querySelector('#merge-retry').hidden"),
+                         5, "an explicit destination retry")
+                    page.value("document.querySelector('#merge-retry').click()")
+                    wait(lambda: page.value("typeof window.__landingProbe.release==='function'"), 10, "retry admission")
+                    page.value("document.querySelector('#merge-work-message').value='Retain terminal screens after retry';"
+                               "document.querySelector('#merge-work-message').dispatchEvent(new Event('input'));window.__landingProbe.release()")
                 wait(lambda: page.value("!document.querySelector('#merge-options').hidden && document.querySelector('#merge-destination').options.length>1"),
                      30, "compatible final destinations")
+                if label == "merge-retry":
+                    if not page.value("document.querySelector('#merge-work-message').value==='Retain terminal screens after retry' && "
+                                      "document.querySelector('#merge-merge-message').value==='Merge retained terminal screens' && "
+                                      "window.__landingProbe.calls===2 && document.querySelector('#merge-retry').hidden"):
+                        raise SystemExit('successful retry replaced operator drafts or repeated discovery')
                 if page.value("document.querySelector('.row[data-run=' + CSS.escape(" + json.dumps(run_id) + ") + '] .row-task').textContent") != run_id[:-9]:
                     raise SystemExit('the run list omitted the approved short name')
                 branch = json.dumps(said)
