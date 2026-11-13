@@ -96,7 +96,7 @@ function row(run) {
   link.href = "#run=" + encodeURIComponent(run.run_id);
   link.dataset.tone = said.tone;
   link.dataset.run = run.run_id;
-  link.append(el("span", said.text, "row-what"), el("span", run.goal || run.run_id, "row-task"));
+  link.append(el("span", said.text, "row-what"), el("span", run.short_name || run.goal || run.run_id, "row-task"));
   const meta = el("span", null, "row-meta");
   const repo = el("span", run.repo || "Repository unavailable", "row-repo");
   repo.translate = false;

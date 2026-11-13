@@ -372,6 +372,9 @@ def _ask(stage, state, todo, logs):
             "{{TODO_DONE_DIR}}", os.path.join(state["worktree_path"], done)) if done else stages.CLOSEOUT_DELETES)
         ask = ask.replace("{{CLOSEOUT_DOCS}}", stages.CLOSEOUT_DOCS % ", ".join(documents) if documents
                           else stages.CLOSEOUT_NO_DOCS)
+    if stage in stages.FINAL and state.get("merge_version") == 1:
+        from app.foundation.landing import DRAFT_ASK
+        ask += "\n\n" + DRAFT_ASK
     return ask
 
 

@@ -70,8 +70,14 @@
           <textarea id="start-task" name="task" rows="4" required
             placeholder="Rename the flaky retry helper and cover it with a regression test…"
             aria-describedby="start-task-hint"></textarea>
-          <p class="hint" id="start-task-hint">Say what should be true when it is done. Its first words name
-            the run and its branch.</p>
+          <p class="hint" id="start-task-hint">Say what should be true when it is done. The complete task reaches both roles.</p>
+        </div>
+        <div class="field">
+          <label for="start-name">Short name</label>
+          <input id="start-name" name="short_name" required maxlength="16" pattern="[A-Za-z0-9]+(-[A-Za-z0-9]+)*"
+            autocomplete="off" spellcheck="false" placeholder="terminal-cache" aria-describedby="start-name-hint">
+          <p class="hint" id="start-name-hint">Branch and folder: <span id="start-name-preview">your-name</span>-xxxxxxxx. Up to 16 letters, digits and internal hyphens.</p>
+          <p class="hint" id="start-landing" role="status">Choose a repository to see where Merge lands.</p>
         </div>
         <fieldset class="field source" id="start-source">
           <legend>Repository</legend>
@@ -292,6 +298,17 @@
           <div id="stop-reply-text"></div>
           <div class="actions" id="stop-reply-actions"></div>
         </div>
+        <fieldset class="field" id="merge-options" hidden>
+          <legend>Merge destination and messages</legend>
+          <label for="merge-destination">Land on</label>
+          <select id="merge-destination" name="merge_destination"></select>
+          <p class="hint" id="merge-destination-hint" role="status"></p>
+          <label for="merge-work-message">Change commit message</label>
+          <textarea id="merge-work-message" name="work_message" rows="3" autocomplete="off"></textarea>
+          <label for="merge-merge-message">Merge commit message</label>
+          <textarea id="merge-merge-message" name="merge_message" rows="3" autocomplete="off"></textarea>
+          <p class="hint" id="merge-message-hint" role="status"></p>
+        </fieldset>
         <div class="field" id="stop-note-field">
           <label for="stop-note" id="stop-note-label">Your note</label>
           <textarea id="stop-note" name="note" rows="3" autocomplete="off"></textarea>

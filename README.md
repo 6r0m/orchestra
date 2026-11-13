@@ -94,7 +94,7 @@ A run keeps the settings it started with. Provider usage and cost limits are sep
 see the [trace and cost contract](docs/architecture/trace-contract.md#what-the-vendor-plugins-own).
 
 ```bash
-make feature TASK="fix the retry in the uploader"   # the same run, from the command line
+make feature NAME=fix-uploader TASK="fix the retry in the uploader"
 make down                                           # stop the stack; Temporal keeps its data
 ```
 

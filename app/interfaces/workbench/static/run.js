@@ -84,6 +84,8 @@ let selected = null;
 let shownStop = null;
 // Where the shown run's merge lands when its base is a remote's — `origin/main` — which its confirmation says.
 let landsOn = null;
+let mergeState = null;
+const mergeDrafts = new Map();
 // What the operator has typed for each stop and not yet sent: another run opened and this one again, the
 // note is still there.
 const drafts = new Map();
@@ -107,6 +109,8 @@ let shownAbove = new Set();
 export function show(runId) {
   if (selected === runId) return;
   selected = runId;
+  mergeState = null;
+  $("merge-options").hidden = true;
   showAccounting(runId);
   shownStop = null;
   shownAbove = new Set();
@@ -145,9 +149,10 @@ export async function refreshRun() {
   const view = status.view;
   const state = status.state;
   updateAccounting(view);
-  landsOn = state && state.remote ? state.remote + "/" + state.base_branch : null;
+  landsOn = state && state.base_branch ? (state.remote ? state.remote + "/" : "local ") + state.base_branch : null;
+  mergeState = state;
   // With its worker down the run is shown from its listing alone: what it last said stays on the page.
-  if (!status.unreadable || !$("run-task").textContent) $("run-task").textContent = view.goal || runId;
+  if (!status.unreadable || !$("run-task").textContent) $("run-task").textContent = state.short_name || view.goal || runId;
   if (!status.unreadable || !$("run-facts").children.length) {
     renderFacts(runId, view, state, status.links, status.timeline, status.configuration);
   }
@@ -158,6 +163,7 @@ export async function refreshRun() {
   if (status.unreadable) return;
   const to = view.stop && view.stop.to;
   renderStop(status.stop, status.timeline, to);
+  renderMerge(status);
   renderReply(status.stop, view.reply, to);
   renderKept(runId, view);
   renderHistory(view, status.timeline, status.stop);
@@ -176,8 +182,11 @@ function renderFacts(runId, view, state, links, timeline, configuration) {
   const planned = Boolean(state.plan) && timeline.some((entry) => entry.stage === "plan");
   const facts = [
     ["Repository", view.repo && code(view.repo)],
+    ["Task", state.short_name && view.goal],
     ["Flow", view.flow && (view.flow.name ? code(view.flow.name) : "the order from before flows")],
     ["Host", view.host && code(view.host)],
+    ["Merge lands on", state.base_branch && ((state.remote ? state.remote + "/" + state.base_branch + " (pushed)"
+      : state.base_branch + " (local; nothing is pushed)"))],
     ["Run and branch", [code(runId), copyButton(runId, "the run's id")]],
     ["Worktree", view.worktree && [code(view.worktree), copyButton(view.worktree, "the worktree's path")]],
     ["Plan", planned && [code(state.plan), copyButton(state.todo_path || state.plan, "the plan's path")]],
@@ -477,6 +486,61 @@ function renderReply(stop, reply, to) {
 // The action as the stop published it, and the note — or the words given, as an agent's answer sent on: what an
 // answer needs is the workflow's to refuse. One thing the page refuses itself, before sending: a note with an
 // approval whose stop does not say it takes one, which a worker from before notes would take and drop unsaid.
+function renderMerge(status) {
+  const panel = $("merge-options"), stop = status.stop, state = status.state;
+  for (const key of mergeDrafts.keys()) {
+    if (key.startsWith(selected + ":") && (!stop || !key.startsWith(stop.id + ":"))) mergeDrafts.delete(key);
+  }
+  const canEdit = !state.remote || state.merge_version === 1 || state.remote_id && state.prepush_id;
+  const visible = canEdit && status.merge_version === 1 && stop && stop.reason === "final" && state.final_tree && state.base_tip;
+  panel.hidden = !visible;
+  if (!visible) return;
+  const key = stop.id + ":" + state.base_tip + ":" + state.final_tree;
+  if (panel.dataset.key === key) return;
+  panel.dataset.key = key;
+  const saved = mergeDrafts.get(key), proposed = state.merge_choice ? state.merge_choice.messages
+    : state.commit_draft && state.commit_draft.messages;
+  $("merge-work-message").value = saved ? saved.work : proposed ? proposed.work : "";
+  $("merge-merge-message").value = saved ? saved.merge : proposed ? proposed.merge : "";
+  $("merge-message-hint").textContent = proposed ? "Review both messages before confirming Merge."
+    : "No valid agent proposal. Enter both messages here; another agent turn is unnecessary.";
+  const select = $("merge-destination");
+  select.replaceChildren();
+  $("merge-destination-hint").textContent = "Reading compatible destinations…";
+  const run = selected;
+  const remember = () => {
+    mergeDrafts.set(key, { destination: select.value, work: $("merge-work-message").value,
+      merge: $("merge-merge-message").value });
+    const destination = select.value && JSON.parse(select.value);
+    if (destination) $("merge-destination-hint").textContent = destination.remote
+      ? "Pushed to " + destination.remote + "/" + destination.branch + ". Cached compatibility is rechecked against the remote before landing."
+      : "Local " + destination.branch + ". Nothing is pushed.";
+  };
+  for (const id of ["merge-work-message", "merge-merge-message"]) $(id).oninput = remember;
+  select.onchange = remember;
+  api("/api/runs/" + encodeURIComponent(run) + "/landing").then((result) => {
+    if (selected !== run || panel.dataset.key !== key || panel.hidden) return;
+    if (!Array.isArray(result.choices)) throw new Error("the target worker needs a graceful reload for destination selection");
+    const wanted = saved && saved.destination || JSON.stringify({ branch: state.base_branch, remote: state.remote || null });
+    for (const destination of result.choices) {
+      const option = el("option", destination.remote ? destination.remote + "/" + destination.branch + " — pushed"
+        : destination.branch + " — local");
+      option.value = JSON.stringify({ branch: destination.branch, remote: destination.remote });
+      select.append(option);
+    }
+    if (![...select.options].some((option) => option.value === wanted)) {
+      const missing = el("option", "Saved destination unavailable — choose a compatible destination");
+      missing.value = "";
+      select.prepend(missing);
+    }
+    select.value = [...select.options].some((option) => option.value === wanted) ? wanted : "";
+    remember();
+    if (!result.identity_ready) $("merge-destination-hint").textContent += " Configure the intended repository Git identity before Merge.";
+  }).catch((error) => {
+    if (selected === run && panel.dataset.key === key) $("merge-destination-hint").textContent = "Destination unavailable: " + error.message;
+  });
+}
+
 async function answer(stop, action, button, words) {
   const runId = selected;
   const text = words === undefined ? $("stop-note").value.trim() : words.trim();
@@ -487,13 +551,25 @@ async function answer(stop, action, button, words) {
     return;
   }
   const body = { stop: stop.id, action: action };
+  if (action === "merge" && !$("merge-options").hidden) {
+    const value = $("merge-destination").value;
+    if (!value) { $("stop-alert").textContent = "Choose an available destination before Merge."; return; }
+    const destination = JSON.parse(value);
+    body.landing = { version: 1, ...destination, basis: mergeState.base_tip, tree: mergeState.final_tree,
+      messages: { work: $("merge-work-message").value, merge: $("merge-merge-message").value } };
+    landsOn = (destination.remote ? destination.remote + "/" : "local ") + destination.branch;
+  }
   // Only words you wrote: an empty note must reach the workflow empty, for it to refuse.
   if (text) body.text = text;
   if (ASK[action]) {
     // A merge that leaves the machine says where it goes before it is asked for.
-    const asked = action === "merge" && landsOn
+    const asked = action === "merge" && body.landing
+      ? { ...ASK.merge, title: "Merge into " + landsOn + "?",
+        body: (body.landing.remote ? "This pushes to the named remote." : "Nothing is pushed.") +
+          "\nChange commit: " + body.landing.messages.work + "\nMerge commit: " + body.landing.messages.merge }
+      : action === "merge" && landsOn
       ? { ...ASK.merge, title: "Merge the verified change into " + landsOn + "?",
-        body: "It is pushed to the remote, forcing nothing. If that branch has moved since this change was " +
+        body: (mergeState && mergeState.remote ? "It is pushed to the remote, forcing nothing. " : "Nothing is pushed. ") + "If that branch has moved since this change was " +
           "judged, git merges the two and the merge is pushed; a conflict lands nothing and goes back " +
           "to the run." }
       : ASK[action];

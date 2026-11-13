@@ -43,6 +43,15 @@ the queue; what the activity does is the other side's.
 
 ## Invariants
 
+- **Final Merge choices are accepted here.** The versioned Merge Update validates stop ownership, confirmation,
+  messages and the independently accepted final-tree/base identity, asks the target host to admit the existing
+  destination, then revalidates the stop after that asynchronous read. No accepted answer or effective target
+  changes when validation fails. A recorded selection changes this run only. The attempt freezes its target,
+  messages and recovery identity across refusals and Continue; revision reopens the change before retargeting.
+  A new recorded start opts into short names, pre-role remote pins and closeout message proposals. Missing or
+  malformed proposals remain visibly unavailable; valid manual text needs no additional role turn. Native
+  settlement and final-tree checks remain mandatory. Old starts and ordinary answers replay unchanged.
+
 - **Review checkpoints describe accepted actions; they never route work.** After consuming an accepted
   stop answer, before reopening, reconciliation, another role or cleanup, an opted-in run asks its target
   to retain an immutable Git sample. A failed or timed-out capture is explicitly unavailable and leaves

@@ -83,7 +83,10 @@ repository named in `.orchestra/repos.json` or in the file named by `ORCHESTRA_R
 reads the file again each time it is opened, and a name that
 carries its owners, `work/platform/service`, is found under `work`, then `platform`, each opening in
 view as you hover it — or on any other one given as its path as WSL sees it (`/mnt/e/...` for a Windows
-drive); only the one chosen is sent. The task's first words name the run and its branch. It follows the
+drive); only the one chosen is sent. Give a meaningful **Short name** for the branch and worktree:
+1–16 ASCII letters/digits with internal hyphens, for example `terminal-cache`. The form previews the
+complete name with its random suffix; it never shortens a name silently. The full task still reaches
+both roles. Existing runs keep their original names and sessions. It follows the
 flow chosen in its Flow list, whose steps show under it: `engineer-code`, the default — `default_flow`
 in `.orchestra/settings.json` — has the engineer plan from the code; `architect-research` has the architect research
 first and its brief wait for your approval. With no `default_flow`, a run that names no flow takes the
@@ -163,8 +166,15 @@ its entry in `.orchestra/repos.json`; the todo alone when it names none): its
 turn in the history opens what it changed since the architect's verification. A revise undoes it
 before its role's turn. If the base branch moved while the run built, it was brought into the worktree
 and judged before this gate, so what you read is the change on the base as it is. Merge lands it on
-that base: the repository's own branch, or — where its entry names the `remote` its base lives on —
-that remote's, by a push that forces nothing, which the confirmation says. That push runs the
+the selected compatible destination: initially the repository's own branch, or — where its entry names
+the `remote` its base lives on — that remote's. **Land on** lists existing branches containing the verified
+base. Local choices push nothing. Remote choices require endpoint and pre-push evidence captured before
+the agents ran; an older run without it cannot silently gain a new remote. Previewed remote refs are cached,
+and the selected remote is fetched and checked again before landing. Review the two commit messages and
+edit them as needed; if the agent proposal is unavailable, enter them here without another model turn.
+The confirmation names the exact destination and messages. Git identity must be configured in the intended
+repository before committing; Orchestra never invents it or changes global Git settings. A failed attempt
+keeps its target/messages on Continue; revise the change before retargeting. The selected push runs the
 repository's own pre-push hook on the commit being landed, and what the hook refuses lands nothing: the
 gate says why, in the hook's words. A hook changed or taken out since the run began lands nothing
 either — put it back as it was, or stop the run and begin again. Should the base have moved again since

@@ -92,6 +92,13 @@ when the decision above moves on; nothing else of it is read again.
 
 ## Invariants
 
+- New run asks for a complete short name and previews its branch/folder form independently of the full task.
+  Landing preview and run facts distinguish a local branch from an explicitly selected pushed destination;
+  a tracking upstream is a warning, never push permission. The final gate lists compatible existing destinations,
+  retains operator message edits across polling and confirms the actual target and both commit messages.
+  Missing agent proposals allow manual entry at that gate. Drafts and dropdown selections cannot change workflow
+  state until the confirmed answer is accepted; failed Merge attempts retain their frozen destination/messages.
+
 The browser retains a bounded least-recently-used set of parsed xterm displays for open runs, keyed by run,
 host and role. The selected open run prepares both roles, including unopened or collapsed panels, so idle
 review time also warms the next role's recorded screen. Parsing uses explicit terminal dimensions; fitting
@@ -111,7 +118,9 @@ The cursor remains a position in the worker's append-only record, never in the s
 Corrupt/incompatible snapshots, truncated records and older workers recover through normal record replay.
 Storage failure is visible and never prevents workflow execution or terminal observation.
 Explicit removal invalidates that screen's in-flight saves in the page, both after hashing and inside
-the serialized write transaction. A fresh save after a reset can start again at a lower cursor.
+the serialized write transaction. This coordination state exists only while saves for that screen are
+active and is released after the last one settles, including failures and early returns. Removing an idle
+screen creates no retained invalidation entry. A fresh save after a reset can start again at a lower cursor.
 
 IndexedDB transactions prevent one tab overwriting a newer cursor or recreating a recently closed run's
 snapshot after another tab clears it. Confirmed closure releases persisted screens; a bounded closed-run

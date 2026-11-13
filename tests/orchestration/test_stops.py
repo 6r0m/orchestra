@@ -1572,5 +1572,49 @@ def command(argv):
     return code, out.getvalue()
 
 
+class FinalMergeAdmission(unittest.TestCase):
+    def test_refused_or_stale_merge_does_not_change_the_final_gate(self):
+        run = WF.FeatureRun()
+        run.state = {'run_id': 'one', 'base_tip': 'base', 'final_tree': 'tree'}
+        run.stop = {'id': 'one:1', 'reason': 'final', 'phase': 'closeout', 'actions': ['merge', 'discard']}
+        selected = dict(version=1, branch='release', remote=None, basis='base', tree='tree',
+                        messages={'work': 'Change one thing', 'merge': 'Merge that change'})
+        answer = {'stop': 'one:1', 'action': 'merge', 'confirm': True, 'landing': selected}
+        run._validate_merge_answer(answer)
+        for changed in (dict(answer, stop='one:old'), dict(answer, confirm=False),
+                        dict(answer, landing=dict(selected, tree='another'))):
+            with self.assertRaises(ValueError):
+                run._validate_merge_answer(changed)
+            self.assertIsNone(run.answer_given)
+            self.assertEqual(run.stop['id'], 'one:1')
+        run.state['merge_choice'] = selected
+        with self.assertRaisesRegex(ValueError, 'froze'):
+            run._validate_merge_answer(dict(answer, landing=dict(selected, branch='different')))
+        run.answer_given = {'action': 'revise'}
+        with self.assertRaises(ValueError):
+            run._validate_merge_answer(answer)
+
+    def test_a_concurrent_answer_during_git_validation_cannot_consume_the_old_stop(self):
+        run = WF.FeatureRun()
+        run.state = {"run_id": "one", "base_tip": "base", "final_tree": "tree"}
+        run.stop = {"id": "one:1", "reason": "final", "phase": "closeout", "actions": ["merge"]}
+        run.queue = "target"
+        selected = dict(version=1, branch="release", remote=None, basis="base", tree="tree",
+                        messages={"work": "Change one thing", "merge": "Merge that change"})
+        answer = {"stop": "one:1", "action": "merge", "confirm": True, "landing": selected}
+        before = json.dumps(run.state, sort_keys=True)
+
+        async def admitted(*args, **kwargs):
+            run.stop = dict(run.stop, id="one:2")
+            return {"remote_id": None, "prepush_id": None}
+
+        with mock.patch.object(WF.workflow, "execute_activity", side_effect=admitted):
+            with self.assertRaisesRegex(ValueError, "not waiting"):
+                asyncio.run(run.answer_merge(answer))
+        self.assertIsNone(run.answer_given)
+        self.assertEqual(json.dumps(run.state, sort_keys=True), before)
+        self.assertEqual(run.stop["id"], "one:2")
+
+
 if __name__ == "__main__":
     unittest.main()

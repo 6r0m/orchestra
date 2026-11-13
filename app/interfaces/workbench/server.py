@@ -75,7 +75,7 @@ STATIC = {"/": ("index.html", "text/html; charset=utf-8"),
 RUN_ID = re.compile(r"^[\w-]{1,64}$")
 MAX_BODY = 1 << 20
 MAX_TURN_FILE = 8 << 20
-ANSWER_KEYS = {"stop", "action", "text", "confirm"}
+ANSWER_KEYS = {"stop", "action", "text", "confirm", "landing"}
 # The page reads the stack three ways every few seconds, and a Windows worker's process takes about
 # half a second to read: every request shares one reading at most this old, and a stack action drops it.
 READING_SECONDS = 3
@@ -324,6 +324,10 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
                 if parts == ["worktrees"]:
                     query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
                     return self._send(HTTPStatus.OK, self._worktrees((query.get("repo") or [None])[0]))
+                if parts == ["landing"]:
+                    query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                    return self._send(HTTPStatus.OK, call(lambda client: runs.landing_options(
+                        client, repo=(query.get("repo") or [None])[0])))
                 if parts == ["repos"]:
                     return self._send(HTTPStatus.OK, [{"id": name, "target": entry.get("target") or (
                         "windows" if repos.windows_path(entry["path"]) else "wsl")}
@@ -339,6 +343,8 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
                     run_id = parts[1]
                     if len(parts) == 2:
                         return self._send(*self._run(run_id))
+                    if parts[2:] == ["landing"]:
+                        return self._send(HTTPStatus.OK, call(lambda client: runs.landing_options(client, run_id=run_id)))
                     if parts[2:] == ["turn"]:
                         return self._send(*self._turn(run_id))
                     if parts[2:] == ["history"]:
@@ -398,6 +404,7 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
                     handle = call(lambda client: runs.start(client, task, repo=body.get("repo") or None,
                                                             auto_proceed=bool(body.get("auto_proceed")),
                                                             flow=body.get("flow") or None,
+                                                            short_name=body.get("short_name"),
                                                             settings_root=root, settings_environ=environ))
                     return self._send(HTTPStatus.OK, {"run_id": handle.id})
                 if len(parts) == 3 and parts[0] == "runs" and RUN_ID.match(parts[1]) and parts[2] == "answer":

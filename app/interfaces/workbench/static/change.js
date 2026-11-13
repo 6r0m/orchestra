@@ -319,7 +319,7 @@ export function showReviews(runId, review, open, stage = null) {
           }
         }
         snapshot = result;
-        status.textContent = result.files_total ? result.files_total + " files changed in this snapshot."
+        status.textContent = result.files_total ? fileCount(result.files_total) + " in this snapshot."
           : "No files differ between these snapshots.";
         if (live) status.append(" Sampled ", clock(new Date().toISOString(), "ago"),
           "; refreshes with worktree updates while open. Not independently verified.");

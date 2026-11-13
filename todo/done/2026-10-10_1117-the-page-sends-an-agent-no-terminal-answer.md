@@ -1,12 +1,11 @@
 # The page sends an agent no answer of its own terminal's
 
-**Status:** BUILT 2026-10-10 — the one gap the external reviewer named is closed below. It awaits the
-reviewer's PASS, and the operator's word to close it.
+**Status:** DONE (local implementation) 2026-11-13 — existing delivery reconciled and locally retested; live-state limits remain recorded below.
 **Scope:** what a role's terminal on the page hands on to its agent
-([terminals.js](../app/interfaces/workbench/static/terminals.js)), and the scripted proof of it in
-`make demo` ([demo.py](../tools/demo.py)). Nothing on a host changes.
+([terminals.js](../../app/interfaces/workbench/static/terminals.js)), and the scripted proof of it in
+`make demo` ([demo.py](../../tools/demo.py)). Nothing on a host changes.
 **Stable documentation owner:** the invariant in
-[interfaces' structure](../app/interfaces/docs/architecture/structure.md); [using.md](../docs/using.md)
+[interfaces' structure](../../app/interfaces/docs/architecture/structure.md); [using.md](../../docs/using.md)
 for what the operator gives up for it.
 
 ## Goal
@@ -27,7 +26,7 @@ terminal answered for itself.
 - **A clean prompt over three key chords.** A cursor's report from the top row and F3 held with Shift, Alt
   or Ctrl are the same bytes, so neither is sent.
 - **Tracked here**, apart from the
-  [Pause and Reject change](done/2026-10-09_1418-workbench-reject-and-run-sections.md), which stays closed.
+  [Pause and Reject change](2026-10-09_1418-workbench-reject-and-run-sections.md), which stays closed.
 
 ## Verified evidence
 
@@ -43,12 +42,12 @@ terminal answered for itself.
 
 ## What changed
 
-- [terminals.js](../app/interfaces/workbench/static/terminals.js): the exception for modified F3 is gone.
+- [terminals.js](../../app/interfaces/workbench/static/terminals.js): the exception for modified F3 is gone.
   What is shaped as a terminal's answer is not sent, those chords with it.
-- [demo.py](../tools/demo.py): the scripted engineer asks, as it starts, where its cursor is from the top
+- [demo.py](../../tools/demo.py): the scripted engineer asks, as it starts, where its cursor is from the top
   row's second column, beside the questions it already asked.
 - The invariant with what is given up for it, in interfaces' structure; the operator's side of it in
-  using.md; the demo's row in [tools/README.md](../tools/README.md).
+  using.md; the demo's row in [tools/README.md](../../tools/README.md).
 
 ## Considered and not taken
 
@@ -67,3 +66,17 @@ terminal answered for itself.
   them; Shift+F3 and Ctrl+F3 dropped, as documented.
 - **On WSL:** `tests.test_demo` and `tests.test_architecture` — 9 classes, 45 tests, OK.
 - **Not run:** the whole suite, which runs no page script; a real agent, which this needs none of.
+
+### 2026-11-13 — Local acceptance and operator closeout
+
+- Operator approved completion, architectural review and local retesting of the current todos.
+  The existing implementation remains with its documented owners; no replacement service or workflow
+  authority was introduced for this delivery.
+- Full host acceptance passed sequentially: Windows, 704 tests; WSL, 933 tests. The first WSL run
+  exposed three CLI fixtures missing the new required name; valid named-start fixtures restored their
+  original preflight, telemetry-isolation and collision checks. Their focused rerun and the replacement
+  full WSL suite passed. New terminal-cache/merge regressions have additional focused browser acceptance.
+- Closure covers implemented behavior and local test acceptance. No live worker/service restart,
+  real push, Git identity mutation or new paid call was performed. Earlier live evidence is historical;
+  current production health, physical portrait-display acceptance and provider invoice completeness
+  are not newly asserted by this closeout. The previously recorded billing-coverage limitations remain.

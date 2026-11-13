@@ -9,16 +9,18 @@ $uv = Join-Path $env:USERPROFILE ".local\bin\uv.exe"
 
 $hostTests = @(
     "tests.agents.test_launch", "tests.agents.test_terminal", "tests.agents.test_trust", "tests.agents.test_adapters",
-    "tests.workspace.test_repos", "tests.workspace.test_worktrees",
+    "tests.workspace.test_repos", "tests.workspace.test_worktrees", "tests.workspace.test_merge_choices",
     "tests.orchestration.test_workflow", "tests.orchestration.test_stops", "tests.orchestration.test_replay",
     "tests.observability.test_trace_parity", "tests.observability.test_stale_settings", "tests.foundation.test_policy",
-    "tests.foundation.test_flows",
+    "tests.foundation.test_flows", "tests.foundation.test_landing",
     "tests.foundation.test_localenv",
     "tests.agents.test_pi", "tests.agents.test_prompt_size", "tests.observability.test_generation_upload",
     "tests.observability.test_pricing", "tests.observability.test_accounting",
     "tests.application.test_stack", "tests.application.test_reload", "tests.application.test_activities", "tests.test_architecture", "tests.test_harness",
     "tests.test_public_check", "tests.interfaces.test_worker",
     "tests.interfaces.test_terminal_browser", "tests.interfaces.test_diff_browser", "tests.interfaces.test_review_browser",
+    "tests.interfaces.test_merge_browser",
+    "tests.interfaces.test_start_browser",
     "tests.application.test_reviews", "tests.application.test_operator_history", "tests.interfaces.test_workbench.View"
 )
 if (-not $Tests) { $Tests = $hostTests }

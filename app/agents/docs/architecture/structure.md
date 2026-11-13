@@ -44,7 +44,10 @@ This package's relationships are drawn once, in [the main view](diagrams/main.md
 
 Through the vendor CLI's own argv and its session store: a turn is that CLI started again
 with the role's session resumed by exact id and the prompt delivered through its adapter. Orchestra
-passes argv directly; a managed launcher may use its own platform wrapper. A prompt past `nodes.PROMPT_BUDGET` has its
+passes argv directly; a managed launcher may use its own platform wrapper. An adapter can bind the assigned
+worktree explicitly at launch (`in_worktree`); Codex receives `--cd` on fresh and resumed invocations so its
+saved directory cannot override the controller's assigned root. This does not approve native trust dialogs.
+A prompt past `nodes.PROMPT_BUDGET` has its
 longest parts — never the skill or the stage's ask — attached as files in the run's folder, each named in its
 place; a kind that reads outside the worktree only where it is told to is told that folder (`readable`) — Claude
 by a rule allowing reads there, never as a working directory, which would keep its shell's `cd` into the folder

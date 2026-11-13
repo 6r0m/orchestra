@@ -1,0 +1,3 @@
+{
+  "git.repositoryScanIgnoredFolders": ["node_modules", "tmp"]
+}

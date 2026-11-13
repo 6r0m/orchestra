@@ -3,9 +3,30 @@
 
 import { api } from "./api.js";
 import { $, el, report, sayRefused, score, wrote } from "./ui.js";
-import { sourceChoice } from "./picker.js";
+import { sourceChoice, reposRead } from "./picker.js";
 
 const chosenRepo = sourceChoice("start");
+$("start-name").oninput = () => { $("start-name-preview").textContent = $("start-name").value.toLowerCase() || "your-name"; };
+let previewRequest = 0;
+async function previewLanding() {
+  const request = ++previewRequest, repo = chosenRepo();
+  if (!repo) return;
+  try {
+    const result = await api("/api/landing?repo=" + encodeURIComponent(repo));
+    if (request !== previewRequest) return;
+    if (typeof result.branch !== "string") throw new Error("the target worker needs a graceful reload for landing preview");
+    const target = result.remote ? result.remote + "/" + result.branch + " (pushed)"
+      : result.branch + " (local; nothing is pushed)";
+    $("start-landing").textContent = "Merge lands on: " + target +
+      (!result.remote && result.upstream ? ". This branch tracks " + result.upstream +
+        "; tracking does not authorize pushing. Choose a prepared remote at the final gate to push." : "") +
+      (result.identity_ready ? "" : ". Git commit identity needs configuration before Merge.");
+  } catch (error) {
+    if (request === previewRequest) $("start-landing").textContent = "Merge destination unavailable: " + error.message;
+  }
+}
+$("start-source").addEventListener("change", previewLanding);
+$("start-path").addEventListener("blur", previewLanding);
 // The runs started from this page, by id, with the repository each was started on, until the list reads them
 // closed. Kept in memory, as an unsent note is: a reload forgets them.
 const starting = new Map();
@@ -83,7 +104,8 @@ async function loadFlows() {
 }
 
 // flows/ is read again each time the list is opened, so a flow added or edited there shows without a reload.
-export const reloadFlows = () => loadFlows().catch((error) => report($("start-result"), error.message, true));
+export const reloadFlows = () => Promise.all([loadFlows(), reposRead().then(previewLanding)])
+  .catch((error) => report($("start-result"), error.message, true));
 $("start-flow").onfocus = reloadFlows;
 $("start-flow").onchange = () => {
   chosenFlow = true;
@@ -104,11 +126,15 @@ $("start").onsubmit = async (event) => {
   button.disabled = true;
   report($("start-result"), "starting…");
   try {
+    const support = await api("/api/landing?repo=" + encodeURIComponent(repo));
+    if (support.version !== 1) throw Object.assign(new Error("Reload the Workbench and target worker before starting a named run."), { status: 409 });
     const started = await api("/api/runs", { task: $("start-task").value, repo: repo,
-      flow: $("start-flow").value, auto_proceed: $("start-auto").checked });
+      short_name: $("start-name").value, flow: $("start-flow").value, auto_proceed: $("start-auto").checked });
     report($("start-result"), "started " + started.run_id);
     starting.set(started.run_id, { repo: repo });
     $("start-task").value = "";
+    $("start-name").value = "";
+    $("start-name").oninput();
     wrote();
     if (location.hash === from) location.hash = "#run=" + encodeURIComponent(started.run_id);
   } catch (error) {

@@ -124,6 +124,12 @@ def host(argv, windows=WINDOWS, skills=None):
     return list(argv) + WINDOWS_FLAGS if windows else list(argv)
 
 
+def in_worktree(argv, folder):
+    # Native resume can restore a differently cased saved path on mounted filesystems. The controller's
+    # assigned root must remain authoritative on every invocation, including resumed sessions.
+    return list(argv) + ["--cd", folder]
+
+
 def session_in(argv):
     return argv[argv.index("resume") + 1] if "resume" in argv[1:2] else None
 

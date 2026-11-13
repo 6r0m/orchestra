@@ -145,6 +145,55 @@ export async function run() {
         "invalidation prevented a fresh screen at its reset cursor after " + phase);
     }
 
+    const trackedMaps = new Set(), releases = [], pendingSaves = [];
+    const nativeSet = Map.prototype.set, nativeDigest = crypto.subtle.digest;
+    const retained = (run) => [...trackedMaps].some((map) => map.has(JSON.stringify([run, "windows", "engineer"])));
+    try {
+      Map.prototype.set = function (key, value) {
+        if (typeof key === "string" && key.startsWith('["probe-metadata-')) trackedMaps.add(this);
+        return nativeSet.call(this, key, value);
+      };
+      for (let n = 0; n <= cache.LIMITS.screens; n++) {
+        const run = "probe-metadata-idle-" + n;
+        await cache.remove(run, "windows", "engineer");
+        check(!retained(run), "idle removal retained historical screen metadata");
+      }
+      const run = "probe-metadata-overlap";
+      cleanup.add(run);
+      crypto.subtle.digest = function (...args) {
+        const computed = nativeDigest.apply(this, args);
+        return new Promise((resolve) => releases.push(() => resolve(computed)));
+      };
+      const first = cache.save(run, "windows", "engineer", 500, stream);
+      const second = cache.save(run, "windows", "engineer", 600, stream);
+      pendingSaves.push(first, second);
+      check(releases.length === 2, "overlapping saves did not reach their hash barriers");
+      await cache.remove(run, "windows", "engineer");
+      releases[1]();
+      check(!await second && retained(run), "metadata retired before the oldest save finished");
+      const fresh = cache.save(run, "windows", "engineer", 10, stream);
+      pendingSaves.push(fresh);
+      releases[2]();
+      check(await fresh, "a fresh screen could not save while invalidated saves finished");
+      releases[0]();
+      check(!await first && cache.read(run, "windows", "engineer").cursor === 10,
+        "the oldest save replaced a fresh screen after another save completed");
+      await cache.remove(run, "windows", "engineer");
+      check(!retained(run), "completed saves retained screen metadata");
+      check(!await cache.save(run, "windows", "engineer", 0, stream) && !retained(run),
+        "an early-return save retained metadata");
+      crypto.subtle.digest = nativeDigest;
+      const failed = await import("/terminal-cache.js?metadata-failure");
+      const failedRun = "probe-metadata-failure";
+      check(!await failed.save(failedRun, "windows", "engineer", 1, {}) && failed.issue() && !retained(failedRun),
+        "a failed save retained metadata or hid its failure");
+    } finally {
+      Map.prototype.set = nativeSet;
+      crypto.subtle.digest = nativeDigest;
+      for (const release of releases) release();
+      await Promise.allSettled(pendingSaves);
+    }
+
     const peer = await import("/terminal-cache.js?peer");
     const race = "probe-race";
     cleanup.add(race);

@@ -110,6 +110,9 @@ class FakeWorktrees:
     def prepush_id(self, repo):
         return "what-runs-before-a-push"
 
+    def landing_pins(self, repo):
+        return {}
+
     def create(self, repo, base, root, run_id, target, lfs_pointers=False, remote=None, pinned=None):
         self.calls.append(("create", run_id, target))
         return "/fake/worktree/%s" % run_id

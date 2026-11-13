@@ -1,8 +1,8 @@
 # Operator review milestones
 
-**Status:** IMPLEMENTED AND VERIFIED — live current intervals active
-**Scope:** durable review checkpoints, operator-action history projection and milestone diff/copy UI  
-**Stable documentation owners:** [orchestration](../app/orchestration/docs/architecture/structure.md), [workspace](../app/workspace/docs/architecture/structure.md), [application](../app/application/docs/architecture/structure.md), and [interfaces](../app/interfaces/docs/architecture/structure.md)
+**Status:** DONE (local implementation) 2026-11-13 — existing delivery reconciled and locally retested; live-state limits remain recorded below.
+**Scope:** durable review checkpoints, operator-action history projection and milestone diff/copy UI
+**Stable documentation owners:** [orchestration](../../app/orchestration/docs/architecture/structure.md), [workspace](../../app/workspace/docs/architecture/structure.md), [application](../../app/application/docs/architecture/structure.md), and [interfaces](../../app/interfaces/docs/architecture/structure.md)
 
 ## Contents
 
@@ -60,13 +60,13 @@ Repeated external review should not require resending the entire accumulated pat
 
 ## Verified evidence
 
-- [client.py](../app/application/client.py), `history` and `_changes`, already derive completed turns, original accepted answers, their event ordering and per-turn Git tree ranges from Temporal. Answers have stable stop identity and an `after` relationship to completed work. New role-activity names are already recognized there.
-- [run.js](../app/interfaces/workbench/static/run.js), `renderHistory`, `answerRow`, `roundChange`, already shows operator rows and engineer changes since a prior review. It does not aggregate automatic rounds into operator milestones or offer a milestone copy control.
-- [change.js](../app/interfaces/workbench/static/change.js) keeps a selected snapshot for Refresh/file reads; its top-level Copy all changes deliberately reads a fresh whole-run snapshot. That live command is not a historical checkpoint.
-- [diff.js](../app/interfaces/workbench/static/diff.js), `copyPatch`, already reads a large patch in bounded chunks against one immutable base/tree pair. Reuse that route; do not concatenate per-round patches and call them one net change.
-- [worktrees.py](../app/workspace/worktrees.py), `work_tree` and `review_diff`, creates Git trees using a private index and reads named snapshots after worktree removal when the repository still holds them. `held` explicitly reports objects Git has pruned. Current tree hashes are not durable retention roots.
+- [client.py](../../app/application/client.py), `history` and `_changes`, already derive completed turns, original accepted answers, their event ordering and per-turn Git tree ranges from Temporal. Answers have stable stop identity and an `after` relationship to completed work. New role-activity names are already recognized there.
+- [run.js](../../app/interfaces/workbench/static/run.js), `renderHistory`, `answerRow`, `roundChange`, already shows operator rows and engineer changes since a prior review. It does not aggregate automatic rounds into operator milestones or offer a milestone copy control.
+- [change.js](../../app/interfaces/workbench/static/change.js) keeps a selected snapshot for Refresh/file reads; its top-level Copy all changes deliberately reads a fresh whole-run snapshot. That live command is not a historical checkpoint.
+- [diff.js](../../app/interfaces/workbench/static/diff.js), `copyPatch`, already reads a large patch in bounded chunks against one immutable base/tree pair. Reuse that route; do not concatenate per-round patches and call them one net change.
+- [worktrees.py](../../app/workspace/worktrees.py), `work_tree` and `review_diff`, creates Git trees using a private index and reads named snapshots after worktree removal when the repository still holds them. `held` explicitly reports objects Git has pruned. Current tree hashes are not durable retention roots.
 - Native [Git ref updates](https://git-scm.com/docs/git-update-ref) can retain object references; [Git GC](https://git-scm.com/docs/git-gc) preserves objects reachable through the refs namespace. This avoids milestone commits. Compatibility with this project's scanners and supported Git versions still needs the planned regression evidence.
-- [workflow.py](../app/orchestration/workflow.py), `_stop`, `_final_gate`, `_reopened` and `_reconcile`, owns accepted answers, closeout reopening and base movement. None currently records a Git sample for every operator boundary.
+- [workflow.py](../../app/orchestration/workflow.py), `_stop`, `_final_gate`, `_reopened` and `_reconcile`, owns accepted answers, closeout reopening and base movement. None currently records a Git sample for every operator boundary.
 - Existing history projection intentionally separates base updates from engineer work and closeout changes from verified implementation. Milestones must preserve those distinctions.
 - Baseline: 29 existing tests passed across terminal streaming, history projection, snapshot diff reads and completed-turn lifetime. They establish reusable seams, not the new milestone feature. No exact-boundary or pinned-after-GC acceptance was run in this investigation.
 - The existing uncommitted prompt/context changes are a dependency to preserve. A milestone must never narrow the operator notes delivered independently to either role.
@@ -75,7 +75,7 @@ Repeated external review should not require resending the entire accumulated pat
 
 Temporal owns operator answers and the run's sequence; Git owns bytes and snapshot objects. Application composes those into the read model and target-host activities. The Workbench renders/copies the resulting ranges through the existing diff API. Langfuse remains optional observability and owns neither milestone order nor source snapshots.
 
-Primary routes: [workflow](../app/orchestration/workflow.py), [activities](../app/application/activities.py), [history projection](../app/application/client.py), [worktree operations](../app/workspace/worktrees.py), [Workbench server](../app/interfaces/workbench/server.py), [run history](../app/interfaces/workbench/static/run.js), [Change view](../app/interfaces/workbench/static/change.js), and [shared diff reader](../app/interfaces/workbench/static/diff.js).
+Primary routes: [workflow](../../app/orchestration/workflow.py), [activities](../../app/application/activities.py), [history projection](../../app/application/client.py), [worktree operations](../../app/workspace/worktrees.py), [Workbench server](../../app/interfaces/workbench/server.py), [run history](../../app/interfaces/workbench/static/run.js), [Change view](../../app/interfaces/workbench/static/change.js), and [shared diff reader](../../app/interfaces/workbench/static/diff.js).
 
 ## Problem and root cause
 
@@ -145,16 +145,16 @@ Observe each permanent guard failing against current code before its production 
 | Snapshot failure/legacy | absence cannot prove no change | unavailable/read-only legacy states stay explicit; failure does not discard the answer, block execution indefinitely or invoke a model |
 | Retention and isolation | hashes alone do not pin snapshots | milestone survives worktree removal and real `git gc`; same repository/two runs stay independent; releasing one approved ref cannot remove another |
 
-Use [test_stops.py](../tests/orchestration/test_stops.py) and [test_replay.py](../tests/orchestration/test_replay.py) for sequencing, refusal, cancellation and old histories; [test_worktrees.py](../tests/workspace/test_worktrees.py) for Git state, GC and immutable diff reads; [test_workbench.py](../tests/interfaces/test_workbench.py), especially `HistoryRead` and `Transcript`, for the projection/API; and [demo_press.py](../tools/demo_press.py) or the existing browser acceptance owner for real keyboard/disclosure/clipboard behavior. Extend the existing owner or add a focused test module there rather than building another harness.
+Use [test_stops.py](../../tests/orchestration/test_stops.py) and [test_replay.py](../../tests/orchestration/test_replay.py) for sequencing, refusal, cancellation and old histories; [test_worktrees.py](../../tests/workspace/test_worktrees.py) for Git state, GC and immutable diff reads; [test_workbench.py](../../tests/interfaces/test_workbench.py), especially `HistoryRead` and `Transcript`, for the projection/API; and [demo_press.py](../../tools/demo_press.py) or the existing browser acceptance owner for real keyboard/disclosure/clipboard behavior. Extend the existing owner or add a focused test module there rather than building another harness.
 
-Run targeted cases first, then `bash run-tests.sh` and `powershell -NoProfile -ExecutionPolicy Bypass -File run-tests.ps1` sequentially under [tests/README.md](../tests/README.md). Run the applicable isolated browser scenario and `bash tools/public_check.sh`. No paid model call or external reviewer API is required.
+Run targeted cases first, then `bash run-tests.sh` and `powershell -NoProfile -ExecutionPolicy Bypass -File run-tests.ps1` sequentially under [tests/README.md](../../tests/README.md). Run the applicable isolated browser scenario and `bash tools/public_check.sh`. No paid model call or external reviewer API is required.
 
 ## Documentation plan
 
-- **Orchestration:** accepted-action boundaries, capture failure semantics and replay/version behavior in its existing [structure](../app/orchestration/docs/architecture/structure.md).
-- **Workspace:** private snapshot retention and explicit release semantics in its existing [structure](../app/workspace/docs/architecture/structure.md); Git object/ref behavior remains that owner's responsibility.
-- **Application:** the projection from Temporal/Git into review intervals in its existing [structure](../app/application/docs/architecture/structure.md).
-- **Interfaces and usage:** milestone selection, snapshot quality and clipboard behavior in the existing [interface structure](../app/interfaces/docs/architecture/structure.md) and [using.md](../docs/using.md). Preserve the current Change spoiler; do not create another history store or duplicate architecture graph.
+- **Orchestration:** accepted-action boundaries, capture failure semantics and replay/version behavior in its existing [structure](../../app/orchestration/docs/architecture/structure.md).
+- **Workspace:** private snapshot retention and explicit release semantics in its existing [structure](../../app/workspace/docs/architecture/structure.md); Git object/ref behavior remains that owner's responsibility.
+- **Application:** the projection from Temporal/Git into review intervals in its existing [structure](../../app/application/docs/architecture/structure.md).
+- **Interfaces and usage:** milestone selection, snapshot quality and clipboard behavior in the existing [interface structure](../../app/interfaces/docs/architecture/structure.md) and [using.md](../../docs/using.md). Preserve the current Change spoiler; do not create another history store or duplicate architecture graph.
 - Stable docs and code must not link to this todo. Historical review retention must not be conflated with the separate terminal-cache policy.
 
 ## Rollout and rollback
@@ -215,3 +215,17 @@ Use additive, versioned workflow behavior that replays old histories; existing p
 - The existing Workbench service loaded the application reader without replacing either worker. Live browser checks confirmed the current interval is first and open, has the latest accepted checkpoint as its base, lists the actual revision's files, and matches immutable patch readback. The workflow state, stop and configuration hash stayed unchanged across activation. Health checks confirmed both assigned queues polling; no WSL restart, agent interruption, answer submission or paid call occurred.
 - Public-safety checks and diff validation passed. Native process reuse and account admission remain outside this scope.
 - Subsequent live acceptance observed another operator Merge capture a valid checkpoint; the new current interval correctly showed no additional files. The Git commit stopped on missing author configuration, independently of checkpoint capture; no identity or repository configuration was changed during this work.
+
+### 2026-11-13 — Local acceptance and operator closeout
+
+- Operator approved completion, architectural review and local retesting of the current todos.
+  The existing implementation remains with its documented owners; no replacement service or workflow
+  authority was introduced for this delivery.
+- Full host acceptance passed sequentially: Windows, 704 tests; WSL, 933 tests. The first WSL run
+  exposed three CLI fixtures missing the new required name; valid named-start fixtures restored their
+  original preflight, telemetry-isolation and collision checks. Their focused rerun and the replacement
+  full WSL suite passed. New terminal-cache/merge regressions have additional focused browser acceptance.
+- Closure covers implemented behavior and local test acceptance. No live worker/service restart,
+  real push, Git identity mutation or new paid call was performed. Earlier live evidence is historical;
+  current production health, physical portrait-display acceptance and provider invoice completeness
+  are not newly asserted by this closeout. The previously recorded billing-coverage limitations remain.

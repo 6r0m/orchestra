@@ -1,7 +1,7 @@
 """Operator entrypoint: a Temporal client for runs, and the stack they run on. The forms for a run,
 the worktree view, and the stack:
 
-    orchestrate "<task>" [--auto-proceed] [--repo NAME|PATH]
+    orchestrate "<task>" --name <short-name> [--auto-proceed] [--repo NAME|PATH]
     orchestrate --resume <run-id> --answer "<answer>" [--confirm]
     orchestrate --continue <run-id>
     orchestrate --use-engineer-defaults <run-id>
@@ -21,6 +21,7 @@ stops for the operator or ends. `--stack` goes through the stack's one owner, as
 import argparse
 import asyncio
 import datetime
+import json
 import os
 import sys
 import textwrap
@@ -32,6 +33,7 @@ from app.foundation import flows
 from app.foundation import policy as policy_mod
 from app.foundation import paths
 from app.workspace import repos
+from app.workspace import worktrees
 from app.observability import telemetry
 from app.orchestration import workflow as WF
 from app.application.client import Refusal, preflight, work_item_label  # noqa: F401 - the CLI's names for them
@@ -158,15 +160,21 @@ def _trace_url(tele, state):
 
 
 async def _start(client, args, tele, check):
+    if not args.name:
+        raise Refusal("a new run requires --name with a meaningful short branch/worktree name")
+    try:
+        worktrees.short_name(args.name)
+    except ValueError as error:
+        raise Refusal(str(error)) from error
     handle = await runs.start(client, args.task, repo=args.repo, auto_proceed=args.auto_proceed,
-                              settings_path=args.settings, check=check, flow=args.flow)
+                              settings_path=args.settings, check=check, flow=args.flow, short_name=args.name)
     run_id = handle.id
     print("run-id: %s" % run_id, flush=True)
     status = await follow(handle)
     return _report(status, run_id, _trace_url(tele, status["state"]))
 
 
-async def _answer(client, run_id, text, confirm, tele, check, only=None):
+async def _answer(client, run_id, text, confirm, tele, check, only=None, landing=None):
     handle = client.get_workflow_handle(run_id)
     # Read only once a worker can answer: with none the query would wait for one.
     status = await (runs.readable_status(client, run_id) if check else runs.status(client, run_id))
@@ -184,6 +192,13 @@ async def _answer(client, run_id, text, confirm, tele, check, only=None):
               file=sys.stderr)
         return 2
     answer["stop"] = stop["id"]
+    if landing is not None:
+        if answer.get("action") != "merge" or confirm is not True:
+            raise Refusal("--landing belongs to a confirmed Merge answer")
+        if set(landing) != {"branch", "remote", "messages"}:
+            raise Refusal("--landing names only branch, remote and messages; the saved stop/base/tree are read from the run")
+        answer["landing"] = dict(landing, version=1, basis=status["state"].get("base_tip"),
+                                 tree=status["state"].get("final_tree"))
     try:
         await runs.answer(client, run_id, answer, check=check, only=only)
     except runs.NotWaiting as error:
@@ -330,11 +345,13 @@ def parse_args(argv):
                         help="skip approvals: every approval the flow schedules, never an emergency stop or "
                              "the final merge")
     parser.add_argument("--repo", metavar="NAME|PATH", help="repository to run on (default: this one)")
+    parser.add_argument("--name", help="explicit short branch/worktree name for a new run")
     parser.add_argument("--flow", metavar="NAME",
                         help="the flow to follow, a file in flows/ (default: the settings' default_flow)")
     parser.add_argument("--resume", metavar="RUN_ID", help="answer the stop this run waits at")
     parser.add_argument("--answer", metavar="TEXT")
     parser.add_argument("--confirm", action="store_true", help="confirm a discard")
+    parser.add_argument("--landing", metavar="JSON", help="confirmed Merge: branch, remote, and work/merge messages as JSON")
     parser.add_argument("--continue", dest="continue_", metavar="RUN_ID",
                         help="run a failed stage again once you have fixed its cause")
     parser.add_argument("--use-engineer-defaults", metavar="RUN_ID",
@@ -364,6 +381,10 @@ def parse_args(argv):
         parser.error("--resume requires --answer")
     if not args.resume and args.answer is not None:
         parser.error("--answer belongs to --resume")
+    if args.name is not None and not args.task:
+        parser.error("--name belongs to a new task; existing run identities cannot be renamed")
+    if args.landing is not None and not args.resume:
+        parser.error("--landing belongs to a confirmed --resume Merge answer")
     return args
 
 
@@ -399,7 +420,13 @@ async def run(argv=None, client=None, tele=None, check=True):
         if args.force_terminate:
             return await _force_terminate(client, args.force_terminate)
         if args.resume:
-            return await _answer(client, args.resume, args.answer, args.confirm, tele, check)
+            try:
+                selected = json.loads(args.landing) if args.landing is not None else None
+                if args.landing is not None and not isinstance(selected, dict):
+                    raise ValueError("a landing JSON object is required")
+            except ValueError as error:
+                raise Refusal(str(error)) from error
+            return await _answer(client, args.resume, args.answer, args.confirm, tele, check, landing=selected)
         if args.continue_:
             return await _answer(client, args.continue_, "continue", False, tele, check, only="failed")
         return await _start(client, args, tele, check)

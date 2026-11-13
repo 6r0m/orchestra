@@ -8,7 +8,7 @@ export const LIMITS = Object.freeze({ bytes: 32 * 1024 * 1024, frame: 8 * 1024 *
   screens: 24, closed: 256 });
 const { bytes: BYTE_LIMIT, frame: FRAME_LIMIT, screens: SCREEN_LIMIT, closed: CLOSED_LIMIT } = LIMITS;
 const frames = new Map();
-const invalidations = new Map();
+const activeScreens = new Map();
 const closed = new Set();
 const serializers = new WeakMap();
 const saving = new Set();
@@ -98,7 +98,8 @@ export function read(runId, target, role) {
 
 export function remove(runId, target, role) {
   const id = key(runId, target, role);
-  invalidations.set(id, (invalidations.get(id) || 0) + 1);
+  const screen = activeScreens.get(id);
+  if (screen) screen.generation++;
   frames.delete(id);
   return change((store) => store.delete(id));
 }
@@ -163,17 +164,28 @@ async function digest(body) {
 }
 
 export function save(runId, target, role, cursor, term) {
-  const operation = saveScreen(runId, target, role, cursor, term);
+  const id = key(runId, target, role);
+  let screen = activeScreens.get(id);
+  if (!screen) {
+    screen = { generation: 0, count: 0 };
+    activeScreens.set(id, screen);
+  }
+  screen.count++;
+  const operation = saveScreen(runId, target, role, cursor, term, screen, screen.generation);
   saving.add(operation);
-  operation.finally(() => saving.delete(operation));
+  operation.finally(() => {
+    saving.delete(operation);
+    // Other saves may still be hashing or waiting for the write transaction.
+    if (--screen.count === 0) activeScreens.delete(id);
+  });
   return operation;
 }
 
-async function saveScreen(runId, target, role, cursor, term) {
+async function saveScreen(runId, target, role, cursor, term, screen, generation) {
   if (!database || failure || closed.has(runId) || !cursor) return false;
   // A legacy page configuration cannot validate persisted geometry; its ordinary replay still works.
   if (!Number.isInteger(CONFIG.terminal_size.min_rows) || !Number.isInteger(CONFIG.terminal_size.max_rows)) return false;
-  const id = key(runId, target, role), generation = invalidations.get(id);
+  const id = key(runId, target, role);
   try {
     const snapshot = capture(term);
     if (!snapshot) return false;
@@ -185,10 +197,10 @@ async function saveScreen(runId, target, role, cursor, term) {
     const row = { id: id, kind: "screen", format: FORMAT,
       runId, target, role, cursor, cols: term.cols, rows: term.rows, body,
       bytes, digest: await digest(body), at: Date.now() };
-    if (closed.has(runId) || invalidations.get(id) !== generation) return false;
+    if (closed.has(runId) || screen.generation !== generation) return false;
     frames.set(row.id, row);
     return await change((store, rows) => {
-      if (closed.has(runId) || invalidations.get(id) !== generation) return false;
+      if (closed.has(runId) || screen.generation !== generation) return false;
       if (rows.some((item) => item.kind === "closed" && item.runId === runId)) {
         closed.add(runId);
         for (const [id, frame] of frames) if (frame.runId === runId) frames.delete(id);

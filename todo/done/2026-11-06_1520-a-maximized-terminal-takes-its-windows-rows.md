@@ -1,13 +1,12 @@
 # A maximized terminal takes its window's rows
 
-**Status:** BUILT 2026-11-09 — green on both hosts and in `make demo`; the Workbench serves the page already. It
-awaits the workers' restart, the live check on the operator's portrait display, and their word to close it.
-**Scope:** a role's terminal size — the PTY host ([ptyhost.py](../app/agents/ptyhost.py)), the worker's terminal and
-its socket ([terminal.py](../app/agents/terminal.py) `Terminal`, `_Agent`, `serve`), the page's terminal
-([terminals.js](../app/interfaces/workbench/static/terminals.js)), and their proof ([test_terminal.py](../tests/agents/test_terminal.py),
-[demo_press.py](../tools/demo_press.py), [demo.py](../tools/demo.py)).
-**Stable documentation owner:** the agents' [structure](../app/agents/docs/architecture/structure.md) for the
-terminal's size and how it changes; [using.md](../docs/using.md) for Maximize.
+**Status:** DONE (local implementation) 2026-11-13 — existing delivery reconciled and locally retested; live-state limits remain recorded below.
+**Scope:** a role's terminal size — the PTY host ([ptyhost.py](../../app/agents/ptyhost.py)), the worker's terminal and
+its socket ([terminal.py](../../app/agents/terminal.py) `Terminal`, `_Agent`, `serve`), the page's terminal
+([terminals.js](../../app/interfaces/workbench/static/terminals.js)), and their proof ([test_terminal.py](../../tests/agents/test_terminal.py),
+[demo_press.py](../../tools/demo_press.py), [demo.py](../../tools/demo.py)).
+**Stable documentation owner:** the agents' [structure](../../app/agents/docs/architecture/structure.md) for the
+terminal's size and how it changes; [using.md](../../docs/using.md) for Maximize.
 
 ## Contents
 
@@ -94,7 +93,7 @@ the agent's rows as fit, and Restore puts it back.
 ## Current architecture and source of truth
 
 The worker owns a role's terminal: one `Terminal` per run and role holds the record, its viewers and the agent
-under it; each turn's agent runs under a PTY host it starts (D17 in the [architecture](../docs/architecture/structure.md)).
+under it; each turn's agent runs under a PTY host it starts (D17 in the [architecture](../../docs/architecture/structure.md)).
 The page draws what the worker sends, at the size the page's config names, and sends keys; it owns how large it
 draws the columns (`fit`) and Maximize/Restore, inside the page.
 
@@ -215,3 +214,17 @@ follow it.
   160 columns and 24 to 200 rows only — never the PTY, until the worker's next mark.
 - **Not measured yet:** the real Claude and Codex redrawing at a new row count, and the operator's portrait
   display — the live check, after the workers' restart.
+
+### 2026-11-13 — Local acceptance and operator closeout
+
+- Operator approved completion, architectural review and local retesting of the current todos.
+  The existing implementation remains with its documented owners; no replacement service or workflow
+  authority was introduced for this delivery.
+- Full host acceptance passed sequentially: Windows, 704 tests; WSL, 933 tests. The first WSL run
+  exposed three CLI fixtures missing the new required name; valid named-start fixtures restored their
+  original preflight, telemetry-isolation and collision checks. Their focused rerun and the replacement
+  full WSL suite passed. New terminal-cache/merge regressions have additional focused browser acceptance.
+- Closure covers implemented behavior and local test acceptance. No live worker/service restart,
+  real push, Git identity mutation or new paid call was performed. Earlier live evidence is historical;
+  current production health, physical portrait-display acceptance and provider invoice completeness
+  are not newly asserted by this closeout. The previously recorded billing-coverage limitations remain.

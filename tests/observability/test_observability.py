@@ -115,7 +115,7 @@ class Hermetic(Scenario):
         a1, _ = codex_review_first("PASS")
         E.host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)])
         try:
-            code, out = captured(cli.run(["toy task", "--repo", repo, "--settings", cast.file()], client=E.client(), check=False))
+            code, out = captured(cli.run(["toy task", "--name", "toy-task", "--flow", "engineer-code", "--repo", repo, "--settings", cast.file()], client=E.client(), check=False))
         finally:
             telemetry.resolve = original
         found = re.search(r"run-id: ([\w-]+)", out)
@@ -136,16 +136,16 @@ class RunIds(unittest.TestCase):
         fresh = "toy-task-%s" % uuid.uuid4().hex[:8]
         drawn = iter([taken, taken, fresh])
         original = worktrees.run_id
-        worktrees.run_id = lambda task: next(drawn)
+        worktrees.run_id = lambda task, name=None: next(drawn)
         self.addCleanup(setattr, worktrees, "run_id", original)
         for rid in (taken, fresh):
             self.addCleanup(shutil.rmtree, A.run_dir(rid), ignore_errors=True)
         a1, _ = codex_review_first("PASS")
         E.host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)])
-        _, first = captured(cli.run(["toy task", "--repo", repo, "--settings", cast.file()], client=E.client(), check=False))
+        _, first = captured(cli.run(["toy task", "--name", "toy-task", "--flow", "engineer-code", "--repo", repo, "--settings", cast.file()], client=E.client(), check=False))
         self.assertIn("run-id: %s" % taken, first)
         E.host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)])
-        _, second = captured(cli.run(["toy task", "--repo", repo, "--settings", cast.file()], client=E.client(), check=False))
+        _, second = captured(cli.run(["toy task", "--name", "toy-task", "--flow", "engineer-code", "--repo", repo, "--settings", cast.file()], client=E.client(), check=False))
         self.assertIn("run-id: %s" % fresh, second, "the retained id is never reused")
         self.assertRaises(StopIteration, next, drawn)
 
@@ -198,7 +198,7 @@ class Preflight(unittest.TestCase):
 
         repo = tempfile.mkdtemp(prefix="orchestra-preflight-")
         self.addCleanup(shutil.rmtree, repo, ignore_errors=True)
-        code, out = captured(cli.run(["toy task", "--repo", repo], client=Client(), tele=object()))
+        code, out = captured(cli.run(["toy task", "--name", "toy-task", "--flow", "engineer-code", "--repo", repo], client=Client(), tele=object()))
         self.assertEqual(code, 4, out)
         self.assertIn("no worker is polling", out)
         self.assertIn("the wsl worker", out)
@@ -274,7 +274,7 @@ class EntryPoint(unittest.TestCase):
     def _make(self, *args):
         return subprocess.run(
             ["make", "-C", REPO, "feature",
-             "V=%s %s" % (sys.executable, self.stub)] + list(args),
+             "V=%s %s" % (sys.executable, self.stub), "NAME=test-run"] + list(args),
             capture_output=True, text=True, timeout=120)
 
     def test_hostile_task_text_arrives_verbatim_as_one_argument(self):
@@ -284,13 +284,21 @@ class EntryPoint(unittest.TestCase):
         # The entry point is a module, so the recipe is `-m app.interfaces.cli <task>`: the
         # task is one argument, the last, and Make added nothing of its own after it.
         self.assertEqual(argv[:2], ["-m", "app.interfaces.cli"], argv)
-        self.assertEqual(len(argv), 3, argv)
+        self.assertEqual(len(argv), 5, argv)
+        self.assertEqual(argv[2:4], ["--name", "test-run"])
         self.assertEqual(argv[-1], self.hostile)
         self.assertIn("$5", argv[-1], "Make must not eat a bare $")
         self.assertIn("$(HOME)", argv[-1], "Make must not expand $(...)")
         self.assertFalse(os.path.exists(self.sentinel),
                          "nothing in the task text may be executed by Make "
                          "or by the shell")
+
+    def test_hostile_name_reaches_validation_without_make_or_shell_execution(self):
+        done = self._make('TASK=a complete task', 'NAME=' + self.hostile)
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        argv = json.load(open(self.capture))
+        self.assertEqual(argv[2:4], ['--name', self.hostile])
+        self.assertFalse(os.path.exists(self.sentinel))
 
     def test_missing_task_refuses_with_usage(self):
         done = self._make()

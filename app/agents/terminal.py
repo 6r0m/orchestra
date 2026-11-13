@@ -439,6 +439,8 @@ def run_turn(worktree, argv, rdir, name, prompt, timeout, env, on_tick=None, *, 
     if os.path.exists(paths["events"]):
         os.remove(paths["events"])
     argv = [executable] + list(argv[1:])
+    if hasattr(adapter, "in_worktree"):
+        argv = adapter.in_worktree(argv, worktree)
     session = adapter.session_in(argv)
     # The turn's events file is also in the agent's environment, for a kind whose hook names it as `-`: one hook
     # definition on every turn, which a vendor that trusts a hook by its exact definition — the operator trusting

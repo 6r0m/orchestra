@@ -12,7 +12,10 @@ operator, and the operator's Continue is the only way anything runs again.
 import asyncio
 import concurrent.futures
 import contextlib
+import hashlib
+import json
 import os
+import re
 import shutil
 import threading
 import time
@@ -27,6 +30,7 @@ from app.agents import nodes as N
 from app.foundation import paths
 from app.foundation import policy as P
 from app.foundation import stages
+from app.foundation import landing
 from app.workspace import repos
 from app.orchestration import routing
 from app.observability import telemetry as T
@@ -115,6 +119,15 @@ def _failure(exc):
                             non_retryable=True)
 
 
+def _merge_pins(state):
+    pins = dict(state.get("merge_pins") or {})
+    remote = state.get("remote")
+    # An older run may already hold its original remote's pre-role evidence.
+    if remote and state.get("remote_id") and state.get("prepush_id"):
+        pins.setdefault(remote, {"endpoint": state["remote_id"], "gate": state["prepush_id"]})
+    return pins
+
+
 # A step cut short from outside that is not known to be its run's Stop: its worker stopped under it, or
 # Temporal no longer knows it — its run force-terminated, or the step unheard past its heartbeat timeout.
 LOST = "lost"
@@ -178,17 +191,28 @@ class Activities:
                 self._git_busy.pop(run_id, None)
 
     def all(self):
-        return [self.prepare, self.create_worktree, self.open_run, self.open_phase, self.run_role,
+        return [self.prepare, self.prepare_named, self.create_worktree, self.open_run, self.open_phase, self.run_role,
                 self.run_role_with_operator_context, self.run_role_with_operator_history,
                 self.record_stop, self.record_answer, self.finish_trace, self.reconcile, self.reopen, self.merge,
                 self.discard,
-                self.worktree_view, self.review_diff, self.review_checkpoint, self.work_tree, self.adopt_todo_name]
+                self.worktree_view, self.review_diff, self.review_checkpoint, self.work_tree, self.adopt_todo_name,
+                self.validate_merge_choice]
 
     def client(self):
         if not self._resolved:
             self._client = self._telemetry() if callable(self._telemetry) else self._telemetry
             self._resolved = True
         return self._client
+
+    @activity.defn
+    def prepare_named(self, args):
+        try:
+            prefix = W.short_name(args["short_name"])
+            if not re.fullmatch(re.escape(prefix) + r"-[0-9a-f]{8}", args.get("run_id", "")):
+                raise ValueError("the run, branch and folder must use the complete approved name and unique suffix")
+        except (KeyError, ValueError) as exc:
+            raise ApplicationError(str(exc), type="Refused", non_retryable=True) from exc
+        return self.prepare(args)
 
     @activity.defn
     def prepare(self, args):
@@ -218,6 +242,9 @@ class Activities:
                 resolved["prepush_id"] = self.git.prepush_id(resolved["repo_path"])
             except Exception as exc:
                 raise _failure(exc) from exc
+        if args.get("merge_version") == landing.VERSION:
+            resolved["merge_pins"] = self.git.landing_pins(resolved["repo_path"])
+            resolved["merge_version"] = landing.VERSION
         # Neither CLI fails a turn whose skill no folder holds — one drops it without a word, the other waits
         # at its prompt until the turn's timeout (measured) — so every skill the run's stages invoke is looked
         # for where its kind finds skills. The run was handed only its flow's stages' skills.
@@ -248,7 +275,8 @@ class Activities:
                 tip = self.git.started_from(path)
             except Exception as exc:
                 raise _failure(exc) from exc
-        plan = W.plan_path(state["todo_dir"], state["todo_name"], state["created"], state["task"])
+        plan = W.plan_path(state["todo_dir"], state["todo_name"], state["created"], state["task"],
+                           name=state.get("short_name"))
         return {"worktree_path": path, "worktree": path, "plan": plan, "todo_path": os.path.join(path, plan),
                 "base_tip": tip}
 
@@ -451,6 +479,8 @@ class Activities:
                 # The tree the final gate holds from here on: the operator's to judge, and the only one a
                 # merge may commit.
                 result["final_tree"] = left
+                if state.get("merge_version") == landing.VERSION:
+                    result["commit_draft"] = landing.draft(N.final_message(role, out))
             if is_review:
                 verdict, feedback = N.parse_review(role, rc, out)
                 result.update(verdict=verdict, feedback=feedback)
@@ -570,6 +600,17 @@ class Activities:
         # run started before a flow made its build final, the tree the architect verified, its plan the
         # controller's to finish.
         final = state.get("final_tree")
+        selected = state.get("merge_choice")
+        extra = {}
+        work_message, merge_message = ("%s: %s" % (stem, words))[:100], "Merge %s" % stem
+        if selected:
+            selected = landing.choice(selected, state)
+            work_message, merge_message = (selected["messages"][key] for key in ("work", "merge"))
+            binding = {"execution": state["merge_execution"], "attempt": state["merge_attempt"],
+                       "repo": os.path.normcase(os.path.realpath(state["repo_path"])),
+                       "branch": state["base_branch"], "remote": state.get("remote"),
+                       "endpoint": state.get("remote_id"), "basis": state["base_tip"], "tree": final}
+            extra["recovery"] = hashlib.sha256(json.dumps(binding, sort_keys=True).encode("utf-8")).hexdigest()
         # No agent may change the worktree between the check of that tree and the commit,
         # nor hold it open while it is removed; a conflict's next turn opens the terminals again.
         terminal.close_run(state["run_id"])
@@ -578,9 +619,9 @@ class Activities:
                 return self.git.merge(state["repo_path"], state["worktree_path"], state["run_id"],
                                       state["base_branch"], final or state.get("verified_tree"),
                                       None if final else state["plan"],
-                                      state["todo_done_dir"], ("%s: %s" % (stem, words))[:100],
-                                      "Merge %s" % stem, state.get("base_tip"), state.get("remote"),
-                                      state.get("remote_id"), state.get("prepush_id"))
+                                      state["todo_done_dir"], work_message,
+                                      merge_message, state.get("base_tip"), state.get("remote"),
+                                      state.get("remote_id"), state.get("prepush_id"), **extra)
             except W.MergeRefused as exc:
                 return {"result": "refused", "reason": str(exc)}
             except Exception as exc:
@@ -643,8 +684,38 @@ class Activities:
     def worktree_view(self, args):
         """Every worktree the target's git reports, and whether it is merged. Reads only."""
         try:
+            if args.get("merge_state") is not None:
+                state = args["merge_state"]
+                return self.git.merge_destinations(state["repo_path"], state["base_tip"], state["run_id"],
+                                                   _merge_pins(state))
             resolved = self.repositories.resolve(args["repository"], args["worktree_root"])
+            if args.get("landing_preview"):
+                repo, branch, remote = resolved["repo_path"], resolved["base_branch"], resolved.get("remote")
+                tracking = W.git(repo, "for-each-ref", "--format=%(upstream:short)", "refs/heads/" + branch).stdout.strip()
+                return {"version": landing.VERSION, "branch": branch, "remote": remote, "upstream": tracking or None,
+                        "identity_ready": W.identity_ready(repo)}
             return {"base_branch": resolved["base_branch"],
                     "rows": self.git.view(resolved["repo_path"], resolved["base_branch"], resolved.get("remote"))}
         except repos.Refused as exc:
             raise ApplicationError(str(exc), type="Refused", non_retryable=True)
+
+    @activity.defn
+    def validate_merge_choice(self, args):
+        state, selected = args["state"], landing.choice(args["choice"], args["state"])
+        try:
+            rows = self.git.merge_destinations(state["repo_path"], state["base_tip"], state["run_id"],
+                                               _merge_pins(state))
+            if not any(row["branch"] == selected["branch"] and row["remote"] == selected["remote"]
+                       for row in rows["choices"]):
+                raise W.MergeRefused("the destination is incompatible or lacks unchanged pre-role trust evidence")
+            pin = _merge_pins(state).get(selected["remote"], {})
+            if selected["remote"]:
+                latest = self.git.base_tip(state["repo_path"], selected["branch"], selected["remote"], pin["endpoint"])
+                if W.git(state["repo_path"], "merge-base", "--is-ancestor", state["base_tip"], latest,
+                         check=False).returncode != 0:
+                    raise W.MergeRefused("the authoritative remote destination no longer contains the verified base")
+            if not W.identity_ready(state["repo_path"]) or not W.identity_ready(state["worktree_path"]):
+                raise W.MergeRefused("configure the intended controller Git identity before confirming Merge")
+            return {"remote_id": pin.get("endpoint"), "prepush_id": pin.get("gate")}
+        except Exception as exc:
+            raise _failure(exc) from exc

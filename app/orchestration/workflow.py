@@ -29,6 +29,7 @@ with workflow.unsafe.imports_passed_through():
     from app.foundation import flows
     from app.foundation import policy as P
     from app.foundation import stages
+    from app.foundation import landing
     from app.orchestration import routing
 
 NAMESPACE = "orchestration"
@@ -156,6 +157,12 @@ class FeatureRun:
         s = self.state = {"run_id": start["run_id"], "task": start["task"], "label": start["label"],
                           "created": start["created"], "auto_proceed": start["auto_proceed"],
                           "repo": repository["id"], "target": repository["target"], "status": "RUNNING"}
+        if "merge_version" in start and (type(start["merge_version"]) is not int or
+                start["merge_version"] != landing.VERSION or not isinstance(start.get("short_name"), str)):
+            s.update(status="REFUSED", refusal="unsupported named-start protocol or missing short name")
+            return s
+        if start.get("merge_version") == landing.VERSION:
+            s.update(short_name=start["short_name"], merge_version=landing.VERSION)
         # A start with no flow at all is a run started before flows, which follows the order that code took.
         legacy = "flow" not in start
         flow = start.get("flow")
@@ -171,7 +178,14 @@ class FeatureRun:
         s["flow"] = {"name": None, "steps": steps} if legacy else flow
         self.segments = flows.segments(steps)
         try:
-            s.update(await self._activity("prepare", {"repository": repository, "policy": self.policy},
+            preparation = {"repository": repository, "policy": self.policy}
+            prepare_activity = "prepare"
+            if start.get("merge_version") == landing.VERSION:
+                preparation["merge_version"] = landing.VERSION
+                preparation["short_name"] = start["short_name"]
+                preparation["run_id"] = start["run_id"]
+                prepare_activity = "prepare_named"
+            s.update(await self._activity(prepare_activity, preparation,
                                           READS, SHORT_TIMEOUT))
         except ActivityError as error:
             if is_cancelled_exception(error):
@@ -356,6 +370,9 @@ class FeatureRun:
                 if name in result:
                     s["final_tree"] = result[name]
                     self.conflict_reopens = name == "final_tree"
+                    s.pop("commit_draft", None)
+                    if "commit_draft" in result:
+                        s["commit_draft"] = result["commit_draft"]
             self._line("%s completed" % label)
         self.timeline.append(entry)
         return True
@@ -407,6 +424,9 @@ class FeatureRun:
     async def _next(self, work):
         """On to the flow's next work stage, in a phase of its own."""
         s = self.state
+        if "merge_version" in s or "merge_choice" in s:
+            s.pop("merge_choice", None)
+            s.pop("commit_draft", None)
         # Routing hints and reviewer feedback end here; original operator notes retain their phase provenance.
         s.update(phase=work, round=0, feedback="", guidance="", gate_reason="", episode=s["episode"] + 1)
         if work not in stages.FINAL:
@@ -443,7 +463,15 @@ class FeatureRun:
                          episode=s["episode"] + 1)
                 if self.review_rounds:
                     s.update(convergence=None, convergence_seen=[])
+                s.pop("merge_choice", None)
                 return "review" if answer["role"] == "architect" else "build"
+            if answer.get("landing"):
+                selected = answer["landing"]
+                attempt = s.get("merge_attempt") if s.get("merge_choice") else answer["stop"]
+                s.update(merge_choice=selected, merge_attempt=attempt,
+                         merge_execution=workflow.info().run_id, base_branch=selected["branch"],
+                         remote=selected["remote"], remote_id=answer["landing_pin"].get("remote_id"),
+                         prepush_id=answer["landing_pin"].get("prepush_id"))
             self._doing("merge")
             merged = await self._until_done("merge", lambda: self._git("merge", {"state": s}))
             if merged is None:
@@ -746,6 +774,28 @@ class FeatureRun:
 
     @workflow.update
     def answer(self, answer):
+        if "landing" in answer:
+            raise ValueError("use the supported final Merge Update for destination/message edits")
+        return self._accept_answer(answer)
+
+    @workflow.update
+    async def answer_merge(self, answer):
+        try:
+            pin = await workflow.execute_activity(
+                "validate_merge_choice", {"state": dict(self.state), "choice": answer["landing"]},
+                task_queue=self.queue, schedule_to_close_timeout=SHORT_TIMEOUT, retry_policy=READS)
+        except ActivityError as error:
+            raise ApplicationError(_message(error), type="MergeChoiceRefused", non_retryable=True) from error
+        self._validate_merge_answer(answer)
+        return self._accept_answer(dict(answer, landing_pin=pin))
+
+    @answer_merge.validator
+    def _validate_merge_answer(self, answer):
+        if not answer.get("landing"):
+            raise ValueError("name the confirmed final Merge destination and messages")
+        self._validate_answer(answer)
+
+    def _accept_answer(self, answer):
         note = self._operator_note(answer)
         if note is not None:
             self.operator_notes.append(note)
@@ -774,6 +824,19 @@ class FeatureRun:
 
     @answer.validator
     def _validate_answer(self, answer):
+        if "landing_pin" in answer:
+            raise ValueError("landing evidence is controller-owned")
+        if self.state.get("merge_version") == landing.VERSION and answer.get("action") == "merge" and "landing" not in answer:
+            raise ValueError("confirm the final Merge destination and valid commit messages")
+        if "landing" in answer:
+            if answer.get("action") != "merge" or self.stop is None or self.stop["reason"] != "final":
+                raise ValueError("destination and messages may change only at an unanswered final gate")
+            if answer.get("confirm") is not True:
+                raise ValueError("confirm the exact destination and commit messages")
+            landing.choice(answer["landing"], self.state)
+            if self.state.get("merge_choice") and answer["landing"] != self.state["merge_choice"]:
+                raise ValueError("this Merge attempt already froze its destination and messages; "
+                                 "Continue it unchanged or revise the change before selecting another destination")
         if "operator_history_version" in answer and (type(answer["operator_history_version"]) is not int or
                 answer["operator_history_version"] != OPERATOR_HISTORY_VERSION):
             raise ValueError("unsupported operator-note history transport; reload the Workbench or use the current CLI")
@@ -824,6 +887,7 @@ class FeatureRun:
                 "operator_context_version": OPERATOR_CONTEXT_VERSION,
                 "operator_history_version": OPERATOR_HISTORY_VERSION,
                 "review_milestones_version": REVIEW_MILESTONES_VERSION,
+                "merge_version": landing.VERSION,
                 "configuration": self._configuration()}
 
 
@@ -844,6 +908,8 @@ class WorktreeView:
 
     @workflow.run
     async def run(self, args):
+        if args.get("protocol_probe") == landing.VERSION:
+            return {"merge_version": landing.VERSION}
         return await workflow.execute_activity(
             "worktree_view", args, task_queue=args["queue"], start_to_close_timeout=SHORT_TIMEOUT,
             retry_policy=READS)

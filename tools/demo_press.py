@@ -320,7 +320,7 @@ def refused(page, repo, task, said):
     page.value("location.hash = '#new'; true")
     wait(lambda: page.value("[...document.getElementById('start-repo').options].some((o) => o.value === %s)"
                             % json.dumps(repo)), 30, "the page offering the repository %s" % repo)
-    page.value("document.getElementById('start-repo').value = %s; document.getElementById('start-task').value = %s;"
+    page.value("document.getElementById('start-name').value='demo-change'; document.getElementById('start-repo').value = %s; document.getElementById('start-task').value = %s;"
                " true" % (json.dumps(repo), json.dumps(task)))
     pressed = button("#start", "Start run")
     wait(lambda: page.value(pressed + " !== undefined"), 60, "the 'Start run' button")
@@ -365,7 +365,7 @@ def answered(page, status, said):
     wait(lambda: page.value("document.getElementById('start-repo').options.length > 0"), 30,
          "the repositories the page offers")
     page.value(ANSWER_STARTS % json.dumps(status))
-    page.value("document.getElementById('start-task').value = %s; true" % json.dumps("A start answered " + status))
+    page.value("document.getElementById('start-name').value='demo-change'; document.getElementById('start-task').value = %s; true" % json.dumps("A start answered " + status))
     pressed = button("#start", "Start run")
     wait(lambda: page.value(pressed + " !== undefined"), 60, "the 'Start run' button")
     region = page.value(REGION % pressed)
@@ -1484,6 +1484,29 @@ def main(url, run_id, label, said, note=None):
                 return accounting(page, run_id)
             if label == "review-closed":
                 return review_closed(page, run_id, said)
+            if label == "merge-choice":
+                page.value("location.hash='#run='+" + json.dumps(run_id))
+                wait(lambda: page.value("!document.querySelector('#merge-options').hidden && document.querySelector('#merge-destination').options.length>1"),
+                     30, "compatible final destinations")
+                if page.value("document.querySelector('.row[data-run=' + CSS.escape(" + json.dumps(run_id) + ") + '] .row-task').textContent") != run_id[:-9]:
+                    raise SystemExit('the run list omitted the approved short name')
+                branch = json.dumps(said)
+                page.value("(()=>{const s=document.querySelector('#merge-destination');s.value=[...s.options].find(o=>JSON.parse(o.value).branch===" +
+                           branch + " && JSON.parse(o.value).remote===null).value;s.dispatchEvent(new Event('change',{bubbles:true}));"
+                           "document.querySelector('#merge-work-message').value='Retain terminal screens';"
+                           "document.querySelector('#merge-merge-message').value='Merge retained terminal screens';"
+                           "document.querySelector('#merge-merge-message').dispatchEvent(new Event('input',{bubbles:true}));})()")
+                page.call("Runtime.evaluate", expression="new Promise(resolve=>setTimeout(resolve,2500))", awaitPromise=True)
+                if page.value("document.querySelector('#merge-merge-message').value") != 'Merge retained terminal screens':
+                    raise SystemExit('polling replaced the operator commit message')
+                page.value("[...document.querySelectorAll('#stop-actions button')].find(b=>b.textContent==='Merge').click()")
+                wait(lambda: page.value("document.querySelector('dialog[open]')!==null"), 10, "destination confirmation")
+                if not page.value("document.querySelector('dialog[open]').textContent.includes('local '+" + branch + ")"):
+                    raise SystemExit('confirmation omitted the actual local branch')
+                page.value("[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Merge').click()")
+                wait(lambda: page.value("document.body.textContent.includes('Merged')"), 30, "the actual selected landing")
+                print('PASS: final destination, operator messages and Git landing agree')
+                return 0
             if run_id == "start" and label.startswith("refused:"):
                 repo, task = label.split(":", 2)[1:]
                 return refused(page, repo, task, said)
@@ -1584,7 +1607,7 @@ def main(url, run_id, label, said, note=None):
                 page.value("location.hash = '#new'; true")
                 wait(lambda: page.value("document.getElementById('start-repo').options.length > 0"), 30,
                      "the repositories the page offers")
-                page.value("document.getElementById('start-task').value = %s; true" % json.dumps(label))
+                page.value("document.getElementById('start-name').value='demo-change'; document.getElementById('start-task').value = %s; true" % json.dumps(label))
                 pressed = button("#start", "Start run")
             else:
                 if run_id == "stack":

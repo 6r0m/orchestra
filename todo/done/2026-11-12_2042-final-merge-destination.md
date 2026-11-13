@@ -1,10 +1,10 @@
 # Public names and final Merge
 
-**Status:** REVIEW REQUIRED
+**Status:** DONE 2026-11-13 — implementation and isolated paid browser acceptance verified; activation of the main stack is separate.
 
 **Scope:** public-facing run/branch/worktree names, destination visibility, final Merge selection and messages, Temporal admission and Git landing
 
-**Stable documentation owners:** [workspace](../app/workspace/docs/architecture/structure.md), [orchestration](../app/orchestration/docs/architecture/structure.md), [application](../app/application/docs/architecture/structure.md), [interfaces](../app/interfaces/docs/architecture/structure.md), [usage](../docs/using.md)
+**Stable documentation owners:** [workspace](../../app/workspace/docs/architecture/structure.md), [orchestration](../../app/orchestration/docs/architecture/structure.md), [application](../../app/application/docs/architecture/structure.md), [interfaces](../../app/interfaces/docs/architecture/structure.md), [usage](../../docs/using.md)
 
 ## Contents
 
@@ -41,11 +41,15 @@ New worktrees and their branches must likewise have deliberately chosen, readabl
   - Reason: not stated.
   - Date/source: 2026-11-12, operator answer to the pre-start naming question.
 
+- **D6** Implement the current todos through implement-approved-change, apply architect review and retest locally.
+  - Effect: authorizes this implementation under D1–D5 and existing Git/Temporal safeguards; it does not authorize a real push, production restart, paid call or identity mutation.
+  - Date/source: 2026-11-13, operator implementation request.
+
 ### Operator gates
 
 - **Q1 [CLOSED by D2]:** Should final selection also support branches with different history, requiring change transfer and fresh verification?
 - **Q2 [CLOSED by D5]:** Should New run take a short name from the operator or request an agent suggestion before Start?
-- No remaining blocking product question. This todo still requires implementation review/approval.
+- No remaining blocking product question. D6 authorizes local implementation and acceptance.
 
 ### Working assumptions
 
@@ -57,6 +61,7 @@ New worktrees and their branches must likewise have deliberately chosen, readabl
 - **A6 [ACTIVE]:** Draft one concise change subject and optional body in the existing engineer closeout turn; derive the work and merge subjects from that approved draft, respecting the repository's conventions without imposing a universal prefix. Preview/edit at the final gate. Do not add a paid naming turn or infer a message from tool output. Existing/custom runs without a draft can supply one at the gate without rerunning an agent.
 - **A7 [ACTIVE]:** Use one required portable short-name field for new capable UI/CLI starts, independent of the full task. Preview normalization and the resulting branch/folder; accept a meaningful compact slug within the existing prefix budget, or ask for a shorter valid name. Never silently truncate, remove unsupported text or fall back to the task's first words. Preserve the existing unique suffix and one run-ID/branch/folder identity rather than add an alias registry.
 - **A8 [ACTIVE]:** Naming is prospective. Existing workflows, branches, worktree folders, todo paths, sessions and recordings retain their identities; an agent's later message draft cannot rename an active run. Repository todo date conventions remain intact, while new task slugs use the approved name.
+- **A9 [ACTIVE]:** Manual message entry is available for any otherwise valid final-tree closeout, including a new-capable turn whose proposal is missing or invalid. Reject that proposal as message evidence and show why it is unavailable; do not commit it automatically or schedule another paid turn just to obtain text. This does not excuse failed/unknown native completion, session recovery, closeout/tree checks, stale stops or invalid operator-entered messages.
 
 ## Non-goals
 
@@ -71,26 +76,26 @@ New worktrees and their branches must likewise have deliberately chosen, readabl
 
 | Owner | Observed behavior |
 |---|---|
-| [repos.py](../app/workspace/repos.py), `resolve`, `ENTRY_KEYS` | A descriptor optionally names `remote`; it must also name `base_branch`. An unnamed remote means local landing. Detection does not turn tracking into push authorization. |
-| [activities.py](../app/application/activities.py), `prepare` | Only a run initially configured with a remote receives its endpoint and pre-push fingerprints. Merely adding a remote option at the gate would miss those guards for existing local runs. |
-| [workflow.py](../app/orchestration/workflow.py), `_final_gate`, `_reconcile`, `answer` | Merge uses saved run state. Accepted answers are bound to a stop; there is no destination-choice protocol. Conflicts return through the existing roles. |
-| [worktrees.py](../app/workspace/worktrees.py), `_merged_onto`, `_land` | Landing accepts an equal/descendant destination tip; divergent or rewritten history is not interchangeable. It preserves the run's final tree, commit hooks, endpoint/gate fingerprints and non-rewriting destination update. |
-| [server.py](../app/interfaces/workbench/server.py), repository listing | The New run list exposes names/hosts, not resolved landing facts. Target-host Git must supply facts the WSL Workbench cannot determine for Windows. |
-| [run.js](../app/interfaces/workbench/static/run.js), `renderFacts`, `answer` | Remote confirmation names the saved remote/branch; local confirmation is generic. The run facts omit the base/destination. |
-| [start.js](../app/interfaces/workbench/static/start.js) | The New run form has no resolved landing preview. |
-| [activities.py](../app/application/activities.py), `merge` | The work subject is the todo filename stem plus the first eight ASCII-normalized task words, truncated to 100 characters. The merge subject is `Merge <todo stem>`. These are controller strings, not agent-generated summaries. |
-| [stages.py](../app/foundation/stages.py), `closeout`; [activities.py](../app/application/activities.py), `run_role` | An existing engineer closeout turn can supply the proposal without a new stage. Its current result is a final tree; there is no structured commit-message product today. |
-| [worktrees.py](../app/workspace/worktrees.py), `_adopted_merge` | Adoption identifies an existing run branch by the merge's second parent. Once that branch is removed, it falls back to the subject; two clean identical titles therefore need independent recovery identity. |
-| [worktrees.py](../app/workspace/worktrees.py), `run_id`, `slug`, `plan_path`, `create` | The task's first words supply a clipped 16-character prefix and an eight-hex-character suffix. That same ID is the branch and worktree folder. A separate first-six-word task slug supplies the todo path. `create` validates actual Windows path budgets before creating branch/worktree. |
-| [client.py](../app/application/client.py), `start`, `work_item_label`; [workflow.py](../app/orchestration/workflow.py), `run`; [activities.py](../app/application/activities.py), `create_worktree` | The client allocates the ID before Temporal starts; setup creates the worktree before any agent turn. The label uses an ASCII-clipped task excerpt, and creation builds the todo path from the raw task. A later closeout proposal cannot provide those initial names without changing the lifecycle. |
-| [activities.py](../app/application/activities.py), `merge`; [worktrees.py](../app/workspace/worktrees.py), `_land` and `_merged_onto` | Git commit/commit-tree executes in controller repository/worktree contexts. Missing identity currently reaches Git's mutation path; the existing commit-failure recovery test proves continuation, not an early identity preflight. |
-| [completed reconciliation todo](done/2026-10-07_2000-reconcile-before-the-final-gate.md), authority register | A3 is explicitly an agent working assumption to confirm, not an operator Decision. The local-default behavior is nevertheless established by executable code and stable architecture. |
+| [repos.py](../../app/workspace/repos.py), `resolve`, `ENTRY_KEYS` | A descriptor optionally names `remote`; it must also name `base_branch`. An unnamed remote means local landing. Detection does not turn tracking into push authorization. |
+| [activities.py](../../app/application/activities.py), `prepare` | Only a run initially configured with a remote receives its endpoint and pre-push fingerprints. Merely adding a remote option at the gate would miss those guards for existing local runs. |
+| [workflow.py](../../app/orchestration/workflow.py), `_final_gate`, `_reconcile`, `answer` | Merge uses saved run state. Accepted answers are bound to a stop; there is no destination-choice protocol. Conflicts return through the existing roles. |
+| [worktrees.py](../../app/workspace/worktrees.py), `_merged_onto`, `_land` | Landing accepts an equal/descendant destination tip; divergent or rewritten history is not interchangeable. It preserves the run's final tree, commit hooks, endpoint/gate fingerprints and non-rewriting destination update. |
+| [server.py](../../app/interfaces/workbench/server.py), repository listing | The New run list exposes names/hosts, not resolved landing facts. Target-host Git must supply facts the WSL Workbench cannot determine for Windows. |
+| [run.js](../../app/interfaces/workbench/static/run.js), `renderFacts`, `answer` | Remote confirmation names the saved remote/branch; local confirmation is generic. The run facts omit the base/destination. |
+| [start.js](../../app/interfaces/workbench/static/start.js) | The New run form has no resolved landing preview. |
+| [activities.py](../../app/application/activities.py), `merge` | The work subject is the todo filename stem plus the first eight ASCII-normalized task words, truncated to 100 characters. The merge subject is `Merge <todo stem>`. These are controller strings, not agent-generated summaries. |
+| [stages.py](../../app/foundation/stages.py), `closeout`; [activities.py](../../app/application/activities.py), `run_role` | An existing engineer closeout turn can supply the proposal without a new stage. Its current result is a final tree; there is no structured commit-message product today. |
+| [worktrees.py](../../app/workspace/worktrees.py), `_adopted_merge` | Adoption identifies an existing run branch by the merge's second parent. Once that branch is removed, it falls back to the subject; two clean identical titles therefore need independent recovery identity. |
+| [worktrees.py](../../app/workspace/worktrees.py), `run_id`, `slug`, `plan_path`, `create` | The task's first words supply a clipped 16-character prefix and an eight-hex-character suffix. That same ID is the branch and worktree folder. A separate first-six-word task slug supplies the todo path. `create` validates actual Windows path budgets before creating branch/worktree. |
+| [client.py](../../app/application/client.py), `start`, `work_item_label`; [workflow.py](../../app/orchestration/workflow.py), `run`; [activities.py](../../app/application/activities.py), `create_worktree` | The client allocates the ID before Temporal starts; setup creates the worktree before any agent turn. The label uses an ASCII-clipped task excerpt, and creation builds the todo path from the raw task. A later closeout proposal cannot provide those initial names without changing the lifecycle. |
+| [activities.py](../../app/application/activities.py), `merge`; [worktrees.py](../../app/workspace/worktrees.py), `_land` and `_merged_onto` | Git commit/commit-tree executes in controller repository/worktree contexts. Missing identity currently reaches Git's mutation path; the existing commit-failure recovery test proves continuation, not an early identity preflight. |
+| [completed reconciliation todo](2026-10-07_2000-reconcile-before-the-final-gate.md), authority register | A3 is explicitly an agent working assumption to confirm, not an operator Decision. The local-default behavior is nevertheless established by executable code and stable architecture. |
 
 The pasted claims about particular private descriptor entries were not needed or independently inspected. They must not become public examples or assumed configuration changes.
 
 ## Current architecture and source of truth
 
-[Project D24–D27](../docs/architecture/structure.md) own verified landing, recorded execution, repository resolution and controller-only Git. Workspace owns target-host Git facts and mutations; application composes them; Temporal owns the accepted destination and subsequent routing. Workbench and CLI present the same application contract. Git remote identity and hooks remain checked by their existing workspace owners.
+[Project D24–D27](../../docs/architecture/structure.md) own verified landing, recorded execution, repository resolution and controller-only Git. Workspace owns target-host Git facts and mutations; application composes them; Temporal owns the accepted destination and subsequent routing. Workbench and CLI present the same application contract. Git remote identity and hooks remain checked by their existing workspace owners.
 
 ## Problem and root cause
 
@@ -102,7 +107,7 @@ Worktree naming has the same raw-text source problem but an earlier lifecycle bo
 
 ### Premise / KISS gate
 
-Implement D1 within D2 using the existing target-host Git reads and final Merge path. One location selector (`Local only` or an eligible remote) plus one existing-branch selector is sufficient; their combined label names the exact destination. A confirmed choice travels with the existing Temporal answer. Add no separate approval state machine, scheduler, port, service or permanent branch snapshot store.
+Implement D1 within D2 using the existing target-host Git reads and final Merge path. One combined selector names each compatible local or remote branch and its push behavior. A confirmed choice travels with the existing Temporal answer. Add no separate approval state machine, scheduler, port, service or permanent branch snapshot store.
 
 Compatible landing reuses the existing clean-merge and conflict behavior; selecting another destination does not itself invoke a model. The capability deliberately given up is landing onto unrelated/older history or creating a new branch. Such options are refused with an explanation, never disguised as a compatible branch.
 For D3, reuse the existing closeout output and final confirmation rather than add a message-generation service or turn. Keep a controller-owned stable recovery marker in the commit body/trailer, separate from its readable subject; Git already owns that durable artifact. The knowingly omitted capability is automatic renaming of commits that have already landed.
@@ -116,8 +121,8 @@ For D4/D5, use the pre-start name as the single naming input for the existing ID
 4. **Recorded Merge:** freeze the selected destination, stop, verified/final tree and original verified base identity in the confirmation request. The capability-advertising application path refuses unsupported workers instead of silently dropping fields. The workflow validates the recorded protocol and final-stop ownership; the existing Git activity validates authoritative destination facts and commit prerequisites before protected mutation (invariant 6 defines the boundary). Refusal must not change the saved effective destination or silently land on the default. Under A5, check the actual Git contexts used by the controller and return prerequisite status only, never identity values. A generic failed commit is not automatically classified as an identity failure.
 5. **Landing and recovery:** use the selected destination with the existing final-tree checks, commit hooks, endpoint/gate fingerprints, compare-and-swap/fast-forward protection, adoption and cleanup. A compatible target that moved cleanly follows D24's existing no-extra-role behavior. A conflict routes reconciliation to that selected target, then engineer/architect/closeout and a fresh gate; it must not fall back to the original branch. Record the accepted destination in run state/history so failure recovery and all clients agree.
 6. **Compatibility:** command changes opt in through recorded answer/start evidence, following D25. Preserve all old histories and unchanged-target answers. Apply A2/A4 explicitly in the UI and client; do not expose a functioning-looking choice that the worker ignores.
-7. **Commit draft and approval:** the existing closeout ask requests bounded structured message metadata based on the completed diff and verified scope. Read only the native final assistant response; never scan terminal/tool streams for a proposal. Application validates message structure, and Temporal stores the draft alongside the final-tree identity. The final gate displays the actual work and merge subjects plus optional body and allows editing. Confirmed Merge freezes the messages with the destination and tree. A revision/new final tree invalidates the old draft; Continue reuses the accepted messages instead of regenerating them. No agent may commit or use message data to route the workflow. Preserve Unicode; reject invalid structure instead of silently stripping or truncating it. Clean/factual wording remains operator/reviewer judgment, not a word blacklist.
-8. **Recovery identity:** preserve second-parent adoption while the run branch exists. For new commits after cleanup, use the controller-owned marker rather than a human-readable subject; retain legacy message fallback only for legacy records. Reject duplicate/spoofed reserved metadata and do not put provider session identifiers, transcripts or raw operator notes in the commit. Two runs with the same clean title must never adopt/report each other's merge. No new database/ref namespace is needed for message identity.
+7. **Commit draft and approval:** the existing closeout ask requests bounded structured message metadata based on the completed diff and verified scope. Read only the native final assistant response; never scan terminal/tool streams for a proposal. Application validates message structure independently of the existing native-settlement and final-tree checks. A missing/invalid proposal is unavailable metadata with an observable reason, not an automatic failure of an otherwise valid closeout. Temporal stores the valid draft or its unavailability alongside the independently accepted final-tree product. The final gate displays the actual subjects/body or permits manual entry under A9; Merge requires valid messages whether supplied by the agent or operator. It cannot bypass native completion, closeout guards, final-tree identity, stop ownership or message validation. Confirmed Merge freezes messages with destination and tree. A revision/new final tree invalidates the old draft; Continue reuses accepted messages instead of regenerating them. No agent may commit or use message data to route the workflow. Preserve Unicode; reject invalid structure instead of silently stripping or truncating it. Clean/factual wording remains operator/reviewer judgment, not a word blacklist.
+8. **Recovery identity:** preserve second-parent adoption while the run branch exists. For new commits after cleanup, use a controller-owned marker bound to the recorded logical Merge approval/attempt, resolved repository and destination (including remote fingerprint/ref), approved final tree and verified base, rather than its readable subject. Freeze that binding in workflow evidence; a lost response, Continue or activity retry reuses it, while a newly accepted Merge has its own attempt binding. Validate the marker together with the expected parent/tree evidence and destination; identical titles or markers copied to another target are not sufficient. Retain legacy message fallback only for legacy records. Reject duplicate/spoofed reserved metadata and do not put provider session identifiers, transcripts or raw operator notes in the commit. Two runs/attempts/targets with the same clean title must never adopt/report each other's merge. No new database/ref namespace is needed for message identity.
 9. **Pre-start names:** expose the same short-name input in New run, CLI and application/API admission. Validate a nonempty portable slug against the existing prefix budget (`RUN_ID_WORDS`) before creating a workflow/worktree; show the branch/folder form and suffix semantics. The entire approved slug is retained; overlong/invalid names are refused without creating a run, branch or folder. The client allocates the existing unique suffix and retains its bounded collision handling. Record the approved name in new start evidence; use it for the ID, readable run label and repository-convention todo slug. Never substitute it for the original task in prompts or retained operator context. Display the short name as the primary label while keeping the full task separately accessible. Keep `run_id == branch == worktree basename`, so terminal records, session recovery, cleanup and retained review refs keep one immutable key.
 10. **Public text and compatibility:** public commit bodies/subjects contain neither raw chat excerpts nor AI credits: no `Co-Authored-By` or `Generated with` lines, and no tool/model/vendor attribution. A feature name mentioning a provider is not an attribution and must not be banned as a word. New-name admission and role-product changes preserve legacy histories by recorded protocol/patch evidence. Old runs retain their original IDs/paths; revisions refresh the final commit draft, never their pre-start names. Rollout must not claim name support while an older worker can silently ignore the naming input.
 
@@ -139,20 +144,21 @@ For D4/D5, use the pre-start name as the single naming input for the existing ID
 6. Failed validation causes no commit, destination/run branch movement, worktree/index/config/descriptor change, fallback landing or agent start. A selected remote's authoritative fetch may refresh its remote-tracking cache; that is not a destination write. Repeated accepted answers remain idempotent for their stop and chosen destination.
 7. Temporal records the choice; history replay is deterministic. Legacy unsupported combinations refuse explicitly and leave the original destination intact.
 8. Remote facts and UI labels contain no credentials or sensitive URL components. No production push is required for acceptance.
-9. Human-readable subjects are not run identifiers. Accepted message bytes are stable across retries, and recovery cannot confuse two runs with identical subjects after cleanup. New clients refuse an unsupported message-edit protocol rather than silently merge with ignored edits.
+9. Human-readable subjects are not run identifiers. Accepted message bytes and the attempt/destination/tree binding are stable across retries; recovery cannot confuse two runs, logical merge attempts or destinations with identical subjects after cleanup. New clients refuse an unsupported message-edit protocol rather than silently merge with ignored edits.
 10. New names come from the approved short name, not raw task slicing. Preserve compact path/ref validation, suffix uniqueness and collision refusal. Invalid names leave protected state unchanged; original task/notes remain complete, and legacy sessions/paths remain usable.
 11. No commit text adds tool/model/vendor credits or discloses raw operator conversation. The naming source and attribution rules apply to both commits; no existing history is rewritten to meet them.
+12. An invalid/missing agent message is never committed automatically. A valid settled closeout/tree may still reach the same final gate for validated manual entry; no paid retry is needed solely for proposal text. Missing/invalid final-tree evidence, a failed native turn or a stale stop still refuses Merge.
 
 ## Implementation tasks
 
-- [ ] **T1 — regressions first:** extend existing workspace, Temporal, application/API and real-browser fixtures with the matrix below; observe relevant failures before production edits.
-- [ ] **T2 — workspace facts and admission:** implement bounded local discovery, explicit compatibility/refusal results, preparation fingerprints under A2 and commit-identity readiness under A5; integrate destination checks with existing Git landing without a second Git writer.
-- [ ] **T3 — workflow/application:** carry the frozen choice through the existing confirmed answer, enforce capability/version and stop bindings, record its identity, preserve milestone capture against the pre-transition base, and route conflict recovery against the selected target. Keep old histories replaying.
-- [ ] **T4 — interfaces:** add New run preview, run destination fact, upstream warning, final selectors and exact confirmation. Preserve keyboard focus/drafts and selected values across polling; reject stale confirmations. Use the same application contract for CLI/API callers.
-- [ ] **T4a — commit messages:** extend the existing closeout result under A6, validate/store tree-bound draft metadata, show editable final messages, and freeze them in the accepted Merge. Separate new recovery identity from subjects under contract 8; preserve legacy histories and safe recovery with missing drafts. Keep agents unable to stage/commit and add no naming turn.
-- [ ] **T4b — worktree/branch names:** implement D4/D5 through the existing start, ID, label and plan-path owners. Add a previewed UI/CLI name input, early structural/length validation, recorded start compatibility and original-task retention. Preserve prefix/Windows path bounds, bounded suffix collisions and immutable legacy run/session/cache/ref keys. Do not rename existing artifacts or silently derive a name from task text.
-- [ ] **T5 — documentation:** update the stable owners below; keep this todo as progress only.
-- [ ] **T6 — acceptance:** run focused tests, both required host suites sequentially, browser acceptance and public checks; review the entire task diff while preserving the existing staged index. Activate only through the established graceful Orchestra lifecycle, without WSL restart or interrupted roles.
+- [x] **T1 — regressions first:** extend existing workspace, Temporal, application/API and real-browser fixtures with the matrix below; observe relevant failures before production edits.
+- [x] **T2 — workspace facts and admission:** implement bounded local discovery, explicit compatibility/refusal results, preparation fingerprints under A2 and commit-identity readiness under A5; integrate destination checks with existing Git landing without a second Git writer.
+- [x] **T3 — workflow/application:** carry the frozen choice through the existing confirmed answer, enforce capability/version and stop bindings, record its identity, preserve milestone capture against the pre-transition base, and route conflict recovery against the selected target. Keep old histories replaying.
+- [x] **T4 — interfaces:** add New run preview, run destination fact, upstream warning, final selectors and exact confirmation. Preserve keyboard focus/drafts and selected values across polling; reject stale confirmations. Use the same application contract for CLI/API callers.
+- [x] **T4a — commit messages:** extend the existing closeout result under A6/A9, independently validate/store tree-bound draft metadata or its unavailability, allow validated manual entry for any otherwise valid closeout, and freeze the accepted messages. Bind new recovery identity to attempt/destination/tree under contract 8; preserve legacy histories. Keep agents unable to stage/commit and add no naming turn.
+- [x] **T4b — worktree/branch names:** implement D4/D5 through the existing start, ID, label and plan-path owners. Add a previewed UI/CLI name input, early structural/length validation, recorded start compatibility and original-task retention. Preserve prefix/Windows path bounds, bounded suffix collisions and immutable legacy run/session/cache/ref keys. Do not rename existing artifacts or silently derive a name from task text.
+- [x] **T5 — documentation:** update the stable owners below; keep this todo as progress only.
+- [x] **T6 — acceptance:** run focused tests, both required host suites sequentially, browser acceptance and public checks; review the entire task diff while preserving the existing staged index. Activate only through the established graceful Orchestra lifecycle, without WSL restart or interrupted roles.
 
 ## Test-first and verification plan
 
@@ -172,8 +178,8 @@ These are planned permanent regressions/acceptance cases, not tests already impl
 | Selected-target conflict | Existing reconciliation reads the original saved base | Target advances into conflict; no ref moves, roles see that target, and a new final gate precedes landing. |
 | Partial merge | A failed attempt could be retargeted after a side effect | Fail before/after commit/ref update and during cleanup; continue adopts the same destination or refuses, never redirects it. |
 | Clean messages | Subjects use the todo date/slug and the beginning of a chat request | A scripted closeout supplies a change summary; the gate previews both actual subjects, operator edits survive polling, and Git stores the approved message without date/artifact/chat-prefix construction. |
-| Message boundaries | A tool result, stale proposal or invalid text could become a commit message | Consume only the final assistant product; reject missing/invalid structured output for new-capable turns, controls/oversized fields and reserved-marker spoofing. Legacy/custom flows permit explicit gate entry without another paid turn. New final trees invalidate old drafts; unsupported workers cannot drop edits. |
-| Message recovery | Subject matching can report another run's commit after branch removal | Two disposable runs use identical subjects; after branch/worktree cleanup, each lost-response retry adopts only its own merge. Frozen messages survive failed commits and continuation; old recorded histories keep their original behavior. |
+| Message boundaries | A tool result, stale proposal or invalid text could become a commit message | Consume only the final assistant product; reject missing/invalid proposals as message evidence, including controls/oversized fields and reserved-marker spoofing. For both new-capable and legacy/custom closeouts with valid native settlement/tree products, show unavailability and accept a valid manual message at the same final gate without another agent turn. Invalid tree/settlement evidence, stale stops and malformed manual text still refuse Merge. New final trees invalidate old drafts; unsupported workers cannot drop edits. |
+| Message recovery | Subject matching can report another run's commit after branch removal | Disposable runs/attempts use identical subjects across two compatible targets. After cleanup, each lost-response retry adopts only its bound attempt/destination/tree; copied or mismatched markers refuse. Continue reuses the accepted binding; a newly accepted Merge gets its own binding. Frozen messages survive failed commits and continuation; old recorded histories keep their original behavior. |
 | Readable worktree/branch | Current ID/plan generators clip early request words, regardless of actual intent | A conversational task plus explicit name such as `terminal-cache` creates the exact approved prefix plus the existing suffix, matching the real branch/folder; task-derived leading words do not leak into labels or the todo slug. The full task and notes still reach all roles unchanged. |
 | Name admission and bounds | Current generator silently clips long words and drops unsupported text | Empty, over-budget, path/ref-invalid and unsupported names refuse before workflow/worktree creation. Real Git accepts valid names; Windows deep-path refusal, suffix collision/retry bounds and two simultaneous runs with the same short name remain proven. |
 | Legacy/name continuity | A new naming scheme could orphan sessions, recordings, refs or change an active path | Old recorded starts replay unchanged. Resume/navigation/cleanup still address the same legacy ID/path; new-run revisions change only the final commit draft. New clients do not silently lose a name through older workers. |
@@ -232,3 +238,106 @@ D1–D5 work through actual new-run admission, final gate and target-host Git on
 - The existing compact prefix and per-repository Windows path checks remain necessary. This plan changes the source of meaningful names, not those reliability bounds; it replaces silent clipping with explicit validation and preview.
 - Baseline: `powershell -NoProfile -ExecutionPolicy Bypass -File run-tests.ps1 tests.workspace.test_worktrees.Create` passed six tests. Its current task-prefix expectation is evidence of the old behavior, not acceptance of the new naming contract. New regression/real-browser naming coverage remains implementation work.
 - Applied the current public attribution rule to planned commit products. Only this existing todo was edited; no production code, stage/index, branch, folder, conversation, existing commit or service was changed. Scope remains REVIEW REQUIRED.
+
+### 2026-11-13 — Review corrections
+
+- Confirmed the draft-boundary ambiguity. A9 and contract 7 separate message availability from the independently validated closeout/tree product for all capable/legacy runs. Manual entry does not bypass native completion, closeout, stop, tree or message validation and does not trigger an extra paid turn.
+- Contract 8 and the recovery regression now explicitly bind controller identity to the logical Merge attempt, destination and approved tree/base; retries preserve the same binding. Readable titles are not recovery authority.
+- The separate cache finding was reproduced in the real browser: idle removal retained historical per-screen metadata. Its implementation owner now retains invalidation state only for active saves and releases it after the last operation settles. This is not a change to this merge plan's implementation status.
+- The reviewer's invitation to proceed is not operator implementation authorization. This single plan remains REVIEW REQUIRED; D1–D5 are unchanged. No destination/naming production code, live answer, Git identity/configuration, remote write or worker/WSL lifecycle was changed.
+
+### 2026-11-13 — Approved local implementation and acceptance
+
+- D6 authorizes the implementation. Explicit short names reach the client, recorded start, branch/folder,
+  label and full plan slug; invalid names refuse before creation. The complete original task/notes remain
+  unchanged. Legacy starts, paths, sessions and recorded histories retain their original contract.
+- Named starts probe the existing workflow reader for protocol support and use a distinct preparation
+  activity, so an old host cannot silently ignore names or remote pins. New browser assets refuse a
+  server without the new preview contract. No service, naming agent, workflow stage or dependency was added.
+- Workspace provides bounded existing-ref discovery, optional pre-role endpoint/gate pins, authoritative
+  selected-remote admission, explicit Git identity readiness and existing protected landing. Original
+  pre-role remote evidence on legacy runs remains usable; absent evidence is not fabricated.
+- The versioned Merge Update validates the final stop/tree/messages, awaits target-host admission and
+  revalidates the stop before accepting it. The selected destination and messages stay frozen across
+  refusal/Continue; revision reopens before retargeting. Checkpoint capture precedes the target transition.
+- The existing closeout asks for one structured native-final proposal. Invalid/missing proposals remain
+  unavailable metadata; valid manual messages can reach the same gate without another paid turn. Native
+  settlement, closeout guards and final-tree checks remain mandatory. Both commit subjects are approved
+  text; controller recovery hashes execution/attempt/repository/destination/base/tree and checks parents/trees.
+- Red: new destination/name acceptance exposed missing APIs; the missing-identity regression reproduced
+  Git's refusal after staging. Identity now refuses before staging, and protected-state checks pass.
+  Initial Edge acceptance found the new validation activity missing from registration; registering the
+  existing owner fixed the actual route. The normal page now selects a different compatible branch,
+  preserves edited messages across polling, confirms it and actually lands/removes its worktree.
+- Full suites ran sequentially: Windows 704 tests passed; initial WSL acceptance exposed three CLI
+  fixtures lacking the newly required name. Their updated fixtures preserve the original assertions;
+  seven focused checks and the replacement full WSL suite (933 tests) passed. The first full suites
+  precede the final compatibility/refusal refinements; focused final checks passed 77 Windows tests,
+  followed by 10 workspace/workflow/real-Edge tests for legacy pins and final admission. Tests use
+  scripted agents and disposable local bare remotes; no model quota or real remote was consumed.
+- Read-only architect pass: the effect remains with workspace, accepted transitions with Temporal,
+  contract validation with foundation, composition with application and presentation with interfaces.
+  Real consumers (CLI, Make, API and browser), refusal paths, old histories and legacy pinned destinations
+  were checked. No alternate Git writer, pricing authority, native warm pool or hidden push default was added.
+- Stable owners and operator instructions are updated. This closes implementation/local acceptance;
+  a fresh live activation is not claimed. No staging/commit, real push, Git identity change, production
+  restart, WSL restart or paid provider request was performed. Activation uses the existing graceful
+  lifecycle only when separately authorized and safe.
+
+- Final compatibility review found that a legacy remote-backed run could hold valid pre-role
+  fingerprints outside the new map. Discovery now reuses only that existing evidence; a missing
+  endpoint/gate remains unavailable. The dedicated regression and real Edge landing passed in the
+  final 10-test check. A concurrent-stop regression separately proves post-read revalidation refuses
+  the old stop before accepting its answer. All moved-document links are checked from their new locations.
+- Public-safety scanning passed for tracked working-tree/index/history bytes and separately for all
+  new candidate files. The operator's index remains unchanged. No further local implementation finding
+  remains in the reviewed scope; activation and existing financial coverage limits remain explicit.
+- A final real-Git regression reproduced slash-containing remote names being split incorrectly.
+  Discovery now uses actual configured remote names. Its focused replacement passed 11 tests,
+  including real Edge landing and final-stop refusal. The named run-list projection and normal
+  final gate passed eight tests; the final CLI controls passed 17. These are the final focused
+  refinements after the full-suite baseline, not an additional full-suite claim.
+
+### 2026-11-13 — Small paid browser acceptance
+
+- Ran the normal page against dedicated temporary queues and a disposable arithmetic repository, with
+  Codex assessing/verifying and managed Pi → DeepSeek Flash planning/building/closing out. Submitted a
+  plan revision through the page, approved it, then selected a compatible local `release` destination.
+  Merge landed the verified tree with the two manually approved readable subjects, removed the worktree,
+  and preserved the original base branch. The three existing tests passed unchanged before and after landing.
+- Fixed a reproduced startup-order race: the landing preview waits for the initial repository list.
+  A regression failed before the change and passed afterward; the real page then displayed its default
+  local destination without requiring the operator to reselect the repository.
+- Native Codex resume exposed a differently cased saved directory and stopped at folder trust. An unpaid
+  loopback-provider diagnostic reproduced the failure and isolated explicit `--cd` as the correction.
+  The adapter now binds the assigned worktree on every invocation; the same paid session resumed and
+  completed without approving trust or changing permission settings. Fresh/resumed launch regressions passed.
+  Native result records independently confirm one exact Pi session across four turns and one exact Codex
+  session across three completed turns.
+- The paid closeout returned prose plus fenced JSON, which the strict proposal reader correctly refused.
+  Its prompt now explicitly requests a whole-message plain JSON object, with the closeout report in a
+  separate field. Manual final-gate entry completed this run without a paid retry or relaxed tree validation.
+- The post-merge browser check exposed an omitted final milestone: history read only synchronous answers.
+  It now includes a Merge Update only after matching successful completion. Pending and refused updates
+  are excluded. The native test server omitted the accepted-event numeric link; correlation uses the stable
+  Update ID instead. Focused negative coverage and the real Edge landing test pass. The completed paid
+  page exposes all four boundaries, and its final retained export includes the arithmetic change and
+  completed todo after worktree removal.
+- Live Langfuse readback held 34 priced requests. Independent multiplication of the stored exclusive
+  buckets by their selected rates matched every request: DeepSeek approximately USD 0.012256; Codex
+  Standard API-equivalent approximately USD 0.092659. These remain estimates with unknown billing coverage.
+  Per-role/iteration time, failed-attempt timing, cost qualification and browser-title totals were visible.
+  Request-level audit evidence remains in ignored scratch; it is not copied into this public document.
+- The initial full checks passed 708 Windows and 938 WSL tests. They precede the final history projection
+  and prompt wording; final verification is recorded below. No main-stack or WSL restart, external Git
+  push, production trust approval, global identity change, index mutation or main-repository commit occurred.
+- Final full suites ran sequentially on the final code: 709 Windows tests and 939 WSL tests passed,
+  including normal Edge landing, closed-history exports, native terminal containment and workflow replay.
+  All 280 changed-document links, diff whitespace, the public check and a separate scan of all 14 new
+  public candidate files passed. The startup/resume/history red cases and the test server's absent numeric
+  Update link are resolved; no failing test is deferred in this acceptance.
+- The temporary workflow and its diff workflows were removed through the existing test cleanup path,
+  only its dedicated worker/HTTP processes were stopped, and its Git metadata was retired from editor
+  discovery. Native sessions, request-level audit and the labelled Langfuse trace are retained as private
+  ignored/runtime evidence. The main stack's activation and existing D10 account-admission limitation
+  remain separate from this completed acceptance.

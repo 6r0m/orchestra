@@ -51,6 +51,22 @@ the operator's own repositories, and a missing file means no descriptors rather 
 - **A change is one snapshot, read one way.** Reading the change makes its tree on a private copy of the index, staging nothing; the commit of its base the run stands on and that tree name it — for a run that recorded none, the worktree's HEAD, or the base merged into it after a conflict — and every later read — each part of its file list, one file, each part of its patch — names them again, so none mixes in what the live worktree did meanwhile. A file is read whole only when git's own sizes say each side is small enough, decided before any diff runs, and otherwise its changes alone. A round's change is the same read between two trees its reviews judged; a tree git has pruned is said gone. Every read passes the same diff options, so no repository or user setting runs an external diff or text conversion, colours the text or turns rename detection off; paths come from git's NUL-separated lists, and a file is named literally, never as a pattern.
 - **One authority per repository fact, refusing when there is none (D26).** A Windows target refuses a path Windows cannot use as a working directory, which it would otherwise silently replace with `C:\Windows`.
 
+## Names and landing
+
+Explicit short names are validated in full before identity allocation; the same approved prefix and random
+suffix name the run, branch and worktree. Unsupported or oversized names refuse without truncation. Legacy
+starts retain their original identity generation and paths.
+
+Landing discovery reads bounded existing refs on the target host. A compatible branch contains the recorded
+verified base; remote-tracking refs are cached evidence, refreshed only for the selected remote at admission
+and landing. Optional remote endpoint/gate fingerprints are taken before role execution; missing or changed
+evidence disables that remote. Discovery never authorizes a push or changes the repository configuration.
+
+Git identity readiness checks the effective author and committer without exporting their values and refuses
+before staging. New landing recovery uses controller metadata bound to the execution, accepted Merge attempt,
+repository, destination, verified base and final tree. Adoption also checks commit parents and trees; readable
+subjects are not new-protocol recovery evidence. Existing recorded merges preserve their legacy adoption path.
+
 ## Review snapshot retention
 
 `review_checkpoint` samples through the private index and atomically creates a pair of private refs under

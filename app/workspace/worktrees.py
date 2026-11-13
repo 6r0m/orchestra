@@ -135,6 +135,69 @@ def base_tip(repo, base, remote=None, pinned=None):
     return git(repo, "rev-parse", "--verify", _ref(base, remote) + "^{commit}").stdout.strip()
 
 
+def identity_ready(repo):
+    """Read Git's effective author/committer contexts without exporting their values."""
+    return all(git(repo, "var", name, check=False).returncode == 0
+               for name in ("GIT_AUTHOR_IDENT", "GIT_COMMITTER_IDENT"))
+
+
+def landing_pins(repo):
+    """Pin optional remote endpoints before roles run; an unusable option stays unavailable."""
+    names = git(repo, "remote").stdout.splitlines()
+    pins = {}
+    for name in names[:64]:
+        try:
+            pins[name] = {"endpoint": remote_id(repo, name), "gate": prepush_id(repo)}
+        except GitError:
+            pins[name] = {"unavailable": "the remote endpoint or pre-push gate could not be pinned"}
+    return pins
+
+
+def merge_destinations(repo, tip, run_id=None, pins=None):
+    """Bounded local ref discovery; cached remote refs are never represented as a fresh fetch."""
+    refs = git(repo, "for-each-ref", "--count=513", "--format=%(refname)",
+               "refs/heads/", "refs/remotes/").stdout.splitlines()
+    if len(refs) > 512:
+        raise MergeRefused("more than 512 candidate refs; destination discovery is unavailable")
+    remote_names = sorted(git(repo, "remote").stdout.splitlines(), key=len, reverse=True)
+    choices, refused = [], []
+    for ref in refs:
+        if ref.startswith("refs/heads/"):
+            remote, branch = None, ref[len("refs/heads/"):]
+            if branch == run_id:
+                continue
+        else:
+            suffix = ref[len("refs/remotes/"):]
+            remote = next((name for name in remote_names if suffix.startswith(name + "/")), None)
+            if remote is None:
+                continue
+            branch = suffix[len(remote) + 1:]
+            if not branch or branch == "HEAD":
+                continue
+        reason = None
+        pin = (pins or {}).get(remote) if remote else None
+        if remote and (not pin or "endpoint" not in pin or "gate" not in pin):
+            reason = "no pre-role trust evidence for this remote"
+        elif remote:
+            try:
+                if remote_id(repo, remote) != pin["endpoint"] or prepush_id(repo) != pin["gate"]:
+                    reason = "remote endpoint or pre-push gate changed since preparation"
+            except GitError:
+                reason = "remote trust evidence is unreadable"
+        if not reason:
+            result = git(repo, "merge-base", "--is-ancestor", tip, ref, check=False)
+            if result.returncode not in (0, 1):
+                raise MergeRefused("Git could not establish destination compatibility")
+            if result.returncode:
+                reason = "destination does not contain the verified base"
+        row = {"branch": branch, "remote": remote}
+        if reason:
+            refused.append(dict(row, reason=reason))
+        else:
+            choices.append(dict(row, cached=bool(remote)))
+    return {"choices": choices, "unavailable": refused, "identity_ready": identity_ready(repo)}
+
+
 def started_from(path):
     """The commit a worktree's branch is at: for a run's worktree just made, the base's tip it began from."""
     return git(path, "rev-parse", "HEAD").stdout.strip()
@@ -149,13 +212,24 @@ WINDOWS_MAX_FILE = 259
 WINDOWS_MAX_DIRECTORY = 247
 
 
-def run_id(task):
+def short_name(value):
+    """Validate the complete operator-selected prefix before allocating an identity."""
+    if (not isinstance(value, str) or not 1 <= len(value) <= RUN_ID_WORDS or
+            not re.fullmatch(r"[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*", value)):
+        raise ValueError("short name must contain 1–%d ASCII letters/digits and internal hyphens; "
+                         "choose a shorter name rather than truncating it" % RUN_ID_WORDS)
+    return value.lower()
+
+
+def run_id(task, name=None):
     """A run's id, which also names its branch and worktree: the task's first words, then
     eight random characters that keep two runs of a similar task apart.
 
     Lowercase letters, digits and hyphens only, at most 25 characters, so it is a valid
     branch name, folder name and workflow id on either host.
     """
+    if name is not None:
+        return "%s-%s" % (short_name(name), uuid.uuid4().hex[:8])
     words = re.findall(r"[a-z0-9]+", (task or "").encode("ascii", "ignore").decode().lower())
     name = ""
     for word in words:
@@ -173,10 +247,11 @@ def slug(text, words=6):
     return "_".join(found[:words])[:60].strip("_") or "run"
 
 
-def plan_path(todo_dir, todo_name, created, task):
+def plan_path(todo_dir, todo_name, created, task, name=None):
     """The run's plan, named by the repository's own todo convention from the run's start time."""
     stamp = datetime.datetime.fromisoformat(created)
-    return os.path.join(todo_dir, stamp.strftime(todo_name).replace("{slug}", slug(task)) + ".md")
+    task_slug = short_name(name).replace("-", "_") if name is not None else slug(task)
+    return os.path.join(todo_dir, stamp.strftime(todo_name).replace("{slug}", task_slug) + ".md")
 
 
 def create(repo, base, root, run_id, target, lfs_pointers=False, remote=None, pinned=None):
@@ -491,7 +566,7 @@ def _clean(path):
     return not git(path, "status", "--porcelain", "--untracked-files=all").stdout.strip()
 
 
-def _adopted_merge(repo, base, run_id, merge_message, remote=None):
+def _adopted_merge(repo, base, run_id, merge_message, remote=None, recovery=None, final_tree=None, basis=None):
     """A merge of *this* run already on the base branch, or None.
 
     Identified by the run's own tip as the merged side of a merge commit — its second
@@ -511,6 +586,19 @@ def _adopted_merge(repo, base, run_id, merge_message, remote=None):
         commit, parents = parts[0], parts[1:]
         if len(parents) < 2:
             continue                                  # only a merge commit can hold a run's work
+        if recovery:
+            body = git(repo, "show", "-s", "--format=%B", commit).stdout
+            markers = re.findall(r"^Orchestra-Merge: (.+)$", body, re.M)
+            if markers != [recovery] or len(parents) != 2:
+                continue
+            work_parents = git(repo, "show", "-s", "--format=%P", parents[1]).stdout.split()
+            if (work_parents != [basis] or _tree(repo, parents[1]) != final_tree or
+                    git(repo, "merge-base", "--is-ancestor", basis, parents[0], check=False).returncode):
+                continue
+            expected = git(repo, "merge-tree", "--write-tree", "--no-messages", *parents, check=False)
+            if expected.returncode == 0 and expected.stdout.strip() == _tree(repo, commit):
+                return commit
+            continue
         if tip:
             if parents[1] == tip:
                 return commit
@@ -568,7 +656,7 @@ def _unfinish_plan(worktree, verified_tree, plan, done_dir):
 
 
 def merge(repo, worktree, run_id, base, verified_tree, plan, done_dir, message, merge_message, tip=None,
-          remote=None, pinned=None, gate=None):
+          remote=None, pinned=None, gate=None, recovery=None):
     """Land the run's change on the base: the local branch, or `remote`'s where the base is a remote's.
 
     `verified_tree` is the tree the run holds for its merge, and the worktree must still be it. A run
@@ -589,12 +677,19 @@ def merge(repo, worktree, run_id, base, verified_tree, plan, done_dir, message, 
     landing = bool(tip) and not plan
     remote = remote if landing else None
     now = base_tip(repo, base, remote, pinned) if landing else None
-    merged = _adopted_merge(repo, base, run_id, merge_message, remote)
+    if recovery:
+        if not re.fullmatch(r"[0-9a-f]{64}", recovery) or not landing:
+            raise MergeRefused("invalid landing recovery binding")
+        merge_message += "\n\nOrchestra-Merge: " + recovery
+    merged = _adopted_merge(repo, base, run_id, merge_message, remote, recovery, verified_tree, tip)
     if merged:
         cleanup(repo, worktree, run_id, base, remote)
         return _merged(repo, merged, tip if landing else None)
     if not branch_exists(repo, run_id) or not os.path.isdir(worktree):
         raise MergeRefused("the run's branch or worktree is gone and %s holds no merge of it" % base)
+    if not identity_ready(repo) or not identity_ready(worktree):
+        raise MergeRefused("Git author/committer identity is unavailable in the controller commit context; "
+                           "configure the intended repository identity, then Continue")
     if landing:
         return _land(repo, worktree, run_id, base, verified_tree, message, merge_message, tip, now, remote,
                      pinned, gate)

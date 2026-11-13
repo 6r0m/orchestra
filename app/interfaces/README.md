@@ -7,7 +7,8 @@ What a human or a process manager starts. Nothing imports this package.
 | durable documentation: the architecture, its structure and its views | [docs/README.md](docs/README.md) |
 
 ```bash
-python -m app.interfaces.cli "fix X in Y"        # or: make feature TASK="fix X in Y"
+python -m app.interfaces.cli --name fix-helper "fix X in Y"
+# Or: make feature NAME=fix-helper TASK="fix X in Y"
 python -m app.interfaces.worker wsl | windows | sweep [pid ...]
 python -m app.interfaces.workbench.server
 ```

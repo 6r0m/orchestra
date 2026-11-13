@@ -219,6 +219,7 @@ def view(listed, status, health):
     draining = {part["name"] for part in health.get("components", []) if part["state"] == "draining"}
     return {"run_id": listed["run_id"], "execution": listed["execution"], "started": listed["started"],
             "closed": listed["closed"], "goal": state.get("task"), "repo": state.get("repo"),
+            **({"short_name": state["short_name"]} if state.get("short_name") else {}),
             "host": state.get("target"), "worktree": state.get("worktree_path"), "state": kind,
             "status": state.get("status"), "phase": state.get("phase"), "round": state.get("round"),
             "episode": state.get("episode"), "stage": working.get("stage"), "role": working.get("role"),
@@ -236,24 +237,39 @@ def view(listed, status, health):
 
 
 async def start(client, task, repo=None, auto_proceed=False, settings_path=None, check=True, flow=None,
-                settings_root=paths.REPO, settings_environ=os.environ):
+                settings_root=paths.REPO, settings_environ=os.environ, short_name=None):
     """Start a run on `repo` (a descriptor's name, a path, or this repository), following `flow` (a file in
     `flows/`, the settings' `default_flow` when none is named); returns its handle.
 
     The flow is read and checked here, once, and the run is handed its steps and its policy made whole —
     each role's agent and persona's text among it: it never reads a flow, settings or a persona file, so
     none edited later changes a run already started."""
+    if short_name is not None:
+        short_name = worktrees.short_name(short_name)
     settings = S.load(settings_path, root=settings_root, environ=settings_environ)
     selected = repos.select(repo)
     queue = policy_mod.queue(settings, selected["target"])
     name = flow or settings.get("default_flow")
     chosen = {"name": name, "steps": flows.load(name)} if name else None
+    if short_name is not None:
+        steps = chosen["steps"] if chosen else list(flows.LEGACY_FLOW)
+        if "you:merge" in steps and "engineer:closeout" not in steps:
+            raise Refusal("named runs reaching Merge need an engineer:closeout final-tree product; "
+                          "choose a flow with closeout before starting")
     pol = S.run_policy(settings, chosen["steps"] if chosen else None)
     if check:
         await preflight(client, queues(policy_mod.workflow_queue(pol), queue))
+    if short_name is not None:
+        capability = await client.execute_workflow(WF.WorktreeView.run,
+            {"protocol_probe": 1, "repository": selected, "queue": queue,
+             "worktree_root": pol["targets"][selected["target"]]["worktree_root"]},
+            id="named-start-probe-%s" % os.urandom(6).hex(), task_queue=policy_mod.workflow_queue(pol),
+            run_timeout=datetime.timedelta(seconds=20))
+        if not isinstance(capability, dict) or capability.get("merge_version") != 1:
+            raise Refusal("the workflow worker needs a graceful reload before it supports named starts")
     now = datetime.datetime.now()
     for attempt in range(START_ATTEMPTS):
-        run_id = worktrees.run_id(task)
+        run_id = worktrees.run_id(task, name=short_name) if short_name is not None else worktrees.run_id(task)
         # `auto_proceed` skips every approval the flow schedules — never an emergency stop or the merge.
         start_input = {"run_id": run_id, "task": task, "label": work_item_label(run_id, task, now),
                        "created": now.isoformat(timespec="minutes"),
@@ -261,6 +277,9 @@ async def start(client, task, repo=None, auto_proceed=False, settings_path=None,
                        "repository": selected, "policy": pol, "queue": queue}
         if chosen:
             start_input["flow"] = chosen
+        if short_name is not None:
+            start_input.update(short_name=short_name, merge_version=1,
+                               label=work_item_label(run_id, short_name, now))
         try:
             return await client.start_workflow(
                 WF.FeatureRun.run, start_input, id=run_id, task_queue=policy_mod.workflow_queue(pol),
@@ -325,6 +344,8 @@ async def answer(client, run_id, answer, check=True, only=None):
     if current is None:
         raise NotWaiting("no run %r" % run_id)
     stop = current["stop"]
+    if "landing" in answer and current.get("merge_version") != 1:
+        raise NotAccepted("the workflow worker needs a graceful reload before accepting destination/message edits")
     if stop is None or (only and stop["reason"] != only):
         raise NotWaiting("run %s is not waiting for %s" % (run_id, "a %s answer" % only if only else "an answer"))
     if answer.get("stop") not in (None, stop["id"]):
@@ -352,7 +373,8 @@ async def answer(client, run_id, answer, check=True, only=None):
         answer["review_milestones_version"] = WF.REVIEW_MILESTONES_VERSION
     try:
         await client.get_workflow_handle(run_id).execute_update(
-            WF.FeatureRun.answer, answer, id="answer:%s" % stop["id"])
+            WF.FeatureRun.answer_merge if "landing" in answer else WF.FeatureRun.answer,
+            answer, id="answer:%s" % stop["id"])
     except WorkflowUpdateFailedError as error:
         raise NotAccepted(error.cause.message if error.cause else str(error))
     except RPCError as error:
@@ -546,6 +568,8 @@ async def history(client, run_id):
     result names none has none; the work that makes a build final names the one it left, `final_tree` — or
     `closeout_tree`, as the first closeouts named it. An answer is the `answer:<stop-id>` Update the workflow
     accepted, as its accepted event recorded the request; one its validator refused never entered the history.
+    The asynchronous `answer_merge` also requires its matching successful completion: its Git admission can
+    still refuse after Temporal accepts the request. Update IDs correlate both events across server versions.
     Its phase is the one of the last role turn begun before it, failed or not, and it comes `after` the last turn
     completed before it, by its key `stage:episode:round` — the transcript's order is the history's own, never one
     read from clocks. Each engineer turn carries its `change` (`_changes`), which begins from the commit the
@@ -561,7 +585,7 @@ async def history(client, run_id):
     attempts = {}
     trace_id = None
     steps, began, came = {}, None, []
-    checkpoints, captures = {}, {}
+    checkpoints, captures, merge_updates = {}, {}, {}
     try:
         async for event in client.get_workflow_handle(run_id).fetch_history_events():
             if event.HasField("activity_task_scheduled_event_attributes"):
@@ -626,11 +650,22 @@ async def history(client, run_id):
                             checkpoints[capture["stop"]] = {"unavailable": "checkpoint activity " + name}
             elif event.HasField("workflow_execution_update_accepted_event_attributes"):
                 request = event.workflow_execution_update_accepted_event_attributes.accepted_request
-                if request.input.name == "answer":
+                if request.input.name in ("answer", "answer_merge"):
                     answer = await decoded(request.input.args.payloads)
-                    answers.append({"stop": answer.get("stop"), "action": answer.get("action"),
-                                    "role": answer.get("role"), "text": answer.get("text"), "at": at(event),
-                                    "phase": phase, "after": _turn_key(turns[-1]) if turns else None})
+                    row = {"stop": answer.get("stop"), "action": answer.get("action"),
+                           "role": answer.get("role"), "text": answer.get("text"), "at": at(event),
+                           "phase": phase, "after": _turn_key(turns[-1]) if turns else None}
+                    if request.input.name == "answer":
+                        answers.append(row)
+                    else:
+                        # The async Merge Update can still fail its Git admission after acceptance.
+                        if request.meta.update_id:
+                            merge_updates[request.meta.update_id] = row
+            elif event.HasField("workflow_execution_update_completed_event_attributes"):
+                attributes = event.workflow_execution_update_completed_event_attributes
+                row = merge_updates.pop(attributes.meta.update_id, None)
+                if row is not None and attributes.outcome.HasField("success"):
+                    answers.append(row)
     except RPCError as error:
         if error.status == RPCStatusCode.NOT_FOUND:
             return None
@@ -828,3 +863,23 @@ async def worktrees_of(client, repo=None, settings_path=None, check=True):
                               "worktree_root": pol["targets"][selected["target"]]["worktree_root"]},
         id="worktrees-%s" % os.urandom(6).hex(), task_queue=policy_mod.workflow_queue(pol))
     return selected, view
+
+
+async def landing_options(client, run_id=None, repo=None, check=True):
+    """Ask the target host for landing facts; dropdown reads never fetch or mutate Git."""
+    if run_id:
+        current = await (readable_status(client, run_id) if check else status(client, run_id))
+        if not current or not current["state"].get("base_tip"):
+            raise Refusal("this run has no recorded base for destination discovery")
+        queue, workflow_queue = current["queue"], current["workflow_queue"]
+        args = {"merge_state": current["state"], "queue": queue}
+    else:
+        settings = S.load()
+        selected = repos.select(repo)
+        queue, workflow_queue = policy_mod.queue(settings, selected["target"]), policy_mod.workflow_queue(settings)
+        args = {"repository": selected, "queue": queue, "landing_preview": True,
+                "worktree_root": settings["targets"][selected["target"]]["worktree_root"]}
+    if check:
+        await preflight(client, queues(workflow_queue, queue))
+    return await client.execute_workflow(WF.WorktreeView.run, args,
+        id="landing-%s" % os.urandom(6).hex(), task_queue=workflow_queue)

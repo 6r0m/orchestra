@@ -63,6 +63,13 @@ handed, and never learns how git reads one.
 
 ## Invariants
 
+- New named starts validate the operator's complete short name before creating a workflow. Legacy start
+  callers remain compatible. Landing preview/discovery uses the target host through the existing read workflow;
+  no server reads another host's Git. A client refuses destination/message edits when the workflow worker
+  lacks the advertised protocol. Only the versioned Merge Update accepts those edits, through target-host
+  validation before state promotion. Closeout reads a proposal solely from the native final assistant product;
+  an unavailable proposal cannot invalidate independently valid closeout evidence or trigger a paid retry.
+
 Large retained operator context is resolved from accepted Update events in the exact Temporal execution
 that scheduled the role. The worker uses its own connection, validates each reference's stop, action,
 recipient and text hash, and restores the ordered original provenance for normal prompt composition and

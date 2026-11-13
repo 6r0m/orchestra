@@ -32,7 +32,9 @@ What a kind's module holds, each named below by what it answers:
 - `session(out, minted)`: the session a new turn began. `final_message(out)`: its answer.
 - `message_of(event)`: an agent message inside one JSON line of its output, or None.
 - `skill_folders(name, repo)`: where a skill of that name would be found for it.
-- optional — `configure(role, env, traced, private)`: the process environment and CLI settings for a selected API provider, or a refusal
+- optional — `in_worktree(argv, folder)`: the command explicitly bound to the assigned worktree, for a CLI
+  whose native resume can otherwise restore a different working directory;
+  `configure(role, env, traced, private)`: the process environment and CLI settings for a selected API provider, or a refusal
   before launch when it cannot be configured; no credentials enter the role's policy or trace;
   `prompt_input(prompt, files)`: safe input on argv and per-turn environment for an adapter's native prompt delivery;
   `trust_ensure(repo, home)`, `trust_forget(repo, home)`; `trace_env(context)`,

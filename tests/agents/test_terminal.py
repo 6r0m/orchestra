@@ -377,6 +377,38 @@ class Turns(unittest.TestCase):
         self.fail("timed out")
 
 
+class AssignedWorktree(unittest.TestCase):
+    def test_codex_fresh_and_resume_receive_the_assigned_directory_explicitly(self):
+        class Started(Exception):
+            pass
+
+        with tempfile.TemporaryDirectory(prefix="orchestra-cwd-") as root:
+            worktree = os.path.join(root, "Mixed Case worktree")
+            os.mkdir(worktree)
+            for session in (None, "saved-thread"):
+                with self.subTest(session=session):
+                    argv, _ = codex.command({"workspace_access": "read"}, session)
+                    captured = {}
+
+                    def start(command, cwd, env):
+                        captured.update(argv=command, cwd=cwd)
+                        raise Started()
+
+                    with mock.patch.object(terminal.shutil, "which", return_value="codex"), \
+                         mock.patch.object(terminal, "open_terminal") as opened:
+                        opened.return_value.start.side_effect = start
+                        with self.assertRaises(Started):
+                            terminal.run_turn(worktree, argv, os.path.join(root, "run"),
+                                              "assess-e1-1", "review", 10, {}, kind="codex")
+                    command = captured["argv"]
+                    self.assertIn("--cd", command)
+                    self.assertEqual(command[command.index("--cd") + 1], worktree)
+                    self.assertEqual(captured["cwd"], worktree)
+                    self.assertEqual(codex.session_in(command), session)
+                    self.assertEqual(command[command.index("--sandbox") + 1], "read-only")
+                    self.assertFalse(any("bypass" in part for part in command))
+
+
 class ANewKind(unittest.TestCase):
     """A kind of agent is its module alone: one planted for the test runs through the real terminal as the
     shipped kinds do — typed into, ended by its own signal, resumed — and its review is read by the one

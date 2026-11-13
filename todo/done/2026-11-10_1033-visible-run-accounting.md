@@ -1,6 +1,6 @@
 # Visible run timing and recorded cost
 
-**Status:** VERIFIED — local implementation and activation; operator-owned index preserved.
+**Status:** DONE (local implementation) 2026-11-13 — existing delivery reconciled and locally retested; live-state limits remain recorded below.
 
 ## Scope and decisions
 
@@ -46,7 +46,21 @@ candidate files. Runtime evidence stays in ignored scratch; no credentials or tr
 
 ## Durable owners
 
-- [Architecture and D20](../docs/architecture/structure.md)
-- [Usage and cost contract](../docs/architecture/trace-contract.md#usage-and-cost)
-- [Operator guide](../docs/using.md#the-optional-trace)
-- [Provisioning tools](../tools/README.md)
+- [Architecture and D20](../../docs/architecture/structure.md)
+- [Usage and cost contract](../../docs/architecture/trace-contract.md#usage-and-cost)
+- [Operator guide](../../docs/using.md#the-optional-trace)
+- [Provisioning tools](../../tools/README.md)
+
+### 2026-11-13 — Local acceptance and operator closeout
+
+- Operator approved completion, architectural review and local retesting of the current todos.
+  The existing implementation remains with its documented owners; no replacement service or workflow
+  authority was introduced for this delivery.
+- Full host acceptance passed sequentially: Windows, 704 tests; WSL, 933 tests. The first WSL run
+  exposed three CLI fixtures missing the new required name; valid named-start fixtures restored their
+  original preflight, telemetry-isolation and collision checks. Their focused rerun and the replacement
+  full WSL suite passed. New terminal-cache/merge regressions have additional focused browser acceptance.
+- Closure covers implemented behavior and local test acceptance. No live worker/service restart,
+  real push, Git identity mutation or new paid call was performed. Earlier live evidence is historical;
+  current production health, physical portrait-display acceptance and provider invoice completeness
+  are not newly asserted by this closeout. The previously recorded billing-coverage limitations remain.

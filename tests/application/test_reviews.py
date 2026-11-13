@@ -1,8 +1,41 @@
 """Review ranges use retained evidence, refuse unknown/cross-base history and freeze current endpoints."""
 import unittest
 from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+
+from temporalio.api.history.v1 import HistoryEvent
+from temporalio.converter import DataConverter
 
 from app.application import client as runs
+
+
+class MergeHistory(unittest.IsolatedAsyncioTestCase):
+    async def test_only_a_successfully_completed_merge_update_becomes_a_boundary(self):
+        converter = DataConverter.default
+        events = []
+        for number, completion in ((10, None), (20, 'failure'), (30, 'success')):
+            event = HistoryEvent(event_id=number)
+            request = event.workflow_execution_update_accepted_event_attributes.accepted_request
+            request.meta.update_id = 'update-%s' % number
+            request.input.name = 'answer_merge'
+            request.input.args.payloads.extend(await converter.encode([{'stop': 'stop-%s' % number, 'action': 'merge'}]))
+            events.append(event)
+            if completion:
+                done = HistoryEvent(event_id=number + 1)
+                attributes = done.workflow_execution_update_completed_event_attributes
+                attributes.meta.update_id = request.meta.update_id
+                getattr(attributes.outcome, completion).SetInParent()
+                events.append(done)
+
+        async def history():
+            for event in events:
+                yield event
+
+        client = SimpleNamespace(data_converter=converter,
+                                 get_workflow_handle=lambda _: SimpleNamespace(fetch_history_events=history))
+        record = await runs.history(client, 'run')
+        self.assertEqual([row['stop'] for row in record['answers']], ['stop-30'])
+        self.assertEqual([row['stop'] for row in record['review']['boundaries']], ['stop-30'])
 
 
 class ReviewRanges(unittest.IsolatedAsyncioTestCase):

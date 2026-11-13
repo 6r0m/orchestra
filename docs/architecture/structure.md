@@ -407,13 +407,18 @@ still lands on a checkout.
 - **D24** **The worktree lifecycle and the final gate.** A run's worktree is
   created by the target's own git at `<worktree root>/<run-id>` on branch
   `<run-id>` from the base branch, linked the way that repository's own git
-  settings say. The run id reads as the task: its first words, lowercase and hyphenated, up
-  to 16 characters, then eight random characters — 25 in all, because a Windows
+  settings say. New named starts validate the operator's complete short name: lowercase and hyphenated,
+  up to 16 characters, then eight random characters — 25 in all, because a Windows
   worktree folder plus a repository's deepest file must stay within Windows' path
   limits. A start whose id meets a run Temporal still retains draws a fresh one; a
   Windows worktree whose deepest file or folder would pass those limits, measured
   on that repository's base branch, is refused before it exists; and an existing
   branch of the run's name is adopted only while it still points at the base.
+  Legacy starts keep their recorded task-derived IDs, paths and conversations. Final-gate choices
+  and commit messages follow the versioned admission contract in
+  [orchestration](../../app/orchestration/docs/architecture/structure.md#invariants); Git compatibility,
+  pre-role remote trust and recovery belong to
+  [workspace](../../app/workspace/docs/architecture/structure.md#names-and-landing).
   Once the architect has passed the build, the engineer closes the todo out
   (`engineer:closeout`): the todo, finished, moved to the repository's done folder — or
   deleted, where the repository deletes a finished task (a null `todo_done_dir`). How a
@@ -457,8 +462,7 @@ still lands on a checkout.
   answer, and stops the run. The change read at the gate is what the worktree holds
   against that commit. `merge` lands the change the gate showed: the final tree as one
   commit on that commit, made in the worktree so the repository's own commit hooks
-  judge it, its message the plan's name and a few words of the task; then a merge
-  commit named for the plan, its first parent the base's own tip — the same two commits
+  judge it; then a merge commit, its first parent the base's own tip — the same two commits
   for every run, the base's own history its first-parent line, and nothing kept of the
   base's coming in. While the base is still at the commit the change was judged on,
   that merge commit's tree is the final tree exactly. Where the base moved on after the

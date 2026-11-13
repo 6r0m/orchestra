@@ -125,6 +125,33 @@ class TheStack(unittest.TestCase):
 
 
 class Forms(unittest.TestCase):
+    def test_named_start_refuses_an_old_workflow_worker_before_creating_a_run(self):
+        import cast
+        target = mock.MagicMock()
+        target.execute_workflow = mock.AsyncMock(return_value={'rows': []})
+        target.start_workflow = mock.AsyncMock()
+        with mock.patch.object(cli.runs.S, 'load', return_value=cast.settings()), \
+             mock.patch.object(cli.runs.repos, 'select', return_value={'id': 'repo', 'target': 'wsl'}):
+            with self.assertRaisesRegex(cli.runs.Refusal, 'workflow worker'):
+                asyncio.run(cli.runs.start(target, 'The complete task', short_name='test-name',
+                                           flow='engineer-code', check=False))
+        target.start_workflow.assert_not_awaited()
+
+    def test_confirmed_merge_json_reaches_the_shared_client_with_the_saved_tree(self):
+        status = {'stop': {'id': 'example:1', 'reason': 'final', 'actions': ['merge']},
+                  'state': {'base_tip': 'base', 'final_tree': 'tree'}, 'lines': []}
+        selected = {'branch': 'release', 'remote': None, 'messages': {'work': 'Preserve screens', 'merge': 'Merge screens'}}
+        target = mock.MagicMock()
+        with mock.patch.object(cli.runs, 'status', new=mock.AsyncMock(return_value=status)), \
+             mock.patch.object(cli.runs, 'answer', new=mock.AsyncMock()) as answer, \
+             mock.patch.object(cli, 'follow', new=mock.AsyncMock(return_value=status)), \
+             mock.patch.object(cli, '_report', return_value=0), \
+             mock.patch.object(cli, '_trace_url', return_value=None):
+            code = asyncio.run(cli.run(['--resume', 'example', '--answer', 'merge', '--confirm',
+                                       '--landing', json.dumps(selected)], client=target, tele=object(), check=False))
+        self.assertEqual(code, 0)
+        self.assertEqual(answer.call_args.args[2]['landing'], dict(selected, version=1, basis='base', tree='tree'))
+
     def test_adopting_a_verified_todo_name_does_not_answer_or_follow_the_stop(self):
         result = {"todo_path": "/worktree/todo/concise.md"}
         with mock.patch.object(cli.runs, "adopt_todo_name", new_callable=mock.AsyncMock, return_value=result) as adopted, \
@@ -174,7 +201,7 @@ class Forms(unittest.TestCase):
             out = io.StringIO()
             with contextlib.redirect_stderr(out):
                 # A client that can start nothing: the flow is refused before one is needed.
-                code = asyncio.run(cli.run(["a task", "--flow", name], client=object(), tele=object(), check=False))
+                code = asyncio.run(cli.run(["a task", "--name", "test-flow", "--flow", name], client=object(), tele=object(), check=False))
             self.assertEqual(code, 4, name)
             self.assertIn(said, out.getvalue())
 

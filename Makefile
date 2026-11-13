@@ -9,6 +9,9 @@ SHELL := /bin/bash
 TASK_SAFE := $(value TASK)
 unexport TASK
 export TASK_SAFE
+NAME_SAFE := $(value NAME)
+unexport NAME
+export NAME_SAFE
 
 # This checkout's uv-managed environment, on this host's own disk (app/foundation/envpath.py).
 V = UV_PROJECT_ENVIRONMENT="$$(uv run --no-project --managed-python --python 3.13 python app/foundation/envpath.py $(CURDIR))" \
@@ -62,9 +65,9 @@ workbench-restart: ## Restart the Workbench's service, to load this checkout's c
 workbench-status: ## Show the Workbench's service
 	@bash workers.sh workbench status
 
-feature: ## Run one task through the workflow (usage: make feature TASK="fix X in Y")
-	@test -n "$$TASK_SAFE" || { echo 'usage: make feature TASK="fix X in Y"' >&2; exit 2; }
-	@$(V) -m app.interfaces.cli "$$TASK_SAFE"
+feature: ## Run one task (usage: make feature NAME=fix-uploader TASK="fix X in Y")
+	@test -n "$$TASK_SAFE" -a -n "$$NAME_SAFE" || { echo 'usage: make feature NAME=fix-uploader TASK="fix X in Y"' >&2; exit 2; }
+	@$(V) -m app.interfaces.cli --name "$$NAME_SAFE" "$$TASK_SAFE"
 
 demo: ## Watch runs answered, stopped and force-terminated, and a worker brought back, in a Workbench of its own, with fake agents (needs `make up`)
 	@$(V) tools/demo.py
