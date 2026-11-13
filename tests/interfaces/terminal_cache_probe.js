@@ -97,6 +97,54 @@ export async function run() {
     release(true);
     await held;
 
+    for (const phase of ["hash", "transaction"]) {
+      const invalidated = "probe-invalidated-" + phase;
+      cleanup.add(invalidated);
+      await cache.save(invalidated, "windows", "engineer", 100, stream);
+      let pendingSave, removal, releaseHash;
+      const nativeDigest = crypto.subtle.digest, nativeRead = IDBObjectStore.prototype.getAll;
+      try {
+        if (phase === "hash") {
+          crypto.subtle.digest = function (...args) {
+            const computed = nativeDigest.apply(this, args);
+            return new Promise((resolve) => { releaseHash = () => resolve(computed); });
+          };
+          pendingSave = cache.save(invalidated, "windows", "engineer", 500, stream);
+          check(releaseHash, "save did not reach the delayed hash");
+          await cache.remove(invalidated, "windows", "engineer");
+          releaseHash();
+        } else {
+          let armed = true;
+          IDBObjectStore.prototype.getAll = function (...args) {
+            const request = nativeRead.apply(this, args);
+            if (armed && this.transaction.mode === "readwrite") {
+              armed = false;
+              // Run before the cache's write callback, while the real transaction is active.
+              request.addEventListener("success", () => {
+                removal = cache.remove(invalidated, "windows", "engineer");
+              }, { once: true });
+            }
+            return request;
+          };
+          pendingSave = cache.save(invalidated, "windows", "engineer", 500, stream);
+        }
+        const accepted = await pendingSave;
+        await removal;
+        check(!cache.read(invalidated, "windows", "engineer") &&
+          !(await rows()).some((row) => row.runId === invalidated),
+          "an invalidated screen reappeared after " + phase);
+        check(!accepted, "an invalidated save was accepted after " + phase);
+      } finally {
+        crypto.subtle.digest = nativeDigest;
+        IDBObjectStore.prototype.getAll = nativeRead;
+        releaseHash?.();
+        await pendingSave;
+        await removal;
+      }
+      check(await cache.save(invalidated, "windows", "engineer", 10, stream),
+        "invalidation prevented a fresh screen at its reset cursor after " + phase);
+    }
+
     const peer = await import("/terminal-cache.js?peer");
     const race = "probe-race";
     cleanup.add(race);

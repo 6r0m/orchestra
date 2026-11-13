@@ -110,6 +110,8 @@ Refresh and browser reopening reuse committed snapshots on the same Workbench or
 The cursor remains a position in the worker's append-only record, never in the serialized display.
 Corrupt/incompatible snapshots, truncated records and older workers recover through normal record replay.
 Storage failure is visible and never prevents workflow execution or terminal observation.
+Explicit removal invalidates that screen's in-flight saves in the page, both after hashing and inside
+the serialized write transaction. A fresh save after a reset can start again at a lower cursor.
 
 IndexedDB transactions prevent one tab overwriting a newer cursor or recreating a recently closed run's
 snapshot after another tab clears it. Confirmed closure releases persisted screens; a bounded closed-run

@@ -8,6 +8,7 @@ export const LIMITS = Object.freeze({ bytes: 32 * 1024 * 1024, frame: 8 * 1024 *
   screens: 24, closed: 256 });
 const { bytes: BYTE_LIMIT, frame: FRAME_LIMIT, screens: SCREEN_LIMIT, closed: CLOSED_LIMIT } = LIMITS;
 const frames = new Map();
+const invalidations = new Map();
 const closed = new Set();
 const serializers = new WeakMap();
 const saving = new Set();
@@ -97,6 +98,7 @@ export function read(runId, target, role) {
 
 export function remove(runId, target, role) {
   const id = key(runId, target, role);
+  invalidations.set(id, (invalidations.get(id) || 0) + 1);
   frames.delete(id);
   return change((store) => store.delete(id));
 }
@@ -171,6 +173,7 @@ async function saveScreen(runId, target, role, cursor, term) {
   if (!database || failure || closed.has(runId) || !cursor) return false;
   // A legacy page configuration cannot validate persisted geometry; its ordinary replay still works.
   if (!Number.isInteger(CONFIG.terminal_size.min_rows) || !Number.isInteger(CONFIG.terminal_size.max_rows)) return false;
+  const id = key(runId, target, role), generation = invalidations.get(id);
   try {
     const snapshot = capture(term);
     if (!snapshot) return false;
@@ -179,12 +182,13 @@ async function saveScreen(runId, target, role, cursor, term) {
       cols: term.cols, rows: term.rows, snapshot });
     const bytes = new TextEncoder().encode(body).length;
     if (bytes > FRAME_LIMIT) throw new Error("terminal screen exceeds the refresh-cache allowance");
-    const row = { id: key(runId, target, role), kind: "screen", format: FORMAT,
+    const row = { id: id, kind: "screen", format: FORMAT,
       runId, target, role, cursor, cols: term.cols, rows: term.rows, body,
       bytes, digest: await digest(body), at: Date.now() };
-    if (closed.has(runId)) return false;
+    if (closed.has(runId) || invalidations.get(id) !== generation) return false;
     frames.set(row.id, row);
     return await change((store, rows) => {
+      if (closed.has(runId) || invalidations.get(id) !== generation) return false;
       if (rows.some((item) => item.kind === "closed" && item.runId === runId)) {
         closed.add(runId);
         for (const [id, frame] of frames) if (frame.runId === runId) frames.delete(id);
