@@ -1,6 +1,6 @@
 # Run setup and skill instructions
 
-**Status:** VERIFIED — implementation and activation complete; pending operator closeout.
+**Status:** PASS — implemented, verified and activated; scope closed by the operator.
 
 ## Goal and scope
 
@@ -16,11 +16,11 @@ choose a compatible preferred Merge destination at setup; distinguish worktree n
   cached compatible choices and explicit refresh; the final approved Merge still owns the actual landing.
 - The worktree name identifies the run's temporary folder/branch. Actual completed-change messages remain
   independently proposed and approved at the final gate, as in the existing naming agreement.
-- [Interfaces](../app/interfaces/docs/architecture/structure.md) owns input composition;
-  [application](../app/application/docs/architecture/structure.md) routes read-only discovery to the target;
-  [agents](../app/agents/docs/architecture/structure.md) owns native skill roots;
-  [orchestration](../app/orchestration/docs/architecture/structure.md) retains the recorded preference;
-  [workspace](../app/workspace/docs/architecture/structure.md) keeps Git admission and landing.
+- [Interfaces](../../app/interfaces/docs/architecture/structure.md) owns input composition;
+  [application](../../app/application/docs/architecture/structure.md) routes read-only discovery to the target;
+  [agents](../../app/agents/docs/architecture/structure.md) owns native skill roots;
+  [orchestration](../../app/orchestration/docs/architecture/structure.md) retains the recorded preference;
+  [workspace](../../app/workspace/docs/architecture/structure.md) keeps Git admission and landing.
 
 ## Implementation and acceptance
 
@@ -28,6 +28,7 @@ choose a compatible preferred Merge destination at setup; distinguish worktree n
 - [x] Multiple searchable skill checkboxes; stage/current-request context; visible task/note insertion.
 - [x] Setup destination list, explicit refresh, saved final-gate preference and unknown-target refusal.
 - [x] Clear worktree naming label and separate commit-message explanation.
+- [x] Eight-line task preview with reversible expansion, preserved original text and stable polling.
 - [x] Focused native Edge revision proves both selected references and original note reach both roles.
 - [x] Focused setup, catalog, Git, admission and replay checks passed (38 Windows tests).
 - [x] Final both-host checks, public-safety/document validation and main-stack activation/readback.
@@ -64,10 +65,12 @@ Skills remain operator instructions: selection does not override stage contracts
   confirmed its successful native read returned every complete note. No recovery turn was needed.
 
 - Full WSL suite: 952 tests passed.
-- Final full Windows run: 722 tests executed; every class except the real-worker cleanup class passed.
+- Initial setup full Windows run: 722 tests executed; every class except the real-worker cleanup class passed.
   Activation overlapped that class's orphan-settings assertion. The production worker log confirms it removed
   the exact disposable folder before the test's own sweep. With no reload running, the complete 10-test class
-  passed. No production cleanup boundary was weakened and no further broad rerun was needed.
+  passed. The subsequent task-preview change passed the complete 723-test Windows suite. Its focused
+  browser regression also checked keyboard expansion, polling, short tasks, mobile width and navigation.
+  The later two UI race fixes passed the focused checks above; no production cleanup boundary was weakened.
 - Public-safety checks, candidate-file secret scanning, whitespace and 55 local documentation links passed.
 - Graceful reload completed for both workers; their assigned queues poll and the Workbench service is active.
   Reload waited for an ongoing assessment. The operator advanced the live run independently; these checks
