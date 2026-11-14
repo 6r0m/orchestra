@@ -31,6 +31,8 @@ choose a compatible preferred Merge destination at setup; distinguish worktree n
 - [x] Focused native Edge revision proves both selected references and original note reach both roles.
 - [x] Focused setup, catalog, Git, admission and replay checks passed (38 Windows tests).
 - [x] Final both-host checks, public-safety/document validation and main-stack activation/readback.
+- [x] Refuse skill insertion after the originating stop/form changes; preserve the current draft.
+- [x] Capture one Start submission before asynchronous reads and preserve later form edits.
 
 ## Evidence and limits
 
@@ -51,6 +53,15 @@ All automated checks use scripted agents; no new paid model call or trust approv
 Skills remain operator instructions: selection does not override stage contracts, native trust or sandboxing.
 
 ## Final acceptance
+
+- Follow-up UI review: both reported races reproduced in focused module tests before their fixes.
+  The 24-test Windows group covering setup, native browser flows, operator-note resolution and accepted
+  answers passed; the corresponding 19-test WSL group passed. Three additional approval-note, cross-phase
+  retention and Pi compaction checks passed on each host. A further native two-tab regression advanced a
+  disposable run through its normal Revise
+  action, then proved that the older picker refused insertion into the newer stop without changing its draft.
+  A live note-delivery audit matched accepted originals with the current role's guidance attachment and
+  confirmed its successful native read returned every complete note. No recovery turn was needed.
 
 - Full WSL suite: 952 tests passed.
 - Final full Windows run: 722 tests executed; every class except the real-worker cleanup class passed.

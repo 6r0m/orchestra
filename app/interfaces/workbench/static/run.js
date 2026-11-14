@@ -123,6 +123,7 @@ export function show(runId) {
       const { pickSkills } = await import("./skills.js");
       if (selected !== runId || shownStop !== stop || $("stop-note-field").hidden) return;
       await pickSkills({ run: runId, input: $("stop-note"),
+        isCurrent: () => selected === runId && shownStop === stop && !$("stop-note-field").hidden,
         stages: (drawn.view?.flow?.steps || []).filter((step) => !step.startsWith("you:")) });
     } catch (error) { report($("stop-note-alert"), "Skill picker unavailable; reload the Workbench service. " + error.message, true); }
   };

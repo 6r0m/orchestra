@@ -103,6 +103,8 @@ add their exact references to the editable task. The same control appears with r
 operator stops. These are operator-authored instructions, retained through the existing task and note
 delivery to both roles; the picker neither changes global stage bindings nor grants permissions. Inspect
 the inserted references and add your own instructions before sending. Cancel changes no task or note.
+If the run or selected context changes while the picker is open, close and reopen it before adding skills.
+Start uses the form as submitted; edits made while its checks run remain available for the next run.
 
 The run follows the
 flow chosen in its Flow list, whose steps show under it: `engineer-code`, the default — `default_flow`

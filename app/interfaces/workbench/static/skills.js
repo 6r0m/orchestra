@@ -3,7 +3,7 @@ import { api } from "./api.js";
 import { $, el } from "./ui.js";
 
 let generation = 0;
-export async function pickSkills({ repo, run, input, stages = [] }) {
+export async function pickSkills({ repo, run, input, stages = [], isCurrent = () => true }) {
   const request = ++generation;
   const dialog = $("instruction-skills"), options = $("instruction-skills-options");
   const target = $("instruction-skills-stage"), search = $("instruction-skills-search");
@@ -56,6 +56,10 @@ export async function pickSkills({ repo, run, input, stages = [] }) {
     add.disabled = false;
     add.onclick = () => {
       if (!dialog.open || request !== generation) return;
+      if (!isCurrent()) {
+        status.textContent = "The request changed while the picker was open. Close and reopen it for the current task or stop. Nothing was added.";
+        return;
+      }
       if (!selected.size) { status.textContent = "Select at least one skill."; return; }
       const method = [...selected.values()].map((row) => "- " + row.name + ": " + row.reference.replaceAll("\\", "/")).join("\n");
       const when = target.value === "This request" ? "this request" : target.selectedOptions[0].textContent;

@@ -15,6 +15,7 @@ $("start-skills").onclick = async () => {
     const { pickSkills } = await import("./skills.js");
     if (from !== location.hash || repo !== chosenRepo() || flow !== $("start-flow").value) return;
     await pickSkills({ repo, input: $("start-task"),
+      isCurrent: () => from === location.hash && repo === chosenRepo() && flow === $("start-flow").value,
       stages: (listedFlows.find((row) => row.name === flow)?.steps || []).filter((step) => !step.startsWith("you:")) });
   } catch (error) { report($("start-result"), "Skill picker unavailable; reload the Workbench service. " + error.message, true); }
 };
@@ -138,10 +139,17 @@ $("start-flow").onchange = () => {
   showFlowSteps();
 };
 
+function formValues() {
+  return { repo: chosenRepo(), task: $("start-task").value, short_name: $("start-name").value,
+    flow: $("start-flow").value, auto_proceed: $("start-auto").checked,
+    destination: $("start-destination").value, destinationDisabled: $("start-destination").disabled };
+}
+
 $("start").onsubmit = async (event) => {
   event.preventDefault();
   const button = event.submitter || $("start").querySelector("button[type=submit]");
-  const repo = chosenRepo();
+  const submitted = Object.freeze(formValues());
+  const repo = submitted.repo;
   if (!repo) {
     report($("start-result"), "Choose a repository, or give its path.", true);
     return;
@@ -152,19 +160,23 @@ $("start").onsubmit = async (event) => {
   button.disabled = true;
   report($("start-result"), "starting…");
   try {
+    if (submitted.destinationDisabled || !submitted.destination) throw Object.assign(new Error("Choose a preferred Merge destination; use Refresh destinations if its last read failed."), { status: 409 });
+    const request = { repo, task: submitted.task, short_name: submitted.short_name, flow: submitted.flow,
+      auto_proceed: submitted.auto_proceed, merge_preference: JSON.parse(submitted.destination) };
     const support = await api("/api/landing?repo=" + encodeURIComponent(repo));
     if (support.version !== 1 || !Array.isArray(support.choices)) throw Object.assign(new Error("Reload the Workbench and target worker before choosing a Merge destination."), { status: 409 });
-    if ($("start-destination").disabled || !$("start-destination").value) throw Object.assign(new Error("Choose a preferred Merge destination; use Refresh destinations if its last read failed."), { status: 409 });
-    const started = await api("/api/runs", { task: $("start-task").value, repo: repo,
-      ...(!$("start-destination").disabled && $("start-destination").value ? { merge_preference: JSON.parse($("start-destination").value) } : {}),
-      short_name: $("start-name").value, flow: $("start-flow").value, auto_proceed: $("start-auto").checked });
+    const started = await api("/api/runs", request);
     report($("start-result"), "started " + started.run_id);
     starting.set(started.run_id, { repo: repo });
-    $("start-task").value = "";
-    $("start-name").value = "";
-    $("start-name").oninput();
+    const current = formValues();
+    const sameForm = Object.keys(submitted).every((key) => current[key] === submitted[key]);
+    if (sameForm) {
+      $("start-task").value = "";
+      $("start-name").value = "";
+      $("start-name").oninput();
+    }
     wrote();
-    if (location.hash === from) location.hash = "#run=" + encodeURIComponent(started.run_id);
+    if (sameForm && location.hash === from) location.hash = "#run=" + encodeURIComponent(started.run_id);
   } catch (error) {
     // A 4xx is the Workbench's refusal before any run is made: it checks the request, the repository, the flow,
     // the settings and the workers before it starts one. Anything else — its own failure or timeout, which may

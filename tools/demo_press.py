@@ -1484,14 +1484,18 @@ def task_disclosure(page, run_id):
     print('PASS: eight-line task preview, exact full text, keyboard expansion, polling and collapse; mobile and navigation preserved')
 
 
-def instruction_skills(page, run_id):
-    def choose(button, field, stage):
+def instruction_skills(page, run_id, port):
+    page.call("Emulation.setFocusEmulationEnabled", enabled=True)
+    def choose(button, field, stage, add=True):
         page.value("document.querySelector(%s).click()" % json.dumps(button))
         wait(lambda: page.value("document.querySelector('#instruction-skills').open && "
                                 "document.querySelectorAll('#instruction-skills-options input').length===2"), 15, 'both skill origins')
         page.value("(()=>{const s=document.querySelector('#instruction-skills-stage');s.value=%s;s.dispatchEvent(new Event('change'));"
                    "document.querySelectorAll('#instruction-skills-options input').forEach(x=>{x.checked=true;x.dispatchEvent(new Event('change'));});"
-                   "document.querySelector('#instruction-skills-add').click();return true;})()" % json.dumps(stage))
+                   "return true;})()" % json.dumps(stage))
+        if not add:
+            return
+        page.value("document.querySelector('#instruction-skills-add').click();true")
         text = page.value("document.querySelector(%s).value" % json.dumps(field))
         if '/fixture/global/review-method/SKILL.md' not in text or '/fixture/repo/repo-checks/SKILL.md' not in text:
             raise SystemExit('multiple exact skill references did not reach the operator field')
@@ -1506,6 +1510,37 @@ def instruction_skills(page, run_id):
         raise SystemExit('skill insertion replaced the original task')
     page.value("location.hash='#run='+" + json.dumps(run_id))
     wait(lambda: page.value("!document.querySelector('#merge-options').hidden"), 15, 'final note controls')
+
+    def stop_id(tab):
+        return tab.call("Runtime.evaluate", expression="(async()=>{const {api}=await import('/api.js');"
+                        "return (await api('/api/runs/'+%s)).stop?.id})()" % json.dumps(run_id),
+                        awaitPromise=True, returnByValue=True)["result"].get("value")
+    original = stop_id(page)
+    choose('#stop-skills', '#stop-note', 'architect:verify', add=False)
+    target = page.call("Target.createTarget", url=page.value("location.origin") + '/#run=' + urllib.parse.quote(run_id))["targetId"]
+    try:
+        socket_url = wait(lambda: next((row["webSocketDebuggerUrl"] for row in json.load(urllib.request.urlopen(
+            "http://127.0.0.1:%s/json/list" % port)) if row.get("id") == target), None), 10, 'the second operator tab')
+        with connect(socket_url, max_size=None) as connection:
+            other = Page(connection)
+            other.call("Emulation.setFocusEmulationEnabled", enabled=True)
+            wait(lambda: other.value("document.querySelector('#stop-title')?.textContent==='Ready to merge'"),
+                 15, 'the same stop in the second tab')
+            other.value("document.querySelector('#stop-note').value='Advance this fixture from another tab';"
+                        "document.querySelector('#stop-note').dispatchEvent(new Event('input'));"
+                        "[...document.querySelectorAll('#stop-actions button')].find(x=>x.textContent==='Revise (architect)').click();true")
+            wait(lambda: stop_id(other) not in (None, original), 30, 'a new stop accepted through the second tab')
+        page.call("Runtime.evaluate", expression="(async()=>{await(await import('/run.js')).refreshRun();return true})()",
+                  awaitPromise=True, returnByValue=True)
+        refused = page.value("(()=>{const input=document.querySelector('#stop-note');input.value='New stop draft';"
+                             "input.dispatchEvent(new Event('input'));document.querySelector('#instruction-skills-add').click();"
+                             "return input.value==='New stop draft' && document.querySelector('#instruction-skills-status').textContent.includes('request changed')})()")
+        if not refused:
+            raise SystemExit('a stale picker inserted skills into another stop')
+        page.value("document.querySelector('#instruction-skills-cancel').click();true")
+    finally:
+        page.call("Target.closeTarget", targetId=target)
+
     page.value("document.querySelector('#stop-note').value='Keep this operator note';"
                "document.querySelector('#stop-note').dispatchEvent(new Event('input'))")
     choose('#stop-skills', '#stop-note', 'architect:verify')
@@ -1630,7 +1665,7 @@ def main(url, run_id, label, said, note=None):
             if label == "review-closed":
                 return review_closed(page, run_id, said)
             if label == "instruction-skills":
-                instruction_skills(page, run_id)
+                instruction_skills(page, run_id, port)
             if label == "task-disclosure":
                 task_disclosure(page, run_id)
             if label in ("merge-choice", "merge-retry", "instruction-skills", "task-disclosure"):
