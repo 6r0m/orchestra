@@ -348,6 +348,14 @@ summary:hover { color: var(--ink); }
    changed with the font it was fitted to. */
 .term { padding: 8px; background: #000; overflow: hidden; border-radius: 0 0 8px 8px; }
 .term-size { float: right; min-height: 26px; margin: -4px 0 -4px 12px; padding: 2px 10px; font-size: 13px; }
+.terminal-history-page > .top, .terminal-history-page > .banners, .terminal-history-page .rail { display: none; }
+.terminal-history-page .layout { display: block; }
+.terminal-history-page main { padding: 20px; }
+.terminal-archive { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.terminal-archive progress { width: 100%; }
+.terminal-archive .term { height: calc(100dvh - 220px); min-height: 240px; border: 1px solid var(--rule); border-radius: 8px; }
+.terminal-archive .term .xterm { height: 100%; }
+.terminal-archive .hint { max-width: 100ch; }
 /* Maximized: the terminal fills the window, inside the page, its font sized to it by terminals.js. Placed, not
    stretched: a details element's content is wrapped in a part of its own, which no flex of the details reaches. */
 .terminal.maximized { position: fixed; inset: 10px; z-index: 40; box-shadow: 0 0 0 100vmax rgb(0 0 0 / 60%); }
@@ -395,6 +403,32 @@ body.terminal-maximized { overflow: hidden; }
 .prompt-part .turn-prose { margin-top: 6px; }
 .round-change > summary .hint { margin-left: 10px; }
 .round-change-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin-top: 8px; }
+.change-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 4px 0 12px; }
+.change-toolbar > .result { flex-basis: 100%; }
+.milestone-list { display: grid; gap: 12px; }
+.milestone-card { border: 1px solid var(--rule); border-radius: 8px; background: var(--surface); min-width: 0; }
+.milestone-card.current { border-left: 3px solid var(--engineer); }
+.milestone-card > summary { display: flex; align-items: center; gap: 12px; padding: 13px 16px; list-style: none; }
+.milestone-card > summary::-webkit-details-marker { display: none; }
+.milestone-card > summary:hover { background: var(--raised); border-radius: 8px; }
+.milestone-heading { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.milestone-heading > strong { font-size: 14px; }
+.milestone-badge { padding: 1px 7px; border: 1px solid var(--rule); border-radius: 4px; color: var(--quiet); font-size: 12px; }
+.current .milestone-badge { color: var(--engineer); }
+.milestone-subtitle { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 4px 16px; color: var(--quiet); font-size: 12px; }
+.milestone-count { color: var(--quiet); font-size: 12px; }
+.milestone-card > .round-change-body { margin: 0; padding: 0 16px 16px; gap: 10px; }
+.milestone-card .milestone-copy { border-color: var(--control); }
+.milestone-compare { margin-top: 4px; color: var(--quiet); font-size: 12px; }
+.milestone-compare .section-head { margin-top: 8px; }
+.milestone-compare label { display: grid; gap: 4px; max-width: 100%; }
+.milestone-retention { margin-top: 14px; color: var(--quiet); font-size: 12px; }
+.milestone-retention p { margin-top: 6px; max-width: 75ch; }
+@media (max-width: 540px) {
+  .milestone-card > summary { flex-wrap: wrap; padding: 12px; gap: 8px; }
+  .milestone-count { margin-left: 24px; }
+  .milestone-card > .round-change-body { padding: 0 12px 12px; }
+}
 .answer { border-left-color: var(--you); display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px;
   padding: 5px 0 5px calc(10px + 1em + 6px); }
 .answer .turn-what { color: var(--ink); }

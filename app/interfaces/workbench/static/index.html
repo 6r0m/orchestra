@@ -303,15 +303,14 @@
           <div class="actions" id="stop-reply-actions"></div>
         </div>
         <fieldset class="field" id="merge-options" hidden>
-          <legend>Merge destination and messages</legend>
+          <legend>Merge destination and commit message</legend>
           <label for="merge-destination">Land on</label>
           <select id="merge-destination" name="merge_destination"></select>
           <p class="hint" id="merge-destination-hint" role="status"></p>
           <button type="button" id="merge-retry" hidden>Retry destinations</button>
-          <label for="merge-work-message">Change commit message</label>
-          <textarea id="merge-work-message" name="work_message" rows="3" autocomplete="off"></textarea>
-          <label for="merge-merge-message">Merge commit message</label>
-          <textarea id="merge-merge-message" name="merge_message" rows="3" autocomplete="off"></textarea>
+          <label for="merge-work-message">Commit message</label>
+          <textarea id="merge-work-message" name="work_message" rows="3" autocomplete="off" aria-describedby="merge-message-hint"></textarea>
+          <p class="hint">Merge commit: <output id="merge-message-preview" for="merge-work-message"></output></p>
           <p class="hint" id="merge-message-hint" role="status"></p>
         </fieldset>
         <div class="field" id="stop-note-field">
@@ -329,14 +328,17 @@
         <summary><h2 id="change-title"><span class="chevron" aria-hidden="true"></span>Change
           <span class="hint" id="change-count">Files and patch</span></h2></summary>
         <div class="change-body">
+          <div class="change-toolbar">
+            <button type="button" class="copy" id="change-copy"
+              title="Copy one net diff from the run's original starting point to its latest files or retained snapshot">Copy all changes</button>
+            <span class="hint" id="change-range"></span>
+            <p class="result" id="change-result" role="status"></p>
+          </div>
           <div id="review-milestones"></div>
           <div class="change-body" id="change-worktree">
             <div class="section-head">
               <button type="button" id="diff-load"
                 title="Read what the worktree holds now against the run's base: each file, and the whole patch">Read the change</button>
-              <button type="button" class="copy" id="change-copy"
-                title="Copy the whole change as the worktree holds it now — every file, however long — as one patch">Copy all changes</button>
-              <p class="result" id="change-result" role="status"></p>
             </div>
             <p class="hint" id="change-said"></p>
             <div id="diff-files"></div>
@@ -353,11 +355,11 @@
       <section class="agents" id="agents" aria-labelledby="agents-title">
         <h2 id="agents-title">Terminals</h2>
         <details class="terminal" id="terminal-engineer" data-role="engineer">
-          <summary><span class="role engineer">engineer</span><span class="term-state" id="state-engineer" role="status"></span><button type="button" class="term-size" id="size-engineer">Maximize</button></summary>
+          <summary><span class="role engineer">engineer</span><span class="term-state" id="state-engineer" role="status"></span><button type="button" class="term-size" id="size-engineer">Maximize</button><a class="button term-size" id="history-engineer" target="_blank" rel="noopener" aria-label="Open engineer full terminal history" title="Open a read-only terminal snapshot from the first interaction">↗</a></summary>
           <div class="term" id="term-engineer"></div>
         </details>
         <details class="terminal" id="terminal-architect" data-role="architect">
-          <summary><span class="role architect">architect</span><span class="term-state" id="state-architect" role="status"></span><button type="button" class="term-size" id="size-architect">Maximize</button></summary>
+          <summary><span class="role architect">architect</span><span class="term-state" id="state-architect" role="status"></span><button type="button" class="term-size" id="size-architect">Maximize</button><a class="button term-size" id="history-architect" target="_blank" rel="noopener" aria-label="Open architect full terminal history" title="Open a read-only terminal snapshot from the first interaction">↗</a></summary>
           <div class="term" id="term-architect"></div>
         </details>
       </section>
@@ -365,7 +367,7 @@
       <section class="history" id="history" aria-labelledby="history-title">
         <h2 id="history-title">History</h2>
         <p class="hint">Each turn: what its role was given and what it gave back, with your answers between. The
-          terminals hold each session in full.</p>
+          live terminals show recent scrollback; ↗ opens a full terminal snapshot from the beginning.</p>
         <div id="timeline"></div>
         <details class="legend">
           <summary>What the verdicts mean</summary>
@@ -386,6 +388,19 @@
         <pre id="lines"></pre>
       </details>
     </article>
+    <section id="terminal-history" class="terminal-archive" hidden aria-labelledby="archive-title">
+      <div class="section-head">
+        <h1 id="archive-title">Full terminal history</h1>
+        <a id="archive-back">Open run</a>
+        <button type="button" id="archive-top">Beginning</button>
+        <button type="button" id="archive-bottom">End</button>
+      </div>
+      <p class="hint">Read-only snapshot from the first recorded interaction. Frozen when opened; later agent output is excluded.
+        Scrollback clears are ignored here to preserve earlier turns; CLI redraws may repeat output.</p>
+      <p id="archive-status" class="hint" role="status">Reading recording…</p>
+      <progress id="archive-progress" value="0" max="1" aria-label="Terminal recording parsed"></progress>
+      <div id="archive-term" class="term"></div>
+    </section>
   </main>
 </div>
 <dialog class="confirm" id="confirm" aria-labelledby="confirm-title" aria-describedby="confirm-body">

@@ -205,6 +205,13 @@ export async function run() {
     await cache.save(race, "windows", "architect", 400, stream);
     check((await rows()).filter((row) => row.runId === race && row.kind === "screen").length === 3,
       "host or role identity collided");
+    await cache.save(race, "windows", "engineer", 600, stream, true);
+    const archive = cache.read(race, "windows", "engineer", true);
+    check(archive?.encoding === "gzip" && archive.cursor === 600 && cache.read(race, "windows", "engineer").cursor === 200,
+      "compressed full history replaced the live screen or lost its own cursor");
+    const archiveCopy = terminal();
+    await cache.restore(archiveCopy, archive);
+    check(view(archiveCopy) === view(stream), "compressed history changed native terminal state");
     const late = peer.save(race, "windows", "engineer", 500, stream);
     await cache.close(race);
     await late;

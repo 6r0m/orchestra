@@ -53,12 +53,16 @@ const database = await new Promise((resolve) => {
   } catch (error) { finish(null, error); }
 });
 
-function key(runId, target, role) { return JSON.stringify([runId, target, role]); }
+function key(runId, target, role, archive = false) {
+  return JSON.stringify(archive ? [runId, target, role, "history"] : [runId, target, role]);
+}
 
 function valid(row) {
   return row?.kind === "screen" && row.format === FORMAT &&
     typeof row.runId === "string" && typeof row.target === "string" &&
-    ["engineer", "architect"].includes(row.role) && row.id === key(row.runId, row.target, row.role) &&
+    ["engineer", "architect"].includes(row.role) && (row.archive === undefined || row.archive === true) &&
+    (row.encoding === undefined || row.archive === true && row.encoding === "gzip") &&
+    row.id === key(row.runId, row.target, row.role, row.archive) &&
     Number.isSafeInteger(row.cursor) && row.cursor > 0 && row.cols === CONFIG.terminal_size.cols &&
     Number.isInteger(row.rows) && row.rows >= CONFIG.terminal_size.min_rows && row.rows <= CONFIG.terminal_size.max_rows &&
     typeof row.body === "string" && row.body.length <= FRAME_LIMIT &&
@@ -92,12 +96,12 @@ export async function flush() {
   return pending;
 }
 
-export function read(runId, target, role) {
-  return closed.has(runId) ? null : frames.get(key(runId, target, role)) || null;
+export function read(runId, target, role, archive = false) {
+  return closed.has(runId) ? null : frames.get(key(runId, target, role, archive)) || null;
 }
 
-export function remove(runId, target, role) {
-  const id = key(runId, target, role);
+export function remove(runId, target, role, archive = false) {
+  const id = key(runId, target, role, archive);
   const screen = activeScreens.get(id);
   if (screen) screen.generation++;
   frames.delete(id);
@@ -163,15 +167,45 @@ async function digest(body) {
   return Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export function save(runId, target, role, cursor, term) {
-  const id = key(runId, target, role);
+async function compress(body) {
+  const data = new Uint8Array(await new Response(new Blob([body]).stream().pipeThrough(new CompressionStream("gzip"))).arrayBuffer());
+  let binary = "";
+  for (let offset = 0; offset < data.length; offset += 32768)
+    binary += String.fromCharCode(...data.subarray(offset, offset + 32768));
+  return btoa(binary);
+}
+
+const expandedLimit = (cursor) => Math.min(256 * 1024 * 1024, Math.max(FRAME_LIMIT, cursor * 8 + 65536));
+
+async function unpack(row) {
+  if (row.encoding !== "gzip") return row.body;
+  const bytes = Uint8Array.from(atob(row.body), (value) => value.charCodeAt(0));
+  const reader = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip")).getReader();
+  const decoder = new TextDecoder(), parts = [];
+  const bound = expandedLimit(row.cursor);
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.length;
+      if (total > bound) throw new Error("expanded history exceeds the refresh-cache allowance");
+      parts.push(decoder.decode(value, { stream: true }));
+    }
+    parts.push(decoder.decode());
+    return parts.join("");
+  } finally { await reader.cancel(); }
+}
+
+export function save(runId, target, role, cursor, term, archive = false) {
+  const id = key(runId, target, role, archive);
   let screen = activeScreens.get(id);
   if (!screen) {
     screen = { generation: 0, count: 0 };
     activeScreens.set(id, screen);
   }
   screen.count++;
-  const operation = saveScreen(runId, target, role, cursor, term, screen, screen.generation);
+  const operation = saveScreen(runId, target, role, cursor, term, screen, screen.generation, archive);
   saving.add(operation);
   operation.finally(() => {
     saving.delete(operation);
@@ -181,21 +215,26 @@ export function save(runId, target, role, cursor, term) {
   return operation;
 }
 
-async function saveScreen(runId, target, role, cursor, term, screen, generation) {
+async function saveScreen(runId, target, role, cursor, term, screen, generation, archive) {
   if (!database || failure || closed.has(runId) || !cursor) return false;
   // A legacy page configuration cannot validate persisted geometry; its ordinary replay still works.
   if (!Number.isInteger(CONFIG.terminal_size.min_rows) || !Number.isInteger(CONFIG.terminal_size.max_rows)) return false;
-  const id = key(runId, target, role);
+  const id = key(runId, target, role, archive);
   try {
     const snapshot = capture(term);
     if (!snapshot) return false;
+    const cols = term.cols, rows = term.rows, scrollback = term.options.scrollback;
     // Freeze the complete native state before hashing or waiting for another tab's transaction.
-    const body = JSON.stringify({ format: FORMAT, runId, target, role, cursor, scrollback: term.options.scrollback,
-      cols: term.cols, rows: term.rows, snapshot });
+    const view = archive ? { archive: true } : {};
+    let body = JSON.stringify({ format: FORMAT, runId, target, role, cursor, ...view, scrollback, cols, rows, snapshot });
+    if (archive && new Blob([body]).size > expandedLimit(cursor))
+      throw new Error("expanded history exceeds the refresh-cache allowance");
+    const encoding = archive && typeof CompressionStream === "function" ? "gzip" : undefined;
+    if (encoding) body = await compress(body);
     const bytes = new TextEncoder().encode(body).length;
     if (bytes > FRAME_LIMIT) throw new Error("terminal screen exceeds the refresh-cache allowance");
     const row = { id: id, kind: "screen", format: FORMAT,
-      runId, target, role, cursor, cols: term.cols, rows: term.rows, body,
+      runId, target, role, cursor, ...view, encoding, cols, rows, body,
       bytes, digest: await digest(body), at: Date.now() };
     if (closed.has(runId) || screen.generation !== generation) return false;
     frames.set(row.id, row);
@@ -225,10 +264,14 @@ async function saveScreen(runId, target, role, cursor, term, screen, generation)
 
 export async function restore(term, row) {
   if (!valid(row) || await digest(row.body) !== row.digest) throw new Error("terminal snapshot is corrupt or incompatible");
-  const data = JSON.parse(row.body);
-  for (const field of ["format", "runId", "target", "role", "cursor", "cols", "rows"])
+  const data = JSON.parse(await unpack(row));
+  for (const field of ["format", "runId", "target", "role", "cursor", "cols", "rows", "archive"])
     if (data[field] !== row[field]) throw new Error("terminal snapshot identity does not match");
-  if (data.scrollback !== term.options.scrollback) throw new Error("terminal scrollback configuration changed");
+  if (row.archive) {
+    if (!Number.isSafeInteger(data.scrollback) || data.scrollback < 0 || data.scrollback > Math.max(5000, row.cursor + 2 * CONFIG.terminal_size.max_rows))
+      throw new Error("invalid archived scrollback capacity");
+    term.options.scrollback = data.scrollback;
+  } else if (data.scrollback !== term.options.scrollback) throw new Error("terminal scrollback configuration changed");
   const state = data.snapshot;
   if (typeof state?.vt !== "string") throw new Error("terminal snapshot has no native screen");
   term.resize(row.cols, row.rows);

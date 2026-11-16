@@ -9,7 +9,7 @@ import { refreshRuns, runsListed, runsRead, select } from "./rail.js";
 import { refreshRun, show, unsent } from "./run.js";
 import { openWorktrees } from "./worktrees.js";
 import { openSettings, settingsUnsent } from "./settings.js";
-import { noteTerminalRuns } from "./terminals.js";
+import { noteTerminalRuns, showTerminalHistory } from "./terminals.js";
 
 const VIEWS = { empty: "view-empty", new: "view-new", worktrees: "view-worktrees", settings: "view-settings",
   run: "run" };
@@ -96,12 +96,16 @@ document.addEventListener("workbench:runs", () => {
   showEmpty();
 });
 
-route();
-reloadRepos();
-reloadFlows();
-refreshStack();
-refreshRuns();
-setInterval(refreshStack, 5000);
-setInterval(refreshRuns, 5000);
-setInterval(refreshRun, 2500);
-setInterval(tick, 5000);
+if (new URLSearchParams(location.search).has("terminal-history")) {
+  showTerminalHistory(new URLSearchParams(location.search));
+} else {
+  route();
+  reloadRepos();
+  reloadFlows();
+  refreshStack();
+  refreshRuns();
+  setInterval(refreshStack, 5000);
+  setInterval(refreshRuns, 5000);
+  setInterval(refreshRun, 2500);
+  setInterval(tick, 5000);
+}

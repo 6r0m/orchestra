@@ -190,8 +190,10 @@ the selected compatible destination: initially the repository's own branch, or �
 the `remote` its base lives on — that remote's. **Land on** lists existing branches containing the verified
 base. Local choices push nothing. Remote choices require endpoint and pre-push evidence captured before
 the agents ran; an older run without it cannot silently gain a new remote. Previewed remote refs are cached,
-and the selected remote is fetched and checked again before landing. Review the two commit messages and
-edit them as needed; if the agent proposal is unavailable, enter them here without another model turn.
+and the selected remote is fetched and checked again before landing. Review the single **Commit message**
+and edit it as needed; if the agent proposal is unavailable, enter it here without another model turn.
+The first line is the subject, up to 94 characters, followed by optional details. The merge subject is
+generated as `Merge <subject>` and previewed beneath the editor; details stay in the change commit.
 If destination discovery fails, use **Retry destinations** once the worker is available; your unsent message
 edits stay in the page. Reloading the page discards those unsent edits.
 The confirmation names the exact destination and messages. Git identity must be configured in the intended
@@ -216,28 +218,11 @@ turn's history and in the parts of its prompt. A link opens only on the web, in 
 agent's host stays its words, the path shown when you point at it; an image is its words, never loaded. Copy copies
 the text as written, and a failure, the exact prompt and the raw record stay as written too.
 
-The run's change is its result, so it comes first on its page, right under what the run is doing now —
-under the decision, when a decision judges it. The Change disclosure starts collapsed with its file count
-visible. Open the heading to review files, refresh or copy the patch. Updates and Refresh preserve your
-open or closed choice; opening another run starts collapsed again. While a role works on the run it is live: its host's worker
-looks at the worktree every few seconds — less often when a look is slow — and, when something moved, the page
-shows how many files, lines added and removed and when it was read, with nothing to press. That look writes
-nothing in git; a file's diff is read when you open it, as the file is then, and a file you opened stays open,
-read again only when it changes. Each turn's own change stays in the history. When the change cannot be read
-just now — its worker down, its status unanswered — the page says so and shows the last one as no longer
-current. While the run waits at a blocker or a failed step, or once it is closed keeping its worktree, nothing
-moves it: the page shows what was last seen, and *Read the change* reads what its worktree holds now.
-
-Each read of it is one snapshot: the commit of its base the run stands on and the tree the
-worktree's files make, so that it shows what the run adds to that base and nothing the base brought in —
-and listed file by file, each by its whole path: a rename as its old path and its new one, a binary file
-said so; a very long list comes a part at a time, *List more files* reading the rest of the same snapshot. Open a file to see its diff as an editor shows one: both line numbers, added lines green,
-removed red, long unchanged runs folded a click away. A file too large to show whole shows its changes
-alone, and says so. The patch sits below in a small box; *Copy patch* copies all of it, however large,
-from the same snapshot, and *Refresh* reads a new one. *Copy all changes*, in the expanded block, copies the whole
-change as the worktree holds it at that moment — every file, however long — whenever you press it, the run at
-work, waiting, or closed keeping its worktree. A run merged or discarded has no worktree, and so no Change
-section: a merged change is in git, and each turn's change stays in the history.
+The run's change sits under what it is doing now, below the decision when a decision judges it.
+**Change** starts collapsed with its milestone count, or its file count when milestones are absent.
+Updates and Refresh preserve your open or closed choice; opening another run starts collapsed again.
+Expand it to review the milestone cards and export patches described below. Each turn's own change
+also stays in the history. A missing or unreadable snapshot is unavailable rather than an empty change.
 
 Both roles' terminals follow, the one at work open and an idle one closed until you open it. Each is the
 vendor's own CLI: press Esc to interrupt a working agent — or *Pause*, at the top, which presses it for you —
@@ -292,16 +277,35 @@ which draws inline as Claude does, and shows its session's history again each ti
 and press Ctrl+C to copy it, say into your guidance; with nothing selected, Ctrl+C goes to the agent, as in any
 terminal.
 
-Change also contains **Review milestones**. Each accepted approval, revision, guidance or Continue closes
-an interval; copying or terminal typing creates none. Open an interval to copy that milestone, or choose an
-earlier checkpoint under **Compare from** to copy a larger net range. The copied text identifies its snapshots
-and then contains the full patch. **Copy all changes** exports the entire current run change while its worktree
-is retained. After merge or discard removes it, historical milestones remain accessible under Change.
-The **Current changes** interval appears first and starts after your latest accepted answer. Open Change
-to see its live file list while either role works. **Copy live snapshot** reads an immutable current endpoint;
-its files are not independently verified. A stage or base transition during that read asks you to refresh.
-**Copy all changes** remains independent. Missing historical captures and ranges crossing a base update are
-explicitly unavailable. Existing runs acquire exact boundaries from future supported answers, not retroactively.
+The **↗** link beside each terminal opens that role's **full terminal history** in a separate window.
+It replays the existing recording from the first interaction and freezes at the endpoint captured when opened.
+It has no agent input or live updates, and window sizing changes only the viewer. **Beginning** and **End**
+navigate its scrollback. The archive preserves scrollback clears so earlier turns remain readable; CLI redraws
+may repeat output. Refresh captures a new endpoint and restores any compatible full-history cache before
+reading newer bytes. Archive and live screens have separate cache identities within the same storage bounds;
+closure removes both. If the full screen exceeds the cache allowance, it remains viewable but reopening
+replays the recording. The live terminal retains its smaller recent-scrollback buffer.
+
+**Change** lists milestone cards newest first. Each card compares only with the preceding checkpoint,
+starting at the run's original point for milestone 1. Its header names that baseline and the accepted action.
+**Copy milestone** copies that exact interval, with snapshot labels and its full patch. Each accepted approval,
+revision, guidance or Continue closes an interval; copying or terminal typing creates none.
+The snapshot is captured before the next role starts: changes after your previous accepted action belong
+to **Current** until your next accepted action saves that interval's endpoint.
+
+**Copy all changes**, above the cards, copies one net Git diff from the original run start to the latest files.
+It never concatenates milestone patches: a file added and then removed disappears from the total. After
+worktree cleanup it uses the latest retained snapshot instead, so historical exports remain accessible.
+The total includes any base updates between those endpoints. If the starting point or required final snapshot
+was not recorded, the total is unavailable rather than inferred from a newer base.
+
+The **Current** card starts after your latest accepted answer. Its file list refreshes while open; copying
+samples a fresh immutable endpoint. Those files are not independently verified. A stage or base transition
+during an interval read asks you to refresh. **Compare with an earlier checkpoint** exposes optional larger
+ranges without changing the card's normal baseline. Missing captures and interval ranges crossing a base
+update remain explicitly unavailable. Existing runs gain exact boundaries from future supported answers,
+not retroactively. Open a file for line-by-line changes; long file lists and copied patches read their
+remaining pages from the same immutable snapshot.
 Snapshots survive ordinary worktree cleanup and use disk until explicitly released through the
 [run-scoped retention procedure](../app/workspace/docs/architecture/structure.md#review-snapshot-retention).
 

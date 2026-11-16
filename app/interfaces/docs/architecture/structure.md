@@ -95,7 +95,9 @@ when the decision above moves on; nothing else of it is read again.
 - New run asks for a complete short name and previews its branch/folder form independently of the full task.
   Landing preview and run facts distinguish a local branch from an explicitly selected pushed destination;
   a tracking upstream is a warning, never push permission. The final gate lists compatible existing destinations,
-  retains operator message edits across polling and confirms the actual target and both commit messages.
+  retains the single commit-message editor across polling and confirms the actual target and both commit messages.
+  The browser derives the merge subject from `Merge ` plus the change subject, with a read-only preview;
+  details stay in the change commit. Already accepted message pairs remain frozen under their original protocol.
   Failed destination discovery exposes an explicit retry that refreshes choices without discarding drafts.
   New-run setup separately names its starting base and preferred compatible Merge destination. The preference
   seeds the final selector, whose confirmation remains mandatory. Failed setup discovery is explicitly
@@ -139,17 +141,32 @@ from that page are checked through the existing status API to reconcile closure 
 Unreadable status remains unknown. Browser eviction, storage loss or a missed final write can require replay
 from an earlier cursor. This cache does not keep a vendor process initialized or alter its exact-session recovery.
 
-The Change disclosure also shows operator review intervals, with same-base milestone/range exports through
-the existing immutable diff reader. Clipboard output includes snapshot labels followed by the exact patch;
-whole-run Copy all changes remains independent. Interval bodies preserve selection and disclosure state,
-and earlier-checkpoint menus are populated on demand. Missing evidence is unavailable, never an empty patch.
+The terminal's history link opens the existing page in a separate read-only archive mode. That viewer reads
+only the role's existing recorded-byte stream, freezing its endpoint at the first length announcement and
+ignoring later bytes. It sends only binary read cursors, with no keyboard forwarding or PTY resize requests.
+Recorded size markers resize its local emulator. Its scrollback capacity grows before parsing, and the
+archive ignores clear-scrollback commands so earlier turns survive CLI redraws. Interrupted reads resume only
+after pending parser work completes, with three observable reconnect attempts. Full-history cache entries use
+a distinct identity from live screens under the same global bounds, invalidation and run-closure policy.
+Archive snapshots use browser-native gzip compression within the existing stored-byte allowance; decompression
+is bounded before parsing. The archive adds no model hooks, native-session writer, workflow event or second recording store. A missing
+or oversized cache falls back to the original recording; no history is silently dropped to fit the cache.
+
+The Change disclosure shows operator review intervals as cards in descending recorded order, with same-base
+milestone/range exports through the existing immutable diff reader. Each card's main file list and copy
+action use its immediately preceding checkpoint; optional earlier-range copying cannot change that baseline.
+Interval clipboard output includes snapshot labels followed by the exact patch. A single total-export control
+above the cards compares the recorded original start to the current files, or to the final retained endpoint
+after worktree removal. This is one net diff, including intervening base changes, never concatenated intervals.
+Missing original or ending evidence is unavailable, never a newer guessed baseline or an empty patch.
+Interval bodies preserve selection and disclosure state, and earlier-checkpoint menus populate on demand.
 The current interval appears first, starting from the latest accepted action's checkpoint. While its
 disclosures are open, the existing worktree feed refreshes its sampled tree, with at most one automatic
 read in flight. Stage transitions also refresh the current sample, including the final edits before a stop.
 Copy samples a fresh immutable endpoint. History metadata is refreshed on stage changes
 so a pending checkpoint is read again when its subsequent role begins; no display action creates a boundary.
-Retained intervals remain accessible on a closed run's page after its worktree is removed. The whole-worktree
-reader and its actions are shown only while the worktree is retained, independently of historical exports.
+Retained intervals and the total export remain accessible after worktree removal. The legacy worktree reader
+is a fallback only when milestone cards are absent, so its controls never duplicate the primary card layout.
 
 Terminal replay is paced by xterm's write-completion callback, including when an older worker sends
 its entire record in one frame. The browser counts parsed bytes rather than enqueued bytes and finishes

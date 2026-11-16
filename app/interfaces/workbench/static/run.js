@@ -527,6 +527,12 @@ function renderReply(stop, reply, to) {
 // The action as the stop published it, and the note — or the words given, as an agent's answer sent on: what an
 // answer needs is the workflow's to refuse. One thing the page refuses itself, before sending: a note with an
 // approval whose stop does not say it takes one, which a worker from before notes would take and drop unsaid.
+function mergeMessages() {
+  if (mergeState?.merge_choice) return { ...mergeState.merge_choice.messages };
+  const work = $("merge-work-message").value, subject = work.split("\n", 1)[0];
+  return { work, merge: subject ? "Merge " + subject : "" };
+}
+
 function renderMerge(status) {
   const panel = $("merge-options"), stop = status.stop, state = status.state;
   for (const key of mergeDrafts.keys()) {
@@ -541,23 +547,26 @@ function renderMerge(status) {
   panel.dataset.key = key;
   const saved = mergeDrafts.get(key), proposed = state.merge_choice ? state.merge_choice.messages
     : state.commit_draft && state.commit_draft.messages;
-  $("merge-work-message").value = saved ? saved.work : proposed ? proposed.work : "";
-  $("merge-merge-message").value = saved ? saved.merge : proposed ? proposed.merge : "";
-  $("merge-message-hint").textContent = proposed ? "Review both messages before confirming Merge."
-    : "No valid agent proposal. Enter both messages here; another agent turn is unnecessary.";
+  $("merge-work-message").value = state.merge_choice ? proposed.work : saved ? saved.work : proposed ? proposed.work : "";
+  $("merge-work-message").readOnly = Boolean(state.merge_choice);
+  $("merge-message-preview").textContent = mergeMessages().merge;
+  $("merge-message-hint").textContent = state.merge_choice
+    ? "This attempt keeps its approved messages. Revise the change before editing them."
+    : (proposed ? "Review the commit message before Merge. " : "No valid agent proposal. Enter a commit message here. ")
+      + "Subject: up to 94 characters, followed by optional details. The merge subject is generated automatically.";
   const select = $("merge-destination");
   select.replaceChildren();
   const retry = $("merge-retry");
   const run = selected;
   const remember = () => {
-    mergeDrafts.set(key, { destination: select.value || mergeDrafts.get(key)?.destination || saved?.destination || "", work: $("merge-work-message").value,
-      merge: $("merge-merge-message").value });
+    $("merge-message-preview").textContent = mergeMessages().merge;
+    mergeDrafts.set(key, { destination: select.value || mergeDrafts.get(key)?.destination || saved?.destination || "", work: $("merge-work-message").value });
     const destination = select.value && JSON.parse(select.value);
     if (destination) $("merge-destination-hint").textContent = destination.remote
       ? "Pushed to " + destination.remote + "/" + destination.branch + ". Cached compatibility is rechecked against the remote before landing."
       : "Local " + destination.branch + ". Nothing is pushed.";
   };
-  for (const id of ["merge-work-message", "merge-merge-message"]) $(id).oninput = remember;
+  $("merge-work-message").oninput = remember;
   select.onchange = remember;
   const discover = () => {
     retry.hidden = true;
@@ -607,7 +616,7 @@ async function answer(stop, action, button, words) {
     if (!value) { $("stop-alert").textContent = "Choose an available destination before Merge."; return; }
     const destination = JSON.parse(value);
     body.landing = { version: 1, ...destination, basis: mergeState.base_tip, tree: mergeState.final_tree,
-      messages: { work: $("merge-work-message").value, merge: $("merge-merge-message").value } };
+      messages: mergeMessages() };
     landsOn = (destination.remote ? destination.remote + "/" : "local ") + destination.branch;
   }
   // Only words you wrote: an empty note must reach the workflow empty, for it to refuse.

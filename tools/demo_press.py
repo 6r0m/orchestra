@@ -1162,16 +1162,22 @@ def review_closed(page, run_id, expected):
     if page.value("document.querySelector('#change').hidden"):
         raise SystemExit("retained milestones are hidden with the removed worktree on the closed-run page")
     page.value("document.querySelector('#change>summary').click();true")
-    page.value("document.querySelector('#review-milestones>details>summary').click();true")
-    page.value("document.querySelector('#review-milestones details[data-run]>summary').click();true")
-    if not page.value("document.querySelector('#review-milestones select').checkVisibility()"):
-        raise SystemExit("the historical milestone selector is inaccessible")
-    if page.value("['diff-load','change-copy','diff-files','diff-raw'].some(id=>document.getElementById(id).checkVisibility())"):
+    page.value("document.querySelector('#review-milestones details[data-run]').open=true;true")
+    if not page.value("document.querySelector('#review-milestones .milestone-copy').checkVisibility() && document.querySelector('#change-copy').checkVisibility()"):
+        raise SystemExit("historical milestone and total exports are inaccessible")
+    if page.value("['diff-load','diff-files','diff-raw'].some(id=>document.getElementById(id).checkVisibility())"):
         raise SystemExit("removed-worktree controls are still visible on the closed-run page")
     page.value("[...document.querySelectorAll('#review-milestones button')].find(b=>b.textContent==='Copy milestone').click();true")
     copied = wait(lambda: next(iter(page.value("window.__copied") or []), None), 20, "the retained milestone export")
     if not copied.startswith("# Review range:") or copied.partition("\n\n")[2] != expected:
         raise SystemExit("closed-run milestone export does not match its retained Git snapshot")
+    page.value("window.__copied.length=0;document.querySelector('#change-copy').click();true")
+    try:
+        wait(lambda: page.value("window.__copied")==[expected], 20, 'the exact net export after worktree removal')
+    except SystemExit:
+        print(page.value("({button:document.querySelector('#change-copy').textContent,title:document.querySelector('#change-copy').title,"
+                         "copied:window.__copied.map(x=>({length:x.length,start:x.slice(0,180)}))})"))
+        raise
     print("PASS: a closed DISCARDED run exposes historical milestone copy after actual worktree removal; live-worktree controls stay hidden")
     return 0
 
@@ -1236,6 +1242,13 @@ def review_components(page):
     result = page.call("Runtime.evaluate", expression=setup, awaitPromise=True, returnByValue=True)
     if not result.get("result", {}).get("value"):
         raise SystemExit("component setup failed: %r" % result)
+    if page.value("[...document.querySelectorAll('#review-milestones details[data-run]')].map(b=>b.dataset.review)") != ['current', 's2', 's1']:
+        raise SystemExit('milestone cards must be ordered newest first')
+    if not page.value("document.querySelector('#review-milestones').textContent.includes('Current shows changes since your last action.')"):
+        raise SystemExit('the milestone interval hint is missing')
+    if not page.value("!document.querySelector('#change-worktree').contains(document.querySelector('#change-copy')) && "
+                      "!!(document.querySelector('#change-copy').compareDocumentPosition(document.querySelector('#review-milestones')) & Node.DOCUMENT_POSITION_FOLLOWING)"):
+        raise SystemExit('Copy all changes must appear above the milestone cards')
     wait(lambda: page.value("(()=>{const s=window.__terminalSockets.find(s=>s.url.endsWith('/engineer'));"
                             "return !document.querySelector('#terminal-engineer').open && "
                             "s?.offsets.at(-1)===s?.record.length})()"),
@@ -1274,7 +1287,7 @@ def review_components(page):
     })()""", awaitPromise=True, returnByValue=True)
     wait(lambda: page.value("document.querySelector('#review-milestones details[data-review=current] details.file[data-path=\"live-revision.txt\"]')!==null"),
          15, "live changes after the latest accepted operator checkpoint")
-    page.value("document.querySelector('#review-milestones details[data-review=current] button:last-child').click();true")
+    page.value("document.querySelector('#review-milestones details[data-review=current] .milestone-copy').click();true")
     wait(lambda: page.value("window.__reviewCopied.endsWith(window.__livePatch)"), 20, "the exact live-interval export")
     if not page.value("!window.__reviewCopied.includes('diff --git a/first-only.txt') && "
                       "!window.__reviewCopied.includes('diff --git a/large.txt')"):
@@ -1282,7 +1295,7 @@ def review_components(page):
     page.call("Page.bringToFront")
     wait(lambda: page.value("document.visibilityState==='visible'"), 10, "the visible stop before final sampling")
     page.call("Runtime.evaluate", expression="""(async()=>{
-      await fetch('/finalize',{method:'POST'});
+      window.__wholeLatest=(await(await fetch('/finalize',{method:'POST'})).json()).whole;
       const change=await import('/change.js');
       change.showReviews('run-a',window.__reviewFixture.review,true,'operator-stop');
       return true;
@@ -1297,8 +1310,7 @@ def review_components(page):
                          "({review:b.dataset.review,open:b.open,status:b.querySelector('[role=status]')?.textContent,"
                          "files:[...b.querySelectorAll('details.file')].map(f=>f.dataset.path)}))})"))
         raise
-    page.value("document.querySelector('#review-milestones>details').open=true;"
-               "document.querySelector('#review-milestones details[data-review=s2]').open=true;true")
+    page.value("document.querySelector('#review-milestones details[data-review=s2]').open=true;true")
     # Native keyboard activation of the new copy control.
     page.call("Page.bringToFront")
     page.value("[...document.querySelector('#review-milestones details[data-review=s2]').querySelectorAll('button')]"
@@ -1320,9 +1332,15 @@ def review_components(page):
         raise SystemExit("milestone copied earlier work or lost its snapshot labels")
     # Re-select an earlier endpoint: copy the net range, not concatenated interval patches.
     page.value("(()=>{const box=document.querySelector('#review-milestones details[data-review=s2]');"
+               "box.querySelector('.milestone-compare').open=true;"
                "const select=box.querySelector('select');select.value='start';select.dispatchEvent(new Event('change'));"
                "window.__reviewCopied='';[...box.querySelectorAll('button')].find(b=>b.textContent==='Copy range').click();return true})()")
     wait(lambda: page.value("window.__reviewCopied.endsWith(window.__reviewFixture.whole)"), 20, "the complete multi-milestone range")
+    page.value("window.__reviewCopied='';document.querySelector('#review-milestones details[data-review=s2] .milestone-copy').click();true")
+    wait(lambda: page.value("window.__reviewCopied.endsWith(window.__reviewFixture.delta)"), 20,
+         'the milestone still using its previous checkpoint after a range comparison')
+    if page.value("document.querySelector('#review-milestones details[data-review=s2] details.file[data-path=\"first-only.txt\"]')!==null"):
+        raise SystemExit('an optional comparison changed the milestone file list baseline')
     page.call("Runtime.evaluate", expression="(async()=>{const c=await import('/change.js');const f=window.__reviewFixture;"
               "c.showReviews('run-a',{...f.review,boundaries:[...f.review.boundaries,f.cross]},true);return true})()",
               awaitPromise=True, returnByValue=True)
@@ -1331,14 +1349,30 @@ def review_components(page):
     wait(lambda: page.value("document.querySelector('#review-milestones details[data-review=s3]').innerText.includes('crosses a base update')"),
          10, "an explicit cross-base refusal")
     # Existing all-changes copy stays independent of the selected milestone range.
-    page.call("Runtime.evaluate", expression="(async()=>{const change=await import('/change.js');change.showChangeFor('run-a');return true})()",
+    page.call("Runtime.evaluate", expression="(async()=>{const change=await import('/change.js');change.showChangeFor('run-a');"
+              "change.showReviews('run-a',window.__reviewFixture.review,true,'whole-export');document.querySelector('#change').open=true;return true})()",
               awaitPromise=True, returnByValue=True)
     page.value("window.__reviewCopied='';document.querySelector('#change-copy').click();true")
-    wait(lambda: page.value("window.__reviewCopied===window.__reviewFixture.whole"), 20, "the existing whole-run export")
+    try:
+        wait(lambda: page.value("window.__reviewCopied===window.__wholeLatest"), 20, "the exact start-to-current net export")
+    except SystemExit:
+        print(page.value("({button:document.querySelector('#change-copy').textContent,title:document.querySelector('#change-copy').title,"
+                         "copied:window.__reviewCopied.slice(0,180),length:window.__reviewCopied.length,expected:window.__wholeLatest?.length})"))
+        raise
+    if page.value("window.__reviewCopied.includes('transient.txt')"):
+        raise SystemExit('the total export accumulated a file added and removed between checkpoints')
+    page.call("Emulation.setDeviceMetricsOverride", width=320, height=800, deviceScaleFactor=1, mobile=False)
+    layout = page.value("({width:innerWidth,scroll:document.documentElement.scrollWidth,"
+                        "cards:[...document.querySelectorAll('.milestone-card')].map(box=>({"
+                        "left:box.getBoundingClientRect().left,right:box.getBoundingClientRect().right}))})")
+    page.call("Emulation.clearDeviceMetricsOverride")
+    if layout["scroll"] > layout["width"] or any(box["left"] < 0 or box["right"] > layout["width"] for box in layout["cards"]):
+        raise SystemExit('milestone cards overflow the mobile viewport: %r' % layout)
     updated = page.call("Runtime.evaluate", expression="""(async()=>{
       const change=await import('/change.js');
       document.querySelector('#change').open=true;
       const past=document.querySelector('#review-milestones details[data-review=s2]');
+      past.querySelector('.milestone-compare').open=true;
       const select=past.querySelector('select');select.focus();
       const fixture=window.__reviewFixture;
       change.showReviews('run-a',{...fixture.review,boundaries:[...fixture.review.boundaries,
@@ -1413,6 +1447,158 @@ def review_restored(page, setup, totals):
                              "terminal:document.querySelector('#terminal-" + role + "').outerHTML.slice(0,600),"
                              "rows:document.querySelector('#term-" + role + " .xterm-rows')?.textContent.slice(-500)})"))
             raise
+
+
+def terminal_archive(page, port):
+    wait(lambda: page.value("document.querySelector('#archive-progress')?.max>1"), 15, 'the static archive endpoint')
+    page.call('Runtime.evaluate', expression="fetch('/fixture/append')", awaitPromise=True)
+    wait(lambda: page.value("document.querySelector('#archive-status')?.textContent.includes('Complete')"), 30,
+         'the complete terminal archive')
+    checked = page.value("(()=>{const t=window.__archiveTerm,b=t.buffer.normal;"
+                         "const text=Array.from({length:b.length},(_,i)=>b.getLine(i).translateToString()).join('\\n');"
+                         "return {first:text.includes('FIRST_INTERACTION'),last:text.includes('LAST_RECORDED_INTERACTION'),"
+                         "after:text.includes('AFTER_SNAPSHOT_MUST_NOT_APPEAR'),other:text.includes('ARCHITECT_ONLY'),"
+                         "rows:b.length,readonly:t.options.disableStdin};})()")
+    if not (checked['first'] and checked['last'] and checked['rows'] > 5000 and checked['readonly']) or checked['after'] or checked['other']:
+        raise SystemExit('archive dropped history, changed role, followed live output or accepted input: %r' % checked)
+    if not page.value("window.__archiveSockets.length===2 && window.__archiveSockets[1].reads[0]===window.__archiveInterruptedBytes"):
+        raise SystemExit('archive reconnect did not wait for the confirmed parsed cursor')
+    page.value("window.__archiveTerm.focus();true")
+    page.call('Input.dispatchKeyEvent', type='keyDown', key='x', code='KeyX', text='x')
+    page.call('Input.dispatchKeyEvent', type='keyUp', key='x', code='KeyX')
+    page.value("window.__archiveTerm.select(0,0,'FIRST_INTERACTION'.length);"
+               "document.querySelector('#archive-term .xterm-helper-textarea').dispatchEvent(new KeyboardEvent('keydown',"
+               "{key:'c',code:'KeyC',ctrlKey:true,bubbles:true,cancelable:true}));true")
+    wait(lambda: page.value("window.__copied?.[0]==='FIRST_INTERACTION'"), 5, 'copying archived terminal text')
+    page.call('Runtime.evaluate', expression="(async()=>await(await import('/terminal-cache.js')).flush())()",
+              awaitPromise=True, returnByValue=True)
+    page.value('window.__archiveReloadMarker=true')
+    page.call('Page.reload')
+    wait(lambda: page.value("!window.__archiveReloadMarker && document.querySelector('#archive-status')?.textContent.includes('Complete')"), 30,
+         'the archive restored after refresh')
+    if not page.value("document.querySelector('#archive-status').textContent.includes('cached')"):
+        raise SystemExit('archive refresh did not restore its separate full-history cache: ' +
+                         str(page.value("document.querySelector('#archive-status').textContent")))
+    if not page.value("(()=>{const b=window.__archiveTerm.buffer.normal;return b.length>5000 && "
+                      "Array.from({length:b.length},(_,i)=>b.getLine(i).translateToString()).join('\\n').includes('FIRST_INTERACTION')})()"):
+        raise SystemExit('cached full history lost the first interaction')
+    isolated = page.call('Runtime.evaluate', expression="""(async()=>{
+      const cache=await import('/terminal-cache.js');const q=new URLSearchParams(location.search),id=q.get('terminal-history');
+      const isolated=Boolean(cache.read(id,'windows','engineer',true))&&!cache.read(id,'windows','engineer');
+      (await import('/terminals.js')).showTerminals(id,'windows');
+      document.querySelector('#terminal-history').hidden=true;document.querySelector('#run').hidden=false;
+      const link=document.querySelector('#history-architect');link.scrollIntoView({block:'center'});
+      const r=link.getBoundingClientRect();return {isolated,url:link.href,target:link.target,rel:link.rel,x:r.x+r.width/2,y:r.y+r.height/2};
+    })()""", awaitPromise=True, returnByValue=True)['result'].get('value')
+    if not isolated['isolated'] or isolated['target'] != '_blank' or 'noopener' not in isolated['rel']:
+        raise SystemExit('archive overwrote the live cache or its link does not open an isolated window')
+    for kind in ('mouseMoved', 'mousePressed', 'mouseReleased'):
+        page.call('Input.dispatchMouseEvent', type=kind, x=isolated['x'], y=isolated['y'], button='left',
+                  buttons=1 if kind == 'mousePressed' else 0, clickCount=1)
+    if page.value("document.querySelector('#terminal-architect').open"):
+        raise SystemExit('the history link also opened the live terminal')
+    def new_window():
+        targets=json.load(urllib.request.urlopen('http://127.0.0.1:%s/json/list' % port))
+        return next((tab['webSocketDebuggerUrl'] for tab in targets if tab.get('url') == isolated['url']), None)
+    target=wait(new_window, 10, 'the separate architect history window')
+    with connect(target, max_size=None) as connection:
+        other=Page(connection);other.call('Page.bringToFront')
+        wait(lambda: other.value("document.querySelector('#archive-status')?.textContent.includes('Complete')"), 15,
+             'the architect history')
+        wait(lambda: other.value("document.querySelector('#archive-term .xterm-rows')?.textContent.includes('ARCHITECT_ONLY')"), 10,
+             'the architect recording in its own terminal')
+    cleared=page.call('Runtime.evaluate', expression="""(async()=>{const c=await import('/terminal-cache.js');
+      const id=new URLSearchParams(location.search).get('terminal-history');await c.close(id);
+      return !c.read(id,'windows','engineer',true)&&!c.read(id,'windows','architect',true);})()""",
+      awaitPromise=True, returnByValue=True)['result'].get('value')
+    if not cleared: raise SystemExit('run closure retained archive cache entries')
+    print('PASS: full terminal from the first interaction, >5000 rows, clear-scrollback preservation, static cutoff and cached refresh')
+    return 0
+
+
+def observe_terminal_archive(page):
+    wait(lambda: page.value("document.querySelector('#archive-status')?.textContent.includes('Complete')"), 120,
+         'the full recorded terminal')
+    snapshot=page.value("({rows:window.__archiveTerm.buffer.normal.length,"
+                        "parsed:document.querySelector('#archive-progress').value,"
+                        "endpoint:document.querySelector('#archive-progress').max,"
+                        "readonly:window.__archiveTerm.options.disableStdin,"
+                        "cache_error:window.__archiveCacheError,"
+                        "status:document.querySelector('#archive-status').textContent})")
+    if not snapshot['readonly'] or snapshot['parsed']!=snapshot['endpoint']:
+        raise SystemExit('the role recording is not complete: %r' % snapshot)
+    snapshot['cache']=page.call('Runtime.evaluate',expression="""(async()=>{const c=await import('/terminal-cache.js'),q=new URLSearchParams(location.search);
+      const row=c.read(q.get('terminal-history'),q.get('host'),q.get('role'),true);
+      return row?{bytes:row.bytes,encoding:row.encoding,cursor:row.cursor}:null;})()""",awaitPromise=True,returnByValue=True)['result'].get('value')
+    if not snapshot['cache']: raise SystemExit('full history was not cached: %r' % snapshot)
+    import base64
+    captured=page.call('Page.captureScreenshot',format='png',captureBeyondViewport=False)
+    with open(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'tmp', 'terminal-history-desktop.png'),'wb') as stream:
+        stream.write(base64.b64decode(captured['data']))
+    page.call('Emulation.setDeviceMetricsOverride',width=640,height=900,deviceScaleFactor=1,mobile=False)
+    if page.value('document.documentElement.scrollWidth>innerWidth'):
+        raise SystemExit('the archive overflows a narrow window')
+    page.call('Emulation.clearDeviceMetricsOverride')
+    page.value('window.__archiveReloadMarker=true')
+    page.call('Page.reload')
+    wait(lambda: page.value("!window.__archiveReloadMarker && document.querySelector('#archive-status')?.textContent.includes('Complete')"),120,
+         'the cached full recording after refresh')
+    snapshot['refresh_status']=page.value("document.querySelector('#archive-status').textContent")
+    if 'restored from cached history' not in snapshot['refresh_status']:
+        raise SystemExit('the full history cache was not restored: %r' % snapshot)
+    print(json.dumps(snapshot))
+    return 0
+
+
+def revise_labels(page, run_id, swapped=False):
+    """Click visible labels with native pointer events; inspect real accepted Temporal answers."""
+    page.call("Emulation.setFocusEmulationEnabled", enabled=True)
+    page.call("Page.bringToFront")
+    page.value("location.hash='#run='+" + json.dumps(run_id))
+    wait(lambda: page.value("!document.querySelector('#stop').hidden && "
+                            "[...document.querySelectorAll('#stop-actions button')].some(b=>b.textContent==='Revise (engineer)')"),
+         15, 'the final gate revision buttons')
+
+    def status():
+        return page.call("Runtime.evaluate", expression="(async()=>{const {api}=await import('/api.js');"
+                         "return await api('/api/runs/'+%s)})()" % json.dumps(run_id),
+                         awaitPromise=True, returnByValue=True)['result'].get('value')
+
+    for role in ('engineer', 'architect'):
+        before = status()['stop']['id']
+        label = 'Revise (%s)' % role
+        page.value("document.querySelector('#stop-note').value=%s;true" % json.dumps('Revision for ' + role))
+        if swapped:
+            page.value("document.querySelectorAll('#stop-actions button').forEach(b=>{"
+                       "if(b.textContent==='Revise (engineer)')b.textContent='Revise (architect)';"
+                       "else if(b.textContent==='Revise (architect)')b.textContent='Revise (engineer)';});true")
+        point = page.value("(()=>{const b=[...document.querySelectorAll('#stop-actions button')].find(b=>b.textContent===%s);"
+                           "b.scrollIntoView({block:'center'});const r=b.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;"
+                           "return {x,y,enabled:!b.disabled,hit:document.elementFromPoint(x,y)?.closest('button')===b};})()"
+                           % json.dumps(label))
+        if not point['enabled'] or not point['hit']:
+            raise SystemExit('%s is not an unobstructed enabled button' % label)
+        for kind in ('mouseMoved', 'mousePressed', 'mouseReleased'):
+            page.call('Input.dispatchMouseEvent', type=kind, x=point['x'], y=point['y'], button='left',
+                      buttons=1 if kind == 'mousePressed' else 0, clickCount=1)
+
+        def returned():
+            record = status()
+            stop = record.get('stop')
+            return stop and stop['reason'] == 'final' and stop['id'] != before
+
+        wait(returned, 30, 'the completed %s revision' % role)
+        recorded = page.call("Runtime.evaluate", expression="(async()=>{const {api}=await import('/api.js');"
+                             "return (await api('/api/runs/'+%s+'/history')).answers.at(-1)})()" % json.dumps(run_id),
+                             awaitPromise=True, returnByValue=True)['result'].get('value')
+        if recorded.get('action') != 'revise' or recorded.get('role') != role:
+            raise SystemExit('%s sent the revision to %s' % (label, recorded.get('role')))
+        if recorded.get('text') != 'Revision for ' + role:
+            raise SystemExit('%s changed the operator note' % label)
+        page.call('Runtime.evaluate', expression="(async()=>await(await import('/run.js')).refreshRun())()",
+                  awaitPromise=True, returnByValue=True)
+        print('PASS: native click on %s recorded revise -> %s' % (label, role))
+    return 0
 
 
 def task_disclosure(page, run_id):
@@ -1571,6 +1757,34 @@ def main(url, run_id, label, said, note=None):
             "http://127.0.0.1:%s/json/list" % port)) if page.get("type") == "page"), 30, "a page to drive")
         with connect(target, max_size=None) as socket:
             page = Page(socket)
+            if label in ('terminal-archive','archive-observe'):
+                page.call('Page.enable')
+                page.call('Page.addScriptToEvaluateOnNewDocument', source="""
+let terminalClass;
+const originalWarn=console.warn;
+console.warn=(...args)=>{if(args[0]==='Terminal refresh cache unavailable')window.__archiveCacheError=args[1]?.message;originalWarn(...args);};
+Object.defineProperty(window,'Terminal',{configurable:true,get:()=>terminalClass,set:value=>{
+  terminalClass=class extends value {
+    constructor(...args){super(...args);if(args[0]?.disableStdin)window.__archiveTerm=this;}
+    write(data,callback){super.write(data,()=>{
+      if(window.__archiveInterruptedBytes&&!window.__archiveDelayed){window.__archiveDelayed=true;setTimeout(callback,3500);}
+      else callback?.();
+    });}
+  };
+}});
+""")
+            if label == 'terminal-archive':
+                page.call('Page.addScriptToEvaluateOnNewDocument', source=CLIPBOARD_STAND_IN)
+                page.call('Page.addScriptToEvaluateOnNewDocument', source="""
+const NativeSocket=window.WebSocket;window.__archiveSockets=[];
+window.WebSocket=class extends NativeSocket{
+  constructor(...args){super(...args);this.reads=[];window.__archiveSockets.push(this);
+    this.addEventListener('message',event=>{if(typeof event.data!=='string'&&!window.__archiveInterruptedBytes){
+      window.__archiveInterruptedBytes=event.data.byteLength;this.close();}});
+  }
+  send(data){if(typeof data!=='string')this.reads.push(JSON.parse(new TextDecoder().decode(data)).read);super.send(data);}
+};
+""")
             if label == "settings-policy":
                 page.call("Page.enable")
                 page.call("Page.addScriptToEvaluateOnNewDocument", source=SETTINGS_POLICY_STAND_IN)
@@ -1612,6 +1826,10 @@ def main(url, run_id, label, said, note=None):
                   };
                 })();""")
             page.call("Page.navigate", url=url)
+            if label == 'terminal-archive':
+                return terminal_archive(page, port)
+            if label == 'archive-observe':
+                return observe_terminal_archive(page)
             if label == "review-components":
                 wait(lambda: page.value("document.readyState === 'complete'"), 30, "the isolated component fixture")
                 setup, totals = review_components(page)
@@ -1664,6 +1882,8 @@ def main(url, run_id, label, said, note=None):
                 return accounting(page, run_id)
             if label == "review-closed":
                 return review_closed(page, run_id, said)
+            if label.startswith('revise-labels'):
+                return revise_labels(page, run_id, swapped=label.endswith('-swapped'))
             if label == "instruction-skills":
                 instruction_skills(page, run_id, port)
             if label == "task-disclosure":
@@ -1675,9 +1895,7 @@ def main(url, run_id, label, said, note=None):
                          15, "the failed destination discovery")
                     page.value("""(() => {
                       const work = document.querySelector('#merge-work-message');
-                      const merge = document.querySelector('#merge-merge-message');
                       work.value = 'Retain terminal screens'; work.dispatchEvent(new Event('input'));
-                      merge.value = 'Merge retained terminal screens'; merge.dispatchEvent(new Event('input'));
                     })()""")
                     page.call("Runtime.evaluate", expression="new Promise(resolve=>setTimeout(resolve,2500))", awaitPromise=True)
                     if page.value("window.__landingProbe.calls") != 1:
@@ -1692,9 +1910,43 @@ def main(url, run_id, label, said, note=None):
                      30, "compatible final destinations")
                 if label == "merge-retry":
                     if not page.value("document.querySelector('#merge-work-message').value==='Retain terminal screens after retry' && "
-                                      "document.querySelector('#merge-merge-message').value==='Merge retained terminal screens' && "
+                                      "document.querySelector('#merge-message-preview').textContent==='Merge Retain terminal screens after retry' && "
                                       "window.__landingProbe.calls===2 && document.querySelector('#merge-retry').hidden"):
                         raise SystemExit('successful retry replaced operator drafts or repeated discovery')
+                if page.value("document.querySelectorAll('#merge-options textarea').length") != 1:
+                    raise SystemExit('the final gate must have one editable commit message')
+                if label == 'merge-choice':
+                    page.call("Runtime.evaluate", expression="""(async()=>{
+                      window.__unfrozenFetch=window.fetch;
+                      window.fetch=async(url,...args)=>{
+                        const response=await window.__unfrozenFetch(url,...args);
+                        if(url==='/api/runs/'+location.hash.slice(5)) {
+                          const record=await response.json();
+                          record.state.merge_choice={messages:{work:'Previously approved change',merge:'Previously approved integration'}};
+                          return Response.json(record);
+                        }
+                        return response;
+                      };
+                      delete document.querySelector('#merge-options').dataset.key;
+                      await(await import('/run.js')).refreshRun();
+                    })()""", awaitPromise=True, returnByValue=True)
+                    if not page.value("document.querySelector('#merge-work-message').readOnly && "
+                                      "document.querySelector('#merge-message-preview').textContent==='Previously approved integration'"):
+                        raise SystemExit('an accepted legacy message pair was replaced by generated text')
+                    wait(lambda: page.value("document.querySelector('#merge-destination').value!==''"), 10, 'the frozen destination preview')
+                    page.value("[...document.querySelectorAll('#stop-actions button')].find(b=>b.textContent==='Merge').click()")
+                    wait(lambda: page.value("document.querySelector('dialog[open]')!==null"), 10, 'the frozen message confirmation')
+                    if not page.value("document.querySelector('dialog[open]').textContent.includes('Merge commit: Previously approved integration')"):
+                        raise SystemExit('confirmation changed the already approved merge message')
+                    page.call("Input.dispatchKeyEvent", type="keyDown", key="Escape", code="Escape", windowsVirtualKeyCode=27)
+                    page.call("Input.dispatchKeyEvent", type="keyUp", key="Escape", code="Escape", windowsVirtualKeyCode=27)
+                    page.call("Runtime.evaluate", expression="""(async()=>{
+                      window.fetch=window.__unfrozenFetch;
+                      delete document.querySelector('#merge-options').dataset.key;
+                      await(await import('/run.js')).refreshRun();
+                    })()""", awaitPromise=True, returnByValue=True)
+                    wait(lambda: page.value("!document.querySelector('#merge-work-message').readOnly && "
+                                            "document.querySelector('#merge-destination').options.length>1"), 10, 'the editable unaccepted gate')
                 if page.value("document.querySelector('.row[data-run=' + CSS.escape(" + json.dumps(run_id) + ") + '] .row-task').textContent") != run_id[:-9]:
                     raise SystemExit('the run list omitted the approved short name')
                 branch = json.dumps(said)
@@ -1702,16 +1954,18 @@ def main(url, run_id, label, said, note=None):
                     raise SystemExit('the saved pre-start Merge preference was not selected at the final gate')
                 page.value("(()=>{const s=document.querySelector('#merge-destination');s.value=[...s.options].find(o=>JSON.parse(o.value).branch===" +
                            branch + " && JSON.parse(o.value).remote===null).value;s.dispatchEvent(new Event('change',{bubbles:true}));"
-                           "document.querySelector('#merge-work-message').value='Retain terminal screens';"
-                           "document.querySelector('#merge-merge-message').value='Merge retained terminal screens';"
-                           "document.querySelector('#merge-merge-message').dispatchEvent(new Event('input',{bubbles:true}));})()")
+                           "document.querySelector('#merge-work-message').value='Retain terminal screens\\n\\nKeep confirmed cursors.';"
+                           "document.querySelector('#merge-work-message').dispatchEvent(new Event('input',{bubbles:true}));})()")
                 page.call("Runtime.evaluate", expression="new Promise(resolve=>setTimeout(resolve,2500))", awaitPromise=True)
-                if page.value("document.querySelector('#merge-merge-message').value") != 'Merge retained terminal screens':
-                    raise SystemExit('polling replaced the operator commit message')
+                if not page.value("document.querySelector('#merge-message-preview').textContent==='Merge Retain terminal screens' && "
+                                  "document.querySelector('#merge-work-message').value==='Retain terminal screens\\n\\nKeep confirmed cursors.'"):
+                    raise SystemExit('polling replaced the commit message or its derived merge preview')
                 page.value("[...document.querySelectorAll('#stop-actions button')].find(b=>b.textContent==='Merge').click()")
                 wait(lambda: page.value("document.querySelector('dialog[open]')!==null"), 10, "destination confirmation")
                 if not page.value("document.querySelector('dialog[open]').textContent.includes('local '+" + branch + ")"):
                     raise SystemExit('confirmation omitted the actual local branch')
+                if not page.value("document.querySelector('dialog[open]').textContent.includes('Merge commit: Merge Retain terminal screens')"):
+                    raise SystemExit('confirmation omitted the generated merge subject')
                 page.value("[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Merge').click()")
                 wait(lambda: page.value("document.body.textContent.includes('Merged')"), 30, "the actual selected landing")
                 print('PASS: final destination, operator messages and Git landing agree')

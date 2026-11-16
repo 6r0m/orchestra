@@ -47,6 +47,16 @@ const WRITE_CHUNK = 65536;
 const STREAM_PROTOCOL = "workbench.v2";
 const CHECKPOINT_MS = 2000;
 
+function copySelection(term) {
+  term.attachCustomKeyEventHandler((event) => {
+    if (event.type !== "keydown" || !(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey ||
+        event.code !== "KeyC" || !term.hasSelection()) return true;
+    event.preventDefault();
+    navigator.clipboard.writeText(term.getSelection()).then(() => term.clearSelection(), () => {});
+    return false;
+  });
+}
+
 function checkpoint(entry, force = false) {
   if (entry.disposed || entry.failed || entry.inWrite || entry.restoring || !entry.owner.retain ||
       entry.owner.closed || !entry.shown || entry.lastSaved === entry.shown) return;
@@ -225,6 +235,11 @@ export function noteTerminalRuns(rows) {
 
 // Restore parsed displays across navigation; vendor sessions and recorded output stay worker-owned.
 export function showTerminals(runId, target) {
+  for (const role of ROLES) {
+    const link = $("history-" + role);
+    if (runId) link.href = "/?" + new URLSearchParams({ "terminal-history": runId, host: target, role });
+    else link.removeAttribute?.("href");
+  }
   if (run && runId && run.id === runId && run.target === target) return;
   if (run) {
     Object.assign(run, { active, lastShown, lastSince,
@@ -267,6 +282,145 @@ export function showTerminals(runId, target) {
     $("terminal-" + role).open = Boolean(run.opened[role]);
     fit(role);
   }
+}
+
+// A separate page consumes only recorded bytes. It owns no agent input handler, resize request or live cache.
+export async function showTerminalHistory(query) {
+  document.body.classList.add("terminal-history-page");
+  for (const child of $("main").children) child.hidden = child.id !== "terminal-history";
+  const id = query.get("terminal-history"), role = query.get("role"), target = query.get("host");
+  const status = $("archive-status"), progress = $("archive-progress"), mount = $("archive-term");
+  let term, socket, cursor = 0, end = null, complete = false, failed = false, restored = false, retry = null;
+  let writing = Promise.resolve(), reconnects = 0;
+  const fail = (message) => {
+    failed = true;
+    clearTimeout(retry);
+    socket?.close();
+    status.textContent = "History unavailable: " + message;
+  };
+  try {
+    if (!/^[\w-]+$/.test(id || "") || !ROLES.includes(role) || !Object.hasOwn(CONFIG.terminal_ports, target))
+      throw new Error("invalid run, host or role");
+    const record = await api("/api/runs/" + encodeURIComponent(id));
+    if ((record.state?.target || record.view?.host) !== target) throw new Error("this run belongs to another host");
+    if (record.view?.state === "closed") await cache.close(id);
+    $("archive-title").textContent = role + " · full terminal history";
+    document.title = role + " history · " + id + " | Orchestra Workbench";
+    $("archive-back").href = "/#run=" + encodeURIComponent(id);
+    $("archive-back").textContent = id;
+    term = new Terminal({ cols: COLS, rows: ROWS, scrollback: 5000, disableStdin: true, fontSize: 12,
+      fontFamily: '"Cascadia Mono", Consolas, "Courier New", monospace', convertEol: false });
+    term.open(mount);
+    copySelection(term);
+    // A CLI can erase its scrollback when resuming. The archive preserves it without changing the recording.
+    term.parser.registerCsiHandler({ final: "J" }, (params) => params[0] === 3);
+    const fitArchive = () => {
+      const screen = mount.querySelector(".xterm-screen"), viewport = mount.querySelector(".xterm-viewport");
+      if (!screen || !viewport) return;
+      const rect = screen.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const scale = (mount.clientWidth - 16 - viewport.offsetWidth + viewport.clientWidth) / rect.width;
+      const size = Math.max(1, Math.min(LARGEST, Math.floor(term.options.fontSize * scale * 10) / 10));
+      if (Math.abs(term.options.fontSize - size) >= 0.2) term.options.fontSize = size;
+      if (complete) {
+        const height = screen.getBoundingClientRect().height / term.rows;
+        const rows = Math.max(5, Math.floor((mount.clientHeight - 16) / height));
+        if (Number.isFinite(rows) && rows !== term.rows) term.resize(COLS, rows);
+      }
+    };
+    new ResizeObserver(fitArchive).observe(mount);
+    term.parser.registerOscHandler(SIZE_MARK, (data) => new Promise((resolve) => {
+      const [cols, rows] = data.split(";").map(Number);
+      setTimeout(() => {
+        if (cols === COLS && rows >= MIN_ROWS && rows <= MAX_ROWS) { term.resize(cols, rows); fitArchive(); }
+        resolve(true);
+      }, 0);
+    }));
+    $("archive-top").onclick = () => term.scrollToTop();
+    $("archive-bottom").onclick = () => term.scrollToBottom();
+    const saved = cache.read(id, target, role, true);
+    if (saved) {
+      status.textContent = "Restoring cached full history…";
+      try { cursor = await cache.restore(term, saved); restored = true; }
+      catch (error) {
+        console.warn("Full terminal cache could not be restored; reading the recording", error);
+        await cache.remove(id, target, role, true);
+        term.reset(); term.resize(COLS, ROWS);
+      }
+    }
+    const finish = async () => {
+      complete = true;
+      socket.close();
+      term.scrollToTop();
+      const cached = await cache.save(id, target, role, cursor, term, true);
+      fitArchive();
+      term.scrollToTop();
+      status.textContent = "Complete · " + new Intl.NumberFormat().format(cursor) + " recorded bytes · "
+        + (restored ? "restored from cached history" : cached ? "history cached" : "recording remains available")
+        + (cache.issue() ? " · " + cache.issue() : "");
+    };
+    const connectArchive = () => {
+      const opened = new WebSocket("ws://127.0.0.1:" + CONFIG.terminal_ports[target] + "/" + encodeURIComponent(id) + "/" + role,
+        [STREAM_PROTOCOL, "token." + CONFIG.token]);
+      socket = opened;
+      opened.binaryType = "arraybuffer";
+      opened.onopen = () => {
+        if (opened.protocol !== STREAM_PROTOCOL) fail("the worker does not support recorded-byte replay; load current worker code when safe");
+      };
+      const read = () => opened.send(new TextEncoder().encode(JSON.stringify({ read: cursor })));
+      let parsing = false;
+      opened.onmessage = async (event) => {
+        try {
+          if (failed || complete || opened !== socket) return;
+          if (typeof event.data === "string") {
+            const state = JSON.parse(event.data);
+            if (end !== null) {
+              if (Number.isSafeInteger(state.replay) && state.replay < end) throw new Error("the original recording was truncated");
+              if (!Number.isSafeInteger(state.replay)) return;
+            }
+            if (!Number.isSafeInteger(state.replay) || state.replay < 0) throw new Error("the worker did not provide a recording length");
+            if (end === null) {
+              end = state.replay;
+              if (cursor > end) {
+                await cache.remove(id, target, role, true);
+                term.reset(); term.resize(COLS, ROWS); cursor = 0; restored = false;
+              }
+              progress.max = Math.max(1, end); progress.value = cursor;
+              fitArchive();
+            }
+            if (cursor === end) await finish();
+            else if (!parsing) read();
+            return;
+          }
+          if (end === null || parsing) throw new Error("unexpected terminal replay frame");
+          parsing = true;
+          const data = new Uint8Array(event.data).subarray(0, end - cursor);
+          // Grow before parsing: even one line feed per byte cannot evict the earlier archive rows.
+          term.options.scrollback = Math.max(term.options.scrollback, term.buffer.normal.baseY + data.length + 2 * MAX_ROWS);
+          writing = new Promise((resolve) => term.write(data, resolve));
+          await writing;
+          if (failed || opened !== socket) return;
+          cursor += data.length; progress.value = cursor; parsing = false;
+          status.textContent = "Reading full history · " + Math.floor(cursor * 100 / end) + "%" + (restored ? " · cached beginning restored" : "");
+          if (cursor === end) await finish();
+          else if (opened.readyState === WebSocket.OPEN) read();
+        } catch (error) { fail(error.message); }
+      };
+      opened.onclose = (event) => {
+        if (complete || failed || opened !== socket) return;
+        if (event.code === 1008) {
+          cache.remove(id, target, role, true);
+          fail("the recording cursor was refused; reload to read from the beginning");
+          return;
+        }
+        if (++reconnects > 3) { fail("the worker is not answering. Reload to retry; the recording remains on its host"); return; }
+        status.textContent = "History disconnected; retry " + reconnects + "/3 from the last parsed byte…";
+        retry = setTimeout(() => writing.then(() => { if (!failed && !complete) connectArchive(); }), 3000);
+      };
+    };
+    connectArchive();
+    window.addEventListener("pagehide", () => { clearTimeout(retry); failed = true; socket?.close(); });
+  } catch (error) { fail(error.message); }
 }
 
 // What the run is doing, at every read: whether it can still get a terminal, the role whose terminal it
@@ -333,13 +487,7 @@ function make(role) {
   // Ctrl+C with text selected copies it, and the agent is sent nothing; with nothing selected it is the
   // agent's, as in any terminal. The key is the page's then, so the browser's own copy — of xterm's hidden
   // input, not of the selection — never runs beside it. A copy the browser refuses leaves the text selected.
-  term.attachCustomKeyEventHandler((event) => {
-    if (event.type !== "keydown" || !(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey ||
-        event.code !== "KeyC" || !term.hasSelection()) return true;
-    event.preventDefault();
-    navigator.clipboard.writeText(term.getSelection()).then(() => term.clearSelection(), () => {});
-    return false;
-  });
+  copySelection(term);
   const node = document.createElement("div");
   mount.replaceChildren(node);
   term.open(node);

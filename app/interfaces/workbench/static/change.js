@@ -14,8 +14,24 @@ let runId = null;
 let shown = null;
 // The stop whose change was read on its own: a reread is the operator's, by the button.
 let loadedFor = null;
+let wholeEvidence = null;
+let worktreeRetained = true;
 const number = new Intl.NumberFormat();
 const fileCount = (total) => number.format(total) + (total === 1 ? " file changed" : " files changed");
+const hasMilestones = () => Boolean($("review-milestones").querySelector(".milestone-card"));
+
+function updateChangeView() {
+  const cards = $("review-milestones").querySelectorAll(".milestone-card").length;
+  $("change-worktree").hidden = !worktreeRetained || cards > 0;
+  if (cards) $("change-count").textContent = number.format(cards) + (cards === 1 ? " milestone" : " milestones");
+  const evidence = wholeEvidence?.runId === runId ? wholeEvidence : null;
+  const unavailable = !evidence ? "Reading run history…" : !evidence.initial ? "Run starting point unavailable."
+    : !worktreeRetained && (!evidence.latest?.tree || evidence.latest.unavailable) ? "Latest saved snapshot unavailable." : "";
+  $("change-copy").disabled = Boolean(unavailable);
+  $("change-range").textContent = unavailable || (worktreeRetained
+    ? "Run start to current files · one net diff"
+    : "Run start to milestone " + evidence.count + " · one net diff");
+}
 
 // The change of `run`, not yet read.
 export function showChangeFor(run) {
@@ -23,6 +39,7 @@ export function showChangeFor(run) {
   runId = run;
   shown = null;
   loadedFor = null;
+  wholeEvidence = null;
   $("change").open = false;
   $("change-count").textContent = "Files and patch";
   $("change-said").textContent = "";
@@ -33,6 +50,7 @@ export function showChangeFor(run) {
   $("diff-load").textContent = "Read the change";
   $("diff-load").title = "Read what the worktree holds now against the run's base: each file, and the whole patch";
   $("diff-load").hidden = false;
+  updateChangeView();
 }
 
 // Where the change sits: the run's result, so first after what the run does now — after a decision that does
@@ -40,8 +58,8 @@ export function showChangeFor(run) {
 export function placeChange(where, worktree = true) {
   const section = $("change");
   section.hidden = where === "none";
-  $("change-worktree").hidden = !worktree;
-  if (!worktree) $("change-count").textContent = "Review milestones";
+  worktreeRetained = worktree;
+  updateChangeView();
   if (where !== "none" && section.previousElementSibling !== $("stop")) $("stop").after(section);
 }
 
@@ -117,6 +135,7 @@ function listen(watch) {
 function showLive(watch, summary) {
   if (currentReview?.runId === watch.runId) currentReview.refresh();
   watch.seen = true;
+  if (hasMilestones()) return;
   shown = summary;
   $("change-count").textContent = fileCount(summary.files_total);
   const said = $("change-said");
@@ -156,6 +175,7 @@ function showLive(watch, summary) {
 
 // At a stop that asks the operator to judge a change, the change is read once, on its own.
 export function readOnceFor(stop) {
+  if (hasMilestones()) return;
   if (loadedFor === stop.id) return;
   loadedFor = stop.id;
   loadDiff();
@@ -169,7 +189,7 @@ async function loadDiff(asked) {
     if (reading !== runId) return;
     shown = read;
     const counted = fileCount(read.files_total);
-    $("change-count").textContent = counted;
+    if (!hasMilestones()) $("change-count").textContent = counted;
     // What the change is read against, as the read itself says: a run from before runs recorded their base
     // is read against its worktree's last commit, or the base merged into it after a conflict.
     const against = { tip: "the base this run stands on", merged: "the base merged into this worktree" }[read.against]
@@ -198,14 +218,30 @@ $("diff-load").onclick = () => loadDiff(true);
 $("diff-copy").onclick = () => shown && copyPatch(runId, shown, $("diff-copy"));
 // The whole change as the worktree holds it now — every file, however long — read by the press itself, at any time:
 // while the run works, at a stop, or once it is closed.
-$("change-copy").onclick = () => runId && copyPatch(runId, api("/api/runs/" + encodeURIComponent(runId) + "/diff"),
-  $("change-copy"), "Copy all changes");
+$("change-copy").onclick = async () => {
+  const reading = runId, evidence = wholeEvidence;
+  if (!reading || evidence?.runId !== reading || !evidence.initial) return;
+  const query = new URLSearchParams({ base: evidence.initial });
+  if (!worktreeRetained) {
+    if (!evidence.latest?.tree || evidence.latest.unavailable) return;
+    query.set("tree", evidence.latest.tree);
+  }
+  report($("change-result"), "");
+  const copied = await copyPatch(reading, api("/api/runs/" + encodeURIComponent(reading) + "/diff?" + query),
+    $("change-copy"), "Copy all changes");
+  if (!copied && reading === runId) report($("change-result"), $("change-copy").title, true);
+};
 
 // Operator review intervals come from Temporal; their bytes use the same immutable diff reader.
 let drawn = null;
 let currentReview = null;
 let currentBoundary = null;
-const refreshCurrent = () => currentReview?.refresh();
+const refreshCurrent = () => {
+  currentReview?.refresh();
+  for (const box of $("review-milestones").querySelectorAll(".milestone-card[open]")) {
+    if (box.dataset.review !== "current") box.loadReview?.();
+  }
+};
 $("change").addEventListener("toggle", refreshCurrent);
 document.addEventListener("visibilitychange", refreshCurrent);
 const action = (row) => ({ approve: "approval", revise: "revision", guide: "guidance", continue: "Continue",
@@ -221,25 +257,25 @@ export function showReviews(runId, review, open, stage = null) {
   const bodies = new Map([...root.querySelectorAll("details[data-review]")]
     .filter((box) => box.dataset.run === runId).map((box) => [box.dataset.review, box]));
   root.replaceChildren();
-  if (!runId || !review) { currentReview = null; currentBoundary = null; return; }
+  if (!runId || !review) {
+    currentReview = null; currentBoundary = null; wholeEvidence = null;
+    updateChangeView();
+    return;
+  }
+  wholeEvidence = { runId, initial: review.initial, latest: review.boundaries.at(-1), count: review.boundaries.length };
   const endpoints = [{ stop: "start", label: "Run start" }, ...review.boundaries.map((row, index) =>
     ({ ...row, label: (index + 1) + " · After " + action(row) }))];
   const intervals = review.boundaries.map((row, index) => ({ stop: row.stop, at: row.at, index: index,
-    label: "Milestone " + (index + 1) + " · Through " + action(row) }));
+    label: "Milestone " + (index + 1), action: action(row) }));
+  intervals.reverse();
   const boundary = JSON.stringify([runId, endpoints.at(-1).stop]);
   const newCurrent = open && currentBoundary !== boundary;
   currentBoundary = open ? boundary : null;
   if (open) intervals.unshift({ stop: "current", index: endpoints.length - 1,
-    label: "Milestone " + endpoints.length + " · Current changes · live, not independently verified" });
+    label: "Milestone " + endpoints.length, action: "Current" });
   currentReview = null;
-  if (!intervals.length) return;
-  const all = el("details", null, "round-change");
-  all.dataset.review = "all";
-  all.open = newCurrent || expanded.has("all");
-  all.addEventListener("toggle", refreshCurrent);
-  all.append(el("summary", "Review milestones · " + intervals.length));
-  all.append(el("p", "Copy one review iteration, or compare from an earlier checkpoint. Retained snapshots consume "
-    + "disk space after closure until explicitly released; opening or copying creates no milestone.", "hint"));
+  if (!intervals.length) { updateChangeView(); return; }
+  const all = el("div", null, "milestone-list");
   for (const interval of intervals) {
     const index = interval.index;
     const live = interval.stop === "current";
@@ -250,13 +286,26 @@ export function showReviews(runId, review, open, stage = null) {
       if (live) currentReview = { runId: runId, refresh: saved.refreshReview };
       continue;
     }
-    const box = el("details", null, "round-change");
+    const box = el("details", null, "round-change milestone-card" + (live ? " current" : ""));
     box.dataset.review = interval.stop;
     box.dataset.run = runId;
     box.dataset.evidence = evidence;
-    box.open = (live && newCurrent) || expanded.has(interval.stop);
-    const summary = el("summary", interval.label);
-    if (interval.at) summary.append(el("span", " · " + new Date(interval.at).toLocaleString(), "hint"));
+    box.open = (live && newCurrent) || expanded.has(interval.stop) || (!open && !bodies.size && interval === intervals[0]);
+    const summary = el("summary");
+    const heading = el("span", null, "milestone-heading");
+    heading.append(el("strong", interval.label), el("span", interval.action, "milestone-badge"));
+    const baseline = index ? "Since milestone " + index : "Since run start";
+    const subtitle = el("span", baseline, "milestone-subtitle");
+    if (interval.at) {
+      const stamp = el("time", new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(interval.at)));
+      stamp.dateTime = interval.at;
+      subtitle.append(stamp);
+    }
+    heading.append(subtitle);
+    const count = el("span", "", "milestone-count");
+    const arrow = el("span", "", "chevron");
+    arrow.setAttribute("aria-hidden", "true");
+    summary.append(arrow, heading, count);
     const body = el("div", null, "round-change-body");
     const label = el("label", "Compare from ");
     const from = el("select");
@@ -279,36 +328,27 @@ export function showReviews(runId, review, open, stage = null) {
     label.append(from);
     const controls = el("div", null, "section-head");
     const read = el("button", "Read changes");
-    const copyLabel = () => live ? "Copy live snapshot" : from.value === endpoints[index].stop ? "Copy milestone" : "Copy range";
-    const copy = el("button", copyLabel());
+    const copy = el("button", "Copy milestone");
+    copy.className = "milestone-copy";
     read.type = copy.type = "button";
-    const status = el("p", "Snapshots show sampled files, not approval or proof of who wrote each line.", "hint");
+    const status = el("p", live ? "Current files, not independently verified." : "Open to read this milestone’s changes.", "hint");
     status.setAttribute("role", "status");
     const files = el("div");
     let snapshot = null;
     let busy = false, dirty = false;
-    const visible = () => box.isConnected && box.open && box.parentElement.open &&
+    const visible = () => box.isConnected && box.open &&
       !$("change").hidden && $("change").open && document.visibilityState === "visible";
-    const fetchSnapshot = () => api("/api/runs/" + encodeURIComponent(runId) + "/milestone?" +
-      new URLSearchParams({ from: from.value, through: interval.stop }));
-    from.onchange = () => {
-      snapshot = null;
-      files.replaceChildren();
-      copy.textContent = copyLabel();
-      read.textContent = "Read changes";
-      status.textContent = "Read or copy the selected range.";
-      if (live) refresh(true);
-    };
+    const fetchSnapshot = (start = endpoints[index].stop) => api("/api/runs/" + encodeURIComponent(runId) + "/milestone?" +
+      new URLSearchParams({ from: start, through: interval.stop }));
     const refresh = async (automatic = false) => {
       if (automatic && !visible()) return;
       if (busy) { dirty = true; return; }
       busy = true;
       read.disabled = !automatic;
-      const selected = from.value;
-      status.textContent = "Reading the selected snapshots…";
+      status.textContent = "Reading milestone changes…";
       try {
         const result = await fetchSnapshot();
-        if (!box.isConnected || from.value !== selected) return;
+        if (!box.isConnected) return;
         if (!snapshot || snapshot.base !== result.base || snapshot.tree !== result.tree) {
           const opened = new Set([...files.querySelectorAll("details.file[open]")].map((file) => file.dataset.path));
           const focusedFile = files.contains(document.activeElement) && document.activeElement.closest("details.file")?.dataset.path;
@@ -319,13 +359,13 @@ export function showReviews(runId, review, open, stage = null) {
           }
         }
         snapshot = result;
+        count.textContent = fileCount(result.files_total);
         status.textContent = result.files_total ? fileCount(result.files_total) + " in this snapshot."
           : "No files differ between these snapshots.";
-        if (live) status.append(" Sampled ", clock(new Date().toISOString(), "ago"),
-          "; refreshes with worktree updates while open. Not independently verified.");
+        if (live) status.append(" Sampled ", clock(new Date().toISOString(), "ago"), ". Not independently verified.");
         read.textContent = "Refresh";
       } catch (error) {
-        if (box.isConnected && from.value === selected) status.textContent = "Unavailable: " + error.message;
+        if (box.isConnected) status.textContent = "Unavailable: " + error.message;
       } finally {
         busy = false;
         read.disabled = false;
@@ -333,23 +373,51 @@ export function showReviews(runId, review, open, stage = null) {
       }
     };
     read.onclick = () => refresh();
+    box.loadReview = () => { if (!snapshot) refresh(true); };
+    box.addEventListener("toggle", () => { if (box.open && (live || !snapshot)) refresh(true); });
     if (live) {
       box.refreshReview = () => refresh(true);
       currentReview = { runId: runId, refresh: box.refreshReview };
-      box.addEventListener("toggle", box.refreshReview);
     }
     copy.onclick = async () => {
-      from.disabled = read.disabled = true;
+      read.disabled = true;
       try {
-        await copyPatch(runId, live ? fetchSnapshot() : snapshot || fetchSnapshot(), copy, copyLabel());
-      } finally { from.disabled = read.disabled = false; }
+        if (!await copyPatch(runId, live ? fetchSnapshot() : snapshot || fetchSnapshot(), copy, "Copy milestone"))
+          status.textContent = copy.title;
+      } finally { read.disabled = false; }
     };
-    controls.append(label, read, copy);
+    controls.append(copy, read);
     body.append(controls, status, files);
+    if (index) {
+      const comparison = el("details", null, "milestone-compare");
+      comparison.append(el("summary", "Compare with an earlier checkpoint"));
+      const rangeCopy = el("button", "Copy range");
+      rangeCopy.type = "button";
+      const rangeStatus = el("p", "", "result");
+      rangeStatus.setAttribute("role", "status");
+      from.onchange = () => { rangeStatus.textContent = ""; };
+      rangeCopy.onclick = async () => {
+        from.disabled = true;
+        try {
+          if (!await copyPatch(runId, fetchSnapshot(from.value), rangeCopy, "Copy range"))
+            rangeStatus.textContent = rangeCopy.title;
+        } finally { from.disabled = false; }
+      };
+      const rangeControls = el("div", null, "section-head");
+      rangeControls.append(label, rangeCopy);
+      comparison.append(rangeControls, rangeStatus);
+      body.append(comparison);
+    }
     box.append(summary, body);
     all.append(box);
   }
-  root.append(all);
+  root.append(el("p", "Milestones run from one accepted action to the next (Approve, Revise, guidance or Continue). "
+    + "Current shows changes since your last action.", "hint"), all);
+  const retention = el("details", null, "milestone-retention");
+  retention.append(el("summary", "About saved milestones"), el("p", "Milestones are saved after accepted operator actions. "
+    + "Snapshots remain after worktree cleanup until explicitly released and use disk space. Opening or copying creates no milestone."));
+  root.append(retention);
+  updateChangeView();
   refreshCurrent();
   if (focused?.isConnected) focused.focus({ preventScroll: true });
 }

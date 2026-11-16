@@ -255,6 +255,7 @@ export async function copyPatch(runId, read, button, label = "Copy patch") {
       first.base + " -> " + first.tree + "\n\n" + patch;
   })();
   button.disabled = true;
+  let copied = false;
   try {
     // Written as the click's own, so a patch read in several parts still reaches the clipboard.
     if (window.ClipboardItem && navigator.clipboard.write) {
@@ -264,10 +265,12 @@ export async function copyPatch(runId, read, button, label = "Copy patch") {
       await navigator.clipboard.writeText(await whole);
     }
     button.textContent = "Copied";
+    copied = true;
   } catch (error) {
     button.textContent = "Copy failed";
     button.title = error.message;
   }
   button.disabled = false;
   setTimeout(() => { button.textContent = label; }, 1500);
+  return copied;
 }

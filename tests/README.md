@@ -130,7 +130,8 @@ Add a folder when a concern gains tests that are its own rather than its consume
 |---|---|
 | `foundation/test_landing.py` | final-assistant proposal parsing, manual message validation and final-tree protocol bounds |
 | `workspace/test_merge_choices.py` | explicit whole-name validation, compatible local and pinned-remote destination discovery/landing, identity preflight and marker-based recovery in disposable repositories |
-| `interfaces/test_merge_browser.py` | the normal final gate through real Temporal, Git and isolated Edge: destination choice, message edits across polling, exact confirmation and actual landing/cleanup |
+| `interfaces/test_merge_browser.py` | the normal final gate through real Temporal, Git and isolated Edge: destination choice, message edits across polling, exact confirmation and actual landing/cleanup; native pointer clicks on named Revise buttons reach the matching role, with a swapped-label rejection control |
+| `interfaces/test_terminal_history.py` | full role-terminal snapshots through real recorded-byte streaming and Edge: initial scrollback, clears, frozen endpoints, interrupted parsing, separate persistent cache, new-window role isolation and refusal to send agent input or resize |
 | `application/test_reviews.py` | exact milestone endpoints, legacy/cross-base refusal, and stable-stop current snapshots including concurrent closure |
 | `application/test_operator_history.py` | exact-execution accepted-note resolution, preserved text/provenance and refusal of missing, corrupt, duplicate or foreign references |
 | `interfaces/test_diff_browser.py` | the actual JavaScript copy reader preserves immutable UTF-8 pages, rejects incomplete/mismatched chunks and preserves the clipboard on failure |

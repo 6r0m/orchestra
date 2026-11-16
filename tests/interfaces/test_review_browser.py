@@ -82,7 +82,9 @@ class ReviewBrowser(Repo):
         path = self.worktree("review-browser", change=False)
         base = git(path, "rev-parse", "HEAD").strip()
         write(os.path.join(path, "first-only.txt"), "FIRST_MILESTONE\n")
+        write(os.path.join(path, "transient.txt"), "ADDED_THEN_REMOVED\n")
         first = W.review_checkpoint(path, "ui", "s1", base)["tree"]
+        os.remove(os.path.join(path, "transient.txt"))
         write(os.path.join(path, "app.txt"), "one\nSECOND_MILESTONE\n")
         write(os.path.join(path, "large.txt"), "".join("second milestone line %d for complete patch paging\n" % i
                                                     for i in range(25000)))
@@ -93,6 +95,8 @@ class ReviewBrowser(Repo):
         points = {"start": {"tree": base, "basis": base}, **{row["stop"]: row for row in boundaries}}
         fixture = {"review": {"initial": base, "boundaries": boundaries[:2]}, "cross": boundaries[2],
                    "delta": git(path, "diff", *W.DIFF, first, second), "whole": git(path, "diff", *W.DIFF, base, second)}
+        self.assertIn('transient.txt', fixture['delta'])
+        self.assertNotIn('transient.txt', fixture['whole'])
 
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *args):
@@ -113,7 +117,8 @@ class ReviewBrowser(Repo):
                 write(os.path.join(path, "live-revision.txt" if self.path == "/advance" else "finished-revision.txt"),
                       "LIVE_AFTER_OPERATOR_REVISION\n")
                 snapshot = W.review_diff(path, base=second)
-                self.send({"summary": W.change_summary(path, base), "patch": snapshot["patch"]})
+                self.send({"summary": W.change_summary(path, base), "patch": snapshot["patch"],
+                           "whole": git(path, "diff", *W.DIFF, base, snapshot["tree"])})
 
             def do_GET(self):
                 url = urllib.parse.urlsplit(self.path)
@@ -133,7 +138,7 @@ class ReviewBrowser(Repo):
                         "current": end == "current"}))
                 if url.path.endswith("/diff"):
                     return self.send(W.review_diff(path, int(query.get("offset", 0)), base=query.get("base", base),
-                                                  tree=query.get("tree", second), file=query.get("file")))
+                                                  tree=query.get("tree"), file=query.get("file")))
                 if url.path in STATIC:
                     name, kind = STATIC[url.path]
                     data = (Path(PAGE) / name).read_bytes()

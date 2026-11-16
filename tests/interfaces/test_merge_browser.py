@@ -33,6 +33,12 @@ class MergeBrowser(Repo):
     def test_long_task_has_a_reversible_preview_that_survives_polling(self):
         self.landing('task-disclosure')
 
+    def test_visible_revise_buttons_start_exactly_the_named_role(self):
+        self.landing('revise-labels')
+
+    def test_revise_button_check_rejects_swapped_visible_labels(self):
+        self.landing('revise-labels-swapped')
+
     def landing(self, scenario):
         import cast
         import temporal_env as E
@@ -138,13 +144,38 @@ class MergeBrowser(Repo):
             with patch.object(runs, 'runs', listed), patch.object(runs, 'skill_catalog', AsyncMock(return_value=catalog)):
                 result = subprocess.run([sys.executable, str(script), 'http://127.0.0.1:%d' % port(), run_id,
                                          scenario, 'release'], capture_output=True, text=True, timeout=90)
+            if scenario.startswith('revise-labels'):
+                swapped = scenario.endswith('-swapped')
+                if swapped:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn('Revise (engineer) sent the revision to architect', result.stdout + result.stderr)
+                else:
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                history = E.run(runs.history(E.client(), run_id))
+                answers = [answer for answer in history['answers'] if answer['action'] == 'revise']
+                self.assertEqual([answer['role'] for answer in answers],
+                                 ['architect'] if swapped else ['engineer', 'architect'])
+                turns = history['turns']
+                keys = ['%s:%s:%s' % (turn['stage'], turn['episode'], turn['round']) for turn in turns]
+                for answer in answers:
+                    first = turns[keys.index(answer['after']) + 1]
+                    self.assertEqual(first['stage'], 'build' if answer['role'] == 'engineer' else 'verify')
+                    name = '%s-e%s-%s' % (first['stage'], first['episode'], first['round'])
+                    self.assertIn(answer['text'], next(prompt for turn, prompt in prompts if turn == name))
+                state = E.run(handle.query(WF.FeatureRun.status))['state']
+                self.assertEqual(state['status'], 'READY_FOR_HUMAN')
+                self.assertEqual(W.started_from(repo), initial, 'revision must not land anything on the base')
+                return
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             state = E.run(handle.query(WF.FeatureRun.status))['state']
             self.assertEqual(state['status'], 'MERGED')
             self.assertEqual(state['base_branch'], 'release')
             self.assertEqual(W.started_from(repo), initial)
             self.assertEqual(git(repo, 'rev-parse', 'release^{tree}').strip(), final_tree)
-            self.assertEqual(git(repo, 'show', '-s', '--format=%s', 'release').strip(), 'Merge retained terminal screens')
+            self.assertEqual(git(repo, 'show', '-s', '--format=%s', 'release').strip(), 'Merge Retain terminal screens')
+            self.assertEqual(git(repo, 'show', '-s', '--format=%B', 'release^2').strip(),
+                             'Retain terminal screens\n\nKeep confirmed cursors.')
+            self.assertNotIn('Keep confirmed cursors.', git(repo, 'show', '-s', '--format=%B', 'release'))
             self.assertFalse(os.path.exists(state['worktree_path']))
             history = E.run(runs.history(E.client(), run_id))
             self.assertEqual(history['answers'][-1]['action'], 'merge')
