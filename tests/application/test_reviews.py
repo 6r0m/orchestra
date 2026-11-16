@@ -1,4 +1,4 @@
-"""Review ranges use retained evidence, refuse unknown/cross-base history and freeze current endpoints."""
+"""Review ranges compare retained endpoints across base updates and refuse missing or unstable evidence."""
 import unittest
 from unittest.mock import AsyncMock, patch
 from types import SimpleNamespace
@@ -38,6 +38,44 @@ class MergeHistory(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([row['stop'] for row in record['review']['boundaries']], ['stop-30'])
 
 
+class ScopedReader(unittest.IsolatedAsyncioTestCase):
+    async def test_total_export_without_a_recorded_working_base_refuses_before_git(self):
+        client = SimpleNamespace(execute_workflow=AsyncMock())
+        status = {'workflow_queue': 'workflows', 'queue': 'target', 'state': {'worktree_path': '/fake/worktree'}}
+        with patch.object(runs, 'readable_status', AsyncMock(return_value=status)), patch.object(runs, 'preflight', AsyncMock()):
+            with self.assertRaisesRegex(runs.Refusal, 'recorded working base'):
+                await runs.review_diff(client, 'run')
+        client.execute_workflow.assert_not_awaited()
+
+    async def test_legacy_or_mismatched_worker_scope_is_refused_before_copying(self):
+        alignment = {'from': 'old', 'to': 'new'}
+        status = {'workflow_queue': 'workflows', 'queue': 'target',
+                  'state': {'worktree_path': '/fake/worktree', 'repo_path': '/fake/repo', 'base_tip': 'new'}}
+        client = SimpleNamespace(execute_workflow=AsyncMock())
+        with patch.object(runs, 'readable_status', AsyncMock(return_value=status)), patch.object(runs, 'preflight', AsyncMock()):
+            for result in ({'base': 'first', 'tree': 'last'},
+                           {'base': 'aligned', 'tree': 'last', 'aligned_from': 'other', 'alignment': alignment}):
+                client.execute_workflow.return_value = result
+                with self.subTest(result=result), self.assertRaisesRegex(runs.Refusal, 'did not confirm scoped'):
+                    await runs.review_diff(client, 'run', base='first', tree='last', alignment=alignment)
+
+    async def test_scope_is_forwarded_to_the_target_git_reader_and_confirmed(self):
+        from unittest.mock import Mock
+        from app.application.activities import Activities
+        alignment = {'from': 'old', 'to': 'new'}
+        result = {'base': 'aligned', 'tree': 'last', 'aligned_from': 'first', 'alignment': alignment}
+        git = SimpleNamespace(review_diff=Mock(return_value=result))
+        args = {'worktree_path': '/fake/worktree', 'repo_path': '/fake/repo', 'base': 'first',
+                'tree': 'last', 'alignment': alignment}
+        self.assertEqual(Activities.review_diff(SimpleNamespace(git=git), args), result)
+        git.review_diff.assert_called_once_with('/fake/worktree', 0, 'first', 'last', None, None, '/fake/repo', alignment=alignment)
+        client = SimpleNamespace(execute_workflow=AsyncMock(return_value=result))
+        status = {'workflow_queue': 'workflows', 'queue': 'target', 'state': args}
+        with patch.object(runs, 'readable_status', AsyncMock(return_value=status)), patch.object(runs, 'preflight', AsyncMock()):
+            self.assertEqual(await runs.review_diff(client, 'run', base='first', tree='last', alignment=alignment), result)
+        self.assertEqual(client.execute_workflow.call_args.args[1]['alignment'], alignment)
+
+
 class ReviewRanges(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.record = {"review": {"initial": "base", "boundaries": [
@@ -61,11 +99,30 @@ class ReviewRanges(unittest.IsolatedAsyncioTestCase):
         result = await runs.review_milestone(None, "run", "one", "two")
         self.diff.assert_awaited_once_with(None, "run", base="first", tree="second")
         self.assertEqual(result["patch"], "exact net change")
-        self.assertEqual(result["review_range"], {"from": 1, "through": 2, "current": False})
+        self.assertEqual(result["review_range"], {"from": 1, "through": 2, "current": False, "base_updated": False})
 
-    async def test_cross_base_unknown_and_invalid_ranges_are_refused_before_reading_a_diff(self):
+    async def test_base_update_between_saved_endpoints_keeps_the_exact_git_comparison(self):
+        result = await runs.review_milestone(None, "run", "two", "three")
+        self.diff.assert_awaited_once_with(None, "run", base="second", tree="third",
+                                         alignment={'from': 'base', 'to': 'new-base'})
+        self.assertTrue(result["review_range"]["base_updated"])
+
+    async def test_base_update_before_a_current_sample_is_allowed_and_labelled(self):
+        self.waiting["state"]["base_tip"] = "new-base"
+        self.diff.return_value = {"base": "aligned", 'aligned_from': 'first', "tree": "current", "patch": "own changes"}
+        result = await runs.review_milestone(None, "run", "one", "current")
+        self.diff.assert_awaited_once_with(None, "run", base="first", alignment={'from': 'base', 'to': 'new-base'})
+        self.assertTrue(result["review_range"]["base_updated"])
+
+    async def test_unknown_current_base_is_not_reported_as_a_known_base_update(self):
+        self.waiting['state'].pop('base_tip')
+        with self.assertRaisesRegex(runs.Refusal, 'no recorded base'):
+            await runs.review_milestone(None, 'run', 'one', 'current')
+        self.diff.assert_not_awaited()
+
+    async def test_unknown_and_invalid_ranges_are_refused_before_reading_a_diff(self):
         self.record["review"]["boundaries"].append({"stop": "legacy", "unavailable": "no snapshot"})
-        for first, last in (("one", "three"), ("three", "legacy"), ("two", "one"), ("missing", "two")):
+        for first, last in (("three", "legacy"), ("two", "one"), ("missing", "two")):
             with self.subTest(first=first, last=last), self.assertRaises(runs.Refusal):
                 await runs.review_milestone(None, "run", first, last)
         self.diff.assert_not_awaited()
@@ -87,12 +144,10 @@ class ReviewRanges(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result["base"], "first")
                 self.diff.assert_awaited_with(None, "run", base="first")
 
-    async def test_missing_or_cross_base_start_refuses_before_sampling_the_worktree(self):
+    async def test_missing_start_refuses_before_sampling_the_worktree(self):
         self.record["review"]["boundaries"][0] = {"stop": "one", "unavailable": "no checkpoint was recorded"}
         with self.assertRaisesRegex(runs.Refusal, "starting checkpoint.*no checkpoint"):
             await runs.review_milestone(None, "run", "one", "current")
-        with self.assertRaisesRegex(runs.Refusal, "crosses a base update"):
-            await runs.review_milestone(None, "run", "three", "current")
         self.diff.assert_not_awaited()
 
     async def test_current_export_refuses_setup_or_concurrently_answered_stop(self):

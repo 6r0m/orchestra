@@ -236,6 +236,8 @@ export async function copyPatch(runId, read, button, label = "Copy patch") {
         !Number.isSafeInteger(first.next) || first.next < 0 || first.next > first.total ||
         new TextEncoder().encode(first.patch).length !== first.next)
       throw new Error("The initial patch is incomplete or invalid; nothing was copied.");
+    if (first.review_range?.base_updated && (!first.alignment?.from || !first.alignment?.to || typeof first.aligned_from !== "string"))
+      throw new Error("The reader has not confirmed worktree-only scope; refresh after Workbench and target-worker code are updated.");
     let patch = first.patch;
     let next = first.next;
     while (next < first.total) {
@@ -252,7 +254,8 @@ export async function copyPatch(runId, read, button, label = "Copy patch") {
     const range = first.review_range;
     return "# Review range: " + (range.from ? "checkpoint " + range.from : "run start") + " to " +
       (range.current ? "current, unverified" : "checkpoint " + range.through) + "\n# Snapshot: " +
-      first.base + " -> " + first.tree + "\n\n" + patch;
+      first.base + " -> " + first.tree +
+      (range.base_updated ? "\n# Incoming base changes excluded\n# Previous snapshot: " + first.aligned_from : "") + "\n\n" + patch;
   })();
   button.disabled = true;
   let copied = false;

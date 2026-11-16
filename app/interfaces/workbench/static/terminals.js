@@ -46,6 +46,8 @@ const RESTORE = "Put this terminal back in its place on the page, at its usual r
 const WRITE_CHUNK = 65536;
 const STREAM_PROTOCOL = "workbench.v2";
 const CHECKPOINT_MS = 2000;
+// Bound archive work independently of compression: fixed native cells plus bounded source/decoder input.
+const ARCHIVE_LIMITS = Object.freeze({ bytes: 128 * 1024 * 1024, rows: 262144 });
 
 function copySelection(term) {
   term.attachCustomKeyEventHandler((event) => {
@@ -308,12 +310,16 @@ export async function showTerminalHistory(query) {
     document.title = role + " history · " + id + " | Orchestra Workbench";
     $("archive-back").href = "/#run=" + encodeURIComponent(id);
     $("archive-back").textContent = id;
-    term = new Terminal({ cols: COLS, rows: ROWS, scrollback: 5000, disableStdin: true, fontSize: 12,
+    term = new Terminal({ cols: COLS, rows: ROWS, scrollback: ARCHIVE_LIMITS.rows, disableStdin: true, fontSize: 12,
       fontFamily: '"Cascadia Mono", Consolas, "Courier New", monospace', convertEol: false });
     term.open(mount);
     copySelection(term);
     // A CLI can erase its scrollback when resuming. The archive preserves it without changing the recording.
     term.parser.registerCsiHandler({ final: "J" }, (params) => params[0] === 3);
+    // A control sequence can expand into more lines than its byte count. Never label a trimmed view complete.
+    term._core._bufferService.buffers.normal.lines.onTrim(() => {
+      if (!complete) fail("incomplete view: archive row limit reached. The original recording remains on its host");
+    });
     const fitArchive = () => {
       const screen = mount.querySelector(".xterm-screen"), viewport = mount.querySelector(".xterm-viewport");
       if (!screen || !viewport) return;
@@ -339,13 +345,16 @@ export async function showTerminalHistory(query) {
     $("archive-top").onclick = () => term.scrollToTop();
     $("archive-bottom").onclick = () => term.scrollToBottom();
     const saved = cache.read(id, target, role, true);
-    if (saved) {
+    if (saved && saved.cursor <= ARCHIVE_LIMITS.bytes) {
       status.textContent = "Restoring cached full history…";
-      try { cursor = await cache.restore(term, saved); restored = true; }
+      try {
+        cursor = await cache.restore(term, saved, ARCHIVE_LIMITS.rows); restored = true;
+        term.options.scrollback = ARCHIVE_LIMITS.rows;
+      }
       catch (error) {
         console.warn("Full terminal cache could not be restored; reading the recording", error);
         await cache.remove(id, target, role, true);
-        term.reset(); term.resize(COLS, ROWS);
+        term.reset(); term.resize(COLS, ROWS); term.options.scrollback = ARCHIVE_LIMITS.rows;
       }
     }
     const finish = async () => {
@@ -356,7 +365,7 @@ export async function showTerminalHistory(query) {
       fitArchive();
       term.scrollToTop();
       status.textContent = "Complete · " + new Intl.NumberFormat().format(cursor) + " recorded bytes · "
-        + (restored ? "restored from cached history" : cached ? "history cached" : "recording remains available")
+        + (cached ? (restored ? "restored from cached history" : "history cached") : "not cached; reopening replays the recording")
         + (cache.issue() ? " · " + cache.issue() : "");
     };
     const connectArchive = () => {
@@ -381,6 +390,9 @@ export async function showTerminalHistory(query) {
             if (!Number.isSafeInteger(state.replay) || state.replay < 0) throw new Error("the worker did not provide a recording length");
             if (end === null) {
               end = state.replay;
+              if (end > ARCHIVE_LIMITS.bytes)
+                throw new Error("archive recording limit is " + ARCHIVE_LIMITS.bytes / (1024 * 1024) +
+                  " MiB. The original recording remains on its host; open the run to use its live terminal");
               if (cursor > end) {
                 await cache.remove(id, target, role, true);
                 term.reset(); term.resize(COLS, ROWS); cursor = 0; restored = false;
@@ -394,10 +406,20 @@ export async function showTerminalHistory(query) {
           }
           if (end === null || parsing) throw new Error("unexpected terminal replay frame");
           parsing = true;
+          if (event.data.byteLength > WRITE_CHUNK) throw new Error("the worker exceeded the replay chunk limit");
           const data = new Uint8Array(event.data).subarray(0, end - cursor);
-          // Grow before parsing: even one line feed per byte cannot evict the earlier archive rows.
-          term.options.scrollback = Math.max(term.options.scrollback, term.buffer.normal.baseY + data.length + 2 * MAX_ROWS);
-          writing = new Promise((resolve) => term.write(data, resolve));
+          writing = (async () => {
+            for (let offset = 0; offset < data.length && !failed;) {
+              // Reserve for a worst-case line feed per byte, including room for recorded geometry changes.
+              const room = ARCHIVE_LIMITS.rows - term.buffer.normal.length - 2 * MAX_ROWS;
+              if (room <= 0)
+                throw new Error("incomplete view: archive row limit is " + new Intl.NumberFormat().format(ARCHIVE_LIMITS.rows) +
+                  ". The original recording remains on its host");
+              const part = data.subarray(offset, offset + Math.min(WRITE_CHUNK, room));
+              await new Promise((resolve) => term.write(part, resolve));
+              offset += part.length;
+            }
+          })();
           await writing;
           if (failed || opened !== socket) return;
           cursor += data.length; progress.value = cursor; parsing = false;
@@ -415,7 +437,7 @@ export async function showTerminalHistory(query) {
         }
         if (++reconnects > 3) { fail("the worker is not answering. Reload to retry; the recording remains on its host"); return; }
         status.textContent = "History disconnected; retry " + reconnects + "/3 from the last parsed byte…";
-        retry = setTimeout(() => writing.then(() => { if (!failed && !complete) connectArchive(); }), 3000);
+        retry = setTimeout(() => writing.then(() => { if (!failed && !complete) connectArchive(); }, () => {}), 3000);
       };
     };
     connectArchive();

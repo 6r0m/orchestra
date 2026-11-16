@@ -83,8 +83,12 @@ heartbeats and cancels its pending request on Stop; it uses the existing activit
 No new note store or vendor-session reader supplies operator intent.
 
 The history reader associates checkpoint results with accepted operator actions by their recorded identity,
-including explicit capture failures. Same-base milestone exports use the net change between retained trees,
-never concatenated turn patches. Legacy missing samples and cross-base ranges are refused explicitly.
+including explicit capture failures and the preceding completed turn's identity. Milestone exports exclude
+incoming base changes: differing bases request Git alignment of the earlier snapshot before comparison.
+The target must confirm the requested source identity and alignment; an older worker returning an unscoped
+patch is refused before display/copy. Missing evidence and conflicting alignment remain unavailable.
+The total export compares current worktree files with their recorded working base, or a retained final
+snapshot with its own recorded base after cleanup. Other checkout edits are never source input.
 A current endpoint can be sampled during a role turn or an operator stop. The stage, stop, worktree and
 base must remain unchanged across the read; setup and Git transitions are refused. The sampled tree is
 frozen for all later file reads and patch chunks and conveys no approval. Whole-run live diff remains

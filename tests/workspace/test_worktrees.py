@@ -529,7 +529,92 @@ class ReviewDiff(Repo):
             W.review_diff(self.path, base=base, tree=tree)
 
 
+class ScopedReview(Repo):
+    def pair(self, conflict=False):
+        write(os.path.join(self.repo, 'app.txt'), 'alpha\nmiddle\nomega\n')
+        git(self.repo, 'add', 'app.txt')
+        git(self.repo, 'commit', '-qm', 'shared starting state')
+        old_base = git(self.repo, 'rev-parse', 'HEAD').strip()
+        old = self.worktree('scope-old', change=False)
+        write(os.path.join(old, 'app.txt'), 'alpha\nold own\nomega\n' if conflict else
+              'alpha\nmiddle\nown-before\nomega\n')
+        first = W.review_checkpoint(old, 'scope', 'one', old_base)
+        write(os.path.join(self.repo, 'upstream.txt'), 'UPSTREAM_ONLY\n')
+        write(os.path.join(self.repo, 'app.txt'), 'alpha\nnew upstream\nomega\n' if conflict else
+              'alpha\nupstream\nmiddle\nomega\n')
+        git(self.repo, 'add', '-A')
+        git(self.repo, 'commit', '-qm', 'advance base')
+        new_base = git(self.repo, 'rev-parse', 'HEAD').strip()
+        current = self.worktree('scope-current', change=False)
+        write(os.path.join(current, 'app.txt'), 'alpha\nresolved\nomega\n' if conflict else
+              'alpha\nupstream\nmiddle\nown-before\nown-after\nomega\n')
+        last = W.review_checkpoint(current, 'scope', 'two', new_base)
+        write(os.path.join(self.repo, 'main-only.txt'), 'UNCOMMITTED_MAIN_ONLY\n')
+        return old, current, first, last
+
+    def test_alignment_excludes_base_changes_preserves_prior_work_and_survives_cleanup(self):
+        old, current, first, last = self.pair()
+        protected = (git(self.repo, 'status', '--porcelain'), git(current, 'ls-files', '--stage'))
+        alignment = {'from': first['basis'], 'to': last['basis']}
+        result = W.review_diff(current, base=first['tree'], tree=last['tree'], alignment=alignment)
+        self.assertEqual([row['path'] for row in result['files']], ['app.txt'])
+        self.assertIn('+own-after\n', result['patch'])
+        self.assertNotIn('+own-before\n', result['patch'])
+        self.assertNotIn('+upstream\n', result['patch'])
+        self.assertEqual((git(self.repo, 'status', '--porcelain'), git(current, 'ls-files', '--stage')), protected)
+        self.assertEqual((result['aligned_from'], result['alignment']), (first['tree'], alignment))
+        W.discard(self.repo, old, 'scope-old')
+        W.discard(self.repo, current, 'scope-current')
+        git(self.repo, 'reflog', 'expire', '--expire=now', '--all')
+        git(self.repo, 'gc', '--prune=now')
+        retained = W.review_diff(current, base=first['tree'], tree=last['tree'], repo=self.repo, alignment=alignment)
+        self.assertEqual(retained['patch'], result['patch'])
+
+    def test_alignment_conflict_and_nonadvancing_base_refuse_without_mutation(self):
+        _, current, first, last = self.pair(conflict=True)
+        before = (git(current, 'status', '--porcelain'), git(current, 'ls-files', '--stage'))
+        with self.assertRaisesRegex(W.ChangeRefused, 'overlap'):
+            W.review_diff(current, base=first['tree'], tree=last['tree'],
+                          alignment={'from': first['basis'], 'to': last['basis']})
+        with self.assertRaisesRegex(W.ChangeRefused, 'ancestor'):
+            W.review_diff(current, base=last['tree'], tree=first['tree'],
+                          alignment={'from': last['basis'], 'to': first['basis']})
+        self.assertEqual((git(current, 'status', '--porcelain'), git(current, 'ls-files', '--stage')), before)
+
+    def test_final_merge_adds_only_worktree_delta_and_preserves_main_only_edits(self):
+        _, current, _, last = self.pair()
+        result = W.merge(self.repo, current, 'scope-current', 'develop', last['tree'], None, None,
+                         'Apply scoped change', 'Merge Apply scoped change', tip=last['basis'])
+        self.assertEqual(result['result'], 'merged')
+        landed = git(self.repo, 'diff', *W.DIFF, result['commit'] + '^1', result['commit'])
+        self.assertIn('+own-before\n', landed)
+        self.assertIn('+own-after\n', landed)
+        self.assertNotIn('+upstream\n', landed)
+        self.assertNotIn('upstream.txt', landed)
+        self.assertNotIn('main-only.txt', landed)
+        self.assertEqual(git(self.repo, 'status', '--porcelain').strip(), '?? main-only.txt')
+
+
 class ReviewCheckpoints(Repo):
+    def test_cross_base_checkpoint_diff_preserves_incoming_changes_after_cleanup(self):
+        path = self.worktree('review-cross-base')
+        base = git(path, 'rev-parse', 'HEAD').strip()
+        first = W.review_checkpoint(path, 'review-owner', 'one', base)
+        write(os.path.join(self.repo, 'incoming.txt'), 'incoming base change\n')
+        git(self.repo, 'add', 'incoming.txt')
+        git(self.repo, 'commit', '-qm', 'incoming base')
+        moved = git(self.repo, 'rev-parse', 'HEAD').strip()
+        git(path, 'merge', '--no-ff', '--no-commit', moved)
+        second = W.review_checkpoint(path, 'review-owner', 'two', moved)
+        expected = git(path, 'diff', *W.DIFF, first['tree'], second['tree'])
+        self.assertIn('incoming base change', expected)
+        self.assertNotIn('review-cross-base', expected)
+        W.discard(self.repo, path, 'review-cross-base')
+        git(self.repo, 'reflog', 'expire', '--expire=now', '--all')
+        git(self.repo, 'gc', '--prune=now')
+        result = W.review_diff(path, base=first['tree'], tree=second['tree'], repo=self.repo)
+        self.assertEqual(result['patch'], expected)
+
     def test_recorded_base_commit_remains_readable_after_replaced_base_history_and_gc(self):
         path = self.worktree("review-old-base")
         base = git(path, "rev-parse", "HEAD").strip()

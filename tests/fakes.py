@@ -167,7 +167,7 @@ class FakeWorktrees:
         return [{"path": "/fake/worktrees/one", "branch": "one", "state": "unmerged"},
                 {"path": "/fake/worktrees/two", "branch": "two", "state": "merged"}]
 
-    def review_diff(self, path, offset=0, base=None, tree=None, file=None, files_from=None, repo=None):
+    def review_diff(self, path, offset=0, base=None, tree=None, file=None, files_from=None, repo=None, alignment=None):
         self.calls.append(("review_diff", path, offset, base, tree, file, files_from))
         self.read_beside.append(repo)
         if self.diff_refusal:
@@ -180,6 +180,7 @@ class FakeWorktrees:
             return {"base": base, "tree": tree, "patch": patch, "whole": True,
                     "file": {"path": file, "old": None, "status": "M", "added": 1, "removed": 0, "binary": False}}
         return {"base": base, "tree": tree, "against": against, "summary": " 1 file changed", "summary_total": 15,
+                **({'aligned_from': base, 'alignment': alignment} if alignment is not None else {}),
                 "files": [{"path": "x", "old": None, "status": "M", "added": 1, "removed": 0, "binary": False}],
                 "files_total": 1, "patch": patch[offset:], "offset": offset, "next": len(patch), "total": len(patch)}
 

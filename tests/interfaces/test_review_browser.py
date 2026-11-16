@@ -1,6 +1,7 @@
 """Real browser acceptance on disposable Git snapshots; no live stack, vendor or clipboard writes."""
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -89,14 +90,33 @@ class ReviewBrowser(Repo):
         write(os.path.join(path, "large.txt"), "".join("second milestone line %d for complete patch paging\n" % i
                                                     for i in range(25000)))
         second = W.review_checkpoint(path, "ui", "s2", base)["tree"]
-        boundaries = [{"stop": "s1", "basis": base, "tree": first, "action": "revise", "at": "2026-11-12T09:00:00Z"},
-                      {"stop": "s2", "basis": base, "tree": second, "action": "approve", "at": "2026-11-12T10:00:00Z"},
-                      {"stop": "s3", "basis": "another-base", "tree": second, "action": "revise", "at": "2026-11-12T11:00:00Z"}]
+        write(os.path.join(self.repo, 'upstream.txt'), 'INCOMING_BASE_CHANGE\n')
+        git(self.repo, 'add', 'upstream.txt')
+        git(self.repo, 'commit', '-qm', 'incoming base')
+        moved = git(self.repo, 'rev-parse', 'HEAD').strip()
+        write(os.path.join(self.repo, 'main-only.txt'), 'UNCOMMITTED_MAIN_ONLY\n')
+        cross_path = self.worktree('review-cross', change=False)
+        shutil.copytree(path, cross_path, dirs_exist_ok=True, ignore=shutil.ignore_patterns('.git'))
+        write(os.path.join(cross_path, 'own-cross.txt'), 'OWN_CROSS_MILESTONE\n')
+        third = W.review_checkpoint(cross_path, 'ui', 's3', moved)['tree']
+        boundaries = [{"stop": "s1", "basis": base, "tree": first, "action": "revise", "role": "engineer",
+                       "after": "assess:1:1", "at": "2026-11-12T09:00:00Z"},
+                      {"stop": "s2", "basis": base, "tree": second, "action": "approve",
+                       "after": "verify:2:2", "at": "2026-11-12T10:00:00Z"},
+                      {"stop": "s3", "basis": moved, "tree": third, "action": "revise", "role": "architect",
+                       "after": "build:3:1", "at": "2026-11-12T11:00:00Z"}]
         points = {"start": {"tree": base, "basis": base}, **{row["stop"]: row for row in boundaries}}
-        fixture = {"review": {"initial": base, "boundaries": boundaries[:2]}, "cross": boundaries[2],
+        turns = [{'stage': stage, 'role': role, 'episode': episode, 'round': round_number}
+                 for stage, role, episode, round_number in [('plan', 'engineer', 1, 1), ('assess', 'architect', 1, 1),
+                   ('build', 'engineer', 2, 1), ('verify', 'architect', 2, 1), ('build', 'engineer', 2, 2),
+                   ('verify', 'architect', 2, 2), ('build', 'engineer', 3, 1)]]
+        fixture = {"review": {"initial": base, "boundaries": boundaries[:2]}, "cross": boundaries[2], 'turns': turns,
+                   'closed_total': git(path, 'diff', *W.DIFF, moved, third),
+                   'cross_patch': git(path, 'diff', *W.DIFF, second, third, '--', 'own-cross.txt'),
                    "delta": git(path, "diff", *W.DIFF, first, second), "whole": git(path, "diff", *W.DIFF, base, second)}
         self.assertIn('transient.txt', fixture['delta'])
         self.assertNotIn('transient.txt', fixture['whole'])
+        current_basis = [base]
 
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *args):
@@ -116,9 +136,12 @@ class ReviewBrowser(Repo):
                     return self.send({"error": "isolated fixture"}, 404)
                 write(os.path.join(path, "live-revision.txt" if self.path == "/advance" else "finished-revision.txt"),
                       "LIVE_AFTER_OPERATOR_REVISION\n")
+                if self.path == '/finalize':
+                    write(os.path.join(path, 'upstream.txt'), 'INCOMING_BASE_CHANGE\n')
+                    current_basis[0] = moved
                 snapshot = W.review_diff(path, base=second)
                 self.send({"summary": W.change_summary(path, base), "patch": snapshot["patch"],
-                           "whole": git(path, "diff", *W.DIFF, base, snapshot["tree"])})
+                           "whole": git(path, "diff", *W.DIFF, current_basis[0], snapshot["tree"])})
 
             def do_GET(self):
                 url = urllib.parse.urlsplit(self.path)
@@ -129,15 +152,18 @@ class ReviewBrowser(Repo):
                     return self.send(fixture)
                 if url.path.endswith("/milestone"):
                     start, end = query["from"], query["through"]
-                    if points[start]["basis"] != (base if end == "current" else points[end]["basis"]):
-                        return self.send({"error": "this range crosses a base update; select checkpoints within the same base"}, 400)
+                    if start not in points or end != 'current' and end not in points:
+                        return self.send({'error': 'checkpoint unavailable: no recorded tree'}, 400)
+                    target_basis = current_basis[0] if end == 'current' else points[end]['basis']
+                    alignment = {'from': points[start]['basis'], 'to': target_basis} if points[start]['basis'] != target_basis else None
                     result = W.review_diff(path, base=points[start]["tree"],
-                                           tree=None if end == "current" else points[end]["tree"])
+                                           tree=None if end == "current" else points[end]["tree"], alignment=alignment)
                     return self.send(dict(result, review_range={"from": list(points).index(start),
                         "through": len(points) if end == "current" else list(points).index(end),
-                        "current": end == "current"}))
+                        "current": end == "current", 'base_updated':
+                        points[start]['basis'] != (current_basis[0] if end == 'current' else points[end]['basis'])}))
                 if url.path.endswith("/diff"):
-                    return self.send(W.review_diff(path, int(query.get("offset", 0)), base=query.get("base", base),
+                    return self.send(W.review_diff(path, int(query.get("offset", 0)), base=query.get("base", current_basis[0]),
                                                   tree=query.get("tree"), file=query.get("file")))
                 if url.path in STATIC:
                     name, kind = STATIC[url.path]
@@ -154,11 +180,15 @@ class ReviewBrowser(Repo):
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
+        main_before = git(self.repo, 'status', '--porcelain')
+        index_before = git(path, 'ls-files', '--stage')
         try:
             script = Path(__file__).resolve().parents[2] / "tools/demo_press.py"
             result = subprocess.run([sys.executable, str(script), "http://127.0.0.1:%d" % server.server_port,
                                      "page", "review-components", "PASS"], capture_output=True, text=True, timeout=90)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(git(self.repo, 'status', '--porcelain'), main_before)
+            self.assertEqual(git(path, 'ls-files', '--stage'), index_before)
         finally:
             server.shutdown()
             server.server_close()

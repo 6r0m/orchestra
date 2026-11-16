@@ -227,12 +227,17 @@ async function saveScreen(runId, target, role, cursor, term, screen, generation,
     // Freeze the complete native state before hashing or waiting for another tab's transaction.
     const view = archive ? { archive: true } : {};
     let body = JSON.stringify({ format: FORMAT, runId, target, role, cursor, ...view, scrollback, cols, rows, snapshot });
-    if (archive && new Blob([body]).size > expandedLimit(cursor))
-      throw new Error("expanded history exceeds the refresh-cache allowance");
+    if (archive && new Blob([body]).size > expandedLimit(cursor)) {
+      console.warn("Terminal screen not cached: expanded history exceeds the refresh-cache allowance");
+      return false;
+    }
     const encoding = archive && typeof CompressionStream === "function" ? "gzip" : undefined;
     if (encoding) body = await compress(body);
     const bytes = new TextEncoder().encode(body).length;
-    if (bytes > FRAME_LIMIT) throw new Error("terminal screen exceeds the refresh-cache allowance");
+    if (bytes > FRAME_LIMIT) {
+      console.warn("Terminal screen not cached: screen exceeds the refresh-cache allowance");
+      return false;
+    }
     const row = { id: id, kind: "screen", format: FORMAT,
       runId, target, role, cursor, ...view, encoding, cols, rows, body,
       bytes, digest: await digest(body), at: Date.now() };
@@ -262,13 +267,14 @@ async function saveScreen(runId, target, role, cursor, term, screen, generation,
   } catch (error) { report(error); return false; }
 }
 
-export async function restore(term, row) {
+export async function restore(term, row, archiveRows = Infinity) {
   if (!valid(row) || await digest(row.body) !== row.digest) throw new Error("terminal snapshot is corrupt or incompatible");
   const data = JSON.parse(await unpack(row));
   for (const field of ["format", "runId", "target", "role", "cursor", "cols", "rows", "archive"])
     if (data[field] !== row[field]) throw new Error("terminal snapshot identity does not match");
   if (row.archive) {
-    if (!Number.isSafeInteger(data.scrollback) || data.scrollback < 0 || data.scrollback > Math.max(5000, row.cursor + 2 * CONFIG.terminal_size.max_rows))
+    const bound = Number.isFinite(archiveRows) ? archiveRows : Math.max(5000, row.cursor + 2 * CONFIG.terminal_size.max_rows);
+    if (!Number.isSafeInteger(data.scrollback) || data.scrollback < 0 || data.scrollback > bound)
       throw new Error("invalid archived scrollback capacity");
     term.options.scrollback = data.scrollback;
   } else if (data.scrollback !== term.options.scrollback) throw new Error("terminal scrollback configuration changed");

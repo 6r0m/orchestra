@@ -25,7 +25,11 @@ response={base:'base',tree:'tree',patch:'🧩',next:6,total:6};
 const button={};await copyPatch('run',first,button);
 assert(copied.endsWith('é🧩'));assert(copied.startsWith('# Review range:'));
 assert.equal(button.textContent,'Copied');assert(reads[0].includes('base=base&tree=tree&offset=2'));
+await copyPatch('run',{...first,aligned_from:'original',alignment:{from:'old',to:'new'},review_range:{...first.review_range,base_updated:true}},button);
+assert(copied.includes('# Incoming base changes excluded'));assert(copied.includes('# Previous snapshot: original'));assert(copied.endsWith('é🧩'));
 const kept=copied;
+await copyPatch('run',{...first,review_range:{...first.review_range,base_updated:true}},button);
+assert.equal(button.textContent,'Copy failed');assert.equal(copied,kept);
 for(const invalid of [{...response,tree:'other'},{...response,next:2},{...response,patch:'x'}]){
  response=invalid;await copyPatch('run',first,button);
  assert.equal(button.textContent,'Copy failed');assert.equal(copied,kept);assert.equal(button.disabled,false);

@@ -212,6 +212,32 @@ export async function run() {
     const archiveCopy = terminal();
     await cache.restore(archiveCopy, archive);
     check(view(archiveCopy) === view(stream), "compressed history changed native terminal state");
+    const overBudget = terminal();
+    let refusedRestore = false, archiveWrites = 0;
+    overBudget.write = () => { archiveWrites++; };
+    try { await cache.restore(overBudget, archive, 1); } catch { refusedRestore = true; }
+    check(refusedRestore && !archiveWrites, "cached archive bypassed the viewer's row budget before parsing");
+    const nativeSerialize = SerializeAddon.SerializeAddon.prototype.serialize;
+    const nativeCompression = window.CompressionStream;
+    try {
+      SerializeAddon.SerializeAddon.prototype.serialize = () => "X".repeat(cache.LIMITS.frame + 1);
+      for (const cursor of [1, 2 * 1024 * 1024]) {
+        window.CompressionStream = undefined;
+        check(!await cache.save(race, "windows", "engineer", cursor, stream, true),
+          "oversized archive was accepted");
+        check(!cache.issue(), "archive capacity refusal poisoned the shared live cache");
+        check(cache.read(race, "windows", "engineer", true).cursor === 600,
+          "archive capacity refusal changed the previous snapshot");
+      }
+    } finally {
+      SerializeAddon.SerializeAddon.prototype.serialize = nativeSerialize;
+      window.CompressionStream = nativeCompression;
+    }
+    check(await cache.save(race, "windows", "engineer", 700, stream),
+      "live cache stopped saving after an oversized archive");
+    const afterRefusal = terminal();
+    await cache.restore(afterRefusal, cache.read(race, "windows", "engineer"));
+    check(view(afterRefusal) === view(stream), "live cache could not restore after an archive refusal");
     const late = peer.save(race, "windows", "engineer", 500, stream);
     await cache.close(race);
     await late;

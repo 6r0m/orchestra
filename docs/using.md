@@ -284,26 +284,37 @@ navigate its scrollback. The archive preserves scrollback clears so earlier turn
 may repeat output. Refresh captures a new endpoint and restores any compatible full-history cache before
 reading newer bytes. Archive and live screens have separate cache identities within the same storage bounds;
 closure removes both. If the full screen exceeds the cache allowance, it remains viewable but reopening
-replays the recording. The live terminal retains its smaller recent-scrollback buffer.
+replays the recording; this does not disable live-screen caching. The archive also has separate recording
+and row limits to bound rendering work. If exceeded, it reports that complete history cannot be shown;
+the original recording stays on its host, and the live terminal remains available. The live terminal
+retains its smaller recent-scrollback buffer.
 
 **Change** lists milestone cards newest first. Each card compares only with the preceding checkpoint,
 starting at the run's original point for milestone 1. Its header names that baseline and the accepted action.
+The card name identifies the action that opened the interval, such as **After revision to engineer**.
+The badge names the user action that closed it, or **Current** while it remains open. The role summary
+and **Completed role turns** show which engineer/architect stages ran, with their exact rounds and episodes;
+the current step is shown separately. Missing iteration context is labelled rather than guessed.
 **Copy milestone** copies that exact interval, with snapshot labels and its full patch. Each accepted approval,
 revision, guidance or Continue closes an interval; copying or terminal typing creates none.
 The snapshot is captured before the next role starts: changes after your previous accepted action belong
 to **Current** until your next accepted action saves that interval's endpoint.
 
-**Copy all changes**, above the cards, copies one net Git diff from the original run start to the latest files.
+**Copy all changes**, above the cards, copies this worktree's change against its working base.
+It excludes changes already present in that base and never reads another checkout's uncommitted edits.
 It never concatenates milestone patches: a file added and then removed disappears from the total. After
-worktree cleanup it uses the latest retained snapshot instead, so historical exports remain accessible.
-The total includes any base updates between those endpoints. If the starting point or required final snapshot
-was not recorded, the total is unavailable rather than inferred from a newer base.
+cleanup it compares the retained final snapshot with its recorded base. Missing snapshot/base evidence
+is unavailable rather than inferred from another checkout or an older starting point.
 
 The **Current** card starts after your latest accepted answer. Its file list refreshes while open; copying
 samples a fresh immutable endpoint. Those files are not independently verified. A stage or base transition
 during an interval read asks you to refresh. **Compare with an earlier checkpoint** exposes optional larger
-ranges without changing the card's normal baseline. Missing captures and interval ranges crossing a base
-update remain explicitly unavailable. Existing runs gain exact boundaries from future supported answers,
+ranges without changing the card's normal baseline. A base update between checkpoints does not block
+comparison: Git first brings the previous snapshot onto the newer base without changing your files,
+then shows only the interval's worktree changes. Incoming base changes are excluded. If Git cannot align
+overlapping changes safely, the milestone says so; **Copy all changes** remains available. A base or stage
+change during a live read invalidates that sample. Missing captures remain explicitly unavailable.
+Existing runs gain exact boundaries from future supported answers,
 not retroactively. Open a file for line-by-line changes; long file lists and copied patches read their
 remaining pages from the same immutable snapshot.
 Snapshots survive ordinary worktree cleanup and use disk until explicitly released through the

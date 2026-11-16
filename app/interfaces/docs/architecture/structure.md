@@ -144,21 +144,31 @@ from an earlier cursor. This cache does not keep a vendor process initialized or
 The terminal's history link opens the existing page in a separate read-only archive mode. That viewer reads
 only the role's existing recorded-byte stream, freezing its endpoint at the first length announcement and
 ignoring later bytes. It sends only binary read cursors, with no keyboard forwarding or PTY resize requests.
-Recorded size markers resize its local emulator. Its scrollback capacity grows before parsing, and the
-archive ignores clear-scrollback commands so earlier turns survive CLI redraws. Interrupted reads resume only
+Recorded size markers resize its local emulator. The viewer bounds the recording length before replay and
+uses a fixed row budget independent of compressed-cache size. It reserves space before each parser write,
+reducing chunk size near the bound; overflow reports an incomplete view rather than a complete truncated history.
+Cached restores enforce that row budget before native parsing. These are rendering bounds, not a promise
+about total browser heap: native cell arrays, combined glyphs, serialization and browser overhead also use memory.
+The archive ignores clear-scrollback commands so earlier turns survive CLI redraws. Interrupted reads resume only
 after pending parser work completes, with three observable reconnect attempts. Full-history cache entries use
 a distinct identity from live screens under the same global bounds, invalidation and run-closure policy.
 Archive snapshots use browser-native gzip compression within the existing stored-byte allowance; decompression
 is bounded before parsing. The archive adds no model hooks, native-session writer, workflow event or second recording store. A missing
 or oversized cache falls back to the original recording; no history is silently dropped to fit the cache.
+Capacity refusals do not set the shared storage-failure flag or replace earlier live/archive snapshots.
 
-The Change disclosure shows operator review intervals as cards in descending recorded order, with same-base
+The Change disclosure shows operator review intervals as cards in descending recorded order, with exact
 milestone/range exports through the existing immutable diff reader. Each card's main file list and copy
 action use its immediately preceding checkpoint; optional earlier-range copying cannot change that baseline.
-Interval clipboard output includes snapshot labels followed by the exact patch. A single total-export control
-above the cards compares the recorded original start to the current files, or to the final retained endpoint
-after worktree removal. This is one net diff, including intervening base changes, never concatenated intervals.
-Missing original or ending evidence is unavailable, never a newer guessed baseline or an empty patch.
+Names identify the opening operator action and recipient; role context uses the recorded completed-turn
+identities between boundaries. A disclosure lists their exact stages, rounds and episodes without claiming
+that failed or missing turns completed. The current step is named separately from completed work.
+Unavailable role context never invents iteration identities. Across a base update, the view and copied patch
+identify the Git-aligned earlier snapshot and exclude incoming base changes. Old unscoped responses fail
+before rendering or copying. A single total-export control above the cards compares this worktree against
+its working base; after cleanup it uses the retained final snapshot and that snapshot's recorded base.
+The total is one net diff of the run's work, never concatenated intervals or imported base work.
+Missing source, base or ending evidence is unavailable rather than a guessed baseline or an empty patch.
 Interval bodies preserve selection and disclosure state, and earlier-checkpoint menus populate on demand.
 The current interval appears first, starting from the latest accepted action's checkpoint. While its
 disclosures are open, the existing worktree feed refreshes its sampled tree, with at most one automatic

@@ -25,12 +25,13 @@ function updateChangeView() {
   $("change-worktree").hidden = !worktreeRetained || cards > 0;
   if (cards) $("change-count").textContent = number.format(cards) + (cards === 1 ? " milestone" : " milestones");
   const evidence = wholeEvidence?.runId === runId ? wholeEvidence : null;
-  const unavailable = !evidence ? "Reading run history…" : !evidence.initial ? "Run starting point unavailable."
-    : !worktreeRetained && (!evidence.latest?.tree || evidence.latest.unavailable) ? "Latest saved snapshot unavailable." : "";
+  const unavailable = !evidence ? "Reading run history…"
+    : !worktreeRetained && (!evidence.latest?.tree || !evidence.latest.basis || evidence.latest.unavailable)
+      ? "Latest saved snapshot or its base unavailable." : "";
   $("change-copy").disabled = Boolean(unavailable);
   $("change-range").textContent = unavailable || (worktreeRetained
-    ? "Run start to current files · one net diff"
-    : "Run start to milestone " + evidence.count + " · one net diff");
+    ? "Worktree changes against its current base · one net diff"
+    : "Final worktree changes against their recorded base · one net diff");
 }
 
 // The change of `run`, not yet read.
@@ -220,10 +221,11 @@ $("diff-copy").onclick = () => shown && copyPatch(runId, shown, $("diff-copy"));
 // while the run works, at a stop, or once it is closed.
 $("change-copy").onclick = async () => {
   const reading = runId, evidence = wholeEvidence;
-  if (!reading || evidence?.runId !== reading || !evidence.initial) return;
-  const query = new URLSearchParams({ base: evidence.initial });
+  if (!reading || evidence?.runId !== reading) return;
+  const query = new URLSearchParams();
   if (!worktreeRetained) {
-    if (!evidence.latest?.tree || evidence.latest.unavailable) return;
+    if (!evidence.latest?.tree || !evidence.latest.basis || evidence.latest.unavailable) return;
+    query.set("base", evidence.latest.basis);
     query.set("tree", evidence.latest.tree);
   }
   report($("change-result"), "");
@@ -247,9 +249,9 @@ document.addEventListener("visibilitychange", refreshCurrent);
 const action = (row) => ({ approve: "approval", revise: "revision", guide: "guidance", continue: "Continue",
   merge: "Merge", discard: "Discard" }[row.action] || row.action) + (row.role ? " to " + row.role : "");
 
-export function showReviews(runId, review, open, stage = null) {
+export function showReviews(runId, review, open, stage = null, turns = []) {
   const root = $("review-milestones");
-  const key = JSON.stringify([runId, review, open, stage]);
+  const key = JSON.stringify([runId, review, open, stage, turns]);
   if (drawn === key) return;
   drawn = key;
   const focused = root.contains(document.activeElement) ? document.activeElement : null;
@@ -263,7 +265,7 @@ export function showReviews(runId, review, open, stage = null) {
     return;
   }
   wholeEvidence = { runId, initial: review.initial, latest: review.boundaries.at(-1), count: review.boundaries.length };
-  const endpoints = [{ stop: "start", label: "Run start" }, ...review.boundaries.map((row, index) =>
+  const endpoints = [{ stop: "start", label: "Run start", after: null, tree: review.initial, basis: review.initial }, ...review.boundaries.map((row, index) =>
     ({ ...row, label: (index + 1) + " · After " + action(row) }))];
   const intervals = review.boundaries.map((row, index) => ({ stop: row.stop, at: row.at, index: index,
     label: "Milestone " + (index + 1), action: action(row) }));
@@ -276,12 +278,20 @@ export function showReviews(runId, review, open, stage = null) {
   currentReview = null;
   if (!intervals.length) { updateChangeView(); return; }
   const all = el("div", null, "milestone-list");
+  const turnPositions = new Map(turns.map((turn, index) => [turn.stage + ":" + turn.episode + ":" + turn.round, index]));
+  const position = (endpoint) => endpoint.after === null ? -1 : turnPositions.get(endpoint.after);
   for (const interval of intervals) {
     const index = interval.index;
     const live = interval.stop === "current";
     const evidence = JSON.stringify([endpoints[index], live ? "current" : endpoints[index + 1]]);
+    const firstTurn = position(endpoints[index]);
+    const lastTurn = live ? turns.length - 1 : position(endpoints[index + 1]);
+    const work = firstTurn === undefined || lastTurn === undefined || firstTurn > lastTurn
+      ? null : turns.slice(firstTurn + 1, lastTurn + 1);
+    const working = live && stage?.role ? stage : null;
     const saved = bodies.get(interval.stop);
     if (saved?.dataset.evidence === evidence) {
+      saved.updateWork(work, working);
       all.append(saved);
       if (live) currentReview = { runId: runId, refresh: saved.refreshReview };
       continue;
@@ -293,7 +303,10 @@ export function showReviews(runId, review, open, stage = null) {
     box.open = (live && newCurrent) || expanded.has(interval.stop) || (!open && !bodies.size && interval === intervals[0]);
     const summary = el("summary");
     const heading = el("span", null, "milestone-heading");
-    heading.append(el("strong", interval.label), el("span", interval.action, "milestone-badge"));
+    heading.append(el("strong", interval.label + " · " + (index ? "After " + action(endpoints[index]) : "Initial work")),
+      el("span", live ? "Current" : "User " + interval.action, "milestone-badge"));
+    const workLine = el("span", "", "milestone-subtitle");
+    heading.append(workLine);
     const baseline = index ? "Since milestone " + index : "Since run start";
     const subtitle = el("span", baseline, "milestone-subtitle");
     if (interval.at) {
@@ -307,6 +320,21 @@ export function showReviews(runId, review, open, stage = null) {
     arrow.setAttribute("aria-hidden", "true");
     summary.append(arrow, heading, count);
     const body = el("div", null, "round-change-body");
+    const iterations = el("details", null, "milestone-iterations");
+    const iterationsTitle = el("summary");
+    const iterationsText = el("pre", "", "code");
+    iterations.append(iterationsTitle, iterationsText);
+    box.updateWork = (work, working) => {
+      const turnName = (turn) => (turn.role ? turn.role + " " : "") + turn.stage;
+      const iteration = (turn) => turnName(turn) + " · round " + turn.round + " · episode " + turn.episode;
+      workLine.textContent = work === null ? "Role iteration context unavailable."
+        : work.length ? "Completed stages: " + [...new Set(work.map(turnName))].join(" · ") : "No completed role turns in this interval.";
+      if (working) workLine.append(" · Current step: " + iteration(working));
+      iterations.hidden = !work?.length;
+      iterationsTitle.textContent = "Completed role turns · " + number.format(work?.length || 0);
+      iterationsText.textContent = (work || []).map(iteration).join("\n");
+    };
+    box.updateWork(work, working);
     const label = el("label", "Compare from ");
     const from = el("select");
     from.name = "review-from";
@@ -338,8 +366,14 @@ export function showReviews(runId, review, open, stage = null) {
     let busy = false, dirty = false;
     const visible = () => box.isConnected && box.open &&
       !$("change").hidden && $("change").open && document.visibilityState === "visible";
-    const fetchSnapshot = (start = endpoints[index].stop) => api("/api/runs/" + encodeURIComponent(runId) + "/milestone?" +
-      new URLSearchParams({ from: start, through: interval.stop }));
+    const fetchSnapshot = async (start = endpoints[index].stop) => {
+      const result = await api("/api/runs/" + encodeURIComponent(runId) + "/milestone?" +
+        new URLSearchParams({ from: start, through: interval.stop }));
+      if (result.review_range?.base_updated && (!result.alignment?.from || !result.alignment?.to ||
+          result.aligned_from !== endpoints.find((point) => point.stop === start)?.tree))
+        throw new Error("The reader has not confirmed worktree-only scope; load current Workbench and target-worker code before copying.");
+      return result;
+    };
     const refresh = async (automatic = false) => {
       if (automatic && !visible()) return;
       if (busy) { dirty = true; return; }
@@ -363,6 +397,8 @@ export function showReviews(runId, review, open, stage = null) {
         status.textContent = result.files_total ? fileCount(result.files_total) + " in this snapshot."
           : "No files differ between these snapshots.";
         if (live) status.append(" Sampled ", clock(new Date().toISOString(), "ago"), ". Not independently verified.");
+        if (result.review_range?.base_updated)
+          status.append(" Base branch changed during this interval; incoming base changes are excluded.");
         read.textContent = "Refresh";
       } catch (error) {
         if (box.isConnected) status.textContent = "Unavailable: " + error.message;
@@ -387,7 +423,7 @@ export function showReviews(runId, review, open, stage = null) {
       } finally { read.disabled = false; }
     };
     controls.append(copy, read);
-    body.append(controls, status, files);
+    body.append(controls, iterations, status, files);
     if (index) {
       const comparison = el("details", null, "milestone-compare");
       comparison.append(el("summary", "Compare with an earlier checkpoint"));

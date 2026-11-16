@@ -1236,7 +1236,7 @@ def review_components(page):
       window.__reviewShow=show;
       terminal.showTerminals('run-a','windows');
       terminal.updateTerminals({open:true,shown:'architect',working:'architect',since:'review'});
-      change.showReviews('run-a',fixture.review,true);
+      change.showReviews('run-a',fixture.review,true,{role:'architect',stage:'verify',episode:3,round:1},fixture.turns);
       return true;
     })()"""
     result = page.call("Runtime.evaluate", expression=setup, awaitPromise=True, returnByValue=True)
@@ -1244,6 +1244,14 @@ def review_components(page):
         raise SystemExit("component setup failed: %r" % result)
     if page.value("[...document.querySelectorAll('#review-milestones details[data-run]')].map(b=>b.dataset.review)") != ['current', 's2', 's1']:
         raise SystemExit('milestone cards must be ordered newest first')
+    if not page.value("document.querySelector('[data-review=s2] .milestone-heading strong').textContent.includes('After revision to engineer') && "
+                      "document.querySelector('[data-review=s2] .milestone-subtitle').textContent==='Completed stages: engineer build · architect verify' && "
+                      "document.querySelector('[data-review=s2] .milestone-iterations').textContent.includes('architect verify · round 2 · episode 2') && "
+                      "!document.querySelector('[data-review=s2] .milestone-iterations').textContent.includes('engineer plan')"):
+        raise SystemExit('milestone names or role iterations do not match their exact operator interval')
+    if not page.value("document.querySelector('[data-review=current] .milestone-heading').textContent.includes('Current step: architect verify · round 1 · episode 3') && "
+                      "!document.querySelector('[data-review=current] .milestone-iterations').textContent.includes('architect verify')"):
+        raise SystemExit('the current role was mislabelled as completed work')
     if not page.value("document.querySelector('#review-milestones').textContent.includes('Current shows changes since your last action.')"):
         raise SystemExit('the milestone interval hint is missing')
     if not page.value("!document.querySelector('#change-worktree').contains(document.querySelector('#change-copy')) && "
@@ -1297,7 +1305,7 @@ def review_components(page):
     page.call("Runtime.evaluate", expression="""(async()=>{
       window.__wholeLatest=(await(await fetch('/finalize',{method:'POST'})).json()).whole;
       const change=await import('/change.js');
-      change.showReviews('run-a',window.__reviewFixture.review,true,'operator-stop');
+      change.showReviews('run-a',window.__reviewFixture.review,true,'operator-stop',window.__reviewFixture.turns);
       return true;
     })()""", awaitPromise=True, returnByValue=True)
     try:
@@ -1342,25 +1350,55 @@ def review_components(page):
     if page.value("document.querySelector('#review-milestones details[data-review=s2] details.file[data-path=\"first-only.txt\"]')!==null"):
         raise SystemExit('an optional comparison changed the milestone file list baseline')
     page.call("Runtime.evaluate", expression="(async()=>{const c=await import('/change.js');const f=window.__reviewFixture;"
-              "c.showReviews('run-a',{...f.review,boundaries:[...f.review.boundaries,f.cross]},true);return true})()",
+              "const original=window.fetch;window.__legacyScope=true;window.fetch=async(...args)=>{const r=await original(...args);"
+              "if(window.__legacyScope&&String(args[0]).includes('/milestone?')){const d=await r.json();delete d.alignment;delete d.aligned_from;"
+              "return Response.json(d,{status:r.status})}return r;};"
+              "c.showReviews('run-a',{...f.review,boundaries:[...f.review.boundaries,f.cross]},true,null,f.turns);return true})()",
               awaitPromise=True, returnByValue=True)
     page.value("(()=>{const box=document.querySelector('#review-milestones details[data-review=s3]');box.open=true;"
                "[...box.querySelectorAll('button')].find(b=>b.textContent==='Read changes').click();return true})()")
-    wait(lambda: page.value("document.querySelector('#review-milestones details[data-review=s3]').innerText.includes('crosses a base update')"),
-         10, "an explicit cross-base refusal")
+    wait(lambda: page.value("document.querySelector('[data-review=s3] [role=status]').textContent.includes('not confirmed worktree-only scope')"),
+         10, 'refusing a legacy unscoped server response')
+    if page.value("document.querySelector('[data-review=s3] details.file')!==null"):
+        raise SystemExit('legacy response rendered unconfirmed file changes')
+    page.value("window.__reviewCopied='kept-scope-control';document.querySelector('[data-review=s3] .milestone-copy').click();true")
+    wait(lambda: page.value("document.querySelector('[data-review=s3] .milestone-copy').textContent==='Copy failed'"),
+         10, 'refusing an unconfirmed clipboard export')
+    if page.value("window.__reviewCopied") != 'kept-scope-control':
+        raise SystemExit('legacy server response replaced the clipboard')
+    page.value("window.__legacyScope=false;[...document.querySelector('[data-review=s3]').querySelectorAll('button')]"
+               ".find(b=>b.textContent==='Read changes').click();true")
+    wait(lambda: page.value("document.querySelector('#review-milestones details[data-review=s3] details.file[data-path=\"own-cross.txt\"]')!==null && "
+                           "document.querySelector('#review-milestones details[data-review=s3] details.file[data-path=\"upstream.txt\"]')===null"),
+         10, "the milestone change excluding the incoming base update")
+    page.value("window.__reviewCopied='';document.querySelector('[data-review=s3] .milestone-copy').click();true")
+    wait(lambda: page.value("window.__reviewCopied.endsWith(window.__reviewFixture.cross_patch) && "
+                           "window.__reviewCopied.includes('# Incoming base changes excluded')"), 15,
+         'the scoped cross-base patch')
     # Existing all-changes copy stays independent of the selected milestone range.
     page.call("Runtime.evaluate", expression="(async()=>{const change=await import('/change.js');change.showChangeFor('run-a');"
-              "change.showReviews('run-a',window.__reviewFixture.review,true,'whole-export');document.querySelector('#change').open=true;return true})()",
+              "change.showReviews('run-a',window.__reviewFixture.review,true,'whole-export',window.__reviewFixture.turns);document.querySelector('#change').open=true;return true})()",
               awaitPromise=True, returnByValue=True)
     page.value("window.__reviewCopied='';document.querySelector('#change-copy').click();true")
     try:
-        wait(lambda: page.value("window.__reviewCopied===window.__wholeLatest"), 20, "the exact start-to-current net export")
+        wait(lambda: page.value("window.__reviewCopied===window.__wholeLatest"), 20, "the current-worktree change against its current base")
     except SystemExit:
         print(page.value("({button:document.querySelector('#change-copy').textContent,title:document.querySelector('#change-copy').title,"
                          "copied:window.__reviewCopied.slice(0,180),length:window.__reviewCopied.length,expected:window.__wholeLatest?.length})"))
         raise
     if page.value("window.__reviewCopied.includes('transient.txt')"):
         raise SystemExit('the total export accumulated a file added and removed between checkpoints')
+    if page.value("window.__reviewCopied.includes('upstream.txt') || window.__reviewCopied.includes('main-only.txt')"):
+        raise SystemExit('the run export included incoming base work or another checkout\'s edits')
+    page.call('Runtime.evaluate', expression="""(async()=>{const c=await import('/change.js'),f=window.__reviewFixture;
+      c.showReviews('run-a',{...f.review,boundaries:[...f.review.boundaries,f.cross]},false,null,f.turns);
+      c.placeChange('first',false);document.querySelector('#change').open=true;
+      window.__reviewCopied='';document.querySelector('#change-copy').click();return true;})()""",awaitPromise=True,returnByValue=True)
+    wait(lambda: page.value("window.__reviewCopied===window.__reviewFixture.closed_total"),20,
+         'the retained final run export excluding its imported base')
+    page.call('Runtime.evaluate', expression="""(async()=>{const c=await import('/change.js'),f=window.__reviewFixture;
+      c.placeChange('first',true);c.showReviews('run-a',f.review,true,null,f.turns);return true;})()""",
+      awaitPromise=True,returnByValue=True)
     page.call("Emulation.setDeviceMetricsOverride", width=320, height=800, deviceScaleFactor=1, mobile=False)
     layout = page.value("({width:innerWidth,scroll:document.documentElement.scrollWidth,"
                         "cards:[...document.querySelectorAll('.milestone-card')].map(box=>({"
@@ -1376,7 +1414,7 @@ def review_components(page):
       const select=past.querySelector('select');select.focus();
       const fixture=window.__reviewFixture;
       change.showReviews('run-a',{...fixture.review,boundaries:[...fixture.review.boundaries,
-        {stop:'s4',basis:'another-base',tree:'new-tree',action:'guide',at:'2026-11-12T12:00:00Z'}]},true);
+        {stop:'s4',basis:'another-base',tree:'new-tree',action:'guide',at:'2026-11-12T12:00:00Z'}]},true,null,fixture.turns);
       const kept=document.querySelector('#review-milestones details[data-review=s2]');
       return {past:kept===past,value:kept.querySelector('select').value,
         current:document.querySelector('#review-milestones details[data-review=current] select').value};
@@ -1476,7 +1514,7 @@ def terminal_archive(page, port):
     page.call('Page.reload')
     wait(lambda: page.value("!window.__archiveReloadMarker && document.querySelector('#archive-status')?.textContent.includes('Complete')"), 30,
          'the archive restored after refresh')
-    if not page.value("document.querySelector('#archive-status').textContent.includes('cached')"):
+    if not page.value("document.querySelector('#archive-status').textContent.includes('restored from cached history')"):
         raise SystemExit('archive refresh did not restore its separate full-history cache: ' +
                          str(page.value("document.querySelector('#archive-status').textContent")))
     if not page.value("(()=>{const b=window.__archiveTerm.buffer.normal;return b.length>5000 && "
@@ -1513,6 +1551,30 @@ def terminal_archive(page, port):
       awaitPromise=True, returnByValue=True)['result'].get('value')
     if not cleared: raise SystemExit('run closure retained archive cache entries')
     print('PASS: full terminal from the first interaction, >5000 rows, clear-scrollback preservation, static cutoff and cached refresh')
+    return 0
+
+
+def archive_budget(page, mode):
+    wait(lambda: page.value("/Complete|History unavailable:/.test(document.querySelector('#archive-status')?.textContent)"),
+         90, 'the archive rendering budget result for ' + mode)
+    result = page.value("""(()=>{const t=window.__archiveTerm,b=t.buffer.normal,lines=t._core._bufferService.buffers.normal.lines;
+      let cells=0;for(let i=0;i<lines.length;i++)cells+=lines.get(i)._data.byteLength;
+      return {status:document.querySelector('#archive-status').textContent,rows:b.length,capacity:t.options.scrollback,
+        first:b.getLine(0).translateToString().includes('FIRST_INTERACTION'),cellBytes:cells,
+        writes:window.__archiveWrites||0,trims:window.__archiveTrims||0,
+        parsed:document.querySelector('#archive-progress').value,end:document.querySelector('#archive-progress').max};})()""")
+    if result['capacity'] > 262144 or result['rows'] > 262144 + 200 or result['trims']:
+        raise SystemExit('archive exceeded its rendering budget or discarded history: %r' % result)
+    if mode == 'large':
+        if result['writes'] or result['parsed'] or 'recording limit' not in result['status']:
+            raise SystemExit('oversized recording was not refused before parsing: %r' % result)
+    elif not result['first']:
+        raise SystemExit('archive lost its beginning: %r' % result)
+    if mode == 'short' and not (result['parsed'] < result['end'] and 'row limit' in result['status']):
+        raise SystemExit('short-line overflow was not refused explicitly: %r' % result)
+    if mode == 'long' and (result['parsed'] != result['end'] or result['rows'] < 50000):
+        raise SystemExit('long-line recording did not render completely: %r' % result)
+    print('PASS: measured archive budget ' + mode + ' ' + json.dumps(result))
     return 0
 
 
@@ -1757,7 +1819,7 @@ def main(url, run_id, label, said, note=None):
             "http://127.0.0.1:%s/json/list" % port)) if page.get("type") == "page"), 30, "a page to drive")
         with connect(target, max_size=None) as socket:
             page = Page(socket)
-            if label in ('terminal-archive','archive-observe'):
+            if label in ('terminal-archive','archive-observe','archive-budget'):
                 page.call('Page.enable')
                 page.call('Page.addScriptToEvaluateOnNewDocument', source="""
 let terminalClass;
@@ -1765,8 +1827,9 @@ const originalWarn=console.warn;
 console.warn=(...args)=>{if(args[0]==='Terminal refresh cache unavailable')window.__archiveCacheError=args[1]?.message;originalWarn(...args);};
 Object.defineProperty(window,'Terminal',{configurable:true,get:()=>terminalClass,set:value=>{
   terminalClass=class extends value {
-    constructor(...args){super(...args);if(args[0]?.disableStdin)window.__archiveTerm=this;}
-    write(data,callback){super.write(data,()=>{
+    constructor(...args){super(...args);if(args[0]?.disableStdin){window.__archiveTerm=this;
+      this._core._bufferService.buffers.normal.lines.onTrim(()=>window.__archiveTrims=(window.__archiveTrims||0)+1);}}
+    write(data,callback){window.__archiveWrites=(window.__archiveWrites||0)+1;super.write(data,()=>{
       if(window.__archiveInterruptedBytes&&!window.__archiveDelayed){window.__archiveDelayed=true;setTimeout(callback,3500);}
       else callback?.();
     });}
@@ -1830,6 +1893,8 @@ window.WebSocket=class extends NativeSocket{
                 return terminal_archive(page, port)
             if label == 'archive-observe':
                 return observe_terminal_archive(page)
+            if label == 'archive-budget':
+                return archive_budget(page, said)
             if label == "review-components":
                 wait(lambda: page.value("document.readyState === 'complete'"), 30, "the isolated component fixture")
                 setup, totals = review_components(page)

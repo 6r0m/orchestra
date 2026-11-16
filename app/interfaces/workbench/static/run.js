@@ -719,7 +719,12 @@ async function readRecord(runId, key) {
 function drawHistory() {
   const { view, timeline, stop } = drawn;
   if (view) renderChange(view, stop);
-  showReviews(selected, record.review, view && view.state !== "closed", [view?.stage, view?.since, stop?.id]);
+  const steps = view?.flow ? view.flow.steps : [];
+  const roleOf = (stage) => (steps.find((step) => step.endsWith(":" + stage)) || "").split(":")[0]
+    || STAGE_ROLES[stage];
+  showReviews(selected, record.review, view && view.state !== "closed",
+    { stage: view?.stage, role: view?.role, episode: view?.episode, round: Number.isInteger(view?.round) ? view.round + 1 : undefined,
+      since: view?.since, stop: stop?.id }, record.turns.map((turn) => ({ ...turn, role: roleOf(turn.stage) })));
   const root = $("timeline");
   if (!view || unchanged(root, [timeline, record.turns, record.answers, record.said, [...shownAbove]])) return;
   const openDetails = new Set([...root.querySelectorAll("details[open][data-history-detail]")]
@@ -727,9 +732,6 @@ function drawHistory() {
   // A completed turn's record does not change: one already read keeps what it shows, and what was opened in it.
   const bodies = new Map([...root.querySelectorAll("details.turn > .turn-body[data-loaded='yes']")]
     .map((body) => [body.parentElement.dataset.historyDetail, body]));
-  const steps = view.flow ? view.flow.steps : [];
-  const roleOf = (stage) => (steps.find((step) => step.endsWith(":" + stage)) || "").split(":")[0]
-    || STAGE_ROLES[stage];
   const turns = new Map(record.turns.map((turn) => [turnKey(turn), turn]));
   // Your answers follow the turn the run's history says each came after, in the history's own order; one after a
   // turn the timeline does not show yet comes last.

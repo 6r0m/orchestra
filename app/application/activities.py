@@ -647,9 +647,10 @@ class Activities:
         one file of it.
         """
         try:
+            scope = {'alignment': args['alignment']} if args.get('alignment') is not None else {}
             return self.git.review_diff(args["worktree_path"], args.get("offset", 0), args.get("base"),
                                         args.get("tree"), args.get("file"), args.get("files_from"),
-                                        args.get("repo_path"))
+                                        args.get("repo_path"), **scope)
         except W.ChangeRefused as exc:
             # What the reader asked for is not there to read: said as git said it, and never retried.
             raise ApplicationError(str(exc), type="ChangeRefused", non_retryable=True) from exc

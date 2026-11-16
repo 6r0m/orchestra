@@ -67,6 +67,16 @@ before staging. New landing recovery uses controller metadata bound to the execu
 repository, destination, verified base and final tree. Adoption also checks commit parents and trees; readable
 subjects are not new-protocol recovery evidence. Existing recorded merges preserve their legacy adoption path.
 
+## Review comparisons
+
+Review exports use only the run's worktree or its retained Git objects. To compare milestones across a
+base update, native Git aligns the earlier snapshot onto the newer base, then compares with the ending
+snapshot. This preserves earlier work while excluding incoming base-only changes, including disjoint edits
+to the same file. The bases must be ancestral; overlapping changes that Git cannot align are refused
+without substituting a raw diff. Alignment writes Git objects, not commits, refs, branches, index entries
+or worktree files. Derived baselines can be reconstructed from the retained inputs after cleanup or GC.
+File reads and patch pages reuse the resulting immutable endpoint pair.
+
 ## Review snapshot retention
 
 `review_checkpoint` samples through the private index and atomically creates a pair of private refs under

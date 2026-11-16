@@ -1047,7 +1047,7 @@ def _counted(path):
             "binary": False}
 
 
-def review_diff(path, offset=0, base=None, tree=None, file=None, files_from=None, repo=None):
+def review_diff(path, offset=0, base=None, tree=None, file=None, files_from=None, repo=None, alignment=None):
     """A run's change as a human reviews it: one snapshot, named by its base and its tree, and read from them.
 
     Without `tree`, the change now: the worktree's HEAD and the tree `git add -A` would commit, made on a
@@ -1070,6 +1070,10 @@ def review_diff(path, offset=0, base=None, tree=None, file=None, files_from=None
     change now, and a snapshot read from its own commit. A snapshot named by both its base and its tree is
     read from `repo`, the repository, whose objects a worktree's always were: a run that has landed still
     shows what each of its turns changed, for as long as git keeps those trees.
+
+    With `alignment`, native Git brings `base` onto the supplied newer working base before comparison.
+    The index and worktree remain untouched. A conflicting or nonadvancing base refuses the read;
+    no unscoped patch is substituted. The returned derived tree freezes later file/patch reads.
 
     Raises ChangeRefused for a name that is no object, an object git no longer holds — it prunes unreferenced
     ones after a while — a file not in the change, or what went with a worktree that is gone; on any git
@@ -1113,6 +1117,30 @@ def review_diff(path, offset=0, base=None, tree=None, file=None, files_from=None
         against = None
         base = held(base) if base is not None else git(["rev-parse", "HEAD"]).strip()
         tree = held(tree)
+    scope = {}
+    if alignment is not None:
+        if (not isinstance(alignment, dict) or set(alignment) != {'from', 'to'} or
+                any(not isinstance(value, str) or not OBJECT.fullmatch(value) for value in alignment.values())):
+            raise ChangeRefused('invalid milestone base alignment')
+        source, target = (held(alignment[key]) for key in ('from', 'to'))
+        ancestor = subprocess.run(['git', '-C', path, 'merge-base', '--is-ancestor', source, target],
+                                  capture_output=True, timeout=60)
+        if ancestor.returncode == 1:
+            raise ChangeRefused('the earlier base is not an ancestor of the later base; cannot align this interval')
+        if ancestor.returncode:
+            raise RuntimeError('cannot validate milestone base ancestry: ' + ancestor.stderr.decode('utf-8', 'replace')[:300])
+        merged = subprocess.run(['git', '-C', path, 'merge-tree', '--write-tree', '--no-messages',
+                                 '--merge-base=' + source, base, target], capture_output=True, timeout=60)
+        if merged.returncode == 1:
+            raise ChangeRefused('incoming base changes overlap the previous milestone; cannot exclude them without guessing. '
+                                'Copy all changes remains available against the working base')
+        if merged.returncode:
+            raise RuntimeError('cannot align milestone base: ' + merged.stderr.decode('utf-8', 'replace')[:300])
+        aligned = merged.stdout.decode('ascii').strip()
+        if not OBJECT.fullmatch(aligned):
+            raise RuntimeError('Git returned no valid aligned milestone tree')
+        scope = {'aligned_from': base, 'alignment': alignment}
+        base = held(aligned)
     pair = [base, tree]
 
     def listed():
@@ -1139,12 +1167,12 @@ def review_diff(path, offset=0, base=None, tree=None, file=None, files_from=None
             text, whole = git(["diff"] + DIFF + ["-U3"] + pair + named, literal), False
             if len(text.encode("utf-8")) > FILE_LIMIT:
                 raise ChangeRefused("%s's changes are too large to show here; copy the patch for them" % file)
-        return {"base": base, "tree": tree, "file": entry, "patch": text, "whole": whole}
+        return {"base": base, "tree": tree, "file": entry, "patch": text, "whole": whole, **scope}
     if files_from is not None:
         files = listed()
         return {"base": base, "tree": tree, "files": files[files_from:files_from + FILES_LIMIT],
-                "files_total": len(files), "files_from": files_from}
-    read = {"base": base, "tree": tree, "against": against}
+                "files_total": len(files), "files_from": files_from, **scope}
+    read = {"base": base, "tree": tree, "against": against, **scope}
     if not offset:
         files = listed()
         summary, _, summary_total = _chunk(git(["diff"] + DIFF + ["--stat"] + pair), 0, SUMMARY_LIMIT)

@@ -503,7 +503,7 @@ async def runs(client, limit=200, cursor=None):
     return listed, (page.next_page_token or None) if read >= limit else None
 
 
-async def review_diff(client, run_id, offset=0, base=None, tree=None, file=None, files_from=None):
+async def review_diff(client, run_id, offset=0, base=None, tree=None, file=None, files_from=None, alignment=None):
     """The run's change as its target host's git reads it (`worktrees.review_diff`): the change now, or the
     snapshot `base` and `tree` name, from `offset` bytes into its patch — or its file list from `files_from`, or
     its one `file`. The change now is read against the commit of its base the run stands on, where it recorded
@@ -519,15 +519,21 @@ async def review_diff(client, run_id, offset=0, base=None, tree=None, file=None,
     await preflight(client, queues(current["workflow_queue"], current["queue"]))
     if base is None and tree is None:
         base = current["state"].get("base_tip")
-    named = {key: value for key, value in (("base", base), ("tree", tree), ("file", file), ("files_from", files_from))
+        if not base:
+            raise Refusal('the run has no recorded working base; cannot determine its worktree-only change')
+    named = {key: value for key, value in (("base", base), ("tree", tree), ("file", file), ("files_from", files_from),
+                                          ('alignment', alignment))
              if value is not None}
     try:
         # On the run's own workflow queue: its own stack's worker reads its change.
-        return await client.execute_workflow(
+        result = await client.execute_workflow(
             WF.ReviewDiff.run, dict(named, worktree_path=path, repo_path=current["state"].get("repo_path"),
                                     queue=current["queue"], offset=offset),
             id="diff-%s-%s" % (run_id, os.urandom(4).hex()), task_queue=current["workflow_queue"],
             execution_timeout=datetime.timedelta(minutes=5))
+        if alignment is not None and (result.get('alignment') != alignment or result.get('aligned_from') != base):
+            raise Refusal('the target worker did not confirm scoped milestone comparison; gracefully reload its code before copying')
+        return result
     except WorkflowFailureError as error:
         cause = error.cause.cause if error.cause is not None and error.cause.cause is not None else error.cause
         if isinstance(cause, ApplicationError) and cause.type == "ChangeRefused":
@@ -684,7 +690,7 @@ async def history(client, run_id):
             return None
         raise
     _changes(turns, began, came)
-    boundaries = [dict({key: answer.get(key) for key in ("stop", "action", "role", "at", "phase")},
+    boundaries = [dict({key: answer.get(key) for key in ("stop", "action", "role", "at", "phase", "after")},
                        **checkpoints.get(answer["stop"], {"unavailable": "no checkpoint was recorded"}))
                   for answer in answers]
     return {"turns": turns, "answers": answers, "attempts": list(attempts.values()), "trace_id": trace_id,
@@ -692,7 +698,7 @@ async def history(client, run_id):
 
 
 async def review_milestone(client, run_id, first, last):
-    """One same-base net change; a current sample never changes its baseline or execution stage mid-read."""
+    """One exact endpoint diff; a current sample keeps its baseline and execution stage throughout the read."""
     current = await readable_status(client, run_id) if last == "current" else None
     record = await history(client, run_id)
     if record is None:
@@ -722,22 +728,24 @@ async def review_milestone(client, run_id, first, last):
         if (not state.get("worktree_path") or not (current.get("stop") or
                 (state.get("current") or {}).get("role") in ("engineer", "architect"))):
             raise Refusal("current milestone needs a role or operator stop; read again after the transition")
-        if start["basis"] != state.get("base_tip"):
-            raise Refusal("this range crosses a base update; select checkpoints within the same base")
-        read = await review_diff(client, run_id, base=start["tree"])
+        if not state.get("base_tip"):
+            raise Refusal("the current run has no recorded base")
+        base_updated = start["basis"] != state.get("base_tip")
+        scope = {'alignment': {'from': start['basis'], 'to': state['base_tip']}} if base_updated else {}
+        read = await review_diff(client, run_id, base=start["tree"], **scope)
         after = await readable_status(client, run_id)
         described = await execution(client, run_id)
-        if (identity(after) != identity(current) or read.get("base") != start["tree"] or
+        if (identity(after) != identity(current) or read.get('aligned_from', read.get("base")) != start["tree"] or
                 not described or described["execution"] != "RUNNING"):
             raise Refusal("the run moved during this snapshot; read it again")
     else:
         end = endpoints[keys.index(last)]
         checked(end, "ending checkpoint")
-        if start["basis"] != end["basis"]:
-            raise Refusal("this range crosses a base update; select checkpoints within the same base")
-        read = await review_diff(client, run_id, base=start["tree"], tree=end["tree"])
+        base_updated = start["basis"] != end["basis"]
+        scope = {'alignment': {'from': start['basis'], 'to': end['basis']}} if base_updated else {}
+        read = await review_diff(client, run_id, base=start["tree"], tree=end["tree"], **scope)
     return dict(read, review_range={"from": keys.index(first), "through": keys.index(last),
-                                   "current": current is not None})
+                                   "current": current is not None, "base_updated": base_updated})
 
 
 async def timings(client, run_id):

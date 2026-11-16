@@ -832,6 +832,12 @@ class HistoryRead(unittest.TestCase):
         return {"%s:%d:%d" % (turn["stage"], turn["episode"], turn["round"]): turn["change"]
                 for turn in record["turns"] if "change" in turn}
 
+    def test_review_boundaries_preserve_the_completed_turn_identity_for_names(self):
+        record = self.read([("turn", "build", "build", 3, 2, {}), ("answer", "revise"),
+                            ("failed", "verify", "build", 4, 1), ("answer", "continue")])
+        self.assertEqual([row["after"] for row in record["review"]["boundaries"]],
+                         ["build:3:2", "build:3:2"])
+
     @staticmethod
     def answers(record):
         return [(answer["action"], answer["after"], answer["phase"]) for answer in record["answers"]]
