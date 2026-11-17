@@ -7,12 +7,21 @@ repository, and the one this repository keeps for itself.
 | what you will find | where |
 |---|---|
 | the change being worked on now | the dated files beside this one |
-| a completed or merged change | [done/](done/) |
+| a completed change | [done/](done/) |
 
-A run started against this repository writes its reviewable plan here. Once the architect has
-passed the build, the run's engineer closes it out — cut to its record, its status saying it
-passed, moved to `done/` — and the operator's merge lands it there. A todo written by hand follows
-the same shape, and may move when the operator explicitly closes its defined scope before a commit.
+A run writes its reviewable plan here. An approved engineering increment can merge while its todo
+remains active. Blocked work may move to `parked/`, deferred remaining steps to `backlog/`; those
+directories are created when used. Outstanding criteria and decisions stay with the same file.
+Only a completed task becomes a receipt in `done/`. The versioned run contract is owned by the
+[lifecycle](../docs/architecture/structure.md#relationships-and-dependency-direction).
+A hand-written todo follows the same distinction between merging an increment and finishing its task.
+
+An unfinished todo may have a companion folder with the same stem: `todo/task.md` and `todo/task/`.
+Its `README.md` indexes the sanitized evidence, fixtures and tools required to continue, with provenance
+and resume instructions. The todo links to it; the folder follows a parked or backlog todo unchanged.
+Check Git inclusion before review. Disposable scratch stays in ignored `tmp/`; raw logs, transcripts,
+private data and secrets are not public continuation materials. Completed work migrates lasting assets
+to their stable owners rather than keeping an indiscriminate scratch archive.
 
 ## What a todo here may not contain
 

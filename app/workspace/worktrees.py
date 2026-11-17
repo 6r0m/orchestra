@@ -15,6 +15,8 @@ import tempfile
 import uuid
 
 from app.foundation import envpath
+from app.foundation import closeout
+from app.workspace import repos
 
 
 class GitError(RuntimeError):
@@ -465,7 +467,129 @@ def closeout_todo_matches(worktree, tree, plan, done_dir):
     return bool(holds(worktree, tree, todo_paths(plan, done_dir)))
 
 
-def adopt_todo_name(worktree, plan, verified_tree, name, done_dir=None):
+def todo_locations(state):
+    """Exact identities for one assigned todo, using only repository-owned locations."""
+    plan = state['plan'].replace('\\', '/')
+    if not repos.literal_todo_path(plan):
+        raise GitError('invalid assigned todo path')
+    locations = {'active': plan}
+    for disposition, key in (('completed', 'todo_done_dir'), ('parked', 'todo_parked_dir'), ('backlog', 'todo_backlog_dir')):
+        folder = state.get(key)
+        if folder is not None:
+            if not repos.literal_todo_path(folder):
+                raise GitError('invalid todo directory: ' + key)
+            locations[disposition] = folder + '/' + plan.rsplit('/', 1)[-1]
+    if len(set(locations.values())) != len(locations):
+        raise GitError('todo destination collision')
+    return locations
+
+
+def closeout_source(worktree, verified, state):
+    """Identify the actual verified artifact before paying for closeout, not a guessed active path."""
+    locations = todo_locations(state)
+    found = holds(worktree, verified, list(locations.values()))
+    if len(found) != 1:
+        raise GitError('verified todo needs exactly one assigned location; adopt its verified name if renamed')
+    mode = git(worktree, 'ls-tree', verified, '--', found[0], env=dict(os.environ, GIT_LITERAL_PATHSPECS='1')).stdout.split(' ', 1)[0]
+    if mode not in ('100644', '100755'):
+        raise GitError('verified todo must be a regular file')
+    return found[0]
+
+
+def _todo_materials(worktree, tree, todo):
+    """Exact regular-file Git identities beneath one task's companion folder."""
+    folder = closeout.materials_path(todo)
+    listing = git(worktree, 'ls-tree', '-r', '-z', tree, '--', folder,
+                  env=dict(os.environ, GIT_LITERAL_PATHSPECS='1')).stdout
+    files = {}
+    for record in filter(None, listing.split('\0')):
+        header, path = record.split('\t', 1)
+        mode, kind, oid = header.split(' ')
+        if not path.startswith(folder + '/') or mode not in ('100644', '100755') or kind != 'blob':
+            raise GitError('todo companion materials must be regular files under ' + folder)
+        relative = path[len(folder) + 1:]
+        if relative in files:
+            raise GitError('todo companion filenames could not be read unambiguously')
+        files[relative] = (mode, oid)
+    return files
+
+
+def preflight_todo_materials(worktree, verified, current, state, source):
+    """Refuse a destination collision before a role can overwrite someone else's folder."""
+    original = _todo_materials(worktree, verified, source)
+    present = []
+    for todo in todo_locations(state).values():
+        if todo != source and _todo_materials(worktree, verified, todo):
+            raise GitError('todo materials destination collision at ' + closeout.materials_path(todo))
+        actual = _todo_materials(worktree, current, todo)
+        if actual:
+            present.append(todo)
+            if todo != source and actual != original:
+                raise GitError('todo materials destination collision at ' + closeout.materials_path(todo))
+    if len(present) > 1:
+        raise GitError('todo materials collision: more than one companion folder is present')
+
+
+def _check_todo_materials(worktree, verified, final, state, source, destination):
+    original = _todo_materials(worktree, verified, source)
+    target = destination or source
+    exact = set()
+    for todo in todo_locations(state).values():
+        if todo != source and _todo_materials(worktree, verified, todo):
+            raise GitError('todo materials destination collision at ' + closeout.materials_path(todo))
+        actual = _todo_materials(worktree, final, todo)
+        if actual != (original if todo == target else {}):
+            raise GitError('closeout must retain reviewed companion materials unchanged beside the todo; '
+                           'new, missing, ignored or rewritten material needs build and review')
+    for relative in original:
+        exact.add(closeout.materials_path(source) + '/' + relative)
+        exact.add(closeout.materials_path(target) + '/' + relative)
+    return exact
+
+
+def check_todo_closeout(worktree, verified, final, state, product):
+    """Validate exact closeout ownership and retain every byte of unfinished acceptance criteria."""
+    locations = todo_locations(state)
+    source = closeout_source(worktree, verified, state)
+    disposition = product['disposition']
+    if disposition not in locations and not (disposition == 'completed' and state.get('todo_done_dir') is None):
+        raise GitError('the repository has no enabled todo destination for ' + disposition)
+    destination = locations.get(disposition)
+    present = holds(worktree, final, list(locations.values()))
+    if present != ([destination] if destination else []):
+        raise GitError('todo closeout must leave exactly one assigned artifact at its declared destination, or delete only a completed todo')
+    existing_destination = holds(worktree, verified, [destination]) if destination else []
+    if destination != source and existing_destination:
+        raise GitError('todo destination collision')
+    exact = {source, destination} - {None}
+    exact.update(_check_todo_materials(worktree, verified, final, state, source, destination))
+    all_changes = changed(worktree, verified, final)
+    not_documents = {path for _, path in changed(worktree, verified, final, (), state.get('closeout_docs') or ())}
+    roots = [value.replace('\\', '/').strip('/') for key, value in state.items()
+             if key in ('todo_dir', 'todo_done_dir', 'todo_parked_dir', 'todo_backlog_dir') and value]
+    outside = sorted(path for _, path in all_changes if path not in exact and
+                     (path in not_documents or any(path == root or path.startswith(root + '/') for root in roots)))
+    if outside:
+        raise GitError('closeout changed paths outside its assigned todo and documents: ' + ', '.join(outside))
+    def blob(tree, path):
+        mode = git(worktree, 'ls-tree', tree, '--', path, env=dict(os.environ, GIT_LITERAL_PATHSPECS='1')).stdout.split(' ', 1)[0]
+        if mode not in ('100644', '100755'):
+            raise GitError('todo must remain a regular file')
+        return subprocess.run(['git', '-C', worktree, 'cat-file', 'blob', tree + ':' + path],
+                              capture_output=True, check=True, timeout=60).stdout
+    if disposition != 'completed':
+        original = blob(verified, source)
+        content = blob(final, destination)
+        if not original or not content.endswith(original):
+            raise GitError('unfinished todo must preserve the complete verified contents; prepend status rather than shortening its steps')
+        if disposition in ('parked', 'backlog') and product['reason'].encode('utf-8') not in content:
+            raise GitError('parked/backlog todo must retain the declared reason or resumption condition in its file; prepend a short note')
+    elif destination:
+        blob(final, destination)
+    return dict(product, path=destination, source=source)
+
+
+def adopt_todo_name(worktree, plan, verified_tree, name, done_dir=None, todo_state=None):
     """Resolve an explicitly selected filename from the verified tree; change no file or index."""
     if (not isinstance(name, str) or not name.lower().endswith(".md") or len(name) > 255
             or name != name.strip() or any(ord(char) < 32 or char in '/\\<>:"|?*' for char in name)):
@@ -475,12 +599,18 @@ def adopt_todo_name(worktree, plan, verified_tree, name, done_dir=None):
     original = plan.replace("\\", "/")
     renamed = os.path.join(os.path.dirname(original), name).replace("\\", "/")
     previous, selected = todo_paths(original, done_dir), todo_paths(renamed, done_dir)
+    if todo_state is not None:
+        previous = list(todo_locations(dict(todo_state, plan=original)).values())
+        selected = list(todo_locations(dict(todo_state, plan=renamed)).values())
     present = holds(worktree, verified_tree, previous + selected)
     if not any(path in present for path in selected):
         raise GitError("the architect's verified tree does not hold %s" % renamed)
     if original != renamed and any(path in present for path in previous):
         raise GitError("the verified tree still holds %s; this is not a verified rename" % original)
-    return {"plan": renamed, "todo_path": os.path.join(worktree, *renamed.split("/"))}
+    actual = [path for path in selected if path in present]
+    if todo_state is not None and len(actual) != 1:
+        raise GitError('verified todo rename needs exactly one assigned location')
+    return {"plan": renamed, "todo_path": os.path.join(worktree, *(actual[0] if todo_state else renamed).split("/"))}
 
 
 def reopen(worktree, final_tree, verified_tree):

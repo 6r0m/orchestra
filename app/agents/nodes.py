@@ -20,6 +20,7 @@ import subprocess
 
 from app.agents import adapters
 from app.foundation import stages
+from app.foundation import closeout
 
 # What may follow the verdict object and still leave it the reviewer's last word.
 _ENDS_THERE = re.compile(r"\s*(?:```)?\s*")
@@ -366,12 +367,21 @@ def _ask(stage, state, todo, logs):
     """The stage's ask, its placeholders filled; a closeout's says where its run's repository keeps a finished
     todo and which documents it may bring up to date, as that repository's descriptor names them."""
     ask = stages.STAGE_ASK[stage].replace("{{TODO_PATH}}", todo).replace("{{LOGS}}", logs)
+    ask = ask.replace('{{TODO_MATERIALS}}', closeout.materials_path(todo))
     if stage in stages.FINAL:
         done, documents = state.get("todo_done_dir"), state.get("closeout_docs")
         ask = ask.replace("{{TODO_DONE}}", stages.CLOSEOUT_KEEPS.replace(
             "{{TODO_DONE_DIR}}", os.path.join(state["worktree_path"], done)) if done else stages.CLOSEOUT_DELETES)
         ask = ask.replace("{{CLOSEOUT_DOCS}}", stages.CLOSEOUT_DOCS % ", ".join(documents) if documents
                           else stages.CLOSEOUT_NO_DOCS)
+        if state.get('closeout_version') == closeout.VERSION:
+            targets = {name: state.get(key) for name, key in (
+                ('completed', 'todo_done_dir'), ('parked', 'todo_parked_dir'), ('backlog', 'todo_backlog_dir'))}
+            ask = (stages.FLEXIBLE_CLOSEOUT_ASK.replace('{{TODO_PATH}}', todo)
+                   .replace('{{TODO_LOCATIONS}}', json.dumps(targets)).replace('{{TODO_ACTIVE}}', state['plan'])
+                   .replace('{{TODO_DOCUMENTS}}', json.dumps(documents or [])))
+        else:
+            ask += '\n' + closeout.MATERIALS_ASK
     if stage in stages.FINAL and state.get("merge_version") == 1:
         from app.foundation.landing import DRAFT_ASK
         ask += "\n\n" + DRAFT_ASK

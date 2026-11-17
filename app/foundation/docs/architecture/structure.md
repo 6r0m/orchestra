@@ -30,6 +30,7 @@ stage's ask into a vendor prompt, which is [agents](../../../agents/README.md).
 | `policy.py` | the deployment's validated policy, and `prompt_path`, the one persona-file resolver |
 | `stages.py` | the stage contract: the stages, their roles, their reviews, their asks, and the verdicts |
 | `landing.py` | the portable final-gate destination/message contract and optional closeout proposal |
+| `closeout.py` | the versioned todo outcome product, independent of optional commit-message proposals |
 | `flows.py` | the flows: each file in `flows/` read and checked against the stage contract |
 | `localenv.py` | the one parser for deployment-private values in `.env`, exporting nothing; each consumer owns whether a read failure refuses work or degrades optional tracing |
 

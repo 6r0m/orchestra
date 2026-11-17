@@ -419,17 +419,15 @@ still lands on a checkout.
   [orchestration](../../app/orchestration/docs/architecture/structure.md#invariants); Git compatibility,
   pre-role remote trust and recovery belong to
   [workspace](../../app/workspace/docs/architecture/structure.md#names-and-landing).
-  Once the architect has passed the build, the engineer closes the todo out
-  (`engineer:closeout`): the todo, finished, moved to the repository's done folder — or
-  deleted, where the repository deletes a finished task (a null `todo_done_dir`). How a
-  todo is finished is the engineer's persona's, or a skill's the host binds to the stage.
-  No review follows that turn, so two facts are checked instead, by the repository's own
-  descriptor: it changed nothing but the todo folders and the documents the repository
-  names (`closeout_docs`, as git globs them — never a file's type, since a persona or a
-  skill is Markdown and is behaviour; a repository that names none leaves it the todo
-  alone), and the todo is gone from where it was and, where
-  the repository keeps it, in the done folder. Either one failing fails the step. The
-  architect's `PASS` accepts the implementation, and the operator judges the closeout.
+  Once the architect has passed the approved increment, the engineer prepares its todo outcome
+  (`engineer:closeout`). A versioned closeout distinguishes unfinished active, parked and backlog work
+  from a completed task. Run completion does not waive remaining acceptance criteria. The
+  [portable product](../../app/foundation/closeout.py) owns the shape;
+  [Workspace](../../app/workspace/docs/architecture/structure.md#todo-outcomes) owns artifact validation.
+  No review follows closeout: only the assigned todo, relocation of its unchanged reviewed companion
+  files and the repository's declared documents may change. Unfinished contents must survive intact. The architect accepts the
+  engineering increment; the operator judges the frozen outcome and remaining work at Merge.
+  Unversioned closeouts retain their completed-only move/delete and folder-scope checks for replay.
   An approved todo rename is adopted through the
   [workflow's paused-update contract](../../app/orchestration/docs/architecture/structure.md#invariants),
   so its saved artifact path remains Temporal's.

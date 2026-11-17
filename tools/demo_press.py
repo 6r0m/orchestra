@@ -1953,7 +1953,7 @@ window.WebSocket=class extends NativeSocket{
                 instruction_skills(page, run_id, port)
             if label == "task-disclosure":
                 task_disclosure(page, run_id)
-            if label in ("merge-choice", "merge-retry", "instruction-skills", "task-disclosure"):
+            if label in ("merge-choice", "merge-retry", "instruction-skills", "task-disclosure") or label.startswith('todo-'):
                 page.value("location.hash='#run='+" + json.dumps(run_id))
                 if label == "merge-retry":
                     wait(lambda: page.value("document.querySelector('#merge-destination-hint').textContent.includes('fixture worker unavailable')"),
@@ -2031,6 +2031,14 @@ window.WebSocket=class extends NativeSocket{
                     raise SystemExit('confirmation omitted the actual local branch')
                 if not page.value("document.querySelector('dialog[open]').textContent.includes('Merge commit: Merge Retain terminal screens')"):
                     raise SystemExit('confirmation omitted the generated merge subject')
+                todo = page.value("document.querySelector('#todo-closeout')?.dataset.disposition || null")
+                if label.startswith('todo-') and todo != label.removeprefix('todo-'):
+                    raise SystemExit('the final gate did not show the frozen todo disposition')
+                if todo and todo != 'completed':
+                    if not page.value("document.querySelector('#todo-closeout').checkVisibility() && "
+                                      "document.querySelector('#todo-closeout').textContent.includes('Run the separately approved reliability trial.') && "
+                                      "document.querySelector('dialog[open]').textContent.includes('does not complete the todo')"):
+                        raise SystemExit('unfinished todo or informed partial-merge confirmation is missing')
                 page.value("[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Merge').click()")
                 wait(lambda: page.value("document.body.textContent.includes('Merged')"), 30, "the actual selected landing")
                 print('PASS: final destination, operator messages and Git landing agree')

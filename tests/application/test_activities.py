@@ -498,6 +498,201 @@ class Closeout(unittest.TestCase):
             self.assertEqual((worktrees.work_tree(self.repo), worktrees.guard(self.repo, self.run_id)), before)
 
 
+class FlexibleCloseout(unittest.TestCase):
+    """Real Git protects unfinished todo contents and exact artifact ownership."""
+    PLAN, DONE = Closeout.PLAN, Closeout.DONE
+    setUp, write = Closeout.setUp, Closeout.write
+
+    def turn(self, disposition='active', edit=None, product=None, **state):
+        self.state.update(closeout_version=1, todo_parked_dir='todo/parked', todo_backlog_dir='todo/backlog')
+        original = open(self.state['todo_path'], encoding='utf-8').read() if os.path.exists(self.state['todo_path']) else None
+        destination = {'active': self.PLAN, 'completed': self.DONE,
+                       'parked': 'todo/parked/' + os.path.basename(self.PLAN),
+                       'backlog': 'todo/backlog/' + os.path.basename(self.PLAN)}[disposition]
+        proposal = {'disposition': disposition, 'remaining': '' if disposition == 'completed' else 'Measure sustained reliability.',
+                    'reason': '' if disposition == 'completed' else 'Await the separately approved trial.'}
+        output = json.dumps({'todo': proposal if product is None else product})
+        self.prompts = []
+        def runner(worktree, argv, rdir, name, prompt, timeout, env, *, kind):
+            self.prompts.append(prompt)
+            if edit:
+                edit()
+            elif destination != self.PLAN and original is not None:
+                self.write(destination, (proposal['reason'] + '\n\n' if disposition != 'completed' else '') + original)
+                os.remove(self.state['todo_path'])
+            return 0, output
+        self.host = activities.Activities(runner=runner, git=worktrees, telemetry=None)
+        return self.host.run_role({'stage': 'closeout', 'state': dict(self.state, **state), 'policy': policy('claude-code')})
+
+    def test_unfinished_dispositions_preserve_steps_and_the_index(self):
+        for disposition in ('active', 'parked', 'backlog'):
+            with self.subTest(disposition=disposition):
+                self.write(self.PLAN, 'Original acceptance\n- [ ] Complete the live trial\n')
+                self.state['verified_tree'] = worktrees.work_tree(self.repo)
+                protected = worktrees.guard(self.repo, self.run_id)
+                result = self.turn(disposition)
+                outcome = result['todo_closeout']
+                self.assertEqual(outcome['disposition'], disposition)
+                self.assertIn('Measure sustained reliability', outcome['remaining'])
+                self.assertIn('- [ ] Complete the live trial', open(os.path.join(self.repo, outcome['path']), encoding='utf-8').read())
+                self.assertEqual(worktrees.guard(self.repo, self.run_id), protected)
+                if outcome['path'] != self.PLAN:
+                    os.rename(os.path.join(self.repo, outcome['path']), self.state['todo_path'])
+
+    def test_reviewed_companion_materials_follow_the_todo_without_modification(self):
+        source = self.PLAN[:-3]
+        target = 'todo/parked/' + os.path.basename(source)
+        self.write(source + '/README.md', 'Sanitized incident evidence and next experiment.\n')
+        self.write(source + '/fixtures/sample.txt', 'SYNTHETIC_ORDER_7_ALLOCATION_FAILURE\n')
+        self.write(source + '/reproduce.py', 'print("local fixture only")\n')
+        self.state['verified_tree'] = worktrees.work_tree(self.repo)
+        before = worktrees.guard(self.repo, self.run_id)
+        def relocate():
+            original = open(self.state['todo_path'], encoding='utf-8').read()
+            self.write('todo/parked/' + os.path.basename(self.PLAN), 'Await the separately approved trial.\n\n' + original)
+            os.remove(self.state['todo_path'])
+            shutil.move(os.path.join(self.repo, source), os.path.join(self.repo, target))
+        result = self.turn('parked', edit=relocate)
+        self.assertEqual(worktrees.guard(self.repo, self.run_id), before)
+        self.assertIn('SYNTHETIC_ORDER_7', open(os.path.join(self.repo, target, 'fixtures/sample.txt'), encoding='utf-8').read())
+        self.host.reopen({'state': dict(self.state, final_tree=result['final_tree'])})
+        self.assertTrue(os.path.isfile(os.path.join(self.repo, source, 'reproduce.py')))
+        self.assertFalse(os.path.isfile(os.path.join(self.repo, target, 'reproduce.py')))
+
+    def test_companion_collision_is_detected_before_the_agent_starts(self):
+        self.write(self.PLAN[:-3] + '/README.md', 'Reviewed materials\n')
+        self.state['verified_tree'] = worktrees.work_tree(self.repo)
+        self.write(self.DONE[:-3] + '/README.md', 'Another existing folder\n')
+        with self.assertRaisesRegex(ApplicationError, 'collision'):
+            self.turn('completed')
+        self.assertEqual(self.prompts, [])
+
+    def test_reviewed_materials_cannot_be_rewritten_even_when_documents_allow_them(self):
+        source = self.PLAN[:-3]
+        self.write(source + '/README.md', 'Reviewed evidence\n')
+        self.state['verified_tree'] = worktrees.work_tree(self.repo)
+        with self.assertRaises(ApplicationError):
+            self.turn(edit=lambda: self.write(source + '/README.md', 'Rewritten after review\n'), closeout_docs=['**/*.md'])
+
+    def test_an_ignored_material_destination_cannot_produce_a_final_tree(self):
+        source = self.PLAN[:-3]
+        target = 'todo/parked/' + os.path.basename(source)
+        self.write(source + '/README.md', 'Required reviewed evidence\n')
+        self.write('.gitignore', target + '/\n')
+        self.state['verified_tree'] = worktrees.work_tree(self.repo)
+        def relocate():
+            original = open(self.state['todo_path'], encoding='utf-8').read()
+            self.write('todo/parked/' + os.path.basename(self.PLAN), 'Await the separately approved trial.\n\n' + original)
+            os.remove(self.state['todo_path'])
+            shutil.move(os.path.join(self.repo, source), os.path.join(self.repo, target))
+        before = worktrees.guard(self.repo, self.run_id)
+        with self.assertRaisesRegex(ApplicationError, 'ignored|materials'):
+            self.turn('parked', edit=relocate)
+        self.assertEqual(worktrees.guard(self.repo, self.run_id), before)
+
+    def test_materials_are_retained_for_active_work_and_completed_deletion_policy(self):
+        source = self.PLAN[:-3]
+        self.write(source + '/README.md', 'Reviewed incident record\n')
+        self.state['verified_tree'] = worktrees.work_tree(self.repo)
+        self.assertIn('final_tree', self.turn('active'))
+        result = self.turn('completed', edit=lambda: os.remove(self.state['todo_path']), todo_done_dir=None)
+        self.assertIsNone(result['todo_closeout']['path'])
+        self.assertTrue(os.path.isfile(os.path.join(self.repo, source, 'README.md')))
+
+    def test_other_todos_are_protected_even_when_documents_allow_all_markdown(self):
+        self.write('todo/other.md', 'Other task\n')
+        self.state['verified_tree'] = worktrees.work_tree(self.repo)
+        with self.assertRaisesRegex(ApplicationError, 'todo/other.md'):
+            self.turn('completed', edit=lambda: (
+                self.write(self.DONE, 'Done\n'), os.remove(self.state['todo_path']), self.write('todo/other.md', 'Changed\n')),
+                closeout_docs=['**/*.md'])
+
+    def test_unfinished_work_cannot_be_deleted_or_shortened(self):
+        for bad in ('delete', 'shorten'):
+            self.write(self.PLAN, 'Original acceptance\n- [ ] Run the live trial\n')
+            with self.subTest(bad=bad), self.assertRaisesRegex(ApplicationError, 'todo|unfinished'):
+                self.turn(edit=lambda: os.remove(self.state['todo_path']) if bad == 'delete' else self.write(self.PLAN, 'All fine\n'))
+
+    def test_parked_outcome_keeps_the_resume_reason_in_the_actual_todo(self):
+        original = open(self.state['todo_path'], encoding='utf-8').read()
+        destination = 'todo/parked/' + os.path.basename(self.PLAN)
+        with self.assertRaisesRegex(ApplicationError, 'reason'):
+            self.turn('parked', edit=lambda: (self.write(destination, original), os.remove(self.state['todo_path'])))
+
+    def test_invalid_and_duplicate_products_do_not_produce_a_final_tree(self):
+        for product in ({}, {'disposition': 'active', 'remaining': '', 'reason': ''},
+                        {'disposition': 'completed', 'remaining': 'Still required', 'reason': ''},
+                        {'disposition': '../other', 'remaining': 'Pending', 'reason': 'Blocked'}):
+            with self.subTest(product=product), self.assertRaises(ApplicationError):
+                self.turn(product=product)
+        with self.assertRaisesRegex(ApplicationError, 'duplicate|exactly one|collision'):
+            self.turn(edit=lambda: self.write(self.DONE, 'Duplicate task\n'))
+
+    def test_verified_finished_location_is_given_to_the_agent_and_restored_on_revision(self):
+        original = open(self.state['todo_path'], encoding='utf-8').read()
+        self.write(self.DONE, original)
+        os.remove(self.state['todo_path'])
+        self.state['verified_tree'] = worktrees.work_tree(self.repo)
+        result = self.turn('backlog', edit=lambda: (
+            self.write('todo/backlog/' + os.path.basename(self.PLAN), 'Await the separately approved trial.\n\n' + original), os.remove(os.path.join(self.repo, self.DONE))))
+        self.assertIn(os.path.join(self.repo, *self.DONE.split('/')), self.prompts[0])
+        self.host.reopen({'state': dict(self.state, final_tree=result['final_tree'], todo_closeout=result['todo_closeout'])})
+        self.assertTrue(os.path.isfile(os.path.join(self.repo, self.DONE)))
+        self.assertFalse(os.path.exists(os.path.join(self.repo, result['todo_closeout']['path'])))
+
+    def test_partial_closeout_continues_at_its_declared_location_without_losing_steps(self):
+        original = open(self.state['todo_path'], encoding='utf-8').read()
+        destination = 'todo/parked/' + os.path.basename(self.PLAN)
+        self.write(destination, 'Await the separately approved trial.\n\n' + original)
+        os.remove(self.state['todo_path'])
+        result = self.turn('parked', edit=lambda: None)
+        self.assertEqual(result['todo_closeout']['path'], destination)
+
+    def test_deletion_policy_only_deletes_completed_work(self):
+        result = self.turn('completed', edit=lambda: os.remove(self.state['todo_path']), todo_done_dir=None)
+        self.assertIsNone(result['todo_closeout']['path'])
+        self.write(self.PLAN, 'Original acceptance\n')
+        with self.assertRaises(ApplicationError):
+            self.turn('active', edit=lambda: os.remove(self.state['todo_path']), todo_done_dir=None)
+
+    def test_invalid_or_colliding_directories_refuse_before_starting_an_agent(self):
+        for folder in ('../escape', '/absolute', 'todo/*', 'todo/done'):
+            with self.subTest(folder=folder), self.assertRaises(ApplicationError):
+                self.turn(todo_parked_dir=folder)
+            self.assertEqual(self.prompts, [])
+        with self.assertRaisesRegex(ApplicationError, 'no enabled'):
+            self.turn('backlog', todo_backlog_dir=None)
+
+    def test_existing_destination_collision_refuses_before_the_agent_can_overwrite_it(self):
+        self.write(self.DONE, 'Another file created after verification\n')
+        with self.assertRaisesRegex(ApplicationError, 'collision|exactly one'):
+            self.turn('completed')
+        self.assertEqual(self.prompts, [])
+
+    def test_explicit_name_recovery_recognizes_parked_artifacts_without_moving_them(self):
+        self.state.update(closeout_version=1, todo_parked_dir='todo/parked', todo_backlog_dir='todo/backlog')
+        self.write('todo/parked/renamed.md', 'Verified renamed task\n')
+        os.remove(self.state['todo_path'])
+        self.state['verified_tree'] = worktrees.work_tree(self.repo)
+        before = worktrees.work_tree(self.repo), worktrees.guard(self.repo, self.run_id)
+        host = activities.Activities(git=worktrees, telemetry=None)
+        adopted = host.adopt_todo_name({'state': self.state, 'name': 'renamed.md'})
+        self.assertEqual(adopted['plan'], 'todo/renamed.md')
+        self.assertEqual(adopted['todo_path'], os.path.join(self.repo, 'todo', 'parked', 'renamed.md'))
+        self.assertEqual((worktrees.work_tree(self.repo), worktrees.guard(self.repo, self.run_id)), before)
+
+    def test_reopen_for_each_disposition_restores_the_verified_todo_and_preserves_later_edits(self):
+        for disposition in ('active', 'parked', 'backlog', 'completed'):
+            with self.subTest(disposition=disposition):
+                self.write(self.PLAN, 'All original acceptance\n')
+                self.state['verified_tree'] = worktrees.work_tree(self.repo)
+                result = self.turn(disposition)
+                self.write('docs/later.md', 'Operator edit after closeout\n')
+                self.host.reopen({'state': dict(self.state, final_tree=result['final_tree'], todo_closeout=result['todo_closeout'])})
+                self.assertEqual(open(self.state['todo_path'], encoding='utf-8').read(), 'All original acceptance\n')
+                self.assertEqual(open(os.path.join(self.repo, 'docs/later.md'), encoding='utf-8').read(), 'Operator edit after closeout\n')
+
+
 class LongPrompt(unittest.TestCase):
     """A turn given guidance longer than a command line takes — an audit pasted whole — still starts: the
     guidance is attached as a file in the run's own folder, which the agent may read, and the prompt names it."""

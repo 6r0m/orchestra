@@ -96,8 +96,16 @@ available independently. Private checkpoint refs
 survive ordinary worktree cleanup; the workspace owner defines their retention and release.
 
 - **A role-run and every git side effect are single-attempt (D5).** A failure stops the run for the operator; there is no automatic retry and no retry ledger (D16).
+- **Versioned todo closeout validates before promotion.** Only the adapter's final assistant product
+  supplies the disposition, remaining work and reason. Workspace verifies exact ownership and unfinished
+  contents, including unchanged companion-material relocation and collision refusal, before any final
+  tree is returned. The optional commit-message draft remains independently
+  replaceable by manual text. A distinct activity type prevents older targets from executing the
+  completed-only contract; retained operator notes still use their normal resolver. Reopening returns
+  the verified todo's actual location, not an assumed active path. Legacy role activities retain their contract.
 - **Closeout preflights the saved todo paths against the verified tree.** Every policy requires
-  the assigned active or configured finished name in that snapshot. A deletion policy permits the
+  the assigned artifact in that snapshot: active or finished for unversioned closeout, exactly one
+  configured outcome location for versioned closeout. A deletion policy permits the
   todo's later absence from the working tree, including when a partial closeout continues. A mismatch
   refuses before an agent starts, with the explicit
   verified-name recovery command. Adoption follows the

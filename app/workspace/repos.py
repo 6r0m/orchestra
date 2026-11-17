@@ -31,7 +31,7 @@ VARIABLE = "ORCHESTRA_REPOS"
 DESCRIPTORS = os.path.join(paths.REPO, ".orchestra", "repos.json")
 TARGETS = ("wsl", "windows")
 ENTRY_KEYS = {"path", "target", "base_branch", "remote", "worktree_root", "todo_dir", "todo_done_dir", "todo_name",
-              "closeout_docs", "lfs_pointers"}
+              "todo_parked_dir", "todo_backlog_dir", "closeout_docs", "lfs_pointers"}
 # `remote` names where a repository's base branch lives when that is a remote: a run begins from what that
 # remote holds and lands there, by the controller's push, on the operator's Merge — its `base_branch` named
 # with it, and no branch of this repository's own needed. Unnamed, the base is the repository's own branch
@@ -50,7 +50,7 @@ PATHS = {"closeout_docs"}
 TODO_DEFAULTS = {"todo_dir": "todo", "todo_done_dir": "todo/done", "todo_name": "%Y-%m-%d_%H%M-{slug}"}
 # Keys whose null is a setting of its own: a null `todo_done_dir` means the repository deletes
 # a finished task rather than moving it to a done folder.
-NULLABLE = {"todo_done_dir"}
+NULLABLE = {"todo_done_dir", "todo_parked_dir", "todo_backlog_dir"}
 # The base branch when none is configured: the first of these the repository has,
 # then the remote's default branch.
 BASE_CANDIDATES = ("develop", "dev")
@@ -118,6 +118,10 @@ def load(path=None):
             if key in entry and not (isinstance(entry[key], list) and all(_inside(each) for each in entry[key])):
                 raise Refused("repository %r: %s must list paths inside the repository, as git globs them — "
                               "`docs/`, `**/README.md`" % (name, key))
+        for key in ('todo_parked_dir', 'todo_backlog_dir'):
+            value = entry.get(key)
+            if value is not None and not literal_todo_path(value):
+                raise Refused('repository %r: %s must be a literal directory inside the repository' % (name, key))
     return raw
 
 
@@ -126,6 +130,13 @@ def _inside(path):
     git would read as an option or as pathspec magic."""
     return (isinstance(path, str) and bool(path.strip()) and "\\" not in path and path[0] not in "/:-"
             and ".." not in path.split("/"))
+
+
+def literal_todo_path(value):
+    """Todo artifacts have literal repository-relative paths, never glob or revision syntax."""
+    return (_inside(value) and value == value.strip() and ':' not in value and
+            not any(char in value for char in '*?[]') and not any(ord(char) < 32 for char in value) and
+            not any(part in ('', '.') or part.casefold() == '.git' for part in value.split('/')))
 
 
 def windows_path(path):
@@ -255,6 +266,8 @@ def resolve(selected, target_root, which=shutil.which):
         raise Refused("the worktree root %s is not on a Windows drive: %s" % (root, UNC_REASON))
     resolved = {"repo_path": path, "base_branch": base, "remote": remote, "worktree_root": root}
     resolved.update({key: selected.get(key, value) for key, value in TODO_DEFAULTS.items()})
+    for key, leaf in (('todo_parked_dir', 'parked'), ('todo_backlog_dir', 'backlog')):
+        resolved[key] = selected.get(key, resolved['todo_dir'].rstrip('/') + '/' + leaf)
     resolved["closeout_docs"] = list(selected.get("closeout_docs", ()))
     resolved["lfs_pointers"] = selected.get("lfs_pointers", False)
     return resolved

@@ -116,6 +116,7 @@ export function show(runId) {
   taskObserver = null;
   mergeState = null;
   $("merge-options").hidden = true;
+  $("todo-closeout").hidden = true;
   showAccounting(runId);
   $("stop-skills").onclick = async () => {
     const runId = selected, stop = shownStop;
@@ -179,6 +180,7 @@ export async function refreshRun() {
   const to = view.stop && view.stop.to;
   renderStop(status.stop, status.timeline, to);
   renderMerge(status);
+  renderTodoCloseout(state.todo_closeout);
   renderReply(status.stop, view.reply, to);
   renderKept(runId, view);
   renderHistory(view, status.timeline, status.stop);
@@ -533,6 +535,23 @@ function mergeMessages() {
   return { work, merge: subject ? "Merge " + subject : "" };
 }
 
+function todoOutcome(todo) {
+  return todo.disposition === "completed"
+    ? "Todo completed" + (todo.path ? " at " + todo.path : " and deleted under repository policy") + "."
+    : "Todo remains " + todo.disposition + " at " + todo.path + ". Merging this increment does not complete the todo.";
+}
+
+function renderTodoCloseout(todo) {
+  const panel = $("todo-closeout");
+  panel.hidden = !todo;
+  panel.dataset.disposition = todo?.disposition || "";
+  if (unchanged(panel, todo) || !todo) return;
+  const body = $("todo-closeout-body");
+  body.replaceChildren(el("p", todoOutcome(todo)));
+  if (todo.remaining) body.append(el("p", "Remaining work: " + todo.remaining));
+  if (todo.reason) body.append(el("p", "Reason / resume when: " + todo.reason));
+}
+
 function renderMerge(status) {
   const panel = $("merge-options"), stop = status.stop, state = status.state;
   for (const key of mergeDrafts.keys()) {
@@ -633,6 +652,12 @@ async function answer(stop, action, button, words) {
           "judged, git merges the two and the merge is pushed; a conflict lands nothing and goes back " +
           "to the run." }
       : ASK[action];
+    if (action === "merge" && mergeState?.todo_closeout) {
+      const todo = mergeState.todo_closeout;
+      asked.body = (asked.body || "") + "\n\n" + todoOutcome(todo) +
+        (todo.remaining ? "\nRemaining work: " + todo.remaining : "") +
+        (todo.reason ? "\nReason / resume when: " + todo.reason : "");
+    }
     if (!(await confirmAction({ ...asked, returnTo: button })) || runId !== selected) return;
     body.confirm = true;
   }
@@ -812,6 +837,7 @@ function turnRow(entry, role, turn, openDetails, bodies) {
   const summary = el("summary", null);
   summary.appendChild(head);
   const said = entry.brief || entry.feedback;
+  if (entry.todo_closeout) summary.appendChild(el("span", todoOutcome(entry.todo_closeout), "turn-preview"));
   if (said) summary.appendChild(shownAbove.has(said) ? el("span", "Shown above, in the decision", "turn-preview")
     : markdownLine(firstLine(said), "turn-preview"));
   const body = bodies.get(key) || el("div", null, "turn-body");

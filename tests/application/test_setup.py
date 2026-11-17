@@ -25,7 +25,7 @@ class Preferences(unittest.IsolatedAsyncioTestCase):
         settings = cast.settings()
         selected = {'id': 'fixture', 'path': '/fixture', 'target': 'wsl', 'base_branch': 'develop'}
         preference = {'branch': 'release', 'remote': None}
-        client = SimpleNamespace(execute_workflow=AsyncMock(return_value={'merge_version': 1, 'merge_preference_version': 1}),
+        client = SimpleNamespace(execute_workflow=AsyncMock(return_value={'merge_version': 1, 'merge_preference_version': 1, 'closeout_version': 1}),
                                  start_workflow=AsyncMock(return_value=SimpleNamespace(id='started')))
         with patch.object(runs.S, 'load', return_value=settings), patch.object(runs.repos, 'select', return_value=selected), \
              patch.object(runs, 'landing_options', AsyncMock(return_value={'choices': [preference]})):
@@ -33,6 +33,7 @@ class Preferences(unittest.IsolatedAsyncioTestCase):
                              short_name='short-name', merge_preference=preference)
             recorded = client.start_workflow.call_args.args[1]
             self.assertEqual(recorded['merge_preference'], preference)
+            self.assertEqual(recorded['closeout_version'], 1)
             self.assertEqual(recorded['repository']['base_branch'], 'develop')
             client.execute_workflow.return_value = {'merge_version': 1}
             client.start_workflow.reset_mock()

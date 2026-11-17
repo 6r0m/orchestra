@@ -1,8 +1,8 @@
 # Keep unfinished work visible after run closeout
 
-**Status:** REVIEW REQUIRED  
+**Status:** DONE вЂ” implementation and isolated acceptance complete; production activation excluded.
 **Scope:** todo disposition at closeout, final-gate display and revision recovery.  
-**Stable owner:** [run lifecycle](../docs/architecture/structure.md#relationships-and-dependency-direction).
+**Stable owner:** [run lifecycle](../../docs/architecture/structure.md#relationships-and-dependency-direction).
 
 ## Goal
 
@@ -28,16 +28,16 @@ Finish and merge an authorized engineering increment without falsely completing 
 No retroactive repair in other repositories, automatic experimentation/deployment, new memory store,
 automatic inference from unchecked Markdown boxes, or guarantee that an agent's semantic judgment is true.
 
-## Evidence and root cause
+## Evidence at investigation and root cause
 
-- [Stage asks](../app/foundation/stages.py) require moving/deleting the todo on every closeout.
-- [Role activity](../app/application/activities.py), `Activities.role_run`, accepts closeout only when
+- [Stage asks](../../app/foundation/stages.py) require moving/deleting the todo on every closeout.
+- [Role activity](../../app/application/activities.py), `Activities.run_role`, accepts closeout only when
   the active path is absent and the configured done path exists (or the repository deletes completed todos).
-- [Workspace](../app/workspace/worktrees.py), `todo_paths`, defines only active and done identities.
+- [Workspace](../../app/workspace/worktrees.py), `todo_paths`, defines only active and done identities.
   `reopen` restores closeout changes from the architect-verified snapshot without changing the index.
-- [Engineer](../roles/engineer.md) and [architect](../roles/architect.md) already distinguish completion
+- [Engineer](../../roles/engineer.md) and [architect](../../roles/architect.md) already distinguish completion
   criteria from operator-approved exceptions. They do not provide unfinished closeout destinations.
-- [D24](../docs/architecture/structure.md#relationships-and-dependency-direction) explicitly describes
+- [D24](../../docs/architecture/structure.md#relationships-and-dependency-direction) explicitly describes
   this unconditional relocation. This repository currently documents only active and done locations.
   The defect is the closeout contract, not a Git merge moving files independently.
 
@@ -69,16 +69,16 @@ needs PATCH/BLOCKER unless the operator has accepted deferral or a smaller merge
 
 ## Implementation tasks
 
-- [ ] Write the regression cases below before changing production behavior.
-- [ ] Extend repository convention validation and the portable closeout product, then update stage asks
+- [x] Write the regression cases below before changing production behavior.
+- [x] Extend repository convention validation and the portable closeout product, then update stage asks
   and role instructions together. Preserve final-assistant-only parsing and independent commit drafts.
-- [ ] Admit the new contract through the existing workflow/activity boundaries, recording disposition and
+- [x] Admit the new contract through the existing workflow/activity boundaries, recording disposition and
   resulting path. Preserve legacy handling and explicit renamed-todo recovery.
-- [ ] Replace unconditional done-path postflight with disposition/path checks. Preserve permitted-document
+- [x] Replace unconditional done-path postflight with disposition/path checks. Preserve permitted-document
   scope; include configured parked/backlog paths narrowly rather than allowing arbitrary directories.
-- [ ] Show the outcome and remaining-work summary at the final gate and in retained run history. Revisions
-  and conflict reconciliation restore the verified active todo before roles resume, for every disposition.
-- [ ] Update the stable owners and run the declared checks; inspect the final diff and replay compatibility.
+- [x] Show the outcome and remaining-work summary at the final gate and in retained run history. Revisions
+  and conflict reconciliation restore the actual verified todo location before roles resume, for every disposition.
+- [x] Update the stable owners and run the declared checks; inspect the final diff and replay compatibility.
 
 ## Test-first and verification
 
@@ -94,8 +94,8 @@ Use real Git and browser acceptance for final-gate visibility, not paid models.
 
 Start with `tests.application.test_activities.Closeout`, `tests.workspace.test_worktrees.Closeout`,
 `tests.orchestration.test_stops` and `tests.orchestration.test_replay`, adding parser/descriptor/browser tests
-at their existing owners. Run through the [host test entrypoints](../tests/README.md), narrow tests first,
-then full Windows and WSL suites sequentially, and `make public-check`. No runtime acceptance is claimed yet.
+at their existing owners. Run through the [host test entrypoints](../../tests/README.md), narrow tests first,
+then full Windows and WSL suites sequentially, and `make public-check`. Isolated runtime acceptance is recorded below.
 
 ## Documentation, rollout and completion
 
@@ -109,7 +109,40 @@ and an architectural review. No staging, commits, pushes, paid calls or producti
 
 ## Review record
 
-### 2026-11-16 — investigation
+### 2026-11-16 вЂ” investigation
 
 The operator selected D1. Repository inspection confirmed the deterministic active/done-only postflight;
 the existing lifecycle must change alongside prompts. Plan written; no production behavior changed.
+
+### 2026-11-16 вЂ” implementation and acceptance
+
+- **Authority:** the operator invoked `implement-approved-change` for this plan. The reviewer required
+  exact source/destination protection, restoration of the actual verified location and informed partial
+  Merge presentation. All three are implemented; the activity-name typo was corrected to `Activities.run_role`.
+- **Implementation:** new named starts record the versioned closeout capability. A distinct target activity
+  refuses incompatible workers instead of silently falling back. Active, parked and backlog retain the
+  complete verified todo; parked/backlog also retain the reason in the file. Completed uses the repository's
+  done/deletion policy. Exact path checks protect other todos even under broad document globs. The frozen
+  outcome appears at Merge, in its confirmation, in CLI output and retained history. Commit proposals remain
+  independent. Explicit rename recovery recognizes unfinished locations; revisions restore the actual
+  verified source. Existing unversioned histories retain their recorded contract.
+- **Red evidence:** real-Git regressions exposed rejection of unfinished outcomes and acceptance of an
+  unrelated todo edit. Native Edge rejected a missing final-gate outcome. Further known-bad controls proved
+  that a workflow-only parked reason and a pre-existing destination collision needed refusal.
+- **Green evidence:** focused ownership/recovery checks passed, including deletion policy, partial-closeout
+  Continue, both revision routes, selected-base conflict reconciliation, actual landed todo contents and
+  replay of new executions. Edge drove four actual disposable merges, one per disposition, and checked the
+  unfinished-task warning before approval. The legacy recorded-history suite also passed.
+- **Full verification:** `powershell -NoProfile -ExecutionPolicy Bypass -File run-tests.ps1` passed
+  **762 tests**; `bash -l run-tests.sh` passed **994 tests**. The host suites ran sequentially. Public-safety,
+  local Markdown links and `git diff --check` passed.
+- **Resolved test setup failures:** early fixtures used the wrong target queue and a native path separator
+  in a Git-path assertion; both fixtures were corrected. A non-login WSL shell lacked `uv` before any test
+  began; the login-shell invocation ran the suite successfully without installing or changing dependencies.
+- **Architecture/UI review:** PASS within this implementation scope. Foundation owns the product,
+  Workspace owns artifact evidence, Application composes checks, Temporal records the outcome, and the
+  existing interfaces present it. The pinned UI checklist found no required findings in the changed UI.
+- **Limits:** preserving declared unfinished content is mechanical; deciding that a task is semantically
+  complete remains the architect/operator's responsibility. No actual model obedience is claimed from
+  scripted tests. No production reload, live-run migration, paid call, WSL restart, staging, commit or push
+  was performed by this implementation. Those operations are outside the approved implementation scope.

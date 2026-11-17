@@ -125,6 +125,18 @@ class TheStack(unittest.TestCase):
 
 
 class Forms(unittest.TestCase):
+    def test_cli_final_gate_reports_unfinished_todo_without_claiming_completion(self):
+        status = {'state': {'todo_closeout': {'disposition': 'parked', 'path': 'todo/parked/task.md',
+                   'remaining': 'Live acceptance', 'reason': 'Await authorization'}},
+                  'stop': {'reason': 'final', 'phase': 'closeout', 'todo': '/fixture/todo/task.md',
+                           'feedback': '', 'hint': '', 'actions': ['merge']}, 'lines': []}
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            cli._report(status, 'example', None)
+        self.assertIn('todo/parked/task.md', output.getvalue())
+        self.assertIn('does not complete the todo', output.getvalue())
+        self.assertIn('Live acceptance', output.getvalue())
+
     def test_named_start_refuses_an_old_workflow_worker_before_creating_a_run(self):
         import cast
         target = mock.MagicMock()

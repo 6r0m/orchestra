@@ -43,6 +43,14 @@ the queue; what the activity does is the other side's.
 
 ## Invariants
 
+- **Todo completion is distinct from run completion.** New named starts record the closeout capability;
+  unversioned starts retain their completed-only contract. A versioned closeout schedules a distinct
+  target activity and records its validated outcome beside the final tree and in the timeline. Revision
+  clears that outcome and restores the actual verified todo path before either role resumes. The final
+  Merge approves an engineering increment and its frozen todo outcome; it does not waive outstanding work.
+  Artifact validation belongs to Workspace; semantic completion still requires attributable operator
+  scope and the architect's judgment. No additional stage, stop or task registry owns deferred work.
+
 - **Final Merge choices are accepted here.** The versioned Merge Update validates stop ownership, confirmation,
   messages and the independently accepted final-tree/base identity, asks the target host to admit the existing
   destination, then revalidates the stop after that asynchronous read. No accepted answer or effective target

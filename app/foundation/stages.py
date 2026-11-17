@@ -10,6 +10,7 @@ artifact its stage produces or judges, and a new stage is a change to the workfl
 a run takes them in is its flow's (`flows`). What a role *is* stays configuration — its persona
 file, its brain, its model — and belongs to `policy`.
 """
+from app.foundation import closeout
 
 STAGES = ("research", "plan", "assess", "build", "verify", "closeout")
 STAGE_ROLE = {"research": "architect", "plan": "engineer", "assess": "architect",
@@ -46,6 +47,30 @@ _PASS_PLAN_SUMMARY = ("on PASS is the summary a human reads before approving "
 _ARCHITECT_EVIDENCE = ("Judge from the todo, the repository, `git diff`, the engineer's "
                        "reports (its final messages, in {{LOGS}}/plan-*.out and build-*.out) "
                        "and the web. Do not run tests or builds.\n")
+_BUILD_MATERIALS = (
+    'Before your final build handoff to the architect, identify any remaining investigation or execution. '
+    'Keep the sanitized evidence, fixtures and reusable diagnostic tools needed to continue in '
+    '{{TODO_MATERIALS}}/, beside the todo under the same stem, or reuse an existing tracked stable owner. '
+    'Add a README index explaining the files, provenance, limitations and how to resume; link it from the todo '
+    'using a file-relative link to its companion. Keep links inside that folder relative to it; identify '
+    'external stable owners with explicit repository-root paths so parking cannot break the handoff. '
+    'Required future material must not exist only in ignored tmp/, another '
+    'checkout, a terminal session or an ephemeral worktree. Check git check-ignore --no-index and '
+    'git status --short --untracked-files=all for every required file; it must be included by the controller\'s '
+    'normal Git snapshot. Do not stage or force-add ignored files. If an ignore rule blocks safe retention, '
+    'resolve the repository-owned placement or report the blocker before handoff. '
+    'Preserve only necessary public-safe material, never credentials, private data, raw transcripts or bulk '
+    'generated logs; use curated sanitized observations/extracts and synthetic fixtures. For complete work, '
+    'migrate lasting tools and findings to their stable owners rather than archiving disposable scratch. '
+    'Your final report must distinguish completed work from pending work and list the retained relative paths '
+    'and any missing evidence. Do not claim missing or inaccessible material was retained.\n')
+_VERIFY_MATERIALS = (
+    'Before PASS, independently inspect the continuation material for unfinished work, including '
+    '{{TODO_MATERIALS}}/ or its named stable owner. Check the actual sanitized files, README index, todo links '
+    'and Git inclusion using git check-ignore --no-index and git status --short --untracked-files=all. '
+    'Evidence or tools needed for the remaining task must survive Merge and worktree cleanup, not live only '
+    'in tmp/ or a session. Missing required files, ignored-only evidence, unsafe public content or an '
+    'unusable handoff prevents PASS; return PATCH or BLOCKER with the exact missing material or decision.\n')
 
 # What a closeout is told of its repository's own convention (`repos`): where a finished todo goes, and
 # which documents the turn may bring up to date. Both are checked once the turn ends.
@@ -54,6 +79,13 @@ CLOSEOUT_DELETES = "Delete it: this repository deletes a finished todo."
 CLOSEOUT_DOCS = ("Besides the todo you may change only this repository's documents — %s — and nothing else the "
                  "architect verified.")
 CLOSEOUT_NO_DOCS = "Besides the todo you may change nothing the architect verified."
+FLEXIBLE_CLOSEOUT_ASK = (
+    'The architect passed an engineering increment. Prepare its todo outcome at {{TODO_PATH}}.\n' +
+    closeout.ASK + '\nRepository destinations (null disables parked/backlog; completed null means delete): '
+    '{{TODO_LOCATIONS}}\nActive stays at {{TODO_ACTIVE}}. Other destinations retain the assigned filename. '
+    'Change only the exact todo source and chosen destination, its unchanged verified companion files, '
+    'plus the repository documents: {{TODO_DOCUMENTS}}. '
+    'Never change another todo. Move files without git mv/rm/add; never stage, commit, merge or push.')
 
 # `{{TODO_PATH}}`, `{{LOGS}}` and a closeout's `{{TODO_DONE}}` and `{{CLOSEOUT_DOCS}}` are filled in by whoever
 # renders the ask.
@@ -70,10 +102,10 @@ STAGE_ASK = {
                "actual repository.\n" + _ARCHITECT_EVIDENCE + _VERDICT_ASK + _PASS_PLAN_SUMMARY),
     "build": ("Implement the "
               "approved todo at {{TODO_PATH}} in this worktree.\n"
-              "Never run git commit or git push."),
+              + _BUILD_MATERIALS + "Never run git commit or git push."),
     "verify": ("Independently verify the implementation in this worktree "
                "(inspect `git diff` and `git status`) against the todo at "
-               "{{TODO_PATH}}.\n" + _ARCHITECT_EVIDENCE + _VERDICT_ASK + _PASS_CONFIRMATION),
+               "{{TODO_PATH}}.\n" + _ARCHITECT_EVIDENCE + _VERIFY_MATERIALS + _VERDICT_ASK + _PASS_CONFIRMATION),
     # What it must leave, never how: the method is the role's persona's, or a skill's the host binds to the
     # stage. It may run again — after a failure, or a change sent back — with part of it done already.
     "closeout": ("The architect passed the implementation. Close out its todo at {{TODO_PATH}}. {{TODO_DONE}} "

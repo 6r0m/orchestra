@@ -44,12 +44,42 @@ the operator's own repositories, and a missing file means no descriptors rather 
 - **Only the controller changes a worktree's git state (D27).** Agents never stage, commit, merge or push (D11). Around every role-run a digest of HEAD, the run's branch, `MERGE_HEAD` and the staged content is compared; a change fails the stage.
 - **Every git side effect reads what git already holds first (D24)**, so an attempt whose worker died after git wrote is adopted when it runs again, never applied twice.
 - **A todo name is adopted from evidence, never guessed.** The operator supplies one filename in the
-  todo's existing folder. Git must hold that name in the architect's verified tree, active or finished,
-  and no longer hold the previous name in either location; an unchanged name is a no-op. Validation
+  todo's existing identity. Git must hold that name in the architect's verified tree at an allowed
+  location and no longer hold the previous name; versioned adoption recognizes unfinished destinations
+  and returns the actual verified location. An unchanged name is a no-op. Validation
   changes neither files nor the index.
 - **A snapshot outlives its worktree.** Once a run's worktree is gone — merged, discarded or removed — a snapshot named by both its base and its tree is read from the repository, whose objects a worktree's always were, for as long as git keeps them; what only the worktree could say, the change now, is refused as gone with it.
 - **A change is one snapshot, read one way.** Reading the change makes its tree on a private copy of the index, staging nothing; the commit of its base the run stands on and that tree name it — for a run that recorded none, the worktree's HEAD, or the base merged into it after a conflict — and every later read — each part of its file list, one file, each part of its patch — names them again, so none mixes in what the live worktree did meanwhile. A file is read whole only when git's own sizes say each side is small enough, decided before any diff runs, and otherwise its changes alone. A round's change is the same read between two trees its reviews judged; a tree git has pruned is said gone. Every read passes the same diff options, so no repository or user setting runs an external diff or text conversion, colours the text or turns rename detection off; paths come from git's NUL-separated lists, and a file is named literally, never as a pattern.
 - **One authority per repository fact, refusing when there is none (D26).** A Windows target refuses a path Windows cannot use as a working directory, which it would otherwise silently replace with `C:\Windows`.
+
+## Todo outcomes
+
+Repository descriptors own todo locations. Unfinished parked/backlog locations default beneath the
+configured active directory; each can be overridden or disabled. Completed work follows the done directory
+or deletion policy. Paths are literal, inside the repository, and cannot collide for the assigned filename.
+The verified snapshot must contain exactly one assigned regular file; that actual location supplies the
+closeout prompt, even when it is already finished or parked. A partial closeout can continue against the
+same verified source after the file has moved in the working tree.
+
+Versioned closeout permits changes only to that exact source and selected destination plus declared
+documents and exact relocation of the assigned todo's reviewed companion files. Other todos remain
+protected even under broad document globs. The resulting tree must hold
+exactly the declared artifact; deletion is allowed only for completed work under a deletion policy.
+An unfinished file retains the complete verified bytes as its suffix, with an optional status preamble.
+Parked/backlog files also contain their declared blocker/resumption or deferral reason; a reason only
+in the workflow result is insufficient after history expires.
+This preserves outstanding steps and decisions mechanically without claiming to understand their meaning.
+Reopening restores the actual verified location, preserving subsequent operator edits under the existing
+path-by-path rule. Git checks prove artifact identity and scope, not whether the original task is solved.
+
+The companion folder has the todo's stem beside it, derived by the portable closeout contract.
+Its regular files are identified by their Git paths, modes and object IDs in the verified tree.
+They may move alongside the retained todo only with identical contents, modes and relative layout;
+unrelated folders, post-review additions, deletion, symlinks and rewritten evidence are refused.
+Destination collisions are checked before a role starts. An interrupted move is accepted only when the
+single destination already holds the verified material. A completed deletion policy preserves existing
+reviewed material at its source. Necessary long-term assets belong at stable owners before verification;
+no closeout archives scratch automatically or guesses whether absent evidence was sufficient.
 
 ## Names and landing
 

@@ -18,6 +18,18 @@ EDGE = Path(os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)')) / 'M
 
 @unittest.skipUnless(sys.platform.startswith('win') and EDGE.is_file(), 'native Edge acceptance runs on Windows')
 class MergeBrowser(Repo):
+    def test_unfinished_active_todo_survives_the_actual_merge(self):
+        self.landing('todo-active')
+
+    def test_parked_todo_survives_the_actual_merge(self):
+        self.landing('todo-parked')
+
+    def test_backlog_todo_survives_the_actual_merge(self):
+        self.landing('todo-backlog')
+
+    def test_completed_todo_uses_the_same_final_gate(self):
+        self.landing('todo-completed')
+
     def test_the_normal_gate_preserves_messages_then_lands_on_the_selected_branch(self):
         self.landing('merge-choice')
 
@@ -53,10 +65,13 @@ class MergeBrowser(Repo):
         conflict_prompts = []
         prompts = []
         plan = W.plan_path('todo', '%Y-%m-%d_%H%M-{slug}', '2026-09-15T12:00', 'cache-screens')
+        disposition = scenario.removeprefix('todo-') if scenario.startswith('todo-') else None
+        remaining = 'Run the separately approved reliability trial.'
 
         class DiskRepo(FakeRepos):
             def resolve(self, selected, worktree_root):
-                return dict(super().resolve(selected, worktree_root), repo_path=repo, worktree_root=root)
+                return dict(super().resolve(selected, worktree_root), repo_path=repo, worktree_root=root,
+                            todo_parked_dir='todo/parked', todo_backlog_dir='todo/backlog')
 
         def runner(worktree, argv, directory, name, prompt, timeout, env, **kwargs):
             prompts.append((name, prompt))
@@ -68,17 +83,38 @@ class MergeBrowser(Repo):
                 write(os.path.join(worktree, plan), '**Status:** DRAFT\nKeep terminal screens.\n')
             if name.startswith('build-'):
                 write(os.path.join(worktree, 'app.txt'), 'one\nPERSISTED_TERMINAL_SCREEN\n')
+                if disposition:
+                    write(os.path.join(worktree, os.path.splitext(plan)[0], 'README.md'), 'Sanitized continuation evidence index\n')
+                    write(os.path.join(worktree, os.path.splitext(plan)[0], 'sample.txt'), 'SYNTHETIC_CONTINUATION_EVIDENCE\n')
             if name.startswith('closeout-'):
                 self.assertIn('commit_message', prompt)
-                finished = os.path.join(worktree, 'todo', 'done', os.path.basename(plan))
-                write(finished, '**Status:** PASS\nTerminal screens verified.\n')
-                os.remove(os.path.join(worktree, plan))
+                if disposition:
+                    source = os.path.join(worktree, plan)
+                    destination = source if disposition == 'active' else os.path.join(worktree, 'todo',
+                        'done' if disposition == 'completed' else disposition, os.path.basename(plan))
+                    if source != destination:
+                        write(destination, ('Operator deferred the trial.\n\n' if disposition != 'completed' else '') + Path(source).read_text(encoding='utf-8'))
+                        os.remove(source)
+                        material_source = Path(os.path.splitext(source)[0])
+                        for material in material_source.rglob('*'):
+                            if material.is_file():
+                                moved = Path(os.path.splitext(destination)[0]) / material.relative_to(material_source)
+                                moved.parent.mkdir(parents=True, exist_ok=True)
+                                material.replace(moved)
+                else:
+                    finished = os.path.join(worktree, 'todo', 'done', os.path.basename(plan))
+                    write(finished, '**Status:** PASS\nTerminal screens verified.\n')
+                    os.remove(os.path.join(worktree, plan))
             if role == 'architect':
                 output = (review_first_for(settings, role, 'PASS')[0] if not seen[role]
                           else review_resumed_for(settings, role, 'PASS'))
             else:
                 message = (json.dumps({'commit_message': {'subject': 'Retain terminal screens'}})
                            if name.startswith('closeout-') else 'Completed the requested work.')
+                if disposition and name.startswith('closeout-'):
+                    message = json.dumps({'commit_message': {'subject': 'Retain terminal screens'}, 'todo': {
+                        'disposition': disposition, 'remaining': '' if disposition == 'completed' else remaining,
+                        'reason': '' if disposition == 'completed' else 'Operator deferred the trial.'}})
                 output = first_message_for(settings, role, message)[0]
             seen[role] += 1
             return 0, output
@@ -92,6 +128,8 @@ class MergeBrowser(Repo):
                                   policy=S.run_policy(settings), flow=['engineer:plan', 'architect:assess', 'you:approve',
                                   'engineer:build', 'architect:verify', 'engineer:closeout', 'you:merge'])
             start.update(short_name='cache-screens', merge_version=1)
+            if disposition:
+                start['closeout_version'] = 1
             if scenario == 'task-disclosure':
                 start['task'] = 'Original task\n' + 'Keep every instruction intact. ' * 200 + '\nFINAL_TASK_INSTRUCTION'
             if scenario == 'merge-choice':
@@ -177,6 +215,14 @@ class MergeBrowser(Repo):
                              'Retain terminal screens\n\nKeep confirmed cursors.')
             self.assertNotIn('Keep confirmed cursors.', git(repo, 'show', '-s', '--format=%B', 'release'))
             self.assertFalse(os.path.exists(state['worktree_path']))
+            if disposition:
+                expected = plan.replace('\\', '/') if disposition == 'active' else 'todo/' + (
+                    'done' if disposition == 'completed' else disposition) + '/' + os.path.basename(plan)
+                self.assertEqual(state['todo_closeout']['path'], expected)
+                self.assertIn('Keep terminal screens.', git(repo, 'show', 'release:' + expected))
+                self.assertIn('SYNTHETIC_CONTINUATION_EVIDENCE', git(repo, 'show', 'release:' + expected[:-3] + '/sample.txt'))
+                timeline = E.run(handle.query(WF.FeatureRun.status))['timeline']
+                self.assertEqual(next(row['todo_closeout'] for row in timeline if row['stage'] == 'closeout'), state['todo_closeout'])
             history = E.run(runs.history(E.client(), run_id))
             self.assertEqual(history['answers'][-1]['action'], 'merge')
             self.assertEqual(history['review']['boundaries'][-1]['tree'], final_tree)

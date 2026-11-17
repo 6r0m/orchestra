@@ -127,6 +127,13 @@ async def follow(handle, printed=0, answered=None):
 
 def _report(status, run_id, trace_url):
     state, stop = status["state"], status["stop"]
+    todo = state.get('todo_closeout')
+    if todo:
+        print('todo outcome: %s; path: %s' % (todo['disposition'], todo['path'] or '(deleted completed todo)'))
+        if todo['remaining']:
+            print('Merging this increment does not complete the todo. Remaining: ' + todo['remaining'])
+        if todo['reason']:
+            print('Reason / resume when: ' + todo['reason'])
     if stop is not None:
         final = stop["reason"] == "final"
         print("\n== run %s %s ==" % (run_id, "is READY_FOR_HUMAN" if final else "stopped for you"))

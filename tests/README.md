@@ -129,6 +129,8 @@ Add a folder when a concern gains tests that are its own rather than its consume
 | file | proves |
 |---|---|
 | `foundation/test_landing.py` | final-assistant proposal parsing, manual message validation and final-tree protocol bounds |
+| `foundation/test_closeout.py` | bounded todo-outcome validation, remaining-work requirements and independence from optional message drafts |
+| `orchestration/test_todo_closeout.py` | real Git/Temporal unfinished closeout with retained companion evidence, partial-failure Continue, both revision routes, conflict recovery, post-cleanup readback and new-protocol replay |
 | `workspace/test_merge_choices.py` | explicit whole-name validation, compatible local and pinned-remote destination discovery/landing, identity preflight and marker-based recovery in disposable repositories |
 | `interfaces/test_merge_browser.py` | the normal final gate through real Temporal, Git and isolated Edge: destination choice, message edits across polling, exact confirmation and actual landing/cleanup; native pointer clicks on named Revise buttons reach the matching role, with a swapped-label rejection control |
 | `interfaces/test_terminal_history.py` | full role-terminal snapshots through real recorded-byte streaming and Edge: initial scrollback, clears, frozen endpoints, interrupted parsing, separate persistent cache, new-window role isolation, long/short-line rendering budgets and refusal to send agent input or resize |

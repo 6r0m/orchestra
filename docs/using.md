@@ -178,13 +178,35 @@ you there is then shown on the stop, to be sent with one press, as your guidance
 the engineer* or *Send to the architect*, the one you did not talk with first: the one you talked with keeps the
 talk in its own session. Nothing moves until you press, and a press sends exactly the words shown.
 
-At the
-final gate the change is the one the engineer's closeout left — the todo cut to its record and in the
-repository's done folder — and it is exactly what Merge commits. The architect did not judge the
-closeout, which may touch only the todo and the documents the repository names (`closeout_docs` in
-its entry in `.orchestra/repos.json`; the todo alone when it names none): its
+Before handing a build to the architect, the engineer must retain what is needed to resume unfinished
+work: sanitized incident observations, fixtures and reusable tools, with an index, provenance, limitations
+and continuation instructions. Use a folder beside the todo with the same stem, such as
+`todo/incident.md` and `todo/incident/README.md`, or reuse an existing tracked stable owner.
+The todo links to those materials with repository-relative paths. Required files must be unignored and
+included in Git's normal snapshot; an ignored `tmp/` directory or a terminal is insufficient.
+The architect checks actual files and Git inclusion before PASS. Missing essential material remains a
+finding or blocker. Raw transcripts, secrets, private data and bulk generated logs do not belong in a
+public evidence bundle. No general archive of completed-task temporary files is created. Keep bundle links
+internal; identify other repository owners by explicit repository-root paths so parking preserves the handoff.
+
+At the final gate the change is the one the engineer's closeout left, exactly what Merge commits.
+For new named runs, **Todo outcome** shows the frozen disposition, resulting path, remaining work and
+reason. **Active** keeps unfinished work in place; **Parked** records a blocker and resumption condition;
+**Backlog** preserves deliberately deferred steps. **Completed** moves only finished work to the
+repository's done location, or deletes it where that is the convention. Merging an increment does not
+complete its larger todo or waive pending criteria; the confirmation repeats that distinction.
+Unfinished closeout preserves the whole verified todo, optionally prepending a short status note.
+Old unversioned runs keep their completed-only closeout contract; they are not migrated automatically.
+Repository entries can override or disable parked/backlog destinations with `todo_parked_dir` and
+`todo_backlog_dir`; otherwise they are subdirectories of `todo_dir`.
+
+The architect did not judge the closeout, which may touch only the assigned todo's exact source and
+destination, move its reviewed companion files unchanged, and edit the documents the repository names
+(`closeout_docs` in its entry in `.orchestra/repos.json`; the todo and unchanged companion alone when it
+names none). Other todos stay protected. Its
 turn in the history opens what it changed since the architect's verification. A revise undoes it
-before its role's turn. If the base branch moved while the run built, it was brought into the worktree
+before its role's turn, restoring the actual verified todo location. If the base branch moved while the
+run built, it was brought into the worktree
 and judged before this gate, so what you read is the change on the base as it is. Merge lands it on
 the selected compatible destination: initially the repository's own branch, or — where its entry names
 the `remote` its base lives on — that remote's. **Land on** lists existing branches containing the verified

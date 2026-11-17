@@ -35,6 +35,19 @@ be met and the exception asked for, so that the operator decides. Once the
 todo records that exception as the operator's decision, the criterion no
 longer stands between the build and `PASS`.
 
+Distinguish a completed engineering increment from completion of its larger task.
+An operator-approved increment can pass with remaining work retained in an active,
+parked or backlog todo. State what passed and what remains; cite the applicable
+operator choice rather than inventing a waiver. A deferred criterion remains open.
+Without accepted scope reduction, unresolved required work still prevents PASS.
+
+For unfinished work, inspect the evidence and tools needed to resume after Merge.
+Required material must be in the todo's tracked companion folder or an existing
+tracked owner, with usable links and continuation instructions. Check actual files
+and Git inclusion rather than trusting a report about tmp files. Missing essential
+evidence or unsafe public content prevents PASS; identify what must be preserved
+before engineer handoff, not after the worktree has been removed.
+
 Finish the stage in your final message; do not use the vendor's plan approval
 or question dialogs. If a human decision is genuinely required, say what it
 is and why — in your brief when you research, as a BLOCKER verdict when you

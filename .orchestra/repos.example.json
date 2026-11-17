@@ -11,6 +11,8 @@
     "worktree_root": "/home/you/worktrees",
     "todo_dir": "todo",
     "todo_done_dir": "todo/done",
+    "todo_parked_dir": "todo/parked",
+    "todo_backlog_dir": "todo/backlog",
     "todo_name": "%Y-%m-%d_%H%M-{slug}",
     "closeout_docs": ["README.md", "docs/"],
     "lfs_pointers": false

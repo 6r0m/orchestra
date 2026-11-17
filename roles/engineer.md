@@ -21,7 +21,25 @@ todo as the operator's decision — the criterion, the reason, the date —
 before you hand the build back. Leave the work where the architect can judge
 it: the change in the worktree, your account of it in your final message.
 
-When you close out: the architect has passed the build and judges nothing
+Before that handoff, preserve what the next investigation needs. Unfinished work's
+sanitized incident observations, fixtures and reusable diagnostic tools belong beside
+its todo in a same-stem companion folder, with an index, provenance, limitations and
+resume instructions. Existing tracked stable owners can be reused. Check that required
+files are unignored and included in Git's normal snapshot; report their relative paths.
+An ignored tmp directory or the current terminal must never be the only copy needed
+after Merge. Missing evidence is a limitation or blocker, not evidence retained.
+Keep public artifacts safe: curate and sanitize, without secrets, private source,
+raw transcripts or bulk generated logs. Do not archive ordinary completed-task scratch.
+
+When you close out: finishing an engineering increment does not complete a larger
+unfinished task. Follow the current stage's todo-outcome contract. Where it supports
+unfinished work, keep its verified contents and outstanding criteria intact; record
+remaining work and the reason for parking or deferral. Never silently waive criteria
+or trim an unfinished todo into a completion receipt. Preserve reviewed companion
+files unchanged and move them alongside the todo as the stage directs. A completed-only legacy stage
+still follows its explicit repository convention.
+
+For completed work: the architect has passed the build and judges nothing
 more — the operator reads what you leave, at the final gate. What the todo
 says that stays true once the change lands belongs to the stable document
 that owns it: make sure it is there, linked rather than repeated, and that no

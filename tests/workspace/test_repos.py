@@ -47,6 +47,22 @@ class Layout(unittest.TestCase):
 
 
 class BaseBranch(Layout):
+    def test_unfinished_todo_destinations_follow_the_repository_convention(self):
+        selected = dict(self.selected, base_branch='main', todo_dir='tasks')
+        resolved = self.resolve(selected)
+        self.assertEqual((resolved['todo_parked_dir'], resolved['todo_backlog_dir']), ('tasks/parked', 'tasks/backlog'))
+        resolved = self.resolve(dict(selected, todo_parked_dir=None, todo_backlog_dir='later'))
+        self.assertIsNone(resolved['todo_parked_dir'])
+        self.assertEqual(resolved['todo_backlog_dir'], 'later')
+
+    def test_unfinished_destination_schema_rejects_nonliteral_and_metadata_paths(self):
+        path = os.path.join(self.tmp, 'descriptors.json')
+        for folder in ('../escape', '/absolute', 'todo/*', 'todo/[ab]', 'todo/.git', 'todo/\tbad'):
+            with open(path, 'w', encoding='utf-8') as stream:
+                json.dump({'fixture': {'path': self.repo, 'todo_parked_dir': folder}}, stream)
+            with self.subTest(folder=folder), self.assertRaises(repos.Refused):
+                repos.load(path)
+
     def test_develop_then_dev_then_the_remotes_default(self):
         with self.assertRaisesRegex(repos.Refused, "base_branch"):
             self.resolve()                                   # neither configured nor found

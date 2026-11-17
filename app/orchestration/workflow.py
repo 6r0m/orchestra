@@ -30,6 +30,7 @@ with workflow.unsafe.imports_passed_through():
     from app.foundation import policy as P
     from app.foundation import stages
     from app.foundation import landing
+    from app.foundation import closeout
     from app.orchestration import routing
 
 NAMESPACE = "orchestration"
@@ -67,7 +68,7 @@ OPERATOR_NOTES_BUDGET = 64 * 1024
 OPERATOR_HISTORY_VERSION = 1
 OPERATOR_NOTE_MAX_BYTES = 1024 * 1024
 REVIEW_MILESTONES_VERSION = 1
-ROLE_ACTIVITIES = ("run_role", "run_role_with_operator_context", "run_role_with_operator_history")
+ROLE_ACTIVITIES = ("run_role", "run_role_with_operator_context", "run_role_with_operator_history", "run_role_with_todo_closeout")
 
 
 def _note_size(value):
@@ -157,6 +158,11 @@ class FeatureRun:
         s = self.state = {"run_id": start["run_id"], "task": start["task"], "label": start["label"],
                           "created": start["created"], "auto_proceed": start["auto_proceed"],
                           "repo": repository["id"], "target": repository["target"], "status": "RUNNING"}
+        if 'closeout_version' in start:
+            if type(start['closeout_version']) is not int or start['closeout_version'] != closeout.VERSION:
+                s.update(status='REFUSED', refusal='unsupported todo closeout protocol')
+                return s
+            s['closeout_version'] = closeout.VERSION
         if "merge_version" in start and (type(start["merge_version"]) is not int or
                 start["merge_version"] != landing.VERSION or not isinstance(start.get("short_name"), str)):
             s.update(status="REFUSED", refusal="unsupported named-start protocol or missing short name")
@@ -319,6 +325,7 @@ class FeatureRun:
         self._line("%s %s started" % (label, stages.STAGE_ROLE[stage]))
         self._doing(stage, stages.STAGE_ROLE[stage])
         result = await self._until_done(label, lambda: workflow.execute_activity(
+            ROLE_ACTIVITIES[3] if stage in stages.FINAL and s.get('closeout_version') == closeout.VERSION else
             ROLE_ACTIVITIES[2] if "operator_note_refs" in s else
             ROLE_ACTIVITIES[1] if "operator_notes" in s else ROLE_ACTIVITIES[0],
             {"stage": stage, "state": s, "policy": self.policy, "gate": gate},
@@ -375,6 +382,9 @@ class FeatureRun:
                     s.pop("commit_draft", None)
                     if "commit_draft" in result:
                         s["commit_draft"] = result["commit_draft"]
+                    if 'todo_closeout' in result:
+                        s['todo_closeout'] = result['todo_closeout']
+                        entry['todo_closeout'] = result['todo_closeout']
             self._line("%s completed" % label)
         self.timeline.append(entry)
         return True
@@ -562,6 +572,11 @@ class FeatureRun:
         if reopened is None:
             return False
         s.pop("final_tree")
+        if s.get('closeout_version') == closeout.VERSION:
+            if 'todo_path' in reopened:
+                s['todo_path'] = reopened['todo_path']
+            s.pop('todo_closeout', None)
+            s.pop('commit_draft', None)
         if reopened["kept"]:
             self._line("reopened; changed again since it was offered, and left as they are: %s"
                        % ", ".join(reopened["kept"]))
@@ -911,7 +926,7 @@ class WorktreeView:
     @workflow.run
     async def run(self, args):
         if args.get("protocol_probe") == landing.VERSION:
-            return dict({"merge_version": landing.VERSION},
+            return dict({"merge_version": landing.VERSION, 'closeout_version': closeout.VERSION},
                         **({"merge_preference_version": 1} if args.get("merge_preference_probe") == 1 else {}))
         return await workflow.execute_activity(
             "worktree_view", args, task_queue=args["queue"], start_to_close_timeout=SHORT_TIMEOUT,

@@ -31,6 +31,7 @@ from app.foundation import paths
 from app.foundation import policy as P
 from app.foundation import stages
 from app.foundation import landing
+from app.foundation import closeout
 from app.workspace import repos
 from app.orchestration import routing
 from app.observability import telemetry as T
@@ -192,7 +193,7 @@ class Activities:
 
     def all(self):
         return [self.prepare, self.prepare_named, self.create_worktree, self.open_run, self.open_phase, self.run_role,
-                self.run_role_with_operator_context, self.run_role_with_operator_history,
+                self.run_role_with_operator_context, self.run_role_with_operator_history, self.run_role_with_todo_closeout,
                 self.record_stop, self.record_answer, self.finish_trace, self.reconcile, self.reopen, self.merge,
                 self.discard,
                 self.worktree_view, self.review_diff, self.review_checkpoint, self.work_tree, self.adopt_todo_name,
@@ -299,6 +300,13 @@ class Activities:
         return {"id": node}
 
     @activity.defn
+    def run_role_with_todo_closeout(self, args):
+        """An older target cannot silently execute the completed-only closeout contract."""
+        if args['state'].get('closeout_version') != closeout.VERSION:
+            raise _failure(N.ContentError('unsupported todo closeout protocol'))
+        return (self.run_role_with_operator_history(args) if 'operator_note_refs' in args['state'] else self.run_role(args))
+
+    @activity.defn
     def run_role_with_operator_context(self, args):
         """A distinct activity type prevents older hosts from silently ignoring retained operator input."""
         return self.run_role(args)
@@ -400,7 +408,18 @@ class Activities:
                                         "to close out")
             if stage in stages.FINAL:
                 plan = state["plan"].replace("\\", "/")
-                if not self.git.closeout_todo_matches(worktree, verified, plan, state.get("todo_done_dir")):
+                if state.get('closeout_version') == closeout.VERSION:
+                    try:
+                        source = self.git.closeout_source(worktree, verified, state)
+                        current = self.git.work_tree(worktree)
+                        present = self.git.holds(worktree, current, list(self.git.todo_locations(state).values()))
+                        if len(present) > 1:
+                            raise W.GitError('todo destination collision: the working tree holds more than one assigned artifact')
+                        self.git.preflight_todo_materials(worktree, verified, current, state, source)
+                    except W.GitError as exc:
+                        raise CloseoutViolation(str(exc)) from exc
+                    state = dict(state, todo_path=os.path.join(worktree, *source.split('/')))
+                elif not self.git.closeout_todo_matches(worktree, verified, plan, state.get("todo_done_dir")):
                     raise CloseoutViolation(
                         "the saved todo path %s is absent from the architect's verified tree. "
                         "If the todo was renamed, use orchestrate --adopt-todo-name %s <filename.md>, "
@@ -460,24 +479,14 @@ class Activities:
                 # own convention (`repos`): the todo folders and the documents it names. The architect's
                 # `PASS` stands for everything else.
                 left = self.git.work_tree(worktree)
-                outside = sorted(path for _, path in self.git.changed(
-                    worktree, verified, left, (state.get("todo_dir"), state.get("todo_done_dir")),
-                    state.get("closeout_docs") or ()))
-                if outside:
-                    raise CloseoutViolation(
-                        "the closeout changed what the architect verified: %s. A closeout changes only the "
-                        "todo and the repository's documents; put these back as they were — in the engineer's "
-                        "terminal or by hand — then continue to close out again" % ", ".join(outside))
-                # Whether the todo was closed at all is a fact, checked; how well is the operator's to judge.
-                names = W.todo_paths(state["plan"], state.get("todo_done_dir"))
-                plan, done = names[0], names[1] if len(names) > 1 else None
-                held = self.git.holds(worktree, left, names)
-                if plan in held or (done and done not in held):
-                    raise CloseoutViolation(
-                        "the closeout left the todo unclosed: %s. Continue to close out again" % (
-                            "it is still at %s" % plan if plan in held else "it is not at %s" % done))
-                # The tree the final gate holds from here on: the operator's to judge, and the only one a
-                # merge may commit.
+                if state.get('closeout_version') == closeout.VERSION:
+                    try:
+                        result['todo_closeout'] = self.git.check_todo_closeout(
+                            worktree, verified, left, state, closeout.product(N.final_message(role, out)))
+                    except (ValueError, W.GitError) as exc:
+                        raise CloseoutViolation(str(exc)) from exc
+                else:
+                    self._legacy_closeout(worktree, verified, left, state)
                 result["final_tree"] = left
                 if state.get("merge_version") == landing.VERSION:
                     result["commit_draft"] = landing.draft(N.final_message(role, out))
@@ -541,6 +550,22 @@ class Activities:
         T.flush(client)
         return result
 
+    def _legacy_closeout(self, worktree, verified, left, state):
+        outside = sorted(path for _, path in self.git.changed(
+            worktree, verified, left, (state.get('todo_dir'), state.get('todo_done_dir')),
+            state.get('closeout_docs') or ()))
+        if outside:
+            raise CloseoutViolation(
+                'the closeout changed what the architect verified: %s. A closeout changes only the '
+                "todo and the repository's documents; put these back as they were — in the engineer's "
+                'terminal or by hand — then continue to close out again' % ', '.join(outside))
+        names = W.todo_paths(state['plan'], state.get('todo_done_dir'))
+        plan, done = names[0], names[1] if len(names) > 1 else None
+        held = self.git.holds(worktree, left, names)
+        if plan in held or (done and done not in held):
+            raise CloseoutViolation('the closeout left the todo unclosed: %s. Continue to close out again' % (
+                'it is still at %s' % plan if plan in held else 'it is not at %s' % done))
+
     @activity.defn
     def record_stop(self, args):
         client = self.client()
@@ -586,8 +611,11 @@ class Activities:
         state = args["state"]
         with self._git_step(state["run_id"], "reopening"):
             try:
-                return {"kept": self.git.reopen(state["worktree_path"], state["final_tree"],
-                                                state["verified_tree"])}
+                result = {"kept": self.git.reopen(state["worktree_path"], state["final_tree"], state["verified_tree"])}
+                if state.get('closeout_version') == closeout.VERSION:
+                    source = self.git.closeout_source(state['worktree_path'], state['verified_tree'], state)
+                    result['todo_path'] = os.path.join(state['worktree_path'], *source.split('/'))
+                return result
             except Exception as exc:
                 raise _failure(exc) from exc
 
@@ -676,8 +704,9 @@ class Activities:
     def adopt_todo_name(self, args):
         state = args["state"]
         try:
+            conventions = {'todo_state': state} if state.get('closeout_version') == closeout.VERSION else {}
             return self.git.adopt_todo_name(state["worktree_path"], state["plan"],
-                                           state.get("verified_tree"), args["name"], state.get("todo_done_dir"))
+                                           state.get("verified_tree"), args["name"], state.get("todo_done_dir"), **conventions)
         except Exception as exc:
             raise _failure(exc) from exc
 

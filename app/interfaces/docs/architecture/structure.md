@@ -111,6 +111,11 @@ when the decision above moves on; nothing else of it is read again.
   Missing agent proposals allow manual entry at that gate. Drafts and dropdown selections cannot change workflow
   state until the confirmed answer is accepted; failed Merge attempts retain their frozen destination/messages.
 
+The final gate displays the accepted todo outcome independently of the optional commit-message editor.
+The outcome names the resulting path, remaining work and blocker/deferral reason. Merge confirmation
+repeats that an unfinished todo stays unfinished; no new approval stage or mutable task selector is added.
+The CLI reports the same frozen evidence, and timeline entries retain the outcome after closure.
+
 The browser retains a bounded least-recently-used set of parsed xterm displays for open runs, keyed by run,
 host and role. The selected open run prepares both roles, including unopened or collapsed panels, so idle
 review time also warms the next role's recorded screen. Parsing uses explicit terminal dimensions; fitting

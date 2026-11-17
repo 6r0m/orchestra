@@ -278,6 +278,8 @@ async def start(client, task, repo=None, auto_proceed=False, settings_path=None,
             raise Refusal("the workflow worker needs a graceful reload before it supports named starts")
         if merge_preference is not None and capability.get("merge_preference_version") != 1:
             raise Refusal("the workflow worker needs a graceful reload before it supports Merge preferences")
+        if capability.get('closeout_version') != 1:
+            raise Refusal('the workflow worker needs a graceful reload before it supports flexible todo closeout')
     now = datetime.datetime.now()
     for attempt in range(START_ATTEMPTS):
         run_id = worktrees.run_id(task, name=short_name) if short_name is not None else worktrees.run_id(task)
@@ -289,7 +291,7 @@ async def start(client, task, repo=None, auto_proceed=False, settings_path=None,
         if chosen:
             start_input["flow"] = chosen
         if short_name is not None:
-            start_input.update(short_name=short_name, merge_version=1,
+            start_input.update(short_name=short_name, merge_version=1, closeout_version=1,
                                label=work_item_label(run_id, short_name, now))
         if merge_preference is not None:
             start_input["merge_preference"] = dict(merge_preference)
@@ -643,6 +645,8 @@ async def history(client, run_id):
                             or result.get("final_tree") or result.get("closeout_tree"))
                     if tree:
                         turn["tree"] = tree
+                    if 'todo_closeout' in result:
+                        turn['todo_closeout'] = result['todo_closeout']
                     turns.append(turn)
                 elif attributes.scheduled_event_id in captures:
                     capture = captures.pop(attributes.scheduled_event_id)
