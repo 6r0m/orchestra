@@ -66,6 +66,8 @@ documents and exact relocation of the assigned todo's reviewed companion files. 
 protected even under broad document globs. The resulting tree must hold
 exactly the declared artifact; deletion is allowed only for completed work under a deletion policy.
 An unfinished file retains the complete verified bytes as its suffix, with an optional status preamble.
+It must contain the declared remaining-work summary, reusing existing criteria when sufficient or
+prepending a continuation note; a summary only in the workflow result is insufficient after history expires.
 Parked/backlog files also contain their declared blocker/resumption or deferral reason; a reason only
 in the workflow result is insufficient after history expires.
 This preserves outstanding steps and decisions mechanically without claiming to understand their meaning.

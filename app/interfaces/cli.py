@@ -129,7 +129,12 @@ def _report(status, run_id, trace_url):
     state, stop = status["state"], status["stop"]
     todo = state.get('todo_closeout')
     if todo:
-        print('todo outcome: %s; path: %s' % (todo['disposition'], todo['path'] or '(deleted completed todo)'))
+        outcome = {'MERGED': 'Landed todo outcome',
+                   'DISCARDED': 'Discarded todo proposal; no todo outcome was landed'}.get(state.get('status'))
+        if outcome is None:
+            outcome = ('Proposed todo outcome (pending Merge approval)' if state.get('status') in
+                       (None, 'RUNNING', 'READY_FOR_HUMAN') else 'Unlanded todo proposal (run %s)' % state['status'])
+        print('%s: %s; path: %s' % (outcome, todo['disposition'], todo['path'] or '(deleted completed todo)'))
         if todo['remaining']:
             print('Merging this increment does not complete the todo. Remaining: ' + todo['remaining'])
         if todo['reason']:

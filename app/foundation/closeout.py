@@ -15,8 +15,9 @@ Use completed only when the defined task is complete or an attributable operator
 remaining criteria. Deferral is not a waiver. Completed requires an empty remaining string; other outcomes
 require remaining work, and parked/backlog also require a reason. Do not invent operator authorization.
 For unfinished work retain the entire verified todo unchanged: move it as a file if necessary, optionally
-prepending a short status, remaining-work and resumption note. Parked/backlog files must contain the exact
-reason you declare in the final product; prepend it if missing. Never shorten or rewrite original contents.
+prepending a short status, remaining-work and resumption note. Every unfinished file must contain the exact
+remaining text you declare; quote existing criteria when sufficient, or prepend a continuation note if missing.
+Parked/backlog files must also contain the exact declared reason. Never shorten or rewrite original contents.
 An engineering increment can finish without its original problem being solved. The operator will review
 this outcome and remaining work at Merge. Include commit_message in this same object when requested.\n''' + MATERIALS_ASK
 

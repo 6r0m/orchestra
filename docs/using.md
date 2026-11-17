@@ -190,12 +190,16 @@ public evidence bundle. No general archive of completed-task temporary files is 
 internal; identify other repository owners by explicit repository-root paths so parking preserves the handoff.
 
 At the final gate the change is the one the engineer's closeout left, exactly what Merge commits.
-For new named runs, **Todo outcome** shows the frozen disposition, resulting path, remaining work and
-reason. **Active** keeps unfinished work in place; **Parked** records a blocker and resumption condition;
+For new named runs, **Todo outcome** shows the proposed frozen disposition, resulting path, remaining work and
+reason, pending Merge approval. Only `MERGED` labels it landed; `DISCARDED` labels it a discarded proposal
+with no todo outcome landed. CLI and retained history use the same distinction.
+**Active** keeps unfinished work in place; **Parked** records a blocker and resumption condition;
 **Backlog** preserves deliberately deferred steps. **Completed** moves only finished work to the
 repository's done location, or deletes it where that is the convention. Merging an increment does not
 complete its larger todo or waive pending criteria; the confirmation repeats that distinction.
 Unfinished closeout preserves the whole verified todo, optionally prepending a short status note.
+Its declared remaining-work summary must be in that file, either in existing criteria or a continuation
+note, so it survives Merge and eventual workflow-history expiry.
 Old unversioned runs keep their completed-only closeout contract; they are not migrated automatically.
 Repository entries can override or disable parked/backlog destinations with `todo_parked_dir` and
 `todo_backlog_dir`; otherwise they are subdirectories of `todo_dir`.

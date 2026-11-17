@@ -18,6 +18,9 @@ EDGE = Path(os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)')) / 'M
 
 @unittest.skipUnless(sys.platform.startswith('win') and EDGE.is_file(), 'native Edge acceptance runs on Windows')
 class MergeBrowser(Repo):
+    def test_discard_labels_the_prepared_outcome_as_unlanded_in_page_and_history(self):
+        self.landing('todo-discard')
+
     def test_unfinished_active_todo_survives_the_actual_merge(self):
         self.landing('todo-active')
 
@@ -66,6 +69,8 @@ class MergeBrowser(Repo):
         prompts = []
         plan = W.plan_path('todo', '%Y-%m-%d_%H%M-{slug}', '2026-09-15T12:00', 'cache-screens')
         disposition = scenario.removeprefix('todo-') if scenario.startswith('todo-') else None
+        if scenario == 'todo-discard':
+            disposition = 'parked'
         remaining = 'Run the separately approved reliability trial.'
 
         class DiskRepo(FakeRepos):
@@ -92,8 +97,9 @@ class MergeBrowser(Repo):
                     source = os.path.join(worktree, plan)
                     destination = source if disposition == 'active' else os.path.join(worktree, 'todo',
                         'done' if disposition == 'completed' else disposition, os.path.basename(plan))
+                    preamble = remaining + '\n\nOperator deferred the trial.\n\n' if disposition != 'completed' else ''
+                    write(destination, preamble + Path(source).read_text(encoding='utf-8'))
                     if source != destination:
-                        write(destination, ('Operator deferred the trial.\n\n' if disposition != 'completed' else '') + Path(source).read_text(encoding='utf-8'))
                         os.remove(source)
                         material_source = Path(os.path.splitext(source)[0])
                         for material in material_source.rglob('*'):
@@ -138,6 +144,10 @@ class MergeBrowser(Repo):
             run = E.Run(handle=handle)
             self.addCleanup(run.cleanup)
             self.assertEqual(run.stop['reason'], 'final', run.status)
+            if scenario == 'todo-parked':
+                run.answer('revise engineer Recheck the continuation evidence.')
+                run.status = E.run(E.cli.follow(run.handle))
+                self.assertEqual(run.stop['reason'], 'final', run.status)
             final_tree = run.state['final_tree']
             if scenario == 'merge-choice':
                 state = E.run(handle.query(WF.FeatureRun.status))['state']
@@ -206,6 +216,13 @@ class MergeBrowser(Repo):
                 return
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             state = E.run(handle.query(WF.FeatureRun.status))['state']
+            if scenario == 'todo-discard':
+                self.assertEqual(state['status'], 'DISCARDED')
+                self.assertEqual(state['todo_closeout']['disposition'], 'parked')
+                self.assertEqual(W.started_from(repo), initial, 'Discard must not land its proposed todo')
+                self.assertFalse(os.path.exists(state['worktree_path']))
+                self.assertNotIn(os.path.basename(plan), git(repo, 'ls-tree', '-r', '--name-only', 'HEAD'))
+                return
             self.assertEqual(state['status'], 'MERGED')
             self.assertEqual(state['base_branch'], 'release')
             self.assertEqual(W.started_from(repo), initial)
@@ -220,6 +237,8 @@ class MergeBrowser(Repo):
                     'done' if disposition == 'completed' else disposition) + '/' + os.path.basename(plan)
                 self.assertEqual(state['todo_closeout']['path'], expected)
                 self.assertIn('Keep terminal screens.', git(repo, 'show', 'release:' + expected))
+                if disposition != 'completed':
+                    self.assertIn(remaining, git(repo, 'show', 'release:' + expected))
                 self.assertIn('SYNTHETIC_CONTINUATION_EVIDENCE', git(repo, 'show', 'release:' + expected[:-3] + '/sample.txt'))
                 timeline = E.run(handle.query(WF.FeatureRun.status))['timeline']
                 self.assertEqual(next(row['todo_closeout'] for row in timeline if row['stage'] == 'closeout'), state['todo_closeout'])

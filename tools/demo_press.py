@@ -1953,6 +1953,21 @@ window.WebSocket=class extends NativeSocket{
                 instruction_skills(page, run_id, port)
             if label == "task-disclosure":
                 task_disclosure(page, run_id)
+            if label == 'todo-discard':
+                page.value("location.hash='#run='+" + json.dumps(run_id))
+                wait(lambda: page.value("document.querySelector('#todo-closeout')?.checkVisibility()"), 15, 'the prepared todo outcome')
+                if not page.value("document.querySelector('#todo-closeout').textContent.includes('Proposed todo outcome')"):
+                    raise SystemExit('a prepared todo was not labelled as a proposal before Merge')
+                page.value("[...document.querySelectorAll('#stop-actions button')].find(b=>b.textContent==='Discard').click()")
+                wait(lambda: page.value("document.querySelector('dialog[open]')!==null"), 10, 'Discard confirmation')
+                page.value("[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Discard').click()")
+                wait(lambda: page.value("document.querySelector('#todo-closeout').textContent.includes('Discarded todo proposal')"), 30, 'the discarded outcome')
+                wait(lambda: page.value("document.querySelector('#timeline').textContent.includes('Discarded todo proposal')"), 15, 'discarded closeout history')
+                if not page.value("document.querySelector('#todo-closeout').textContent.includes('no todo outcome was landed') && "
+                                  "!document.querySelector('#todo-closeout').textContent.includes('Landed todo outcome')"):
+                    raise SystemExit('Discard misleadingly presented its todo as landed')
+                print('PASS: proposed closeout became discarded, with no todo outcome landed')
+                return 0
             if label in ("merge-choice", "merge-retry", "instruction-skills", "task-disclosure") or label.startswith('todo-'):
                 page.value("location.hash='#run='+" + json.dumps(run_id))
                 if label == "merge-retry":
@@ -2039,8 +2054,22 @@ window.WebSocket=class extends NativeSocket{
                                       "document.querySelector('#todo-closeout').textContent.includes('Run the separately approved reliability trial.') && "
                                       "document.querySelector('dialog[open]').textContent.includes('does not complete the todo')"):
                         raise SystemExit('unfinished todo or informed partial-merge confirmation is missing')
+                if todo:
+                    if not page.value("document.querySelector('#todo-closeout').textContent.includes('Proposed todo outcome') && "
+                                      "document.querySelector('dialog[open]').textContent.includes('Proposed todo outcome')"):
+                        raise SystemExit('a prepared todo was presented as landed before Merge')
+                    if label == 'todo-parked':
+                        wait(lambda: page.value("document.querySelector('#timeline').textContent.includes('Earlier todo proposal')"),
+                             15, 'the earlier unlanded closeout')
                 page.value("[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Merge').click()")
                 wait(lambda: page.value("document.body.textContent.includes('Merged')"), 30, "the actual selected landing")
+                if todo:
+                    wait(lambda: page.value("document.querySelector('#todo-closeout').textContent.includes('Landed todo outcome') && "
+                                            "document.querySelector('#timeline').textContent.includes('Landed todo outcome')"),
+                         15, 'the landed todo outcome and history')
+                    if label == 'todo-parked' and page.value("document.querySelectorAll('#timeline .turn-preview').length && "
+                        "[...document.querySelectorAll('#timeline .turn-preview')].filter(e=>e.textContent.includes('Landed todo outcome')).length") != 1:
+                        raise SystemExit('a superseded closeout was labelled as landed')
                 print('PASS: final destination, operator messages and Git landing agree')
                 return 0
             if run_id == "start" and label.startswith("refused:"):

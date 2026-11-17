@@ -582,7 +582,10 @@ def check_todo_closeout(worktree, verified, final, state, product):
         content = blob(final, destination)
         if not original or not content.endswith(original):
             raise GitError('unfinished todo must preserve the complete verified contents; prepend status rather than shortening its steps')
-        if disposition in ('parked', 'backlog') and product['reason'].encode('utf-8') not in content:
+        text = content.replace(b'\r\n', b'\n')
+        if product['remaining'].replace('\r\n', '\n').encode('utf-8') not in text:
+            raise GitError('unfinished todo must retain the declared remaining work in its Git artifact')
+        if disposition in ('parked', 'backlog') and product['reason'].replace('\r\n', '\n').encode('utf-8') not in text:
             raise GitError('parked/backlog todo must retain the declared reason or resumption condition in its file; prepend a short note')
     elif destination:
         blob(final, destination)

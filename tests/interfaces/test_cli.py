@@ -125,6 +125,21 @@ class TheStack(unittest.TestCase):
 
 
 class Forms(unittest.TestCase):
+    def test_todo_reporting_distinguishes_proposed_landed_and_discarded_results(self):
+        for state_name, phrase in (('READY_FOR_HUMAN', 'Proposed todo outcome'),
+                                   ('MERGED', 'Landed todo outcome'), ('DISCARDED', 'Discarded todo proposal'),
+                                   ('STOPPED', 'Unlanded todo proposal')):
+            status = {'state': {'status': state_name, 'todo_closeout': {'disposition': 'active',
+                'path': 'todo/task.md', 'remaining': 'Future acceptance', 'reason': ''}}, 'stop': None, 'lines': []}
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                cli._report(status, 'example', None)
+            with self.subTest(state=state_name):
+                self.assertIn(phrase, output.getvalue())
+                if state_name == 'DISCARDED':
+                    self.assertIn('no todo outcome was landed', output.getvalue())
+                    self.assertNotIn('Landed todo outcome', output.getvalue())
+
     def test_cli_final_gate_reports_unfinished_todo_without_claiming_completion(self):
         status = {'state': {'todo_closeout': {'disposition': 'parked', 'path': 'todo/parked/task.md',
                    'remaining': 'Live acceptance', 'reason': 'Await authorization'}},

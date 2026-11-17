@@ -517,9 +517,12 @@ class FlexibleCloseout(unittest.TestCase):
             self.prompts.append(prompt)
             if edit:
                 edit()
-            elif destination != self.PLAN and original is not None:
-                self.write(destination, (proposal['reason'] + '\n\n' if disposition != 'completed' else '') + original)
-                os.remove(self.state['todo_path'])
+            elif original is not None:
+                preamble = '\n\n'.join(proposal[key] for key in ('remaining', 'reason')
+                                       if proposal[key] and proposal[key] not in original)
+                self.write(destination, (preamble + '\n\n' if preamble else '') + original)
+                if destination != self.PLAN:
+                    os.remove(self.state['todo_path'])
             return 0, output
         self.host = activities.Activities(runner=runner, git=worktrees, telemetry=None)
         return self.host.run_role({'stage': 'closeout', 'state': dict(self.state, **state), 'policy': policy('claude-code')})
@@ -549,7 +552,7 @@ class FlexibleCloseout(unittest.TestCase):
         before = worktrees.guard(self.repo, self.run_id)
         def relocate():
             original = open(self.state['todo_path'], encoding='utf-8').read()
-            self.write('todo/parked/' + os.path.basename(self.PLAN), 'Await the separately approved trial.\n\n' + original)
+            self.write('todo/parked/' + os.path.basename(self.PLAN), 'Measure sustained reliability.\n\nAwait the separately approved trial.\n\n' + original)
             os.remove(self.state['todo_path'])
             shutil.move(os.path.join(self.repo, source), os.path.join(self.repo, target))
         result = self.turn('parked', edit=relocate)
@@ -582,7 +585,7 @@ class FlexibleCloseout(unittest.TestCase):
         self.state['verified_tree'] = worktrees.work_tree(self.repo)
         def relocate():
             original = open(self.state['todo_path'], encoding='utf-8').read()
-            self.write('todo/parked/' + os.path.basename(self.PLAN), 'Await the separately approved trial.\n\n' + original)
+            self.write('todo/parked/' + os.path.basename(self.PLAN), 'Measure sustained reliability.\n\nAwait the separately approved trial.\n\n' + original)
             os.remove(self.state['todo_path'])
             shutil.move(os.path.join(self.repo, source), os.path.join(self.repo, target))
         before = worktrees.guard(self.repo, self.run_id)
@@ -613,11 +616,35 @@ class FlexibleCloseout(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaisesRegex(ApplicationError, 'todo|unfinished'):
                 self.turn(edit=lambda: os.remove(self.state['todo_path']) if bad == 'delete' else self.write(self.PLAN, 'All fine\n'))
 
+    def test_new_remaining_work_cannot_exist_only_in_the_final_product(self):
+        self.write(self.PLAN, '**Status:** verified increment\n- [x] Existing acceptance completed\n')
+        self.state['verified_tree'] = worktrees.work_tree(self.repo)
+        with self.assertRaisesRegex(ApplicationError, 'remaining'):
+            self.turn(edit=lambda: None, product={'disposition': 'active',
+                'remaining': 'Run a newly identified acceptance trial.', 'reason': ''})
+
+    def test_existing_remaining_criteria_need_no_duplicate_preamble(self):
+        original = 'Original acceptance\n- [ ] Measure sustained reliability.\n'
+        self.write(self.PLAN, original)
+        self.state['verified_tree'] = worktrees.work_tree(self.repo)
+        self.turn(edit=lambda: None)
+        self.assertEqual(open(self.state['todo_path'], encoding='utf-8').read(), original)
+
+    def test_multiline_remaining_work_matches_windows_newlines_without_rewriting_the_todo(self):
+        original = 'Original acceptance\r\n- [ ] Measure sustained reliability.\r\n- [ ] Resume after approval.\r\n'
+        self.write(self.PLAN, original)
+        self.state['verified_tree'] = worktrees.work_tree(self.repo)
+        self.turn(edit=lambda: None, product={'disposition': 'active',
+            'remaining': '- [ ] Measure sustained reliability.\n- [ ] Resume after approval.', 'reason': ''})
+        with open(self.state['todo_path'], 'rb') as artifact:
+            self.assertEqual(artifact.read(), original.encode('utf-8'))
+
     def test_parked_outcome_keeps_the_resume_reason_in_the_actual_todo(self):
         original = open(self.state['todo_path'], encoding='utf-8').read()
         destination = 'todo/parked/' + os.path.basename(self.PLAN)
         with self.assertRaisesRegex(ApplicationError, 'reason'):
-            self.turn('parked', edit=lambda: (self.write(destination, original), os.remove(self.state['todo_path'])))
+            self.turn('parked', edit=lambda: (self.write(destination, 'Measure sustained reliability.\n\n' + original),
+                                             os.remove(self.state['todo_path'])))
 
     def test_invalid_and_duplicate_products_do_not_produce_a_final_tree(self):
         for product in ({}, {'disposition': 'active', 'remaining': '', 'reason': ''},
@@ -634,7 +661,7 @@ class FlexibleCloseout(unittest.TestCase):
         os.remove(self.state['todo_path'])
         self.state['verified_tree'] = worktrees.work_tree(self.repo)
         result = self.turn('backlog', edit=lambda: (
-            self.write('todo/backlog/' + os.path.basename(self.PLAN), 'Await the separately approved trial.\n\n' + original), os.remove(os.path.join(self.repo, self.DONE))))
+            self.write('todo/backlog/' + os.path.basename(self.PLAN), 'Measure sustained reliability.\n\nAwait the separately approved trial.\n\n' + original), os.remove(os.path.join(self.repo, self.DONE))))
         self.assertIn(os.path.join(self.repo, *self.DONE.split('/')), self.prompts[0])
         self.host.reopen({'state': dict(self.state, final_tree=result['final_tree'], todo_closeout=result['todo_closeout'])})
         self.assertTrue(os.path.isfile(os.path.join(self.repo, self.DONE)))
@@ -643,7 +670,7 @@ class FlexibleCloseout(unittest.TestCase):
     def test_partial_closeout_continues_at_its_declared_location_without_losing_steps(self):
         original = open(self.state['todo_path'], encoding='utf-8').read()
         destination = 'todo/parked/' + os.path.basename(self.PLAN)
-        self.write(destination, 'Await the separately approved trial.\n\n' + original)
+        self.write(destination, 'Measure sustained reliability.\n\nAwait the separately approved trial.\n\n' + original)
         os.remove(self.state['todo_path'])
         result = self.turn('parked', edit=lambda: None)
         self.assertEqual(result['todo_closeout']['path'], destination)

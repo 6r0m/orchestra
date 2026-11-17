@@ -12,7 +12,7 @@ from tests.workspace.test_worktrees import Repo, TARGET, git, write
 
 
 class TodoLifecycle(Repo):
-    def scenario(self, disposition='parked', fail_once=False):
+    def scenario(self, disposition='parked', fail_once=False, new_remaining=False):
         import cast
         import temporal_env as E
         from fakes import FakeRepos, first_message_for, review_first_for, review_resumed_for
@@ -27,7 +27,8 @@ class TodoLifecycle(Repo):
             calls.append((name, prompt))
             role = 'architect' if name.startswith(('assess-', 'verify-')) else 'engineer'
             if name.startswith('plan-'):
-                write(os.path.join(worktree, plan), 'Approved increment\n- [ ] Future live trial\n')
+                write(os.path.join(worktree, plan), 'Approved increment\n' + (
+                    '- [x] Existing acceptance completed\n' if new_remaining else '- [ ] Future live trial\n'))
             if name.startswith(('build-', 'verify-')):
                 self.assertTrue(os.path.isfile(os.path.join(worktree, plan)), 'revision must restore the actual verified todo before either role')
             if name.startswith('build-'):
@@ -38,7 +39,9 @@ class TodoLifecycle(Repo):
                 target = os.path.join(worktree, 'todo', disposition, 'task.md')
                 source = os.path.join(worktree, plan)
                 if os.path.isfile(source):
-                    write(target, 'Operator deferred the trial\n\n' + Path(source).read_text(encoding='utf-8'))
+                    original = Path(source).read_text(encoding='utf-8')
+                    continuation = 'Remaining work: Future live trial\n\n' if 'Future live trial' not in original else ''
+                    write(target, continuation + 'Operator deferred the trial\n\n' + original)
                     os.remove(source)
                     material_source = Path(worktree) / 'todo/task'
                     for material in material_source.rglob('*'):
@@ -69,6 +72,15 @@ class TodoLifecycle(Repo):
             run = E.Run(handle=handle)
         self.addCleanup(run.cleanup)
         return run, calls, E
+
+    def test_new_acceptance_work_survives_merge_and_worktree_cleanup_in_markdown(self):
+        run, calls, E = self.scenario(new_remaining=True)
+        run.answer('merge')
+        self.assertEqual(run.state['status'], 'MERGED')
+        landed = git(self.repo, 'show', 'develop:todo/parked/task.md')
+        self.assertIn('- [x] Existing acceptance completed', landed)
+        self.assertIn('Remaining work: Future live trial', landed)
+        self.assertFalse(os.path.exists(run.state['worktree_path']))
 
     def test_each_revise_role_restores_the_todo_before_resuming(self):
         run, calls, E = self.scenario()

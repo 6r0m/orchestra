@@ -180,10 +180,10 @@ export async function refreshRun() {
   const to = view.stop && view.stop.to;
   renderStop(status.stop, status.timeline, to);
   renderMerge(status);
-  renderTodoCloseout(state.todo_closeout);
+  renderTodoCloseout(state.todo_closeout, state.status);
   renderReply(status.stop, view.reply, to);
   renderKept(runId, view);
-  renderHistory(view, status.timeline, status.stop);
+  renderHistory(view, status.timeline, status.stop, state);
   if (!unchanged($("lines"), status.lines)) $("lines").textContent = status.lines.join("\n");
   showTerminals(runId, state.target);
   // A failed step's terminal is where its failure shows.
@@ -535,19 +535,24 @@ function mergeMessages() {
   return { work, merge: subject ? "Merge " + subject : "" };
 }
 
-function todoOutcome(todo) {
-  return todo.disposition === "completed"
-    ? "Todo completed" + (todo.path ? " at " + todo.path : " and deleted under repository policy") + "."
-    : "Todo remains " + todo.disposition + " at " + todo.path + ". Merging this increment does not complete the todo.";
+function todoOutcome(todo, status, current = true) {
+  const label = status === "DISCARDED" ? "Discarded todo proposal; no todo outcome was landed"
+    : !current ? "Earlier todo proposal; this closeout was not landed"
+    : status === "MERGED" ? "Landed todo outcome"
+    : !status || ["RUNNING", "READY_FOR_HUMAN"].includes(status) ? "Proposed todo outcome (pending Merge approval)"
+    : "Unlanded todo proposal (run " + status + ")";
+  return label + ". Disposition: " + todo.disposition + ". "
+    + (todo.path ? "Path: " + todo.path + "." : "Completed-todo deletion under repository policy.")
+    + (todo.disposition !== "completed" ? " Merging this increment does not complete the todo." : "");
 }
 
-function renderTodoCloseout(todo) {
+function renderTodoCloseout(todo, status) {
   const panel = $("todo-closeout");
   panel.hidden = !todo;
   panel.dataset.disposition = todo?.disposition || "";
-  if (unchanged(panel, todo) || !todo) return;
+  if (unchanged(panel, [todo, status]) || !todo) return;
   const body = $("todo-closeout-body");
-  body.replaceChildren(el("p", todoOutcome(todo)));
+  body.replaceChildren(el("p", todoOutcome(todo, status)));
   if (todo.remaining) body.append(el("p", "Remaining work: " + todo.remaining));
   if (todo.reason) body.append(el("p", "Reason / resume when: " + todo.reason));
 }
@@ -714,8 +719,8 @@ function renderChange(view, stop) {
 let record = { key: null, turns: [], answers: [], said: "" };
 let drawn = { view: null, timeline: [] };
 
-function renderHistory(view, timeline, stop) {
-  drawn = { view: view, timeline: timeline, stop: stop };
+function renderHistory(view, timeline, stop, state) {
+  drawn = { view: view, timeline: timeline, stop: stop, state: state };
   const key = JSON.stringify([selected, timeline.length, stop && stop.id, view.state, view.stage, view.since]);
   if (record.key !== key) {
     record.key = key;
@@ -742,7 +747,7 @@ async function readRecord(runId, key) {
 // One transcript in the run's order, by phase: each turn a row — who, which stage and round, its verdict, how long
 // it took, when — opening to what it received and what it produced; your answers rows of their own between.
 function drawHistory() {
-  const { view, timeline, stop } = drawn;
+  const { view, timeline, stop, state } = drawn;
   if (view) renderChange(view, stop);
   const steps = view?.flow ? view.flow.steps : [];
   const roleOf = (stage) => (steps.find((step) => step.endsWith(":" + stage)) || "").split(":")[0]
@@ -751,7 +756,8 @@ function drawHistory() {
     { stage: view?.stage, role: view?.role, episode: view?.episode, round: Number.isInteger(view?.round) ? view.round + 1 : undefined,
       since: view?.since, stop: stop?.id }, record.turns.map((turn) => ({ ...turn, role: roleOf(turn.stage) })));
   const root = $("timeline");
-  if (!view || unchanged(root, [timeline, record.turns, record.answers, record.said, [...shownAbove]])) return;
+  if (!view || unchanged(root, [timeline, record.turns, record.answers, record.said, [...shownAbove], state?.status, state?.todo_closeout])) return;
+  const latestCloseout = timeline.findLast((entry) => entry.todo_closeout);
   const openDetails = new Set([...root.querySelectorAll("details[open][data-history-detail]")]
     .map((detail) => detail.dataset.historyDetail));
   // A completed turn's record does not change: one already read keeps what it shows, and what was opened in it.
@@ -788,7 +794,8 @@ function drawHistory() {
       shown.push(box);
     }
     box.appendChild(item.entry
-      ? turnRow(item.entry, roleOf(item.entry.stage), turns.get(turnKey(item.entry)), openDetails, bodies)
+      ? turnRow(item.entry, roleOf(item.entry.stage), turns.get(turnKey(item.entry)), openDetails, bodies,
+        state?.status, Boolean(state?.todo_closeout && latestCloseout && historyKey(item.entry) === historyKey(latestCloseout)))
       : answerRow(item.answer, phase, openDetails));
   }
   if (!items.length) shown.push(el("p", "No step has finished yet.", "hint"));
@@ -816,7 +823,7 @@ function firstLine(text) {
   return text.trim().split("\n")[0];
 }
 
-function turnRow(entry, role, turn, openDetails, bodies) {
+function turnRow(entry, role, turn, openDetails, bodies, status, currentCloseout) {
   const key = turnKey(entry);
   const row = el("details", null, "turn");
   row.dataset.historyDetail = key;
@@ -837,7 +844,7 @@ function turnRow(entry, role, turn, openDetails, bodies) {
   const summary = el("summary", null);
   summary.appendChild(head);
   const said = entry.brief || entry.feedback;
-  if (entry.todo_closeout) summary.appendChild(el("span", todoOutcome(entry.todo_closeout), "turn-preview"));
+  if (entry.todo_closeout) summary.appendChild(el("span", todoOutcome(entry.todo_closeout, status, currentCloseout), "turn-preview"));
   if (said) summary.appendChild(shownAbove.has(said) ? el("span", "Shown above, in the decision", "turn-preview")
     : markdownLine(firstLine(said), "turn-preview"));
   const body = bodies.get(key) || el("div", null, "turn-body");
