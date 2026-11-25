@@ -29,6 +29,7 @@ from app.application import settings as S  # noqa: E402
 from app.observability import telemetry as T  # noqa: E402
 from app.foundation import flows  # noqa: E402
 from app.foundation import localenv  # noqa: E402
+from app.foundation import policy as P  # noqa: E402
 from app.workspace import worktrees  # noqa: E402
 from fakes import FakeRepos, FakeWorktrees, Recorder, every_skill, installed  # noqa: E402
 import stand_in  # noqa: E402
@@ -134,7 +135,7 @@ class Skills(unittest.TestCase):
         self.assertEqual(self.prepare()["repo_path"], self.repo)
 
     def test_shipped_flows_prepare_with_no_installed_skills(self):
-        settings = S.load()
+        settings = S.load(path=P.SETTINGS_FILE)
         missing_skill = mock.Mock(return_value=False)
         host = activities.Activities(runner=None, git=None, repositories=FakeRepos(), telemetry=None,
                                      which=installed, holds_skill=missing_skill)

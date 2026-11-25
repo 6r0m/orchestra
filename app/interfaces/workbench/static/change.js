@@ -307,8 +307,8 @@ export function showReviews(runId, review, open, stage = null, turns = []) {
       el("span", live ? "Current" : "User " + interval.action, "milestone-badge"));
     const workLine = el("span", "", "milestone-subtitle");
     heading.append(workLine);
-    const baseline = index ? "Since milestone " + index : "Since run start";
-    const subtitle = el("span", baseline, "milestone-subtitle");
+    const baseline = index ? "milestone " + index : "run start";
+    const subtitle = el("span", "Since " + baseline, "milestone-subtitle");
     if (interval.at) {
       const stamp = el("time", new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(interval.at)));
       stamp.dateTime = interval.at;
@@ -357,8 +357,8 @@ export function showReviews(runId, review, open, stage = null, turns = []) {
     const controls = el("div", null, "section-head");
     const read = el("button", "Read changes");
     const copy = el("button", "Copy milestone");
-    read.title = "Read the changes from the selected comparison point";
-    copy.title = "Copy the patch from the selected comparison point";
+    read.title = "Read changes since " + baseline;
+    copy.title = "Copy the patch since " + baseline;
     copy.className = "milestone-copy";
     read.type = copy.type = "button";
     const status = el("p", live ? "Current files, not independently verified." : "Open to read this milestone’s changes.", "hint");

@@ -171,9 +171,11 @@ $("start").onsubmit = async (event) => {
   button.disabled = true;
   report($("start-result"), "starting…");
   try {
+    if (previewRepo !== repo) {
+      throw new Error("Use Refresh destinations to read Merge destinations for the selected repository.");
+    }
     if (submitted.destinationDisabled || !submitted.destination) {
-      const reason = previewRepo === repo && previewError;
-      throw new Error(reason || "Choose a preferred Merge destination; use Refresh destinations if its last read failed.");
+      throw new Error(previewError || "Choose a preferred Merge destination; use Refresh destinations if its last read failed.");
     }
     const request = { repo, task: submitted.task, short_name: submitted.short_name, flow: submitted.flow,
       auto_proceed: submitted.auto_proceed, merge_preference: JSON.parse(submitted.destination) };

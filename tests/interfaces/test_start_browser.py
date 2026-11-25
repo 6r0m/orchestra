@@ -14,12 +14,14 @@ import fs from 'node:fs';
 import assert from 'node:assert/strict';
 const nodes=new Map();
 const get=id=>{if(!nodes.has(id))nodes.set(id,{value:'',textContent:'',disabled:false,checked:false,
-  addEventListener(){},querySelector(){return {};}});return nodes.get(id);};
-let repo='first-repo',release;const sent=[];
+  addEventListener(){},querySelector(){return {};},options:[],replaceChildren(){this.options=[];},
+  append(option){this.options.push(option);}});return nodes.get(id);};
+let repo='first-repo',release,previewed=false;const sent=[];
 globalThis.location={hash:'#new'};
 globalThis.fixture={get,chosen:()=>repo,api:async(path,body)=>{
   if(path==='/api/runs'){sent.push(body);return {run_id:'started-run'};}
   assert.equal(path,'/api/landing?repo=first-repo');
+  if(!previewed){previewed=true;return {version:1,branch:'main',identity_ready:true,choices:[{branch:'main',remote:null}]};}
   return await new Promise(resolve=>{release=()=>resolve({version:1,choices:[]});});
 }};
 const source=fs.readFileSync(process.argv[1],'utf8')
@@ -29,8 +31,9 @@ const source=fs.readFileSync(process.argv[1],'utf8')
   .replace(/import \{[^}]+\} from "\.\/picker.js";/,
     'const sourceChoice=()=>globalThis.fixture.chosen,reposRead=async()=>{};');
 await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
+await get('start-landing-retry').onclick();
 get('start-task').value='First task';get('start-name').value='first-name';get('start-flow').value='engineer-code';
-get('start-auto').checked=false;get('start-destination').value=JSON.stringify({branch:'main',remote:null});
+get('start-auto').checked=false;
 const button={disabled:false};const started=get('start').onsubmit({preventDefault(){},submitter:button});
 assert.equal(typeof release,'function');
 repo='second-repo';get('start-task').value='Second task';get('start-name').value='second-name';
@@ -47,7 +50,7 @@ assert.equal(button.disabled,false);
                                 capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_landing_preview_waits_for_the_initial_repository_list(self):
+    def test_landing_preview_waits_for_the_list_and_refuses_a_stale_repository(self):
         source = Path(__file__).resolve().parents[2] / 'app/interfaces/workbench/static/start.js'
         script = r'''
 import fs from 'node:fs';
@@ -65,10 +68,11 @@ globalThis.location = {hash:'#new'};
 globalThis.fixture = {get, ready, dialogs, chosen:()=>chosen, api:async (path, body) => {
   if(path==='/api/flows') return {default:'engineer-code',flows:[{name:'engineer-code',steps:[]}]};
   if(path==='/api/runs') { submitted.push(body); return {run_id:'new-run'}; }
-  assert.ok(path.startsWith('/api/landing?repo=example'),path);
+  assert.ok(['/api/landing?repo=example','/api/landing?repo=other'].includes(path),path);
   calls++;
   if(fail) throw Error('the selected path is not a git repository');
-  return {version:1,branch:'main',remote:null,identity_ready:true,choices:[{branch:'main',remote:null},{branch:'release',remote:null}]};
+  const branch = path.endsWith('=other') ? 'develop' : 'main';
+  return {version:1,branch,remote:null,identity_ready:true,choices:[{branch,remote:null},{branch:'release',remote:null}]};
 }};
 let source = fs.readFileSync(process.argv[1], 'utf8');
 source=source.replace(/import \{ api \} from "\.\/api.js";/,
@@ -107,6 +111,25 @@ assert.equal(calls,3);
 await submit();
 assert.equal(submitted.length,1);
 assert.equal(submitted[0].merge_preference.branch,'release');
+
+// Reloading the repository menu can change its selection without firing a change event.
+chosen='other';
+location.hash='#new';
+get('start-task').value='Keep this second draft';
+get('start-name').value='another-run';
+const reads = calls;
+await submit();
+assert.equal(submitted.length,1,'a shared branch name is insufficient to reuse another repository’s preview');
+assert.equal(calls,reads);
+assert.equal(dialogs.at(-1).title,'The run was not started');
+assert.match(dialogs.at(-1).reason,/Refresh destinations/);
+assert.equal(get('start-task').value,'Keep this second draft');
+assert.equal(get('start-name').value,'another-run');
+await get('start-landing-retry').onclick();
+await submit();
+assert.equal(submitted.length,2);
+assert.equal(submitted[1].repo,'other');
+assert.deepEqual(submitted[1].merge_preference,{branch:'develop',remote:null});
 '''
         result = subprocess.run(['node', '--input-type=module', '-e', script, str(source)],
                                 capture_output=True, text=True, timeout=15)

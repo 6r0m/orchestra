@@ -191,8 +191,8 @@ text and **Show less** collapses it again; this changes only the display, not th
 
 The form shows the starting base and a **Preferred Merge destination** list of compatible local and cached
 remote branches. This preference does not change the base the work starts from, authorize a push or freeze
-the final destination. Review it again at the final gate. **Refresh destinations** recovers failed reads
-without discarding the task or name; an unknown destination cannot silently become another target.
+the final destination. Review it again at the final gate. Use **Refresh destinations** if the last read failed
+or belongs to another repository. Refreshing keeps the task and name.
 
 **Add skills to instructions** opens repository and global skills from the selected execution host, grouped
 by the agent that can use them. Choose a flow stage or the current request, select several checkboxes, and
@@ -550,6 +550,7 @@ for the chosen flow before it creates a worktree.
 
 To use GenosAI's approach, install its three skills using the [GenosAI skills guide](https://github.com/6r0m/GenosAI/tree/develop/agents#skills).
 Use these names in **Settings**, or merge the `stage_skills` member into `.orchestra/settings.local.json`.
+This example also restores the bindings for future runs if you used the previous shared defaults.
 
 ```json
 {
