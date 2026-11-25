@@ -39,6 +39,9 @@ class MergeBrowser(Repo):
     def test_destination_discovery_can_be_retried_without_losing_operator_edits(self):
         self.landing('merge-retry')
 
+    def test_reopening_final_gate_restarts_discovery_and_ignores_late_results(self):
+        self.landing('merge-navigation')
+
     def test_selected_destination_conflict_returns_to_the_engineer_without_landing(self):
         self.landing('merge-conflict')
 

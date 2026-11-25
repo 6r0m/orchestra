@@ -317,8 +317,9 @@ and the selected remote is fetched and checked again before landing. Review the 
 and edit it as needed; if the agent proposal is unavailable, enter it here without another model turn.
 The first line is the subject, up to 94 characters, followed by optional details. The merge subject is
 generated as `Merge <subject>` and previewed beneath the editor; details stay in the change commit.
-If destination discovery fails, use **Retry destinations** once the worker is available; your unsent message
-edits stay in the page. Reloading the page discards those unsent edits.
+If destination discovery fails, use **Retry destinations** once the worker is available. Returning to the
+same final gate reads destinations again. Your unsent message stays available across both actions until
+you reload the page or the run leaves that gate.
 The confirmation names the exact destination and messages. Git identity must be configured in the intended
 repository before committing; Orchestra never invents it or changes global Git settings. A failed attempt
 keeps its target/messages on Continue; revise the change before retargeting. The selected push runs the

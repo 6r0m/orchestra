@@ -1844,6 +1844,59 @@ def instruction_skills(page, run_id, port):
                             "document.querySelector('#stop-title').textContent==='Ready to merge'"), 30, 'revision with both selected skills')
 
 
+MERGE_NAVIGATION_STAND_IN = """(() => {
+  const real = window.fetch;
+  const releases = window.__landingReleases = [];
+  window.fetch = (path, options) => {
+    if (!String(path).startsWith('/api/runs/') || !String(path).endsWith('/landing')) return real(path, options);
+    return new Promise(resolve => releases.push(current => resolve(current ? real(path, options) : {
+      ok: true, json: async () => ({choices: [{branch: 'obsolete', remote: null}], identity_ready: false})
+    })));
+  };
+})();"""
+
+
+def merge_navigation(page, run_id):
+    def away():
+        page.value("document.getElementById('nav-settings').click()")
+        wait(lambda: page.value("!document.getElementById('view-settings').hidden"), 5, "Settings")
+
+    def reopen(count):
+        page.value(OPEN % json.dumps(run_id))
+        wait(lambda: page.value("window.__landingReleases.length === %d" % count), 8,
+             "fresh destination discovery after reopening the run" if count > 1 else "initial destination discovery")
+
+    def release(index, current=False):
+        page.call("Runtime.evaluate", expression="""(async () => {
+          window.__landingReleases[%d](%s);
+          await new Promise(resolve => setTimeout(resolve, 0));
+        })()""" % (index, str(current).lower()), awaitPromise=True)
+
+    reopen(1)
+    page.value("""(() => {
+      const message = document.getElementById('merge-work-message');
+      message.value = 'Draft kept across Settings';
+      message.dispatchEvent(new Event('input'));
+    })()""")
+    away()
+    release(0)
+    reopen(2)
+    away()
+    reopen(3)
+    release(2, current=True)
+    wait(lambda: page.value("document.getElementById('merge-destination').options.length > 1"), 15,
+         "destinations from the reopened final gate")
+    release(1)
+    if not page.value("""(() => {
+      const select = document.getElementById('merge-destination');
+      return select.options.length > 1 && [...select.options].every(option => !option.textContent.includes('obsolete'));
+    })()"""):
+        raise SystemExit('an obsolete response replaced the reopened gate’s destinations')
+    if not page.value("document.getElementById('merge-work-message').value==='Draft kept across Settings' && "
+                      "document.getElementById('merge-message-preview').textContent==='Merge Draft kept across Settings'"):
+        raise SystemExit('the reopened final gate lost its message draft')
+
+
 def main(url, run_id, label, said, note=None):
     profile = tempfile.mkdtemp(prefix="orchestra-demo-edge-")
     # A layout is read at the window size it names; every press at the browser's own.
@@ -1925,6 +1978,9 @@ window.WebSocket=class extends NativeSocket{
             if label.startswith("change:") or label == "review-closed":
                 page.call("Page.enable")
                 page.call("Page.addScriptToEvaluateOnNewDocument", source=CLIPBOARD_STAND_IN)
+            if label == "merge-navigation":
+                page.call("Page.enable")
+                page.call("Page.addScriptToEvaluateOnNewDocument", source=MERGE_NAVIGATION_STAND_IN)
             if label == "merge-retry":
                 page.call("Page.enable")
                 page.call("Page.addScriptToEvaluateOnNewDocument", source="""(() => {
@@ -2020,8 +2076,11 @@ window.WebSocket=class extends NativeSocket{
                     raise SystemExit('Discard misleadingly presented its todo as landed')
                 print('PASS: proposed closeout became discarded, with no todo outcome landed')
                 return 0
-            if label in ("merge-choice", "merge-retry", "instruction-skills", "task-disclosure") or label.startswith('todo-'):
-                page.value("location.hash='#run='+" + json.dumps(run_id))
+            if label in ("merge-choice", "merge-retry", "merge-navigation", "instruction-skills", "task-disclosure") or label.startswith('todo-'):
+                if label == "merge-navigation":
+                    merge_navigation(page, run_id)
+                else:
+                    page.value(OPEN % json.dumps(run_id))
                 if label == "merge-retry":
                     wait(lambda: page.value("document.querySelector('#merge-destination-hint').textContent.includes('fixture worker unavailable')"),
                          15, "the failed destination discovery")

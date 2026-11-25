@@ -87,6 +87,7 @@ let shownStop = null;
 // Where the shown run's merge lands when its base is a remote's — `origin/main` — which its confirmation says.
 let landsOn = null;
 let mergeState = null;
+let activeMergeDiscovery = null;
 const mergeDrafts = new Map();
 // What the operator has typed for each stop and not yet sent: another run opened and this one again, the
 // note is still there.
@@ -115,7 +116,7 @@ export function show(runId) {
   taskObserver?.disconnect();
   taskObserver = null;
   mergeState = null;
-  $("merge-options").hidden = true;
+  hideMerge();
   $("todo-closeout").hidden = true;
   showAccounting(runId);
   $("stop-skills").onclick = async () => {
@@ -557,6 +558,13 @@ function renderTodoCloseout(todo, status) {
   if (todo.reason) body.append(el("p", "Reason / resume when: " + todo.reason));
 }
 
+function hideMerge() {
+  const panel = $("merge-options");
+  panel.hidden = true;
+  delete panel.dataset.key;
+  activeMergeDiscovery = null;
+}
+
 function renderMerge(status) {
   const panel = $("merge-options"), stop = status.stop, state = status.state;
   for (const key of mergeDrafts.keys()) {
@@ -564,8 +572,11 @@ function renderMerge(status) {
   }
   const canEdit = !state.remote || state.merge_version === 1 || state.remote_id && state.prepush_id;
   const visible = canEdit && status.merge_version === 1 && stop && stop.reason === "final" && state.final_tree && state.base_tip;
-  panel.hidden = !visible;
-  if (!visible) return;
+  if (!visible) {
+    hideMerge();
+    return;
+  }
+  panel.hidden = false;
   const key = stop.id + ":" + state.base_tip + ":" + state.final_tree;
   if (panel.dataset.key === key) return;
   panel.dataset.key = key;
@@ -593,10 +604,12 @@ function renderMerge(status) {
   $("merge-work-message").oninput = remember;
   select.onchange = remember;
   const discover = () => {
+    const discovery = Symbol();
+    activeMergeDiscovery = discovery;
     retry.hidden = true;
     $("merge-destination-hint").textContent = "Reading compatible destinations…";
     return api("/api/runs/" + encodeURIComponent(run) + "/landing").then((result) => {
-      if (selected !== run || panel.dataset.key !== key || panel.hidden) return;
+      if (activeMergeDiscovery !== discovery) return;
       if (!Array.isArray(result.choices)) throw new Error("the target worker needs a graceful reload for destination selection");
       const wanted = mergeDrafts.get(key)?.destination || JSON.stringify(state.merge_preference || { branch: state.base_branch, remote: state.remote || null });
       select.replaceChildren();
@@ -615,7 +628,7 @@ function renderMerge(status) {
       remember();
       if (!result.identity_ready) $("merge-destination-hint").textContent += " Configure the intended repository Git identity before Merge.";
     }).catch((error) => {
-      if (selected === run && panel.dataset.key === key && !panel.hidden) {
+      if (activeMergeDiscovery === discovery) {
         $("merge-destination-hint").textContent = "Destination unavailable: " + error.message + ". Retry destinations when the worker is available.";
         retry.hidden = false;
       }
