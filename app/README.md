@@ -13,24 +13,3 @@ each concern states its own boundaries, parts and invariants at its own level.
 | where the concerns are composed into what a run does | [application/README.md](application/README.md) |
 | what a human or a process manager starts | [interfaces/README.md](interfaces/README.md) |
 | the direction these depend in, and the participants outside them | [the main view](../docs/architecture/diagrams/main.md) |
-
-Configuration is not here: `.orchestra/settings.json`, the ignored `.orchestra/settings.local.json`,
-`.orchestra/repos.json`, `roles/` and `flows/` sit at the checkout root, because they are the operator's
-to edit (D13). The shared settings file is the committed default; its sparse local patch is ignored.
-The direction the packages depend in is enforced by `tests/test_architecture.py`, which fails on an
-import that crosses a boundary.
-
-## Running it
-
-Entry points are modules, so the checkout is the working directory:
-
-```bash
-python -m app.interfaces.cli "fix X in Y"      # or: make feature TASK="fix X in Y"
-python -m app.interfaces.worker wsl            # started by the stack's owner, through workers.sh / workers.ps1
-python -m app.interfaces.workbench.server
-```
-
-Three files are launched by path instead, because whatever runs them cannot import this package:
-`app/foundation/envpath.py` runs before any environment exists, and `app/agents/ptyhost.py` and
-`app/agents/turn_hook.py` are started by the agent's own containment and by the vendors' hooks.
-None of the three imports anything of ours, and that is what keeps them launchable that way.

@@ -1,7 +1,101 @@
 # Using Orchestra
 
 The Workbench is the surface; everything it does is also reachable from the command line, which is
-what the tests, any automation and the Makefile use.
+what the tests, any automation and the Makefile use. The [command-line section](#the-command-line)
+defines the `orchestrate` command used in this guide.
+
+## Contents
+
+- [First run](#first-run)
+- [Workbench service](#the-workbench) and [stack controls](#the-stack)
+- [Workbench views and decisions](#the-page), [Settings](#settings) and [optional team skills](#optional-team-skills)
+- [Command-line examples](#the-command-line)
+- [Troubleshooting](#where-to-look-when-something-is-wrong), [tracing](#the-optional-trace) and [ports](#the-port)
+
+## First run
+
+### Start the Workbench and workers
+
+For Windows + WSL, use [WSL 2 with systemd](https://learn.microsoft.com/en-us/windows/wsl/systemd/)
+and clone onto a Windows drive so both workers can open the checkout. In WSL, install Git, Make,
+Docker with the Compose plugin, and the [uv release pinned by Orchestra](../pyproject.toml).
+The Windows worker uses Git for Windows and uv at
+`%USERPROFILE%\.local\bin\uv.exe`. Use the same pinned uv release on both hosts. Install and sign in
+to the agent CLI you will use on the host where your run executes. For a Codex-only first run, install
+the [Codex CLI](https://learn.chatgpt.com/docs/cli) in WSL and check the worker's login-shell path
+with `bash -lc 'command -v codex'`.
+
+Run these commands from WSL in the directory where you want the checkout.
+
+```bash
+git clone https://github.com/6r0m/orchestra.git
+cd orchestra
+docker compose version
+systemctl --user is-system-running
+cp .env.example .env
+```
+
+Set `TEMPORAL_DB_PASSWORD` in `.env` before the first start to use your own password for the local
+Temporal database. Agent sign-in stays with each vendor CLI. The [optional trace](#the-optional-trace)
+has its own credentials.
+
+```bash
+make workbench-install
+make up
+make check
+```
+
+Open `http://127.0.0.1:8390`. The WSL and Windows workers should both be up. Workbench installation,
+service lifetime and recovery are covered under [The Workbench](#the-workbench).
+
+### Configure the first task
+
+In **Settings**, choose a profile for each role using the CLIs installed on the target host. For a Codex-only
+run, choose `codex-engineer` and `codex-architect`. Check that each profile's model is available on your
+account and select **Apply**. Orchestra starts with built-in role and stage instructions. Teams can add
+[optional skills](#optional-team-skills).
+
+Give the first task a small, disposable Git repository with a commit. These commands create one in the
+checkout's ignored `tmp/` directory, with a separate folder for its worktrees.
+
+```bash
+mkdir -p tmp
+fixture=$(mktemp -d "$PWD/tmp/first-run.XXXXXX")
+mkdir "$fixture/repository" "$fixture/worktrees"
+git -C "$fixture/repository" init -b main
+git -C "$fixture/repository" config user.name 'First run'
+git -C "$fixture/repository" config user.email 'demo@localhost'
+printf '# First run\n' > "$fixture/repository/README.md"
+git -C "$fixture/repository" add README.md
+git -C "$fixture/repository" commit -m 'Initial fixture'
+printf '%s\n' "$fixture/repository" "$fixture/worktrees"
+```
+
+Add this entry to the ignored `.orchestra/repos.json`, using the two paths printed above. The
+[descriptor example](../.orchestra/repos.example.json) shows the available options.
+
+```json
+{
+  "first-run": {
+    "path": "/path/to/fixture/repository",
+    "target": "wsl",
+    "base_branch": "main",
+    "worktree_root": "/path/to/fixture/worktrees"
+  }
+}
+```
+
+### Start, review and finish
+
+1. Open **New run**, choose `first-run` and its local `main` destination, and name the run `first-run`.
+   Ask the engineer to add `greeting.txt` containing `Hello, Orchestra!` and verify its contents.
+2. Select **Start run**. If Codex asks to review hooks, inspect them and answer in the role's terminal.
+   The [run walkthrough](#the-page) explains what the hooks do and how to resume after a timeout.
+3. Read the architect's plan assessment and approve it when ready. At the final gate, inspect the
+   changed file and confirm **Merge** into the fixture's local `main`, or choose **Discard**.
+
+This calls the selected vendor and uses its quota. To exercise the Workbench with scripted agents,
+run `make demo` from WSL while the stack is up. See the [demo guide](../tools/README.md) for its scope.
 
 ## The Workbench
 
@@ -52,9 +146,10 @@ the Workbench comes back with WSL. Nothing is exposed beyond loopback.
 
 ## The page
 
-The runs are listed down its side under Operator action, Working, Closed and Rejected. Each row names its
-repository, task and worktree branch, with what waits or is working and for how long. A run ready to
-merge stays under Operator action until you answer its final gate; Closed also includes stopped and
+The runs are grouped under Operator action, Working, Closed and Rejected. On a narrow screen, open
+**Runs** above the active view to see the list. Each row shows the repository, task, worktree branch,
+and how long the run has been waiting or working. A run ready to merge stays under Operator action
+until you answer its final gate; Closed also includes stopped and
 discarded runs, and Rejected holds only the runs you ended with *Reject* — each saying whether its
 worktree and branch are gone, or that its cleanup is still required. Each list shows up to five runs and
 scrolls inside itself beyond that; on a window too short for all four, the lists past five give up height
@@ -62,6 +157,8 @@ and the shorter ones stay whole. Older closed
 runs are a page away, so nothing Temporal
 still retains is out of reach, and the tab's title counts the runs that need you. Each run is a link:
 the page's address names the run open, so a reload keeps it and a new tab opens it.
+On a narrow screen, use **Runs** to open the lists. The disclosure shows how many runs need attention
+and closes when you open a view.
 
 If a vendor dialog waits in a live terminal, that running run also appears under Operator action.
 Open its terminal to answer or interrupt it. This is a terminal prompt, not a workflow stop; routine
@@ -275,7 +372,7 @@ steps wait for its replacement. This is an update notice, not a down-worker warn
 that pipes its output through `tail` can still stay quiet until that command finishes.
 
 If a role loses track of its instructions, Pause it and ask it to re-read the applicable `AGENTS.md`,
-its current stage's skill and the approved todo, inspect the existing diff and verification evidence,
+its current stage's skill if one is bound, and the approved todo, inspect the existing diff and verification evidence,
 then continue the current stage while preserving completed work. The latest controller prompt is
 available under that turn's *Received* history. Resuming a conversation retains history, but compaction
 can summarize earlier details. Each new role invocation refreshes its current contract; Pi also keeps
@@ -444,22 +541,44 @@ handoff in its final message. The architect's final feedback separates both role
 explains why the phase did not converge with evidence, lists unresolved or disputed findings, and
 states any operator decision needed.
 
+#### Optional team skills
+
+Install your team's skills where the selected agent CLI can find them on the host that runs the task.
+In **Settings**, choose or enter a skill name for each stage you want to configure, then select **Apply**.
+Leave a stage blank to use the built-in instructions. The target worker checks each explicit binding
+for the chosen flow before it creates a worktree.
+
+To use GenosAI's approach, install its three skills using the [GenosAI skills guide](https://github.com/6r0m/GenosAI/tree/develop/agents#skills).
+Use these names in **Settings**, or merge the `stage_skills` member into `.orchestra/settings.local.json`.
+
+```json
+{
+  "stage_skills": {
+    "research": "architect",
+    "plan": "investigate-change",
+    "assess": "architect",
+    "build": "implement-approved-change",
+    "verify": "architect"
+  }
+}
+```
+
 ## The command line
 
 ```bash
 # this checkout's own environment, on this host's disk
 export UV_PROJECT_ENVIRONMENT="$(uv run --no-project --managed-python --python 3.13 python app/foundation/envpath.py "$PWD")"
-O="uv run --locked python -m app.interfaces.cli"
+orchestrate() { uv run --locked python -m app.interfaces.cli "$@"; }
 
-$O "<task>"                        # a run on this repository
-$O "<task>" --repo work/webapp     # a repository listed in .orchestra/repos.json or ORCHESTRA_REPOS
-$O "<task>" --flow architect-research   # a run that follows another flow than the default
-$O --resume <run-id> --answer yes  # answer the stop the run waits at
-$O --continue <run-id>             # run a failed stage again, after you fixed its cause
-$O --stop <run-id>                 # end a run from whatever it is doing, keeping its worktree and branch
-$O --force-terminate <run-id>      # close a run a stop cannot finish, at once; git already running goes on
-$O --show <run-id>                 # the stage table and the architect's words
-$O --worktrees --repo work/webapp  # every worktree, and whether its work is merged
+orchestrate --name first-run --repo first-run "<task>" # use the disposable repository from the first-run guide
+orchestrate --name fix-webapp --repo work/webapp "<task>" # use a saved repository
+orchestrate --name research --flow architect-research "<task>" # select a different flow
+orchestrate --resume <run-id> --answer yes  # answer the current stop
+orchestrate --continue <run-id>             # rerun a failed stage after fixing its cause
+orchestrate --stop <run-id>                 # end the run and keep its worktree and branch
+orchestrate --force-terminate <run-id>      # end a run that cannot stop gracefully
+orchestrate --show <run-id>                 # the stage table and the architect's words
+orchestrate --worktrees --repo work/webapp  # list worktrees and their merge state
 ```
 
 Each stop prints what it asks and the answers it takes: `yes`, `yes <note for the next stage>` or

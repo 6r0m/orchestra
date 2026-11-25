@@ -9,6 +9,7 @@ const chosenRepo = sourceChoice("start");
 $("start-name").oninput = () => { $("start-name-preview").textContent = $("start-name").value.toLowerCase() || "your-name"; };
 let previewRequest = 0;
 let previewRepo = null;
+let previewError = "";
 $("start-skills").onclick = async () => {
   const repo = chosenRepo(), flow = $("start-flow").value, from = location.hash;
   try {
@@ -22,10 +23,15 @@ $("start-skills").onclick = async () => {
 $("start-landing-retry").onclick = () => previewLanding();
 async function previewLanding() {
   const request = ++previewRequest, repo = chosenRepo();
-  if (!repo) return;
   const select = $("start-destination"), previous = previewRepo === repo ? select.value : "";
   previewRepo = repo;
+  previewError = "";
   select.disabled = true;
+  if (!repo) {
+    select.replaceChildren();
+    $("start-landing").textContent = "Choose a repository to see where Merge lands.";
+    return;
+  }
   $("start-landing").textContent = "Reading destinations…";
   try {
     const result = await api("/api/landing?repo=" + encodeURIComponent(repo));
@@ -49,7 +55,11 @@ async function previewLanding() {
     select.disabled = !select.options?.length;
     $("start-landing").textContent += " The preferred Merge destination remains editable at the final gate. Nothing is pushed without confirmation.";
   } catch (error) {
-    if (request === previewRequest) $("start-landing").textContent = "Merge destination unavailable: " + error.message + ". Refresh destinations when the worker is available; your task and name stay unchanged.";
+    if (request === previewRequest) {
+      previewError = error.message;
+      $("start-landing").textContent = "Merge destination unavailable: " + previewError +
+        ". Refresh destinations after correcting the problem; your task and name stay unchanged.";
+    }
   }
 }
 $("start-source").addEventListener("change", previewLanding);
@@ -157,14 +167,19 @@ $("start").onsubmit = async (event) => {
   // The run started opens only while the page is still where it was started from: an operator who moved
   // on meanwhile stays where they went, and finds it in the list.
   const from = location.hash;
+  let sent = false;
   button.disabled = true;
   report($("start-result"), "starting…");
   try {
-    if (submitted.destinationDisabled || !submitted.destination) throw Object.assign(new Error("Choose a preferred Merge destination; use Refresh destinations if its last read failed."), { status: 409 });
+    if (submitted.destinationDisabled || !submitted.destination) {
+      const reason = previewRepo === repo && previewError;
+      throw new Error(reason || "Choose a preferred Merge destination; use Refresh destinations if its last read failed.");
+    }
     const request = { repo, task: submitted.task, short_name: submitted.short_name, flow: submitted.flow,
       auto_proceed: submitted.auto_proceed, merge_preference: JSON.parse(submitted.destination) };
     const support = await api("/api/landing?repo=" + encodeURIComponent(repo));
-    if (support.version !== 1 || !Array.isArray(support.choices)) throw Object.assign(new Error("Reload the Workbench and target worker before choosing a Merge destination."), { status: 409 });
+    if (support.version !== 1 || !Array.isArray(support.choices)) throw new Error("Reload the Workbench and target worker before choosing a Merge destination.");
+    sent = true;
     const started = await api("/api/runs", request);
     report($("start-result"), "started " + started.run_id);
     starting.set(started.run_id, { repo: repo });
@@ -178,11 +193,8 @@ $("start").onsubmit = async (event) => {
     wrote();
     if (sameForm && location.hash === from) location.hash = "#run=" + encodeURIComponent(started.run_id);
   } catch (error) {
-    // A 4xx is the Workbench's refusal before any run is made: it checks the request, the repository, the flow,
-    // the settings and the workers before it starts one. Anything else — its own failure or timeout, which may
-    // come after Temporal took the start, or no answer at all — leaves whether a run was made unknown here, and
-    // the list of runs says; starting it again could start it twice.
-    const refused = error.status >= 400 && error.status < 500;
+    // An error in the destination check precedes the start. Once sent, only a 4xx proves the request was refused.
+    const refused = !sent || (error.status >= 400 && error.status < 500);
     report($("start-result"), (refused ? "refused: " : "not confirmed: ") + error.message, true);
     sayRefused(refused
       ? { title: "The run was not started", said: "The Workbench refused it before making a run.",

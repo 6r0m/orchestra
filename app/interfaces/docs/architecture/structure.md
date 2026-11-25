@@ -24,7 +24,7 @@ print, serve and exit. The page holds no authoritative state of its own.
 | `cli.py` | the command line over the shared client and the stack's owner |
 | `worker.py` | this host's Temporal worker and the queues it polls |
 | `workbench/server.py` | the page's HTTP server and its small JSON API |
-| `workbench/static/` | the page itself: HTML, CSS, its JavaScript as native modules — the stack, runs, new-run form, Settings, terminals, the history as turns and answers, the change and its file-by-file diff viewer, worktrees, agent text drawn as Markdown, and `app.js` their entry — and a pinned xterm.js and markdown-it |
+| [Workbench browser views](../../workbench/static/README.md) | the browser's native modules, public assets and shared styling |
 | `workbench/orchestra-workbench.service` | the systemd user unit the page runs as, rendered for a checkout by `make workbench-install` |
 
 Each run sequences its own roles, while separate runs can execute concurrently. The host worker's
@@ -99,6 +99,8 @@ when the decision above moves on; nothing else of it is read again.
   The browser derives the merge subject from `Merge ` plus the change subject, with a read-only preview;
   details stay in the change commit. Already accepted message pairs remain frozen under their original protocol.
   Failed destination discovery exposes an explicit retry that refreshes choices without discarding drafts.
+  Typed repository refusals from the execution host reach repository reads as actionable errors. The start
+  form reports a failed destination check before sending the start request.
   New-run setup separately names its starting base and preferred compatible Merge destination. The preference
   seeds the final selector, whose confirmation remains mandatory. Failed setup discovery is explicitly
   refreshable and cannot silently drop the preferred target when starting.

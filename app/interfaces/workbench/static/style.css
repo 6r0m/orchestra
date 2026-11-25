@@ -70,6 +70,10 @@ button.danger.quiet { color: var(--bad); }
 button.copy { min-height: 24px; padding: 1px 8px; font-size: 12px; font-weight: 500; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 
+dialog { color: var(--ink); background: var(--raised); border: 1px solid var(--control);
+  border-radius: 12px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55); overscroll-behavior: contain; }
+dialog::backdrop { background: rgba(4, 6, 9, 0.66); }
+
 /* Fields. */
 .form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; max-width: 760px; }
 .form.inline { grid-template-columns: minmax(0, 1fr) auto; align-items: end; max-width: 960px; }
@@ -134,7 +138,9 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--you); width: 1
 /* The rail: the runs, what needs you first. */
 /* The runs list narrows with the window, so a narrow or portrait one leaves the run its room. */
 .layout { display: grid; grid-template-columns: clamp(240px, 22vw, 330px) minmax(0, 1fr); min-height: calc(100vh - var(--top)); }
-.rail { position: sticky; top: var(--top); align-self: start; height: calc(100vh - var(--top)); overflow: auto;
+.runs-panel { position: sticky; top: var(--top); align-self: start; min-width: 0; }
+.runs-panel > summary { display: none; }
+.rail { height: calc(100vh - var(--top)); overflow: auto;
   display: flex; flex-direction: column; gap: 18px;
   padding: 16px 12px 24px; border-right: 1px solid var(--rule); background: var(--surface); }
 /* Each list is a box of its own: as tall as its runs up to five rows, and scrolling inside itself beyond that.
@@ -349,7 +355,7 @@ summary:hover { color: var(--ink); }
    changed with the font it was fitted to. */
 .term { padding: 8px; background: #000; overflow: hidden; border-radius: 0 0 8px 8px; }
 .term-size { float: right; min-height: 26px; margin: -4px 0 -4px 12px; padding: 2px 10px; font-size: 13px; }
-.terminal-history-page > .top, .terminal-history-page > .banners, .terminal-history-page .rail { display: none; }
+.terminal-history-page > .top, .terminal-history-page > .banners, .terminal-history-page .runs-panel { display: none; }
 .terminal-history-page .layout { display: block; }
 .terminal-history-page main { padding: 20px; }
 .terminal-archive { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
@@ -549,9 +555,7 @@ details.answer > .answer-words { margin: 4px 0 10px calc(10px + 1em + 6px); }
 .apply-bar .result, .apply-bar .alert { flex-basis: 100%; }
 
 #settings-skill-picker { max-width: min(520px, calc(100vw - 32px)); max-height: min(72vh, 640px);
-  padding: 20px; color: var(--ink); background: var(--raised); border: 1px solid var(--control);
-  border-radius: 12px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55); overscroll-behavior: contain; }
-#settings-skill-picker::backdrop { background: rgba(4, 6, 9, 0.66); }
+  padding: 20px; }
 .skill-picker-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .skill-picker-head h2 { margin: 0; font-size: 18px; }
 .skill-options { display: grid; gap: 4px; max-height: 52vh; overflow: auto; overscroll-behavior: contain; }
@@ -584,10 +588,7 @@ details.answer > .answer-words { margin: 4px 0 10px calc(10px + 1em + 6px); }
 .menu .owner:hover > .menu, .menu .owner:focus-within > .menu { display: block; }
 
 /* The page's own confirmation. */
-.confirm { max-width: min(560px, calc(100vw - 32px)); padding: 20px 22px; color: var(--ink);
-  background: var(--raised); border: 1px solid var(--control); border-radius: 12px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55); overscroll-behavior: contain; }
-.confirm::backdrop { background: rgba(4, 6, 9, 0.66); }
+.confirm { max-width: min(560px, calc(100vw - 32px)); padding: 20px 22px; }
 .confirm form { display: grid; gap: 14px; }
 .confirm p { color: var(--quiet); line-height: 1.55; }
 .confirm .actions { justify-content: flex-end; }
@@ -618,10 +619,13 @@ details.answer > .answer-words { margin: 4px 0 10px calc(10px + 1em + 6px); }
 .md hr { border: 0; border-top: 1px solid var(--rule); }
 .md-link { text-decoration: underline dotted var(--control); text-underline-offset: 3px; cursor: help; }
 
-/* Below the desktop layout, the rail sits above the main area. */
+/* The narrow layout keeps the active view in reach and opens the run list on demand. */
 @media (max-width: 1000px) {
-  .layout { grid-template-columns: minmax(0, 1fr); }
-  .rail { position: static; height: auto; max-height: none; border-right: 0; border-bottom: 1px solid var(--rule); }
+  .layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
+  .runs-panel { position: static; border-bottom: 1px solid var(--rule); background: var(--surface); }
+  .runs-panel > summary { display: list-item; padding: 10px 16px; cursor: pointer; font-weight: 600; }
+  #runs-summary { color: var(--quiet); }
+  .rail { height: auto; max-height: none; border-right: 0; }
   main { --pad-top: 20px; --pad-x: 16px; padding-bottom: 40px; }
   .top { gap: 10px; padding: 0 12px; }
 }

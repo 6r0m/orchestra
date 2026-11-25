@@ -2,11 +2,11 @@
 
 **Status:** PASS (implementation) 2026-10-07
 **Scope:** the Codex adapter's two output parsers — `session()` and `final_message()` in
-[codex.py](../app/agents/adapters/codex.py) — and their tests under [tests/agents/](../tests/agents/).
+[codex.py](../../app/agents/adapters/codex.py) — and their tests under [tests/agents/](../../tests/agents/).
 No production code changes.
-**Stable documentation owner:** [tests/README.md](../tests/README.md) (its `| file | proves |` table owns
-what each test file proves). The adapters' contract in
-[adapters/\_\_init\_\_.py](../app/agents/adapters/__init__.py) already owns the `session`/`final_message`
+The regression is defined in [tests/agents/test_output.py](../../tests/agents/test_output.py).
+The adapters' contract in
+[adapters/\_\_init\_\_.py](../../app/agents/adapters/__init__.py) already owns the `session`/`final_message`
 signatures and needs no change.
 
 ## Contents
@@ -55,7 +55,7 @@ None. No question here changes the goal, the architecture, safety, or an irrever
 ### Working assumptions
 
 - **A1 [ACTIVE]:** the new test module stays out of the Windows list in `run-tests.ps1:11`. Both parsers
-  are pure string and JSON handling with no host dependence, and [tests/README.md](../tests/README.md)
+  are pure string and JSON handling with no host dependence, and [tests/README.md](../../tests/README.md)
   describes that list as the files that exercise a host. WSL coverage therefore suffices.
 - **A2 [ACTIVE]:** the new module gets a row in `tests/README.md`'s `| file | proves |` table, because 23
   of the 24 test files on disk have one and that table is the durable owner of what a test file proves.
@@ -79,11 +79,11 @@ Each of these is excluded by D2, or by the evidence showing there is nothing to 
 
 ### Verified facts
 
-- **F1** `session()` ([codex.py:124-135](../app/agents/adapters/codex.py)) strips each line and skips
+- **F1** `session()` ([codex.py:124-135](../../app/agents/adapters/codex.py)) strips each line and skips
   anything not starting with `{` (its guard at lines 127-128) before `json.loads`. Its `except ValueError`
   at line 131 catches a malformed `{`-prefixed line. It holds no `isinstance` check, so that guard is the
   only thing between a non-object JSON line and `event.get("type")`.
-- **F2** `final_message()` ([codex.py:145-156](../app/agents/adapters/codex.py)) applies the same `{`
+- **F2** `final_message()` ([codex.py:145-156](../../app/agents/adapters/codex.py)) applies the same `{`
   guard, and `message_of()` (lines 138-142) additionally checks `isinstance(event, dict)`. It is protected
   twice; `session()` once.
 - **F3** Runtime probe at HEAD (`d9fa616`), calling both parsers directly on one stream of `[1, 2]`, `3`,
@@ -97,9 +97,9 @@ Each of these is excluded by D2, or by the evidence showing there is nothing to 
   which `except ValueError` does not catch. The mutant's `final_message()` still returned the real
   message, confirming F2. The guard is load-bearing, and load-bearing in `session()` alone.
 - **F5** `claude_code.session()` returns `minted` unread, `final_message()` returns `out` verbatim, and
-  `message_of()` returns `None` ([claude_code.py:151-160](../app/agents/adapters/claude_code.py)). Parsing
+  `message_of()` returns `None` ([claude_code.py:151-160](../../app/agents/adapters/claude_code.py)). Parsing
   a JSON event stream is Codex's concern alone, not a shared contract property.
-- **F6** Callers: `nodes.extract_session` ([nodes.py:101-108](../app/agents/nodes.py)) calls
+- **F6** Callers: `nodes.extract_session` ([nodes.py:101-108](../../app/agents/nodes.py)) calls
   `session(out, minted)` and raises `TransportError("the agent's turn named no session")` when it is
   falsy — so the `None` return in F3 is a contract, not an accident. `nodes.parse_review` (nodes.py:146)
   applies its own `{` guard. `activities.py:322` and `nodes.py:177` reach `final_message`.
@@ -139,12 +139,12 @@ Each of these is excluded by D2, or by the evidence showing there is nothing to 
 ## Current architecture and source of truth
 
 A kind's module owns everything that differs between agents; every other module takes a kind as data and
-asks its module ([adapters/\_\_init\_\_.py](../app/agents/adapters/__init__.py)). Reading a finished
+asks its module ([adapters/\_\_init\_\_.py](../../app/agents/adapters/__init__.py)). Reading a finished
 turn's output is part of that contract: `session(out, minted)` names the session a new turn began, and
 `final_message(out)` its answer. `nodes.extract_session` and `nodes.parse_review` consume them and own
-the refusals (F6). Per [tests/README.md](../tests/README.md) the suite mirrors the packages, so these
+the refusals (F6). Per [tests/README.md](../../tests/README.md) the suite mirrors the packages, so these
 tests belong under `tests/agents/`; the shared fixtures stay at the suite root in
-[tests/fakes.py](../tests/fakes.py).
+[tests/fakes.py](../../tests/fakes.py).
 
 ## Problem and root cause
 
@@ -269,16 +269,16 @@ own (`run-tests.ps1`; the same names follow `bash run-tests.sh` on WSL):
 - `git diff -- app/` empty, and `git diff --stat` one insertion in `tests/README.md`; the new test module
   and this todo are untracked. Nothing staged, committed, merged or pushed (D3).
 
-Per [tests/README.md](../tests/README.md) the whole suite runs once when the change is otherwise done,
+Per [tests/README.md](../../tests/README.md) the whole suite runs once when the change is otherwise done,
 and on both hosts only when the change touches launching, terminals or worktrees — which this does not
 (A1). Whether to spend the full two-host run on a test-only change is the architect's call.
 
 ## Documentation plan
 
-- **Authoritative stable owner:** [tests/README.md](../tests/README.md) — its `| file | proves |` table
+- **Authoritative stable owner:** [tests/README.md](../../tests/README.md) — its `| file | proves |` table
   owns what each test file proves (F10).
 - **Router / TOC update:** none. The `| folder | covers |` table already routes `agents/` to
-  [app/agents](../app/agents/README.md), and the new module adds no folder.
+  [app/agents](../../app/agents/README.md), and the new module adds no folder.
 - **Content to add or change:** one table row for `agents/test_output.py`.
 - **Duplication avoided:** the row says what the module proves and does not restate the guard's mechanism,
   which `codex.py` owns as code. `adapters/__init__.py` already owns the contract line for

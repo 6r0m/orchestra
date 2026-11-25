@@ -13,6 +13,16 @@ let selected = null;
 let runTitle = "";
 let waitingCount = 0;
 
+const narrow = matchMedia("(max-width: 1000px)");
+const panel = $("runs-panel");
+function placeRuns() { panel.open = !narrow.matches; }
+placeRuns();
+narrow.addEventListener("change", placeRuns);
+
+export function collapseRuns() {
+  if (narrow.matches) panel.open = false;
+}
+
 export function setRunTitle(text) {
   runTitle = text;
   title();
@@ -87,6 +97,8 @@ function render() {
     else link.removeAttribute("aria-current");
   }
   waitingCount = groups["runs-waiting"].length;
+  $("runs-summary").textContent = waitingCount === 1 ? " · 1 needs attention"
+    : waitingCount ? " · " + waitingCount + " need attention" : "";
   title();
 }
 

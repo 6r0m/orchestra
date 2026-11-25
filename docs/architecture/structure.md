@@ -195,8 +195,8 @@ Orchestra's parts and the participants outside it are drawn in
 [the processes view](diagrams/processes.md), and every stop a run can reach is
 [the stops view](diagrams/stops.md). Verdicts flow one way — architect to workflow — and
 nothing else routes. Observability depends on the workflow; only optional cost display reads it back (D20). What
-each verdict means is in [the architect's own file](../../roles/architect.md); a host that binds its
-own methodology to a stage (`stage_skills`) owns it there instead.
+each verdict means is in [the architect's own file](../../roles/architect.md). Teams can bind their own
+methodology to a stage (D19).
 
 The source itself is organised by concern (D30): one package per concern under `app/`, and the
 folder is the ownership boundary. Each concern states its own boundaries, parts and invariants
@@ -683,28 +683,14 @@ still lands on a checkout.
   State plus the worktree remain sufficient to reconstruct a role, without
   depending on remembered instructions after compaction. Vendor-specific
   protection within a long turn belongs to [agents](../../app/agents/docs/architecture/structure.md).
-- **D19** **The skill owns its methodology; the persona owns only what is
-  orchestrator-specific**: the global `architect`, `investigate-change` and
-  `implement-approved-change` skills own their stance, evidence rules and
-  verdict vocabulary. A `roles/*.md` file states who the role is in this
-  workflow, defers to its skill, and adds only what the skill cannot know —
-  session persistence across stages and that the verdict is what routes (D4).
-  Settings name at most one skill per stage. The kind's adapter owns how it is
-  invoked and which installed roots it can use; Settings discovers names through
-  those roots, and `prepare` checks a binding on the target host before work.
-  A stage invokes its bound skill on every role invocation, including a retry
-  or a resumed review round. The binding is configuration,
-  not role initialization or workflow code.
-- **D25** **The workflow is deterministic.** No clock, randomness, file,
-  network or process call happens in workflow code outside Temporal's own APIs;
-  every effect is an activity. A change to what the workflow commands leaves
-  every recorded history under `tests/histories/` replaying as it was written,
-  and no history is recorded over. Such a change goes behind `workflow.patched`;
-  or, where every history already records what tells a run from before the
-  change from one after it — a field of its start, the name a step's result gave
-  a value — behind that, as the conflict over a tree the first closeouts left is
-  (D24). Only what a history itself holds may tell them apart, never anything
-  read when it replays.
+- **D19** **Team methodology is opt-in.** Stages use the built-in role and stage
+  instructions by default. Settings can bind one installed skill per stage.
+  The target worker checks explicit bindings before work. The agent adapter owns
+  discovery and invocation. A bound skill supplies the team's methodology and
+  leads each turn of that stage, including retries and resumed reviews. The
+  workflow still owns the stage result and routing (D4). New runs capture their
+  bindings at start.
+- **D25** **The workflow is deterministic.** The [orchestration package owns its replay contract](../../app/orchestration/docs/architecture/structure.md#invariants).
 - **D26** **One authority per repository fact, refusing when there is none.** A
   run's repository, base branch, execution target, worktree root and todo
   convention come from its `repos.json` entry when configured, and are detected

@@ -1,201 +1,37 @@
 # Orchestra
 
-**Local-first orchestration and operator workbench for coding agents.**
+**A local workbench for running and reviewing changes made by coding agents.**
 
-Temporal owns workflow state. Git owns code and merge state. Claude Code, Codex and Pi stay exactly what
-they are — native CLI agents, running on your machine, in their own terminals. Orchestra adds the
-part that is usually missing: a deterministic loop between them, live terminals you can watch and
-type into, a review you can read, and gates only a human answers.
+Give an engineer a task, let an architect review its plan and implementation, and decide what lands.
+Watch the agents in their own terminals and inspect the change at the final gate. Orchestra uses the
+native Claude Code, Codex and Pi CLIs and records the run in Temporal.
 
-```
-Engineer → Architect → Approval → Engineer → Architect → Merge
-```
-
-## The problem it solves
-
-An agent that works alone produces changes nobody reviewed. An agent supervised by hand produces
-one change at a time, and only while you watch. The usual answers — a chat window, a CI bot, a
-framework that owns the model — either lose the review or take the agent away from you.
-
-Orchestra keeps the agents native and puts a workflow around them:
-
-- **Two roles, one loop.** An engineer plans, an architect assesses, you approve, the engineer
-  builds, the architect verifies, the engineer closes the todo out, you merge. Each role keeps one
-  conversation across its stages, so the reviewer of the plan is the verifier of the build.
-- **Only a verdict routes.** The architect ends every turn with `PASS`, `PATCH`, `BLOCKER` or
-  `UNVERIFIED`, and that verdict is the only thing the workflow reads. Rounds are budgeted; when a
-  budget runs out the run stops for you instead of looping.
-- **The work happens in a worktree, never on your branch.** Agents never stage, commit, merge or
-  push. The controller does that, after your explicit *Merge*, and commits exactly the tree you
-  were shown: what the architect verified, with its todo closed out.
-- **Nothing is lost when something dies.** A worker killed mid-turn takes the agent's whole process
-  tree with it and the run stops for you to continue; the workflow's state is Temporal's history,
-  not a process's memory.
-
-## Architecture
-
-```
-            ┌──────────────────────────────────────────────┐
-  browser → │  workbench (localhost)                       │   runs, stops, rounds,
-            │  every run · live terminals · diff · gates   │   the change, the answers
-            └───────────────┬──────────────────────────────┘
-                            │ start / status / answer          (one client, also used by the CLI)
-            ┌───────────────▼──────────────────────────────┐
-            │  Temporal  — owns the workflow                │  the stages of the run's flow,
-            │  one workflow execution per run               │  stops, routing, retries, replay
-            └───────────────┬──────────────────────────────┘
-                            │ activities on the run's target queue
-        ┌───────────────────▼───────────────────┐   ┌───────────────────────────────┐
-        │  worker (WSL / Linux)                  │   │  worker (Windows)             │
-        │  git worktree · role turns · terminals │   │  same, with ConPTY + Job      │
-        └───────────────────┬───────────────────┘   └──────────────┬────────────────┘
-                            │ one contained process tree per turn  │
-                    ┌───────▼────────┐                     ┌───────▼────────┐
-                    │  claude (CLI)  │                     │  codex (CLI)   │
-                    └────────────────┘                     └────────────────┘
+```text
+Engineer plans → Architect reviews → You approve
+Engineer builds → Architect verifies → Engineer closes out → You decide whether to merge
 ```
 
-Each host runs its own worker and polls its own task queue, so a repository that must build on
-Windows gets Windows agents and a Linux-only repository gets WSL agents — from one checkout, on one
-machine. A turn is the vendor's real interactive CLI in a real PTY (ConPTY on Windows), contained so
-that the worker's death is the agent's death, including anything it started.
+[Set up your first run](docs/using.md#first-run) · [Use the Workbench](docs/using.md#the-page) ·
+[Read the trust model](docs/architecture/structure.md#risks-and-technical-debt)
 
-The source is organised the same way: one package per concern under [app/](app/README.md), whose
-README routes to each, and each states at its own level what it owns, what it may import, and the
-invariants it keeps.
-
-Every durable document — running it, the architecture, how it came to be — is reached from
-[docs/README.md](docs/README.md). Read [docs/architecture/structure.md](docs/architecture/structure.md) for what owns what, and
-[docs/architecture/diagrams/main.md](docs/architecture/diagrams/main.md) for the parts and the
-processes they run in.
-
-## Quick start
-
-You need Docker, [uv](https://docs.astral.sh/uv/), git, and whichever agent CLIs you intend to use
-(`claude`, `codex`, `pi`) installed and authenticated as you normally use them.
-
-```bash
-git clone <this repository> orchestra && cd orchestra
-cp .env.example .env          # set the credentials for the profiles you use
-make workbench-install        # the Workbench: a systemd user service in WSL, started with it
-make up                       # Temporal + its database, then both workers — or Start in the page
-make check                    # each part of the stack, and the Workbench's service
-```
-
-Open the page — `http://127.0.0.1:8390` by default — and start a run on this repository. To work on
-your own repositories, copy `.orchestra/repos.example.json` to `.orchestra/repos.json` (ignored) and
-describe them there; the page can also start a run on any path you type.
-
-To use DeepSeek through Pi 1.5.0 or newer, configure DeepSeek authentication in Pi and select `deepseek-engineer`
-in Settings. A managed Pi installation can name its wrapper in that profile's optional `launcher`
-setting in the ignored `.orchestra/settings.local.json`; the default executable is `pi`.
-The engineer selection and per-turn limit, editable in hours, are saved in the local settings patch.
-A run keeps the settings it started with. Provider usage and cost limits are separate from elapsed time;
-see the [trace and cost contract](docs/architecture/trace-contract.md#what-the-vendor-plugins-own).
-
-```bash
-make feature NAME=fix-uploader TASK="fix the retry in the uploader"
-make down                                           # stop the stack; Temporal keeps its data
-```
-
-For code updates, use the [scoped reload procedure](app/application/docs/architecture/structure.md#updating-running-orchestra-code).
-
-<!-- A screenshot or short GIF of the workbench belongs here: the run list, a live terminal
-     mid-turn, and the final gate with a diff. Put it in docs/images/ and link it. -->
-
-## Windows and WSL
-
-One checkout serves both hosts, on a Windows drive (`/mnt/<drive>/…` from WSL) — a native Windows
-process cannot use a `\\wsl.localhost\…` path as its working directory, so a checkout on the Linux
-filesystem cannot run the Windows worker. Each host keeps its own Python environment on its own
-disk, so the two never share a virtual environment.
-
-Containment differs per host and both are real: a POSIX worker puts each turn in its own systemd
-scope and reaps it; a Windows worker creates the agent **inside** a Job Object atomically, so a
-worker that dies between spawn and assignment cannot leave an agent behind.
-
-## Security and trust
-
-- **Local-first.** Everything listens on loopback: the workbench, the terminal sockets, Temporal.
-  Nothing is exposed to a network.
-- **The page's own token.** The API and the terminal sockets accept only a token generated on first
-  use, from the page's own origin, and the terminal sockets take it in the handshake's header rather
-  than in a URL.
-- **An agent's push reaches no remote.** A role's git environment refuses every transport, so a push
-  fails even if an agent tries — a guard against a push made by mistake, not a wall against a role that
-  set out to undo it (the next point); the controller alone commits and merges, after your answer. It
-  pushes only where a repository's entry names the remote its base branch lives on: that one
-  branch, on your Merge, by a push that forces nothing and rewrites nothing — and only to where that
-  remote led when the run began.
-- **Orchestra sandboxes no agent.** What holds a role to its worktree is its vendor's own. A Codex role
-  runs under Codex's sandbox, which the operating system enforces: it cannot write outside its
-  worktree. A Claude Code role is held by Claude Code's own rules alone, and a command a writing one
-  runs can write wherever your account can. Settings says which of the two holds the agent you choose.
-  A guard you keep in that host's own Claude settings — a hook that refuses a recursive delete outside
-  the working folder, say — runs in a role's turns as in any session there: a net under an accident,
-  not a boundary. Run it on repositories and hosts you trust
-  ([the accepted limits](docs/architecture/structure.md#risks-and-technical-debt)).
-- **Only what a stage judged can proceed.** A plan changed after the architect passed it goes back
-  for assessment before a build starts; a change made while the architect verifies fails that step;
-  a base branch that moved while a run built is brought into it and judged before the final gate;
-  the engineer's closeout of the todo may touch nothing the architect verified but the todo and
-  the documents the repository names; and a merge lands exactly the tree the final gate showed
-  you, on the base as it was judged. One exception, by design: a base that moved on after the gate
-  takes your change as git merges the two — the same change, on a tree no stage read whole — and
-  where git finds a conflict, nothing lands and the run's roles resolve and judge it first.
-- **Vendor trust dialogs are recorded, not bypassed.** Orchestra records a repository you start a
-  run on with the CLIs' own trust stores, so an unattended turn does not sit at a dialog — and it
-  never overrides an explicit `untrusted` decision of yours.
-- **The private surface is one file.** `.env` holds credentials and machine-specific values;
-  `.env.example` names its keys. Everything about how runs behave is public configuration in
-  `.orchestra/settings.json`. Before publishing anything from a fork: `make public-check`.
-
-## What is proven
-
-The suite is the argument. Its agents are scripted stand-ins, so no run of it calls a model or spends
-quota ([what is real in it, and what is not](tests/README.md#no-test-runs-a-real-agent)). It runs on both
-hosts and covers the things that are easy to claim and hard to do: crash and restart, process-tree containment, exact turn completion for each vendor,
-session loss and rehydration, merge and discard lifecycles, replay-safe workflow evolution, large
-diffs through Temporal's payload limit, and the operator's page.
-
-```bash
-bash run-tests.sh                       # the whole suite, in this checkout's environment
-python tests/acceptance_restart.py      # live acceptance: real Temporal and workers, fake agents
-powershell -NoProfile -ExecutionPolicy Bypass -File run-tests.ps1   # on Windows: the host suite
-```
-
-The live acceptance restarts the server and the workers mid-run, kills a worker while a role is
-running, changes a plan between `PASS` and *Approve*, reads a change larger than one Temporal
-payload in parts and compares it against a patch `git` prints itself, then merges one run and
-discards another — and leaves nothing on the host. [tests/README.md](tests/README.md) says what each
-file proves; [docs/history/](docs/history/) records how the system got here.
+| Find | Go to |
+|---|---|
+| Setup, daily operation and troubleshooting | [Documentation](docs/README.md) |
+| Production components and their owners | [Source](app/README.md) |
+| How to contribute, test and verify a change | [Contributing](CONTRIBUTING.md) |
+| Development and acceptance checks | [Tests](tests/README.md) |
+| Local demo and repository checks | [Tools](tools/README.md) |
+| Work in progress | [Todo](todo/README.md) |
 
 ## Configuration
 
-| what | where |
-|---|---|
-| shared Settings defaults and local overrides | [`.orchestra/settings.json`](.orchestra/settings.json) and the ignored `.orchestra/settings.local.json`, validated by [`policy.py`](app/foundation/policy.py) and [`application.settings`](app/application/settings.py) |
-| how each role works | [`roles/engineer.md`](roles/engineer.md), [`roles/architect.md`](roles/architect.md) |
-| the order a run's stages take | [`flows/`](flows/README.md), one file per flow; the policy's `default_flow` names the default |
-| the repositories runs may work on | `.orchestra/repos.json` — yours; copy [`.orchestra/repos.example.json`](.orchestra/repos.example.json) |
-| credentials and machine-specific values | `.env` — see [`.env.example`](.env.example) |
-
-Each row is the one place its values are written. Whatever needs one reads it from there — production
-code through that file's loader, the suite from the same file — and keeps no copy of its own: not a
-constant in code, not a fixture, not a value a test expects
-([how a test reads them](tests/README.md#one-source-for-every-value)).
-
-Running it day to day — the page, the command line, and where to look when something is wrong — is
-[docs/using.md](docs/using.md). What is being worked on right now is in [todo/](todo/README.md).
-
-The Workbench's Settings view manages role profiles, one explicit methodology skill per stage, review
-budgets, the per-turn time limit and the default flow. Each Apply writes a sparse patch to the ignored
-`.orchestra/settings.local.json`; Revert removes one local override, while Reset stages Revert for every
-setting the page owns and still requires Apply. Other hand-written local members survive. The shared
-file carries the defaults. A separate stack may name its own complete settings file through
-`ORCHESTRA_SETTINGS`; that file is taken alone and the Workbench shows it read-only.
+- [Policy and first-run settings](docs/using.md#first-run)
+- [Optional team skills](docs/using.md#optional-team-skills)
+- [Repository descriptor example](.orchestra/repos.example.json)
+- [Role definitions](roles/README.md)
+- [Workflow definitions](flows/README.md)
 
 ## License
 
-MIT — see [LICENSE](LICENSE). The vendored `app/interfaces/workbench/static/vendor/xterm/` is
-[@xterm/xterm](https://github.com/xtermjs/xterm.js) 5.5.0, MIT, unmodified.
+Orchestra is [MIT licensed](LICENSE). Third-party notice files accompany the
+[Workbench's vendored assets](app/interfaces/workbench/static/vendor/).

@@ -37,13 +37,7 @@
       "persona_file": "roles/architect.md"
     }
   },
-  "stage_skills": {
-    "research": "architect",
-    "plan": "investigate-change",
-    "assess": "architect",
-    "build": "implement-approved-change",
-    "verify": "architect"
-  },
+  "stage_skills": {},
   "review_rounds": {
     "plan": {
       "normal": 10,

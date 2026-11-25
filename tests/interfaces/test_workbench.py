@@ -1133,6 +1133,15 @@ class Runs(Scenario):
         self.addCleanup(lambda: E.Run.cleanup(type("R", (), {"run_id": run_id})()))
         return run_id
 
+    def test_repository_reads_return_the_target_hosts_git_refusal(self):
+        self.host, self.agent = E.host([], repositories=runs.repos)
+        query = urllib.parse.urlencode({"repo": self.repo})
+        for path in ("/api/landing", "/api/worktrees", "/api/skills"):
+            with self.subTest(path=path):
+                status, body = request("GET", path + "?" + query)
+                self.assertEqual(status, 400, body)
+                self.assertIn("is not a git repository", body["error"])
+
     def test_a_waiting_run_says_what_it_waits_at_since_when_and_what_it_takes(self):
         a1, _ = configured_review_first("PASS", "Direction: A.")
         self.host, self.agent = E.host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)], git=FakeWorktrees())

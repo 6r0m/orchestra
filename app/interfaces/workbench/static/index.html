@@ -36,6 +36,8 @@
   <p class="banner bad" id="connection" hidden></p>
 </div>
 <div class="layout">
+  <details class="runs-panel" id="runs-panel" open>
+    <summary>Runs<span id="runs-summary"></span></summary>
   <nav class="rail" aria-label="Runs">
     <section class="group" aria-labelledby="runs-waiting-title">
       <h2 id="runs-waiting-title">Operator action <span class="count" id="runs-waiting-count"></span></h2>
@@ -56,6 +58,7 @@
     <button type="button" class="quiet" id="runs-older" hidden
           title="List closed runs older than these: Temporal keeps them, and the list shows the newest first">Load older runs</button>
   </nav>
+  </details>
   <main id="main" tabindex="-1">
     <section class="view empty" id="view-empty" hidden aria-labelledby="empty-title">
       <h1 id="empty-title">Select a run</h1>
@@ -80,7 +83,8 @@
           <p class="hint" id="start-landing" role="status">Choose a repository to see where Merge lands.</p>
           <label for="start-destination">Preferred Merge destination</label>
           <select id="start-destination" name="merge_preference" disabled></select>
-          <button type="button" id="start-landing-retry">Refresh destinations</button>
+          <button type="button" id="start-landing-retry"
+            title="Read the selected repository's Merge destinations again">Refresh destinations</button>
         </div>
         <fieldset class="field source" id="start-source">
           <legend>Repository</legend>
@@ -109,7 +113,8 @@
             step and the merge still wait for you.</p>
         </div>
         <div class="form-end">
-          <button type="button" id="start-skills">Add skills to instructions</button>
+          <button type="button" id="start-skills"
+            title="Insert references to installed skills into the task">Add skills to instructions</button>
           <button type="submit" class="primary"
             title="Start this task as a new run on the chosen repository, in the chosen flow">Start run</button>
           <p class="result" id="start-result" role="status"></p>
@@ -320,7 +325,8 @@
         <div class="field" id="stop-note-field">
           <label for="stop-note" id="stop-note-label">Your note</label>
           <textarea id="stop-note" name="note" rows="3" autocomplete="off"></textarea>
-          <button type="button" id="stop-skills">Add skills to instructions</button>
+          <button type="button" id="stop-skills"
+            title="Insert references to installed skills into your note">Add skills to instructions</button>
           <p class="alert" id="stop-note-alert" role="alert"></p>
         </div>
         <div class="actions" id="stop-actions"></div>

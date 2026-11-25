@@ -97,7 +97,12 @@ the queue; what the activity does is the other side's.
   leaves the stop, accepted notes and execution unchanged. Neither transport truncates or summarizes text.
   Note-free actions remain available even when legacy reference metadata already exceeds the new allowance.
   These bounds protect individual payloads, not total workflow-history size or unrelated payloads.
-- **The workflow is deterministic (D25).** A change to what it commands keeps the recorded histories in `tests/histories/` replaying — behind `workflow.patched(...)`, or behind what those histories themselves record — and `tests/orchestration/test_replay.py` is the guard, with a control.
+- **The workflow is deterministic (D25).** The workflow uses Temporal APIs for time and randomness
+  and activities for file, network and process effects. A change to its commands must replay the
+  existing [recorded histories](../../../../tests/histories/) without rewriting them. Use
+  `workflow.patched(...)` or facts already recorded in every affected history, such as a start
+  field or an activity result. Replay must choose using recorded facts. The
+  [replay tests](../../../../tests/orchestration/test_replay.py) include a known-incompatible control.
 - **A stop waits here and nowhere else (D6).** Each stop publishes the actions it takes, a revise at the final gate named per role, and its answer arrives as an Update carrying one of them, with the stable id `answer:<stop-id>`, so an answer sent twice is applied once. No activity ever waits for a human.
 - **Adopting a verified todo name does not answer a stop.** At a failed closeout, an explicit operator
   Update asks the target host to validate the selected filename against the architect's verified tree.

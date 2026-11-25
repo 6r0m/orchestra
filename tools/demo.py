@@ -91,8 +91,12 @@ FAKE = textwrap.dedent("""\
     brain = "codex" if "codex" in os.path.basename(sys.argv[0]) else "claude"
     complete = fake_cli.completer(brain, argv, prompt)
     state = os.environ["DEMO_STATE"]
-    # The prompt it was given, shown first, as a vendor's CLI shows it: a session then fills more than one
-    # screen, as a real one does, and the page's terminal has a history to scroll back through.
+    # A replayed recording repeats this marker; another prompt from the same role does not.
+    recording = os.path.join(state, "recording-" + os.path.basename(os.getcwd()) + "-" + brain)
+    if not os.path.exists(recording):
+        open(recording, "w").close()
+        fake_cli.draw("Demo terminal recording began.")
+    # Echo the prompt so the recording fills more than one screen, as a vendor's terminal does.
     for line in prompt.splitlines():
         fake_cli.draw(line)
 
@@ -138,7 +142,8 @@ FAKE = textwrap.dedent("""\
             say("reading the plan and the repository...", "checking the plan against the task...")
             verdict = ("PATCH", "Required finding - the plan does not name the test that proves it. "
                                 "Smallest safe fix: name the test.") if rounds == 1 else (
-                       "PASS", "Direction: add greeting.txt and its test.\\nBlast radius: one new file.")
+                       "PASS", "Direction: add the greeting and its test.\\n\\n| file | change |\\n|---|---|\\n"
+                               "| greeting.txt | new |")
         else:
             say("reading the change...", "comparing it with the approved plan...")
             # Written in Markdown, as agents write: the page draws its table as a table.
@@ -146,30 +151,37 @@ FAKE = textwrap.dedent("""\
                                "| greeting.txt | **new** |")
         message = json.dumps({"verdict": verdict[0], "feedback": verdict[1]})
     else:
+        message = "done"
         todo = re.search(r"write the reviewable todo to exactly: (\\S+)", prompt)
-        closing = re.search(r"Close out its todo at (\\S+)\\. (?:Move|Delete) it", prompt)
-        done = re.search(r"Move it to (\\S+) under its own name", prompt)
+        closing = re.search(r"Prepare its todo outcome at (\\S+)\\.", prompt)
         if closing:
             say("closing out the todo...", "moving it to the done folder...")
-            # A closeout run again finds its own work done.
+            destinations = re.search(r"^Repository destinations.*?: (\\{[^\\n]+\\})$", prompt, re.M)
+            done = json.loads(destinations.group(1))["completed"]
             if os.path.exists(closing.group(1)):
                 closed = open(closing.group(1)).read().replace("**Status:** DRAFT", "**Status:** PASS")
                 os.remove(closing.group(1))
                 if done:
-                    os.makedirs(done.group(1), exist_ok=True)
-                    open(os.path.join(done.group(1), os.path.basename(closing.group(1))), "w").write(closed)
+                    os.makedirs(done, exist_ok=True)
+                    open(os.path.join(done, os.path.basename(closing.group(1))), "w").write(closed)
+            message = json.dumps({"todo": {"disposition": "completed", "remaining": "", "reason": ""},
+                                  "commit_message": {"subject": "Add the demo greeting"}})
         elif "Implement the approved todo" in prompt:
             say("implementing the approved plan...", "running the test...")
             open("greeting.txt", "w").write("hello\\n")
         elif todo:
-            say("reading the repository...", "writing the plan...")
-            os.makedirs(os.path.dirname(todo.group(1)), exist_ok=True)
-            open(todo.group(1), "w").write("**Status:** DRAFT\\n# Add a greeting\\n")
-            open(os.path.join(state, "todo"), "w").write(todo.group(1))
+            path = todo.group(1)
+            if os.path.exists(path):
+                say("reading the architect's finding...", "naming the test in the plan...")
+                with open(path, "a") as plan:
+                    plan.write("Test: greeting.txt says hello.\\n")
+            else:
+                say("reading the repository...", "writing the plan...")
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w") as plan:
+                    plan.write("**Status:** DRAFT\\n# Add a greeting\\n")
         else:
-            say("reading the architect's finding...", "naming the test in the plan...")
-            open(open(os.path.join(state, "todo")).read(), "a").write("Test: greeting.txt says hello.\\n")
-        message = "done"
+            raise SystemExit("unexpected demo engineer prompt")
     complete(message, typed=typed)
     time.sleep(0.2)
 """).replace("{{TESTS}}", TESTS)
@@ -270,17 +282,15 @@ class Demo:
             with open(path, "w") as fh:
                 fh.write(body)
             os.chmod(path, 0o755)
-        # Codex's home is the demo's own, for what it records; its skills are still the host's, as a run finds them.
+        # Codex records trust in the demo's own home.
         os.makedirs(os.path.join(self.tmp, "codex-home"), exist_ok=True)
-        skills = os.path.join(os.path.expanduser("~"), ".codex", "skills")
-        if os.path.isdir(skills):
-            os.symlink(skills, os.path.join(self.tmp, "codex-home", "skills"))
         # The deployment's own settings, with a host and a workflow queue of the demo's own: its queues are
         # polled by no worker but the demo's, and its ports are free now.
         policy = json.load(open(P.SETTINGS_FILE, encoding="utf-8"))
         # These fakes speak Claude's engineer contract and Codex's review contract, independent of defaults.
         policy["roles"]["engineer"]["agent"] = "claude-engineer"
         policy["roles"]["architect"]["agent"] = "codex-architect"
+        policy["stage_skills"] = {}
         host = "demo%s" % os.urandom(3).hex()
         policy["heartbeat_seconds"], policy["timeout_seconds"] = 10, 900
         policy["workflow_queue"] = "orchestration:%s" % host
@@ -438,16 +448,10 @@ class Demo:
             check(scope in fh.read(), "in a systemd scope of its own, %s, which no restart of a Workbench takes"
                   % scope[1:])
 
-        step("a run refused at its start: the page says why in a window, which stays until it is closed")
+        step("a destination check refuses an invalid repository before a start can be sent")
         pressed = self.press("start", "refused:no-repository:" + TASKS["refused"], "is not a git repository")
-        started = re.search(r"started ([\w-]+)", self.said)
-        if started:
-            self.runs.append(started.group(1))
-        check(pressed and started, "started from the form on a listed folder that is no git repository; a window "
-              "said why, stayed through the page's reads and a move to another view, and closed on its Close")
-        view = self.view(started.group(1))
-        check(closed(view) and view["status"] == "REFUSED" and not view["worktree"],
-              "the run ended refused, before any work: %s, no worktree" % view["status"])
+        check(pressed, "the form said why and sent no start; its window stayed through reads and navigation "
+              "and closed on its Close")
 
         step("a start the Workbench refuses, and one it does not confirm, each said as what it is")
         for status, title in (("400", "The run was not started"), ("502", "The start was not confirmed"),
@@ -536,9 +540,8 @@ class Demo:
         check(plan not in landed and done in landed
               and git(self.repo, "show", "develop:" + done).startswith("**Status:** PASS"),
               "and the todo as the engineer's closeout left it, in the merge itself: %s" % done)
-        check(self.press(merged, "absent:Stop run,Force terminate,Copy all changes,Read the change", "absent"),
-              "the page offers the closed run neither Stop run nor Force terminate — nor, its worktree gone with the "
-              "merge, its change to read or copy")
+        check(self.press(merged, "absent:Stop run,Force terminate,Read the change", "absent"),
+              "the closed run offers no live run controls or worktree reads")
         check(self.press(merged, "turn:verify", "The change is the approved plan.") and "PASS" in self.said,
               "the page opens the verify turn and shows its verdict and feedback, read from the record its host "
               "wrote")
@@ -599,6 +602,8 @@ class Demo:
         view = self.view(stuck)
         check((view["state"], view["stage"]) == ("stopping", "merge"),
               "the Stop waits for the merge, which it never cuts off: %s, %s" % (view["state"], view["stage"]))
+        choice = self.api("/api/runs/%s" % stuck)["state"]["merge_choice"]
+        expected_subject = choice["messages"]["merge"].splitlines()[0]
         check(self.press(stuck, "Force terminate", "terminated"), "the page sent the force terminate, confirmed")
         check(self.asked("Force terminate", "a merge", "may still change the repository"),
               "and its question said a merge already running goes on and may still change the repository")
@@ -608,11 +613,10 @@ class Demo:
 
         step("the held merge let go, with the worker still running: termination did not stop it")
         before = git(self.repo, "rev-parse", "develop").strip()
-        plan = os.path.splitext(os.path.basename(self.api("/api/runs/%s" % stuck)["state"]["plan"]))[0]
         self.hold("hold-merge", False)
         wait(lambda: git(self.repo, "rev-parse", "develop").strip() != before, 60, "the held merge going on")
         subject = git(self.repo, "log", "-1", "--format=%s", "develop").strip()
-        check(subject == "Merge %s" % plan,
+        check(subject == expected_subject,
               "the merge landed on the base branch after its run had closed, as the confirmation warns: %r" % subject)
         check(wait(lambda: not self.kept(stuck, view["worktree"]), 30, "the merge's own cleanup"),
               "and its own cleanup took the run's worktree and branch")

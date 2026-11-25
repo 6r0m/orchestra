@@ -130,7 +130,7 @@ async function loadRepos() {
     const menu = repoMenu(tree, (repo) => {
       setRepo(select, repo);
       box.querySelector(".menu").hidden = true;
-      select.dispatchEvent(new Event("change"));
+      select.dispatchEvent(new Event("change", { bubbles: true }));
     });
     if (!listed.length) menu.appendChild(el("li", "None in repos.json: choose A path", "muted"));
     const open = box.querySelector(".menu");

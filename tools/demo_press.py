@@ -161,11 +161,13 @@ TURN_SAID = ("(stage => { " + LATEST_TURN + " const field = turn && turn.querySe
 # before it, that change opened first — and the lines its diff then shows.
 OPEN_FILE = ("((scope, path) => { const box = typeof scope === 'string' ? document.querySelector(scope) : scope;"
              " const change = box && box.closest('details.change'); if (change) change.open = true;"
-             " const file = box && [...box.querySelectorAll('details.file')].find((f) => f.dataset.path === path);"
+             " const file = box && [...box.querySelectorAll('details.file')]"
+             ".find((f) => f.dataset.path === path && f.checkVisibility());"
              " if (!file) return false; if (!file.open) file.querySelector('summary').click(); file.scrollIntoView();"
              " return true; })(%s, %s)")
 FILE_LINES = ("((scope, path) => { const box = document.querySelector(scope);"
-              " const file = box && [...box.querySelectorAll('details.file')].find((f) => f.dataset.path === path);"
+              " const file = box && [...box.querySelectorAll('details.file')]"
+              ".find((f) => f.dataset.path === path && f.checkVisibility());"
               " return file ? [...file.querySelectorAll('.diff .ln')].map((l) => l.innerText.replace(/\\s+/g, ' ')"
               ".trim()) : []; })(%s, %s)")
 OPEN_ROUND = ("(stage => { " + LATEST_TURN + " if (!turn) return false;"
@@ -175,19 +177,25 @@ OPEN_ROUND = ("(stage => { " + LATEST_TURN + " if (!turn) return false;"
               " if (!turn.id) turn.id = 'pressed-turn'; return '#' + turn.id; })(%s)")
 HISTORY_SAID = "document.getElementById('timeline').innerText.replace(/\\s+/g, ' ')"
 
-# A role's terminal watched: the connections the page opens for it, and the xterm it makes — whose buffer,
-# selection and scroll are read from it, not from what it drew. Then opened, as a click on its summary opens it:
-# its xterm is the first the page makes from here, and the other role's, made once that role works, is not it.
-HOLD = ("(role => { const held = window.__held = { role: role, sockets: 0, term: null, first: null };"
-        " const Socket = window.WebSocket;"
-        " window.WebSocket = function (url, protocols) {"
-        " if (String(url).endsWith('/' + role)) held.sockets += 1; return new Socket(url, protocols); };"
-        " window.WebSocket.OPEN = Socket.OPEN;"
-        " const Made = window.Terminal;"
-        " window.Terminal = function (options) { const term = new Made(options); held.term = held.term || term;"
-        " return term; };"
-        " const box = document.getElementById('terminal-' + role);"
-        " box.querySelector('summary').click(); box.scrollIntoView(); return true; })(%s)")
+# Observe the terminal before the page can warm either role. Match the role by its mount.
+HOLD_STAND_IN = """(role => {
+  const held = window.__held = {role, sockets: 0, term: null, first: null};
+  window.WebSocket = class extends window.WebSocket {
+    constructor(url, protocols) {
+      super(url, protocols);
+      if (String(url).endsWith('/' + role)) held.sockets += 1;
+    }
+  };
+  let terminalClass;
+  Object.defineProperty(window, 'Terminal', {configurable: true, get: () => terminalClass, set: value => {
+    terminalClass = class extends value {
+      open(node) {
+        if (node.parentElement?.id === 'term-' + role) held.term = this;
+        super.open(node);
+      }
+    };
+  }});
+})(%s);"""
 # Its record in: the page says it is recorded, and a line of it is in the buffer.
 HELD_READY = ("(h => { if (!h.term || !document.getElementById('state-' + h.role).textContent.startsWith('recorded'))"
               " return false; const buffer = h.term.buffer.active;"
@@ -209,9 +217,9 @@ HOLD_SECONDS = 18
 # The status line beside a control: in the nearest part of the page around it that has one. What the
 # page says of a press is there — `answered: ...`, `stopping`, `terminated`, `done: ...`, `started <run
 # id>`, `removed` — or, for a refusal, in the alert beside it: `not accepted: ...`, `refused: ...`.
-REGION = ("(b => { let node = b.parentElement; while (node && !node.querySelector('[role=status]'))"
+REGION = ("(b => { let node = b.parentElement; while (node && !node.querySelector('.result[role=status], [role=alert]'))"
           " node = node.parentElement; if (!node.id) node.id = 'pressed-' + Date.now(); return node.id; })(%s)")
-SAID = ("(id => [...document.getElementById(id).querySelectorAll('[role=status], [role=alert]')]"
+SAID = ("(id => [...document.getElementById(id).querySelectorAll('.result[role=status], [role=alert]')]"
         ".map((n) => n.textContent.trim()).find((t) => t && t !== 'sending…' && t !== 'starting…') || '')(%s)")
 
 # After a press that leaves the keyboard in a role's terminal: whether it is there, and whether the other
@@ -231,8 +239,10 @@ CONTROLS = ("(() => [...document.querySelectorAll('#run-strip button, #run-strip
 # The page scrolled to its end, then the keyboard given to a control it had scrolled past: how far below the
 # pinned strip that control then is — never under it.
 FOCUS_BELOW = ("(() => { scrollTo(0, document.documentElement.scrollHeight);"
-               " const first = document.querySelector('#run .run-head button, #run .run-head a[href], #agents summary');"
-               " if (!first) return null; first.focus();"
+               " const first = [...document.querySelectorAll('#run .run-head button, #run .run-head a[href],"
+               " #agents summary')].find((control) => control.checkVisibility() && !control.disabled);"
+               " if (!first) throw new Error('No visible run control to focus'); first.focus();"
+               " if (document.activeElement !== first) throw new Error('The run control did not take focus');"
                " return Math.round(first.getBoundingClientRect().top"
                " - document.getElementById('run-strip').getBoundingClientRect().bottom); })()")
 # Each list of runs: how many it holds, whether it scrolls inside itself, and which runs it holds.
@@ -243,7 +253,7 @@ LISTS = ("(() => Object.fromEntries(['runs-waiting', 'runs-running', 'runs-finis
 # The rail that holds them, where it is pinned beside the run: how far it scrolls as a whole, and how many rows'
 # height the tallest list past five still shows. Null where the window is too narrow for a rail beside the run.
 RAIL = ("(() => { const rail = document.querySelector('.rail');"
-        " if (getComputedStyle(rail).position !== 'sticky') return null;"
+        " if (getComputedStyle(document.getElementById('runs-panel')).position !== 'sticky') return null;"
         " const tall = [...rail.querySelectorAll('.runs')].filter((list) => list.querySelectorAll('a.row').length > 5)"
         ".map((list) => list.clientHeight / list.querySelector('a.row').offsetHeight);"
         " return { scrolls: rail.scrollHeight - rail.clientHeight, shown: Math.max(0, ...tall),"
@@ -269,7 +279,15 @@ def laid_out(page, run_id, size, said):
     wait(lambda: page.value(OPENED), 60, "the run")
     time.sleep(6)                                   # two of the page's reads of the run and of the list
     wrong = []
-    # The top of the run's own page: below the runs' lists, where the window is too narrow for them beside it.
+    narrow = page.value("innerWidth <= 1000")
+    if narrow and not page.value(
+            "(() => { const panel = document.getElementById('runs-panel');"
+            " const strip = document.getElementById('run-strip').getBoundingClientRect();"
+            " return panel && !panel.open && panel.querySelector('summary').checkVisibility()"
+            " && strip.bottom <= innerHeight"
+            " && Math.abs(document.getElementById('main').getBoundingClientRect().top"
+            " - panel.getBoundingClientRect().bottom) < 1; })()"):
+        wrong.append("the run controls do not fit in the first view with the run list collapsed")
     page.value("document.getElementById('run-strip').scrollIntoView(); true")
     time.sleep(0.5)
     top = page.value(CONTROLS)
@@ -279,8 +297,10 @@ def laid_out(page, run_id, size, said):
     for where, controls in (("at the top", top), ("scrolled to the history", scrolled)):
         wrong += ["%s is not seen whole %s" % (control["label"], where) for control in controls if not control["seen"]]
     below = page.value(FOCUS_BELOW)
-    if below is not None and below < 0:
+    if below < 0:
         wrong.append("what took the keyboard is %d px under the pinned controls" % -below)
+    if narrow:
+        page.value("document.querySelector('#runs-panel > summary')?.click(); true")
     lists = page.value(LISTS)
     for name, found in lists.items():
         if found["rows"] > 5 and not found["scrolls"]:
@@ -320,8 +340,16 @@ def refused(page, repo, task, said):
     page.value("location.hash = '#new'; true")
     wait(lambda: page.value("[...document.getElementById('start-repo').options].some((o) => o.value === %s)"
                             % json.dumps(repo)), 30, "the page offering the repository %s" % repo)
-    page.value("document.getElementById('start-name').value='demo-change'; document.getElementById('start-repo').value = %s; document.getElementById('start-task').value = %s;"
-               " true" % (json.dumps(repo), json.dumps(task)))
+    wait(lambda: page.value("!document.getElementById('start-destination').disabled"), 30,
+         "the first repository's destination")
+    page.value("document.querySelector('#start-source .picker-button').click(); true")
+    page.value("[...document.querySelectorAll('#start-source .menu button')]"
+               ".find(button => button.title === %s).click(); true" % json.dumps(repo))
+    page.value("document.getElementById('start-name').value='demo-change';"
+               " document.getElementById('start-task').value = %s; true" % json.dumps(task))
+    wait(lambda: page.value("document.getElementById('start-landing').textContent.includes(%s)" % json.dumps(said)),
+         30, "the host's refusal in the destination preview")
+    page.value(ANSWER_STARTS % json.dumps("400"))
     pressed = button("#start", "Start run")
     wait(lambda: page.value(pressed + " !== undefined"), 60, "the 'Start run' button")
     region = page.value(REGION % pressed)
@@ -340,7 +368,8 @@ def refused(page, repo, task, said):
     print("it %s open through the page's reads, %s open once the page moved to Worktrees, and %s on its Close"
           % ("stayed" if stayed else "did NOT stay", "stayed" if moved else "did NOT stay",
              "closed" if shut else "did NOT close"))
-    return 0 if started.startswith("started ") and said in window and stayed and moved and shut else 1
+    sent = page.value("window.__starts")
+    return 0 if started.startswith("refused: ") and said in window and stayed and moved and shut and sent == 0 else 1
 
 
 # Every write of the page's answered in the page, so none reaches the Workbench: its start with `status` — an
@@ -364,6 +393,8 @@ def answered(page, status, said):
     page.value("location.hash = '#new'; true")
     wait(lambda: page.value("document.getElementById('start-repo').options.length > 0"), 30,
          "the repositories the page offers")
+    wait(lambda: page.value("!document.getElementById('start-destination').disabled"), 30,
+         "an available destination")
     page.value(ANSWER_STARTS % json.dumps(status))
     page.value("document.getElementById('start-name').value='demo-change'; document.getElementById('start-task').value = %s; true" % json.dumps("A start answered " + status))
     pressed = button("#start", "Start run")
@@ -481,6 +512,8 @@ def change(page, run_id, path, words):
     read it, and that file's diff, opened, shows `words`. Prints what it saw."""
     page.value(OPEN % json.dumps(run_id))
     wait(lambda: page.value(OPENED), 60, "the run")
+    wait(lambda: page.value("!document.getElementById('change').hidden"), 30, "the change disclosure")
+    page.value("document.getElementById('change').open = true; true")
     shown = wait(lambda: (lambda seen: seen if seen and path in seen["paths"] else None)(page.value(CHANGE)), 90,
                  "the run's change to list %s" % path)
     wait(lambda: page.value(OPEN_FILE % (json.dumps("#change"), json.dumps(path))), 30, "the file %s" % path)
@@ -505,6 +538,17 @@ CLIPBOARD_STAND_IN = """(() => {
   navigator.clipboard.writeText = (text) => { copied.push(text); return Promise.resolve(); };
   navigator.clipboard.write = async (items) => {
     for (const item of items) copied.push(await (await item.getType("text/plain")).text());
+  };
+})();"""
+
+LEGACY_CHANGE_HISTORY = """(() => {
+  const real = window.fetch;
+  window.fetch = async (path, options) => {
+    if (!new URL(String(path), location.href).pathname.endsWith("/history")) return real(path, options);
+    const response = await real(path, options);
+    const record = await response.json();
+    delete record.review;
+    return new Response(JSON.stringify(record), {status: response.status, headers: response.headers});
   };
 })();"""
 
@@ -573,7 +617,7 @@ def change_rows(page, run_id):
                  and changed["open"] == ["a.txt"] and changed["reads"] == {"a.txt": 2}) else 1
 
 
-CHANGE_DISCLOSURE_STAND_IN = FEED_STAND_IN + """(() => {
+CHANGE_DISCLOSURE_STAND_IN = FEED_STAND_IN + LEGACY_CHANGE_HISTORY + """(() => {
   const real = window.fetch;
   window.fetch = async (path, options) => {
     const url = new URL(String(path), location.href);
@@ -687,7 +731,8 @@ def change_idle(page, run_id):
     time.sleep(6)                                   # two of the page's reads of the run
     page.value("const change=document.getElementById('change'); if(change.tagName==='DETAILS') change.open=true; true")
     opened = page.value("window.__feed.opened")
-    button = page.value("(b => Boolean(b && !b.hidden && b.offsetParent))(document.getElementById('diff-load'))")
+    button = page.value("[...document.querySelectorAll('#change button')].some(b => b.checkVisibility()"
+                        " && (b.id === 'diff-load' || ['Read changes', 'Refresh'].includes(b.textContent)))")
     print("the waiting run's page opened %d socket(s) for its change, %s its button to read it"
           % (opened, "and offers" if button else "and does NOT offer"))
     return 0 if opened == 0 and button else 1
@@ -699,7 +744,9 @@ TERMINAL_STAND_IN = """(() => {
   const sent = window.__sent = [], copied = window.__copied = [];
   const send = WebSocket.prototype.send;
   WebSocket.prototype.send = function (data) {
-    if (/\\/(engineer|architect)$/.test(new URL(this.url).pathname)) { sent.push(String(data)); return; }
+    if (typeof data === "string" && /\\/(engineer|architect)$/.test(new URL(this.url).pathname)) {
+      sent.push(data); return;
+    }
     return send.call(this, data);
   };
   if (navigator.clipboard) navigator.clipboard.writeText = (text) => { copied.push(text); return Promise.resolve(); };
@@ -1857,13 +1904,18 @@ window.WebSocket=class extends NativeSocket{
             if label in ("change-rows", "change-idle"):
                 # A script for documents to come is applied only once the Page domain is enabled (measured).
                 page.call("Page.enable")
-                page.call("Page.addScriptToEvaluateOnNewDocument", source=FEED_STAND_IN)
+                source = FEED_STAND_IN + (LEGACY_CHANGE_HISTORY if label == "change-rows" else "")
+                page.call("Page.addScriptToEvaluateOnNewDocument", source=source)
             if label == "change-disclosure":
                 page.call("Page.enable")
                 page.call("Page.addScriptToEvaluateOnNewDocument", source=CHANGE_DISCLOSURE_STAND_IN)
             if label.startswith("terminal-fit:"):
                 page.call("Page.enable")
                 page.call("Page.addScriptToEvaluateOnNewDocument", source=TERMINAL_STAND_IN)
+            if label.startswith("hold:"):
+                page.call("Page.enable")
+                page.call("Page.addScriptToEvaluateOnNewDocument",
+                          source=HOLD_STAND_IN % json.dumps(label.split(":", 2)[1]))
             if label == "handoff":
                 page.call("Page.enable")
                 page.call("Page.addScriptToEvaluateOnNewDocument", source=HANDOFF_STAND_IN)
@@ -2163,15 +2215,15 @@ window.WebSocket=class extends NativeSocket{
                 role, label = label.split(":", 2)[1:]
                 page.value(OPEN % json.dumps(run_id))
                 wait(lambda: page.value(OPENED), 60, "the run")
-                page.value(HOLD % json.dumps(role))
+                page.value(OPEN_TERMINAL % json.dumps(role))
                 wait(lambda: page.value(HELD_READY), 60, "the %s terminal's record" % role)
                 held = {"role": role, "selected": page.value(HELD_SELECT)}
                 time.sleep(HOLD_SECONDS)
                 held["before"] = page.value(HELD_READ)
             if run_id == "start":
                 page.value("location.hash = '#new'; true")
-                wait(lambda: page.value("document.getElementById('start-repo').options.length > 0"), 30,
-                     "the repositories the page offers")
+                wait(lambda: page.value("!document.getElementById('start-destination').disabled"), 30,
+                     "an available destination")
                 page.value("document.getElementById('start-name').value='demo-change'; document.getElementById('start-task').value = %s; true" % json.dumps(label))
                 pressed = button("#start", "Start run")
             else:
@@ -2192,7 +2244,12 @@ window.WebSocket=class extends NativeSocket{
                      "the run's stop")
                 page.value("(n => { n.value = %s; n.dispatchEvent(new Event('input')); return true; })"
                            "(document.getElementById('stop-note'))" % json.dumps(note))
-            wait(lambda: page.value(pressed + " !== undefined"), 60, "the %r button" % label)
+            wait(lambda: page.value("(control => Boolean(control && !control.disabled))(" + pressed + ")"),
+                 60, "the enabled %r button" % label)
+            if label == "Merge":
+                wait(lambda: page.value("document.getElementById('merge-options').hidden"
+                                        " || Boolean(document.getElementById('merge-destination').value)"),
+                     60, "the Merge destination")
             region = "banners" if run_id == "stack" else page.value(REGION % pressed)
             page.value(pressed + ".click(); true")
             # The page asks before a press that stops, lands or removes work; the operator says yes, and what
@@ -2220,7 +2277,7 @@ window.WebSocket=class extends NativeSocket{
                 screen = wait(lambda: (lambda text: text if note in text else "")(page.value(SCREEN % role)), 90,
                               "the %s terminal to show %r" % (typed["role"], note))
                 typed["screen"] = [text for text in screen.splitlines() if note in text][-1].strip()
-            if then:
+            if then and shown.startswith(said):
                 then["after"] = wait(lambda: (lambda text: text if text != then["before"] else "")(
                     page.value(TURN_SAID % json.dumps(then["stage"]))), 300,
                     "the %s turn to say again what it produced" % then["stage"])
@@ -2228,8 +2285,8 @@ window.WebSocket=class extends NativeSocket{
                 # The role's next turn, on its worker: the page connects to it again and adds what it drew,
                 # below what was there.
                 before = held["before"]
-                held["after"] = wait(lambda: (lambda now: now if now["sockets"] > before["sockets"]
-                                              and now["row"] > before["row"] else None)(page.value(HELD_READ)),
+                held["after"] = wait(lambda: (lambda now: now if now["row"] > before["row"] else None)(
+                                     page.value(HELD_READ)),
                                      180, "the %s's next turn in its terminal" % held["role"])
     finally:
         edge.terminate()
@@ -2247,7 +2304,7 @@ window.WebSocket=class extends NativeSocket{
                  "the only one opened" if typed["alone"] else "NOT the only one opened", typed["line"], typed["screen"]))
         return 0 if shown.startswith(said) and typed["keyboard"] and typed["alone"] else 1
     if then:
-        print("its %s turn, opened before: %r, then %r" % (then["stage"], then["before"], then["after"]))
+        print("its %s turn, opened before: %r, then %r" % (then["stage"], then["before"], then.get("after")))
         return 0 if shown.startswith(said) and "Shown above" not in then["after"] else 1
     if held:
         before, after = held["before"], held["after"]

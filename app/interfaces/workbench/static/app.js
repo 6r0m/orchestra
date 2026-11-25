@@ -5,7 +5,7 @@ import { $, tick } from "./ui.js";
 import { noteRuns, refreshStack } from "./stack.js";
 import { reloadRepos } from "./picker.js";
 import { noteStarts, reloadFlows } from "./start.js";
-import { refreshRuns, runsListed, runsRead, select } from "./rail.js";
+import { collapseRuns, refreshRuns, runsListed, runsRead, select } from "./rail.js";
 import { refreshRun, show, unsent } from "./run.js";
 import { openWorktrees } from "./worktrees.js";
 import { openSettings, settingsUnsent } from "./settings.js";
@@ -51,8 +51,16 @@ function route(event) {
   show(runId);
   select(runId);
   showEmpty();
-  // Asked for by the operator, the form takes the typing at once.
-  if (event && view === "new") $("start-task").focus();
+  if (event) {
+    collapseRuns();
+    if (view === "new") {
+      $("start-task").focus();
+    } else {
+      const heading = $(VIEWS[view]).querySelector("h1");
+      heading.tabIndex = -1;
+      heading.focus();
+    }
+  }
 }
 
 // With runs listed and none open, a small word on what waits; with none at all, the form to start one.

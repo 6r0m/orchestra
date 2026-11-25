@@ -72,6 +72,11 @@ class NothingKept(Refusal):
     discarded, or a removal already took it."""
 
 
+def _workflow_cause(error):
+    cause = error.cause
+    return cause.cause if cause is not None and cause.cause is not None else cause
+
+
 async def connect(identity=None):
     """A client of Temporal; `identity` is how a worker names itself to it, the SDK's own otherwise."""
     try:
@@ -537,7 +542,7 @@ async def review_diff(client, run_id, offset=0, base=None, tree=None, file=None,
             raise Refusal('the target worker did not confirm scoped milestone comparison; gracefully reload its code before copying')
         return result
     except WorkflowFailureError as error:
-        cause = error.cause.cause if error.cause is not None and error.cause.cause is not None else error.cause
+        cause = _workflow_cause(error)
         if isinstance(cause, ApplicationError) and cause.type == "ChangeRefused":
             raise Refusal(cause.message) from error
         raise
@@ -869,11 +874,22 @@ async def remove_worktree(client, run_id):
         raise Refusal("run %s's worktree is being removed already" % run_id) from error
     except WorkflowFailureError as error:
         # Its host's git refused, and says why: nothing is retried, as with every git side effect.
-        cause = error.cause.cause if error.cause is not None and error.cause.cause is not None else error.cause
+        cause = _workflow_cause(error)
         if isinstance(cause, StepTimeout) and cause.type == TimeoutType.SCHEDULE_TO_START:
             raise Refusal("run %s's worktree was not removed: no %s worker took the removal; %s, then remove it"
                           % (run_id, host_of(current["queue"]), START_WORKERS)) from error
         raise Refusal("run %s's worktree was not removed: %s" % (run_id, getattr(cause, "message", cause))) from error
+
+
+async def _worktree_view(client, args, kind, workflow_queue):
+    try:
+        return await client.execute_workflow(
+            WF.WorktreeView.run, args, id="%s-%s" % (kind, os.urandom(6).hex()), task_queue=workflow_queue)
+    except WorkflowFailureError as error:
+        cause = _workflow_cause(error)
+        if isinstance(cause, ApplicationError) and cause.type == "Refused":
+            raise Refusal(cause.message) from error
+        raise
 
 
 async def worktrees_of(client, repo=None, settings_path=None, check=True):
@@ -883,10 +899,9 @@ async def worktrees_of(client, repo=None, settings_path=None, check=True):
     queue = policy_mod.queue(pol, selected["target"])
     if check:
         await preflight(client, queues(policy_mod.workflow_queue(pol), queue))
-    view = await client.execute_workflow(
-        WF.WorktreeView.run, {"repository": selected, "queue": queue,
-                              "worktree_root": pol["targets"][selected["target"]]["worktree_root"]},
-        id="worktrees-%s" % os.urandom(6).hex(), task_queue=policy_mod.workflow_queue(pol))
+    view = await _worktree_view(client, {"repository": selected, "queue": queue,
+                                        "worktree_root": pol["targets"][selected["target"]]["worktree_root"]},
+                                "worktrees", policy_mod.workflow_queue(pol))
     return selected, view
 
 
@@ -906,8 +921,7 @@ async def landing_options(client, run_id=None, repo=None, check=True, settings=N
                 "worktree_root": settings["targets"][selected["target"]]["worktree_root"]}
     if check:
         await preflight(client, queues(workflow_queue, queue))
-    return await client.execute_workflow(WF.WorktreeView.run, args,
-        id="landing-%s" % os.urandom(6).hex(), task_queue=workflow_queue)
+    return await _worktree_view(client, args, "landing", workflow_queue)
 
 
 async def skill_catalog(client, repo=None, run_id=None):
@@ -929,11 +943,11 @@ async def skill_catalog(client, repo=None, run_id=None):
         selected, configured = repos.select(repo), S.run_policy(settings)
         queue, workflow_queue = policy_mod.queue(settings, selected["target"]), policy_mod.workflow_queue(settings)
     await preflight(client, queues(workflow_queue, queue))
-    result = await client.execute_workflow(WF.WorktreeView.run,
+    result = await _worktree_view(client,
         {"repository": selected, "queue": queue, "skill_catalog": True,
          **({"skill_root": skill_root} if skill_root else {}),
          "worktree_root": configured["targets"][selected["target"]]["worktree_root"]},
-        id="skills-%s" % os.urandom(6).hex(), task_queue=workflow_queue)
+        "skills", workflow_queue)
     if result.get("version") != 1 or not isinstance(result.get("skills"), dict):
         raise Refusal("the target worker needs a graceful reload before it can list repository skills")
     return dict(result, roles={role: adapters.kind_name(adapters.for_role(value)) for role, value in configured["roles"].items()},

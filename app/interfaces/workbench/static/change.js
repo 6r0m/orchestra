@@ -357,6 +357,8 @@ export function showReviews(runId, review, open, stage = null, turns = []) {
     const controls = el("div", null, "section-head");
     const read = el("button", "Read changes");
     const copy = el("button", "Copy milestone");
+    read.title = "Read the changes from the selected comparison point";
+    copy.title = "Copy the patch from the selected comparison point";
     copy.className = "milestone-copy";
     read.type = copy.type = "button";
     const status = el("p", live ? "Current files, not independently verified." : "Open to read this milestone’s changes.", "hint");

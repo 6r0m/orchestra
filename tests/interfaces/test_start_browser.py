@@ -59,19 +59,22 @@ const get = id => {
   return nodes.get(id);
 };
 let chosen = null, release, calls = 0, fail = false;
+const submitted = [], dialogs = [];
 const ready = new Promise(resolve => {release=()=>{chosen='example';resolve();};});
-globalThis.fixture = {get, ready, chosen:()=>chosen, api:async path => {
+globalThis.location = {hash:'#new'};
+globalThis.fixture = {get, ready, dialogs, chosen:()=>chosen, api:async (path, body) => {
   if(path==='/api/flows') return {default:'engineer-code',flows:[{name:'engineer-code',steps:[]}]};
+  if(path==='/api/runs') { submitted.push(body); return {run_id:'new-run'}; }
   assert.ok(path.startsWith('/api/landing?repo=example'),path);
   calls++;
-  if(fail) throw Error('not found');
+  if(fail) throw Error('the selected path is not a git repository');
   return {version:1,branch:'main',remote:null,identity_ready:true,choices:[{branch:'main',remote:null},{branch:'release',remote:null}]};
 }};
 let source = fs.readFileSync(process.argv[1], 'utf8');
 source=source.replace(/import \{ api \} from "\.\/api.js";/,
   'const api=globalThis.fixture.api;');
 source=source.replace(/import \{[^}]+\} from "\.\/ui.js";/,
-  'const $=globalThis.fixture.get, el=()=>({}), report=()=>{},sayRefused=()=>{},score=()=>{},wrote=()=>{};');
+  'const $=globalThis.fixture.get, el=()=>({}), report=()=>{},sayRefused=details=>globalThis.fixture.dialogs.push(details),score=()=>{},wrote=()=>{};');
 source=source.replace(/import \{ pickSkills \} from "\.\/skills.js";/,'const pickSkills=()=>{};');
 source=source.replace(/import \{[^}]+\} from "\.\/picker.js";/,
   'const sourceChoice=()=>globalThis.fixture.chosen,reposRead=()=>globalThis.fixture.ready;');
@@ -90,12 +93,20 @@ fail=true;
 await get('start-landing-retry').onclick();
 assert.match(get('start-landing').textContent,/Refresh destinations/);
 assert.equal(get('start-destination').disabled,true);
+const submit=()=>get('start').onsubmit({preventDefault(){},submitter:{disabled:false}});
+await submit();
+assert.equal(submitted.length,0);
+assert.equal(dialogs[0].title,'The run was not started');
+assert.match(dialogs[0].reason,/not a git repository/);
 fail=false;
 await get('start-landing-retry').onclick();
 assert.equal(get('start-task').value,'Preserve this complete task');
 assert.equal(get('start-name').value,'work-name');
 assert.equal(JSON.parse(get('start-destination').value).branch,'release');
 assert.equal(calls,3);
+await submit();
+assert.equal(submitted.length,1);
+assert.equal(submitted[0].merge_preference.branch,'release');
 '''
         result = subprocess.run(['node', '--input-type=module', '-e', script, str(source)],
                                 capture_output=True, text=True, timeout=15)

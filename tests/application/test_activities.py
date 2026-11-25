@@ -25,7 +25,9 @@ from app.agents import adapters, terminal  # noqa: E402
 from app.agents import nodes as N  # noqa: E402
 from app.agents.adapters import claude_code, codex  # noqa: E402
 from app.application import activities  # noqa: E402
+from app.application import settings as S  # noqa: E402
 from app.observability import telemetry as T  # noqa: E402
+from app.foundation import flows  # noqa: E402
 from app.foundation import localenv  # noqa: E402
 from app.workspace import worktrees  # noqa: E402
 from fakes import FakeRepos, FakeWorktrees, Recorder, every_skill, installed  # noqa: E402
@@ -130,6 +132,19 @@ class Skills(unittest.TestCase):
         with open(os.path.join(self.folder, "SKILL.md"), "w", encoding="utf-8") as fh:
             fh.write("---\nname: plan-it\n---\n")
         self.assertEqual(self.prepare()["repo_path"], self.repo)
+
+    def test_shipped_flows_prepare_with_no_installed_skills(self):
+        settings = S.load()
+        missing_skill = mock.Mock(return_value=False)
+        host = activities.Activities(runner=None, git=None, repositories=FakeRepos(), telemetry=None,
+                                     which=installed, holds_skill=missing_skill)
+        with mock.patch.object(activities.trust, "ensure"):
+            for flow in flows.available():
+                with self.subTest(flow=flow["name"]):
+                    policy = S.run_policy(settings, flow["steps"])
+                    prepared = host.prepare({"repository": self.SELECTED, "policy": policy})
+                    self.assertEqual(prepared["repo_path"], "/fake/repo")
+        missing_skill.assert_not_called()
 
     def test_a_skill_no_folder_holds_refuses_the_run_naming_it_and_where_it_looked(self):
         os.makedirs(self.folder)
