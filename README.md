@@ -1,18 +1,22 @@
 # Orchestra
 
-**A local workbench for running and reviewing changes made by coding agents.**
+**A local-first workbench for reviewed changes from coding agents.**
 
-Give an engineer a task, let an architect review its plan and implementation, and decide what lands.
-Watch the agents in their own terminals and inspect the change at the final gate. Orchestra uses the
-native Claude Code, Codex and Pi CLIs and records the run in Temporal.
+Give Orchestra a task and follow the engineer and architect in their native Claude Code, Codex or Pi
+terminals. Inspect the proposed diff, request revisions and decide what merges. Temporal records the
+workflow and its decisions so runs can resume after an interruption.
 
-```text
-Engineer plans → Architect reviews → You approve
-Engineer builds → Architect verifies → Engineer closes out → You decide whether to merge
-```
+The supported setup is **Windows with WSL 2 and systemd**. The first-run guide covers Docker Compose,
+uv and the agent CLI on the host that runs the task.
 
 [Set up your first run](docs/using.md#first-run) · [Use the Workbench](docs/using.md#the-page) ·
 [Read the trust model](docs/architecture/structure.md#risks-and-technical-debt)
+
+The default [`architect-plan`](flows/architect-plan.json) flow starts with an architect brief. The
+engineer drafts a plan for the architect to assess. When the plan passes, implementation starts
+automatically. After verification and closeout, you decide whether to merge.
+
+![Orchestra Workbench showing the proposed change and final Merge decision in a sample run](docs/workbench.png)
 
 | Find | Go to |
 |---|---|

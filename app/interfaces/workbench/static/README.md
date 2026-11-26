@@ -11,6 +11,7 @@ These modules render the local Workbench and adapt operator actions to its API.
 | Run list and its disclosure | [rail.js](rail.js) |
 | New run form | [start.js](start.js) |
 | Settings | [settings.js](settings.js) |
+| Saved repository editor | [repository-editor.js](repository-editor.js) |
 | Worktree list and removal controls | [worktrees.js](worktrees.js) |
 | Run view and decisions | [run.js](run.js) |
 | Current change and review milestones | [change.js](change.js) |

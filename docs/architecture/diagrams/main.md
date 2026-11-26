@@ -39,7 +39,7 @@ flowchart TD
     orchestration <-->|"workflow tasks, Updates, the status query"| temporal[("Temporal server")]
     application <-->|"start · answer · status"| temporal
     workspace -->|"the target host's git"| git[("the run's repository")]
-    agents -->|"argv, a PTY, and the vendor's completion hook"| clis[("claude · codex")]
+    agents -->|"argv, PTY and turn completion"| clis[("Claude Code · Codex · Pi")]
     observability -.->|"trace writes and read-only cost display"| langfuse[("Langfuse")]
 ```
 
