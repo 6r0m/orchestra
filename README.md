@@ -1,8 +1,7 @@
 # Orchestra
 
-**Orchestra automates engineering workflows and gives you control over how the work proceeds.**
-
-It is a local-first workbench for delegating software changes to coding agents.
+**Orchestra is a local-first workbench for automating software engineering through configurable,
+review-driven workflows you control.**
 
 Give it a task. An engineer plans and implements the change in a dedicated Git worktree, and an
 architect reviews the plan and implementation in a separate session. The stages, review budgets and
