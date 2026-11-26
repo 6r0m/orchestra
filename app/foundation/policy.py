@@ -398,7 +398,7 @@ def validate(raw):
         location = pointer("stage_skills", stage)
         if not all(skill_name(name) for name in names):
             raise InvalidPolicy("skill names use lowercase letters and digits joined by single hyphens, "
-                                "at most %d characters, such as investigate-change" % SKILL_NAME_MAX, location)
+                                "at most %d characters, such as review-code" % SKILL_NAME_MAX, location)
         if len(set(names)) != len(names):
             raise InvalidPolicy("each skill may appear only once per stage", location)
     roles = raw.get("roles")

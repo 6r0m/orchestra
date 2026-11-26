@@ -841,6 +841,10 @@ def settings_workspace(page):
     check("document.querySelector('#settings-skill-plan [aria-label=\"Add investigate-change to Plan\"]')?.checkVisibility() && "
           "document.getElementById('settings-skill-plan').textContent.includes('Built-in instructions')",
           "active instructions and available skills are visible at the start of each stage")
+    check("!document.querySelector('#settings-skills-engineer > .settings-section-head button') && "
+          "[...document.querySelectorAll('#settings-skill-plan .skill-available button')]"
+          ".map(button => button.textContent.trim()).join(',') === '+ fixture-support,+ investigate-change'",
+          "installed skills follow adapter order without team defaults")
     page.value("""(() => {
       const agent = document.getElementById('settings-agent-engineer');
       agent.value = '#browse';
@@ -866,14 +870,14 @@ def settings_workspace(page):
       const hours = document.getElementById('settings-turn-hours');
       hours.value = '36';
       hours.dispatchEvent(new Event('change'));
-      document.querySelector('#settings-skills-engineer button[title]').click();
+      document.querySelector('#settings-skill-plan [aria-label="Add investigate-change to Plan"]').click();
       document.getElementById('settings-revert-roles').click();
     })()""")
     check("document.getElementById('settings-turn-hours').value === '36' && "
           "!document.querySelector('#settings-skills-engineer .skill-tags button')",
           "Revert Roles leaves the Workflow draft intact")
     page.value("""(() => {
-      document.querySelector('#settings-skills-engineer button[title]').click();
+      document.querySelector('#settings-skill-plan [aria-label="Add investigate-change to Plan"]').click();
       document.querySelector('#settings-skill-plan [aria-label="Add fixture-support to Plan"]').click();
       document.getElementById('settings-revert-workflow').click();
     })()""")
@@ -1060,7 +1064,9 @@ def settings_workspace(page):
       document.getElementById('settings-edit-model-fixture-review').value = 'review-model-edited';
       document.getElementById('settings-edit-launcher-fixture-review').value = 'pi-local';
       document.getElementById('settings-profile-done').click();
-      document.querySelector('#settings-skills-architect button[title]').click();
+      for (const stage of ['research', 'assess', 'verify']) {
+        document.querySelector('#settings-skill-' + stage + ' .skill-available button').click();
+      }
     })()""")
     check("document.getElementById('settings-agent-architect').value === 'fixture-review' && "
           "document.getElementById('settings-model-fixture-review').value === 'review-model-edited' && "

@@ -687,7 +687,7 @@ fieldset.stage-skill { background: var(--ground); border: 1px solid var(--rule);
 .skill-available { max-block-size: 7rem; overflow-y: auto; padding: 2px; }
 .skill-tag { min-height: 26px; padding: 2px 7px; border-radius: 999px; font-size: 12px;
   max-width: 100%; overflow-wrap: anywhere; text-align: start; }
-.skill-tags .skill-tag:first-child, .skill-tag.skill-suggestion { border-color: var(--you); }
+.skill-tags .skill-tag:first-child { border-color: var(--you); }
 .skill-name-entry { justify-self: start; font-size: 12px; }
 .skill-manual { display: flex; gap: 6px; }
 .field-head { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }

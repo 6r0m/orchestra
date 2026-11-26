@@ -21,8 +21,6 @@ const SECTIONS = {
   roles: ["agents", "roles", "stage_skills", "review_prompts"],
   workflow: ["review_rounds", "default_flow", "timeout_seconds"],
 };
-const TEAM_SKILLS = { research: "architect", plan: "investigate-change", assess: "architect",
-  build: "implement-approved-change", verify: "architect" };
 const PROFILE_FIELDS = {
   model: "Model", effort: "Reasoning effort", provider: "Provider override", launcher: "Launcher",
 };
@@ -310,26 +308,11 @@ function skillBinding(names) {
 function stageSkills(settings, role, stages, runtime) {
   const skills = el("section", null, "settings-role-section skills");
   skills.id = "settings-skills-" + role;
-  const header = el("div", null, "settings-section-head");
-  header.append(el("h4", "Stage skills"));
   const picker = el("div", null, "stage-skill-fields");
   const available = runtime?.skill ? shown.skills[runtime.kind] || [] : [];
-  const defaults = stages.filter((stage) => available.includes(TEAM_SKILLS[stage]) &&
-    !skillStack(settings.stage_skills?.[stage]).length);
-  if (defaults.length && shown.writable) {
-    const use = el("button", "Use installed defaults", "quiet");
-    use.type = "button";
-    use.title = "Fill empty stages with the installed GenosAI skills suggested for them";
-    use.onclick = () => {
-      for (const stage_ of defaults) stage(pointer("stage_skills", stage_), { value: TEAM_SKILLS[stage_] });
-      draw();
-      $("settings-skill-" + defaults[0]).focus();
-    };
-    header.append(use);
-  }
   const hint = runtime?.skill ? "Skills apply on each turn of the stage. The first skill leads."
     : "This runtime has no explicit skill binding.";
-  skills.append(header, el("p", hint, "hint"), picker);
+  skills.append(el("h4", "Stage skills"), el("p", hint, "hint"), picker);
   for (const stage_ of stages) {
     const title = stage_ === "research" ? "Plan" : stage_[0].toUpperCase() + stage_.slice(1);
     const text = pointer("stage_skills", stage_);
@@ -371,19 +354,13 @@ function stageSkills(settings, role, stages, runtime) {
     if (!current.length) tags.append(el("span", "Built-in instructions", "hint"));
     fieldset.append(el("p", "In use", "hint"), tags);
     if (runtime?.skill) {
-      const suggestion = TEAM_SKILLS[stage_];
-      const candidates = [...new Set([...(available.includes(suggestion) ? [suggestion] : []), ...available])]
-        .filter((name) => !current.includes(name));
+      const candidates = available.filter((name) => !current.includes(name));
       const choices = el("div", null, "skill-available");
       for (const name of candidates) {
         const choice = el("button", "+ " + name, "skill-tag");
         choice.type = "button";
         choice.disabled = !shown.writable;
         choice.setAttribute("aria-label", "Add " + name + " to " + title);
-        if (name === suggestion) {
-          choice.title = "Suggested for this stage";
-          choice.classList.add("skill-suggestion");
-        }
         choice.onclick = () => save([...current, name]);
         choices.append(choice);
       }

@@ -571,14 +571,14 @@ In **Settings**, add skills in order for each stage you want to configure, then 
 The first skill leads the prompt. The prompt asks the agent to read each supporting skill's `SKILL.md`
 in order, using the run's worktree for repository-local discovery. The target worker checks the binding
 before creating a worktree and checks the active stack again in the worktree before launching each turn.
-Empty stages use built-in instructions. Saved settings accept a single skill name or an ordered array.
+Empty stages use built-in instructions. Saved settings accept a single skill name or an ordered array,
+such as `"verify": ["review-code", "check-evidence"]` when both skills are installed.
 Before using ordered stacks after upgrading, run `make reload` to update the execution workers after
 their current activities finish.
 
 To use GenosAI's approach, install its three skills using the [GenosAI skills guide](https://github.com/6r0m/GenosAI/tree/develop/agents#skills).
-**Use installed defaults** fills empty stages for the selected role when its suggested skills are found.
-You can also merge the `stage_skills` member into `.orchestra/settings.local.json`.
-This example also restores the bindings for future runs if you used the previous shared defaults.
+Choose these skills in **Settings**, or merge the example's `stage_skills` entries into
+`.orchestra/settings.local.json` alongside your other settings.
 
 ```json
 {

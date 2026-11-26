@@ -100,7 +100,7 @@ class ReviewBrowser(Repo):
         engineer = E.SETTINGS["roles"]["engineer"]["agent"]
         runtime = E.SETTINGS["agents"][engineer]["kind"]
         with patch("app.application.settings.adapters.skill_names",
-                   return_value={runtime: ["investigate-change", "fixture-support"], "pi": ["architect"]}):
+                   return_value={runtime: ["fixture-support", "investigate-change"], "pi": ["architect"]}):
             result = subprocess.run([sys.executable, str(script), "http://127.0.0.1:%d" % at,
                                      "page", "settings-workspace", "PASS"], capture_output=True, text=True, timeout=45)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
