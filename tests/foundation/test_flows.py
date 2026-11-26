@@ -22,14 +22,18 @@ CLOSED = CODE[:5] + ["engineer:closeout", "you:merge"]
 
 
 class Shipped(unittest.TestCase):
-    def test_both_shipped_flows_hold_close_out_and_the_policy_names_one_of_them(self):
-        self.assertEqual(flows.load("engineer-code"), CLOSED)
+    def test_shipped_flows_hold_close_out_and_the_policy_names_one_of_them(self):
+        self.assertEqual(flows.load("engineer-plan"), CLOSED)
         research = flows.load("architect-research")
         self.assertEqual(research[:2], ["architect:research", "you:approve"])
         self.assertEqual(research[2:], CLOSED)
+        automated = ["architect:research"] + [step for step in CLOSED if step != "you:approve"]
+        self.assertEqual(flows.load("architect-plan"), automated)
+        self.assertEqual(flows.load("architect-auto"), automated)
+        self.assertEqual(flows.load("engineer-code"), CLOSED)
         shipped = [found["name"] for found in flows.available()]
-        self.assertEqual(shipped, ["architect-research", "engineer-code"])
-        self.assertIn(P.load()["default_flow"], shipped)
+        self.assertEqual(shipped, ["architect-plan", "engineer-plan", "architect-research"])
+        self.assertEqual(P.load(path=P.SETTINGS_FILE)["default_flow"], "architect-plan")
 
     def test_the_order_runs_took_before_flows_never_changes_and_is_itself_a_flow(self):
         self.assertEqual(list(flows.LEGACY_FLOW), CODE)
@@ -175,6 +179,15 @@ class Files(unittest.TestCase):
             with self.assertRaisesRegex(flows.InvalidFlow, "flow 'quick' could not be read: denied"):
                 flows.load("quick")
             self.assertEqual(flows.available(), [{"name": "quick", "error": "flow 'quick' could not be read: denied"}])
+
+    def test_a_local_file_with_a_former_name_keeps_its_own_steps(self):
+        brief = ["architect:research"]
+        self.write("engineer-plan.json", CLOSED)
+        self.assertEqual(flows.available(), [{"name": "engineer-plan", "steps": CLOSED, "aliases": ["engineer-code"]}])
+        self.write("engineer-code.json", brief)
+        self.assertEqual(flows.load("engineer-code"), brief)
+        self.assertEqual(flows.available(), [{"name": "engineer-plan", "steps": CLOSED},
+                                             {"name": "engineer-code", "steps": brief}])
 
     def test_a_name_never_reaches_outside_the_folder(self):
         # Flows that would hold, beside the folder and in a folder of it: only the name keeps them out.

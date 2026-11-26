@@ -249,15 +249,14 @@ class Activities:
         # Neither CLI fails a turn whose skill no folder holds — one drops it without a word, the other waits
         # at its prompt until the turn's timeout (measured) — so every skill the run's stages invoke is looked
         # for where its kind finds skills. The run was handed only its flow's stages' skills.
-        for stage, skill in sorted((policy.get("stage_skills") or {}).items()):
+        for stage, binding in sorted((policy.get("stage_skills") or {}).items()):
             adapter = adapters.for_role(policy["roles"][stages.STAGE_ROLE[stage]])
-            # A run started before agent profiles named it `/name`.
-            skill = skill[1:] if skill.startswith("/") else skill
-            folders = adapter.skill_folders(skill, resolved["repo_path"])
-            if not any(self.holds_skill(folder) for folder in folders):
-                raise ApplicationError("the %s stage's skill %s is in none of %s on the %s host"
-                                       % (stage, skill, ", ".join(folders), selected["target"]),
-                                       type="Refused", non_retryable=True)
+            for skill in stages.skill_stack(binding):
+                folders = adapter.skill_folders(skill, resolved["repo_path"])
+                if not any(self.holds_skill(folder) for folder in folders):
+                    raise ApplicationError("the %s stage's skill %s is in none of %s on the %s host"
+                                           % (stage, skill, ", ".join(folders), selected["target"]),
+                                           type="Refused", non_retryable=True)
         # A CLI's trust dialog asks what starting a run on this repository already answered, and would stop
         # this run's first turn until someone answered it in the page. Best effort; never fails the run.
         trust.ensure(resolved["repo_path"], [adapters.kind_name(adapter) for adapter in kinds])

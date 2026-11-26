@@ -389,15 +389,18 @@ def validate(raw):
     # skills' own rule; how a kind invokes it is the kind's. Unset means the prompt says everything itself.
     skills = raw.get("stage_skills") or {}
     if not isinstance(skills, dict):
-        raise InvalidPolicy("must map a stage to the skill that leads its prompt", pointer("stage_skills"))
+        raise InvalidPolicy("must map a stage to a skill name or ordered list of names", pointer("stage_skills"))
     for stage, skill in skills.items():
         if stage not in stages.STAGE_ROLE:
             raise InvalidPolicy("not a stage (%s)" % ", ".join(sorted(stages.STAGE_ROLE)),
                                 pointer("stage_skills", stage))
-        if not skill_name(skill):
-            raise InvalidPolicy("a skill's name: lowercase letters and digits, words joined by single hyphens, "
-                                "at most %d characters, such as investigate-change" % SKILL_NAME_MAX,
-                                pointer("stage_skills", stage))
+        names = skill if isinstance(skill, list) else [skill]
+        location = pointer("stage_skills", stage)
+        if not all(skill_name(name) for name in names):
+            raise InvalidPolicy("skill names use lowercase letters and digits joined by single hyphens, "
+                                "at most %d characters, such as investigate-change" % SKILL_NAME_MAX, location)
+        if len(set(names)) != len(names):
+            raise InvalidPolicy("each skill may appear only once per stage", location)
     roles = raw.get("roles")
     if not isinstance(roles, dict) or set(roles) != set(ROLES):
         raise InvalidPolicy("must define exactly %s" % " and ".join(ROLES), pointer("roles"))
@@ -478,7 +481,7 @@ def validate(raw):
     # The flow a run starts on when it names none, a file in `flows/`, read only at a run's start: named
     # by the flows' own grammar, so a name taken here can always be a file there.
     if "default_flow" in raw and not flows.is_name(raw["default_flow"]):
-        raise InvalidPolicy("must name a flow in flows/, such as engineer-code", pointer("default_flow"))
+        raise InvalidPolicy("must name a flow in flows/, such as engineer-plan", pointer("default_flow"))
     heartbeat = raw.get("heartbeat_seconds")
     if not isinstance(heartbeat, int) or isinstance(heartbeat, bool) or heartbeat < 1:
         raise InvalidPolicy("must be an int >= 1", pointer("heartbeat_seconds"))

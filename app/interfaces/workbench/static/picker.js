@@ -1,157 +1,212 @@
-// The repositories of repos.json, each list a menu of their owners: a name that carries its owners —
-// `work/platform/service` — is found under `work`, then `platform`, each opening as it is hovered or
-// reached with Tab. A list stays the <select> its form reads, behind the button that opens it.
+// The repository dialog shared by New run and Worktrees. Each form keeps its own choice and path draft.
 
 import { api } from "./api.js";
-import { $, el } from "./ui.js";
+import { $, el, showReading } from "./ui.js";
 
-const LISTS = ["start-repo", "worktrees-repo"];
-// The repositories as last shown, so an unchanged answer leaves an open menu as it is.
-let shownRepos = "";
+const dialog = $("repo-picker");
+const search = $("repo-search");
+const results = $("repo-results");
+const fields = new Map();
+let listed = [];
+let loaded = false;
+let reading = null;
+let active = null;
+let focusBack = null;
 
-function repoTree(listed) {
-  const root = { owners: new Map(), repos: [] };
-  for (const repo of listed) {
-    let node = root;
-    for (const owner of repo.id.split("/").slice(0, -1)) {
-      if (!node.owners.has(owner)) node.owners.set(owner, { owners: new Map(), repos: [] });
-      node = node.owners.get(owner);
-    }
-    node.repos.push(repo);
-  }
-  return root;
+function platform(target) {
+  const badge = el("span", target === "windows" ? "Windows" : "WSL", "repo-platform");
+  badge.dataset.target = target;
+  return badge;
 }
 
-function repoMenu(node, choose) {
-  const list = el("ul", null, "menu");
-  for (const [name, owned] of node.owners) {
-    const item = el("li", null, "owner");
-    const button = el("button", name);
-    button.type = "button";
-    button.title = "The repositories under " + name;
-    item.append(button, repoMenu(owned, choose));
-    list.appendChild(item);
-  }
-  for (const repo of node.repos) {
-    const button = el("button", repo.id.split("/").pop() + " (" + repo.target + ")");
-    button.type = "button";
-    button.translate = false;
-    button.title = repo.id;
-    button.onclick = () => choose(repo.id);
-    const item = el("li");
-    item.appendChild(button);
-    list.appendChild(item);
-  }
-  return list;
+function showChoice(field) {
+  const choice = field.recorded || (field.pathField.hidden && listed.find((repo) => repo.id === field.id));
+  const label = choice?.id || (field.pathField.hidden ? "Choose a repository" : "Repository path");
+  const text = el("span", label, "repo-label");
+  text.translate = !choice || !field.pathField.hidden;
+  field.button.replaceChildren(text);
+  if (choice?.target) field.button.append(platform(choice.target));
 }
 
-function picker(select) {
-  if (select.nextElementSibling && select.nextElementSibling.classList.contains("picker")) {
-    return select.nextElementSibling;
-  }
-  const box = el("div", null, "picker");
-  const button = el("button", "none", "picker-button");
-  button.type = "button";
-  button.title = "Choose the repository, from .orchestra/repos.json";
-  // Opening reads repos.json again, so an entry added to it shows without reloading the page.
-  button.onclick = () => {
-    const menu = box.querySelector(".menu");
-    menu.hidden = !menu.hidden;
-    if (!menu.hidden) reloadRepos();
-  };
-  box.onkeydown = (event) => {
-    if (event.key !== "Escape") return;
-    box.querySelector(".menu").hidden = true;
-    button.focus();
-  };
-  box.append(button, el("ul", null, "menu"));
-  box.lastChild.hidden = true;
-  select.hidden = true;
-  select.after(box);
-  return box;
+function tell(field) {
+  field.source.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
-export function setRepo(select, id) {
-  select.value = id;
-  const chosen = select.selectedOptions[0];
-  const button = picker(select).querySelector(".picker-button");
-  button.textContent = chosen ? chosen.textContent : "none";
-  button.setAttribute("aria-label", "Repository: " + button.textContent);
-}
+export const refreshRepositoryChoice = (prefix) => tell(fields.get(prefix));
 
-// A repository comes from one of two places, `<prefix>-repo` or `<prefix>-path`: only the one chosen is
-// shown, and only it is read — the returned function says which repository is chosen now.
 export function sourceChoice(prefix) {
-  const box = $(prefix + "-source");
-  const byPath = () => box.querySelector("input[name='" + prefix + "-source']:checked").value === "path";
-  const shown = () => {
-    box.querySelector(".source-listed").hidden = byPath();
-    box.querySelector(".source-path").hidden = !byPath();
-    $(prefix + "-path").required = byPath();
+  const field = { prefix, source: $(prefix + "-source"), button: $(prefix + "-repo"), path: $(prefix + "-path"),
+    pathField: $(prefix + "-path-field"), id: null };
+  fields.set(prefix, field);
+  field.button.onclick = () => {
+    active = field;
+    focusBack = field.button;
+    search.value = "";
+    render();
+    dialog.showModal();
+    search.focus();
+    reloadRepos();
   };
-  for (const radio of box.querySelectorAll("input[name='" + prefix + "-source']")) radio.onchange = shown;
-  shown();
-  // None when nothing is chosen: an empty repository would read as none, which the server takes as its
-  // own checkout.
-  return () => (byPath() ? $(prefix + "-path").value.trim() : $(prefix + "-repo").value) || null;
+  return () => field.pathField.hidden ? field.id : field.path.value.trim() || null;
 }
 
-// Chooses the listed repository `id`.
-export function chooseListed(prefix, id) {
-  const listed = $(prefix + "-source").querySelector("input[value='listed']");
-  listed.checked = true;
-  listed.onchange();
-  setRepo($(prefix + "-repo"), id);
+export const isRepositoryPath = (prefix) => !fields.get(prefix).pathField.hidden;
+export const isSavedRepository = (prefix) => {
+  const field = fields.get(prefix);
+  return !field.recorded && field.pathField.hidden && !!field.id;
+};
+
+export function showRecordedRepository(prefix, id, target) {
+  const field = fields.get(prefix);
+  const hidden = field.recorded?.hidden ?? field.pathField.hidden;
+  field.recorded = { id, target, hidden };
+  field.pathField.hidden = true;
+  field.path.required = false;
+  showChoice(field);
 }
 
-// Chooses the repository at `path`, given as its path.
-export function choosePath(prefix, path) {
-  const byPath = $(prefix + "-source").querySelector("input[value='path']");
-  byPath.checked = true;
-  byPath.onchange();
-  $(prefix + "-path").value = path;
+export function clearRecordedRepository(prefix) {
+  const field = fields.get(prefix);
+  if (!field.recorded) return;
+  field.pathField.hidden = field.recorded.hidden;
+  field.path.required = !field.pathField.hidden;
+  field.recorded = null;
+  showChoice(field);
 }
+
+function setPath(field, path) {
+  field.recorded = null;
+  field.pathField.hidden = false;
+  field.path.required = true;
+  if (path !== undefined) field.path.value = path;
+  showChoice(field);
+}
+
+function setListed(field, id) {
+  field.recorded = null;
+  field.id = id;
+  field.pathField.hidden = true;
+  field.path.required = false;
+  showChoice(field);
+}
+
+export function chooseRepository(prefix, repo, notify = false) {
+  const field = fields.get(prefix);
+  if (listed.some((choice) => choice.id === repo)) setListed(field, repo);
+  else setPath(field, repo);
+  if (notify) tell(field);
+}
+
+export function closeRepositoryPicker() {
+  const prefix = active?.prefix;
+  dialog.close();
+  return prefix;
+}
+
+function render() {
+  const focused = results.contains(document.activeElement) ? document.activeElement.title : null;
+  const term = search.value.trim().toLowerCase();
+  const groups = new Map();
+  for (const repo of listed) {
+    const split = repo.id.lastIndexOf("/");
+    const group = split < 0 ? "" : repo.id.slice(0, split);
+    if (!groups.has(group)) groups.set(group, []);
+    if (repo.id.toLowerCase().includes(term)) groups.get(group).push(repo);
+  }
+  results.replaceChildren();
+  let index = 0;
+  for (const [group, repos] of groups) {
+    const position = index++;
+    if (!repos.length) continue;
+    const section = el("div", null, "repo-group");
+    if (group) {
+      const title = el("h3", group);
+      title.id = "repo-group-" + position;
+      title.dataset.accent = position % 3;
+      title.translate = false;
+      section.setAttribute("role", "group");
+      section.setAttribute("aria-labelledby", title.id);
+      section.append(title);
+    }
+    for (const repo of repos) {
+      const label = el("span", repo.id.slice(group ? group.length + 1 : 0), "repo-label");
+      label.translate = false;
+      const option = el("button", null, "repo-choice");
+      option.type = "button";
+      option.title = repo.id;
+      option.setAttribute("aria-label", repo.id + (repo.target === "windows" ? " (Windows)" : " (WSL)"));
+      if (active && isSavedRepository(active.prefix) && active.id === repo.id) option.setAttribute("aria-current", "true");
+      option.onclick = () => {
+        const field = active;
+        setListed(field, repo.id);
+        dialog.close();
+        tell(field);
+      };
+      option.append(label, platform(repo.target));
+      section.append(option);
+    }
+    results.append(section);
+  }
+  if (!results.children.length && loaded) results.append(el("p", term ? "No matching repositories." : "No saved repositories.", "hint"));
+  if (focused) ([...results.querySelectorAll("button")].find((option) => option.title === focused) || search).focus();
+}
+
+search.addEventListener("input", render);
+dialog.addEventListener("keydown", (event) => {
+  if (!["ArrowUp", "ArrowDown"].includes(event.key)) return;
+  const options = [...results.querySelectorAll("button"), ...dialog.querySelectorAll("footer button:not([hidden])")];
+  const position = options.indexOf(document.activeElement);
+  if (position < 0 && document.activeElement !== search) return;
+  event.preventDefault();
+  if (event.key === "ArrowUp" && position <= 0) search.focus();
+  else options[Math.min(position + (event.key === "ArrowUp" ? -1 : 1), options.length - 1)].focus();
+});
+$("repo-enter-path").onclick = () => {
+  const field = active;
+  setPath(field);
+  focusBack = field.path;
+  dialog.close();
+  tell(field);
+};
+$("repo-picker-close").onclick = () => dialog.close();
+dialog.addEventListener("close", () => {
+  if (dialog.open) return;
+  if (focusBack?.offsetParent) focusBack.focus();
+  active = null;
+  focusBack = null;
+});
 
 async function loadRepos() {
-  const listed = await api("/api/repos");
-  const shown = JSON.stringify(listed);
-  if (shown === shownRepos) return;
-  shownRepos = shown;
-  const tree = repoTree(listed);
-  for (const id of LISTS) {
-    const select = $(id);
-    const chosen = select.value;
-    select.replaceChildren(...listed.map((repo) => {
-      const option = el("option", repo.id + " (" + repo.target + ")");
-      option.value = repo.id;
-      return option;
-    }));
-    const box = picker(select);
-    const menu = repoMenu(tree, (repo) => {
-      setRepo(select, repo);
-      box.querySelector(".menu").hidden = true;
-      select.dispatchEvent(new Event("change", { bubbles: true }));
-    });
-    if (!listed.length) menu.appendChild(el("li", "None in repos.json: choose A path", "muted"));
-    const open = box.querySelector(".menu");
-    menu.hidden = open.hidden;
-    open.replaceWith(menu);
-    setRepo(select, listed.some((repo) => repo.id === chosen) ? chosen : select.value);
+  const notice = $("repo-picker-status");
+  notice.textContent = loaded ? "" : "Reading saved repositories…";
+  showReading("repo-picker-reading", !loaded);
+  try {
+    const next = await api("/api/repos");
+    if (loaded && JSON.stringify(next) === JSON.stringify(listed)) return true;
+    listed = next;
+    for (const field of fields.values()) {
+      if (!loaded) field.id = listed[0]?.id || null;
+      const removed = field.id && !listed.some((repo) => repo.id === field.id);
+      if (removed) field.id = null;
+      showChoice(field);
+      if (removed && !field.recorded && field.pathField.hidden) tell(field);
+    }
+    loaded = true;
+    if (dialog.open) render();
+    notice.textContent = "";
+    return true;
+  } catch (error) {
+    notice.textContent = "Saved repositories unavailable. " + error.message;
+    return false;
+  } finally {
+    showReading("repo-picker-reading", false);
   }
 }
 
-export const reloadRepos = () => {
-  const reading = loadRepos().catch((error) => { $("start-result").textContent = error.message; });
-  firstRead = firstRead || reading;
+export async function reloadRepos(fresh = false) {
+  if (fresh && reading) await reading;
+  reading ||= loadRepos().finally(() => { reading = null; });
   return reading;
-};
-// The repositories' first read: a view the URL opens on a repository waits for it before choosing one.
-let firstRead = null;
-export const reposRead = () => firstRead || reloadRepos();
+}
 
-// A click anywhere but in a repository menu closes it.
-document.addEventListener("click", (event) => {
-  for (const menu of document.querySelectorAll(".picker > .menu")) {
-    if (!menu.parentElement.contains(event.target)) menu.hidden = true;
-  }
-});
+export const reposRead = () => loaded ? Promise.resolve() : reloadRepos();

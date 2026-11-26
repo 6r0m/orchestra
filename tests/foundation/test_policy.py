@@ -219,10 +219,11 @@ class Shape(unittest.TestCase):
             self.assertIn("`%s`" % key, str(raised.exception))
 
     def test_a_skill_is_a_name_by_the_agent_skills_rule(self):
-        for good in ("investigate-change", "a", "x" * P.SKILL_NAME_MAX, "v2-review"):
+        for good in ("investigate-change", "a", "x" * P.SKILL_NAME_MAX, "v2-review", [], ["architect", "review"]):
             raw = dict(self.raw(), stage_skills={"plan": good})
             P.validate(raw)
-        for bad in ("/investigate-change", "$architect", "Investigate", "-x", "x-", "a--b", "", "x" * 65, 7):
+        for bad in ("/investigate-change", "$architect", "Investigate", "-x", "x-", "a--b", "", "x" * 65, 7,
+                    ["architect", "architect"], ["architect", "../review"]):
             raw = dict(self.raw(), stage_skills={"plan": bad})
             with self.assertRaises(P.InvalidPolicy, msg=repr(bad)) as raised:
                 P.validate(raw)

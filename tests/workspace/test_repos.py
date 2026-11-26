@@ -297,6 +297,38 @@ class Source(unittest.TestCase):
     def source(self, **environ):
         return repos.descriptor_file(self.root, environ)
 
+    def test_editor_creates_renames_and_removes_only_the_descriptor(self):
+        entry = {"path": self.root, "target": "wsl", "todo_done_dir": None, "lfs_pointers": False}
+        initial = repos.catalog(self.root, {})
+        original = repos.changed(initial, None, "team/tool", entry)
+        saved = repos.save(original, initial["revision"], self.root, {})
+        self.assertEqual(saved["entries"], {"team/tool": entry})
+        renamed = repos.changed(saved, "team/tool", "team/renamed", dict(entry, base_branch="develop"))
+        latest = repos.save(renamed, saved["revision"], self.root, {})
+        self.assertEqual(latest["entries"]["team/renamed"]["todo_done_dir"], None)
+        with self.assertRaises(repos.Stale):
+            repos.save({}, saved["revision"], self.root, {})
+        self.assertEqual(repos.catalog(self.root, {}), latest)
+        kept = os.path.join(self.root, "keep")
+        with open(kept, "w", encoding="utf-8") as fh:
+            fh.write("repository content")
+        repos.save(repos.changed(latest, "team/renamed", None, None), latest["revision"], self.root, {})
+        self.assertEqual(repos.catalog(self.root, {})["entries"], {})
+        self.assertTrue(os.path.isfile(kept))
+
+    def test_editor_refuses_external_or_malformed_descriptors_without_replacing_them(self):
+        path = self.write("external.json", {"tool": {"path": self.root}})
+        environ = {repos.VARIABLE: path}
+        external = repos.catalog(self.root, environ)
+        self.assertFalse(external["writable"])
+        with self.assertRaises(repos.ReadOnly):
+            repos.save({}, external["revision"], self.root, environ)
+        self.assertEqual(repos.load(path), external["entries"])
+        initial = repos.catalog(self.root, {})
+        with self.assertRaisesRegex(repos.Refused, "unknown keys"):
+            repos.changed(initial, None, "tool", {"path": self.root, "unknown": 1})
+        self.assertIsNone(self.source())
+
     def test_without_the_variable_the_folder_s_file_and_one_left_at_the_root_is_refused_not_read(self):
         self.assertIsNone(self.source(), "neither there: no descriptors, as a fresh checkout has none")
         legacy = self.write("repos.json", {"old": {"path": self.root}})

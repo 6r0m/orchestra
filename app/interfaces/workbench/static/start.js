@@ -2,13 +2,14 @@
 // it skips the flow's approvals.
 
 import { api } from "./api.js";
-import { $, el, report, sayRefused, score, wrote } from "./ui.js";
+import { $, el, listedFlowName, report, sayRefused, score, showReading, wrote } from "./ui.js";
 import { sourceChoice, reposRead } from "./picker.js";
 
 const chosenRepo = sourceChoice("start");
 $("start-name").oninput = () => { $("start-name-preview").textContent = $("start-name").value.toLowerCase() || "your-name"; };
 let previewRequest = 0;
 let previewRepo = null;
+let previewRevision;
 let previewError = "";
 $("start-skills").onclick = async () => {
   const repo = chosenRepo(), flow = $("start-flow").value, from = location.hash;
@@ -25,8 +26,10 @@ async function previewLanding() {
   const request = ++previewRequest, repo = chosenRepo();
   const select = $("start-destination"), previous = previewRepo === repo ? select.value : "";
   previewRepo = repo;
+  previewRevision = undefined;
   previewError = "";
   select.disabled = true;
+  showReading("start-landing-reading", Boolean(repo));
   if (!repo) {
     select.replaceChildren();
     $("start-landing").textContent = "Choose a repository to see where Merge lands.";
@@ -37,6 +40,7 @@ async function previewLanding() {
     const result = await api("/api/landing?repo=" + encodeURIComponent(repo));
     if (request !== previewRequest) return;
     if (typeof result.branch !== "string" || !Array.isArray(result.choices)) throw new Error("the target worker needs a graceful reload for destination selection");
+    previewRevision = result.repository_revision;
     const target = result.remote ? result.remote + "/" + result.branch + " (remote base)"
       : result.branch + " (local base)";
     $("start-landing").textContent = "Work starts from: " + target +
@@ -60,9 +64,21 @@ async function previewLanding() {
       $("start-landing").textContent = "Merge destination unavailable: " + previewError +
         ". Refresh destinations after correcting the problem; your task and name stay unchanged.";
     }
+  } finally {
+    if (request === previewRequest) showReading("start-landing-reading", false);
   }
 }
 $("start-source").addEventListener("change", previewLanding);
+$("start-path").addEventListener("input", () => {
+  previewRequest++;
+  previewRepo = null;
+  previewRevision = undefined;
+  previewError = "";
+  showReading("start-landing-reading", false);
+  $("start-destination").disabled = true;
+  $("start-destination").replaceChildren();
+  $("start-landing").textContent = "Finish entering the repository path to see its Merge destinations.";
+});
 $("start-path").addEventListener("blur", previewLanding);
 // The runs started from this page, by id, with the repository each was started on, until the list reads them
 // closed. Kept in memory, as an unsent note is: a reload forgets them.
@@ -102,6 +118,7 @@ function showFlowSteps() {
   const steps = $("start-flow-steps");
   steps.hidden = !(chosen && chosen.steps);
   if (chosen && chosen.steps) score(steps, chosen.steps);
+  $("start-approval-options").hidden = Boolean(chosen?.steps?.length && !chosen.steps.includes("you:approve"));
 }
 
 async function loadFlows() {
@@ -112,7 +129,7 @@ async function loadFlows() {
   listedFlows = answer.flows;
   const select = $("start-flow");
   // The flow the operator chose, else the settings' default; "" when they name none.
-  const chosen = chosenFlow ? select.value : answer.default || "";
+  const chosen = listedFlowName(listedFlows, chosenFlow ? select.value : answer.default || "");
   const options = answer.flows.map((flow) => {
     // A flow that breaks a rule is listed, never offered: its reason is what to fix in its file. The one
     // chosen stays chosen, so a start on it is refused with that reason, never made on another flow.
@@ -128,12 +145,11 @@ async function loadFlows() {
     missing.value = chosen;
     options.unshift(missing);
   }
-  if (!answer.default) {
-    // With no default in the policy a run names no flow, as the command line's does, and takes the
-    // order runs took before flows.
-    const none = el("option", "none — the order from before flows");
-    none.value = "";
-    options.unshift(none);
+  if (!chosen) {
+    const placeholder = el("option", "Choose a flow");
+    placeholder.value = "";
+    placeholder.disabled = true;
+    options.unshift(placeholder);
   }
   select.replaceChildren(...options);
   select.value = chosen;
@@ -141,8 +157,23 @@ async function loadFlows() {
 }
 
 // flows/ is read again each time the list is opened, so a flow added or edited there shows without a reload.
-export const reloadFlows = () => Promise.all([loadFlows(), reposRead().then(previewLanding)])
-  .catch((error) => report($("start-result"), error.message, true));
+let readingOptions = null;
+export function reloadFlows() {
+  if (readingOptions) return readingOptions;
+  showReading("start-reading", !shownFlows);
+  const readDestination = reposRead().then(async (ready) => {
+    await previewLanding();
+    if (ready === false) throw new Error("Saved repositories could not be read. Reopen the repository picker to retry.");
+  });
+  readingOptions = Promise.allSettled([loadFlows(), readDestination]).then((results) => {
+    const failed = results.find((result) => result.status === "rejected");
+    if (failed) report($("start-result"), failed.reason.message, true);
+  }).finally(() => {
+    showReading("start-reading", false);
+    readingOptions = null;
+  });
+  return readingOptions;
+}
 $("start-flow").onfocus = reloadFlows;
 $("start-flow").onchange = () => {
   chosenFlow = true;
@@ -152,7 +183,8 @@ $("start-flow").onchange = () => {
 function formValues() {
   return { repo: chosenRepo(), task: $("start-task").value, short_name: $("start-name").value,
     flow: $("start-flow").value, auto_proceed: $("start-auto").checked,
-    destination: $("start-destination").value, destinationDisabled: $("start-destination").disabled };
+    destination: $("start-destination").value, destinationDisabled: $("start-destination").disabled,
+    repositoryRevision: previewRevision };
 }
 
 $("start").onsubmit = async (event) => {
@@ -162,6 +194,11 @@ $("start").onsubmit = async (event) => {
   const repo = submitted.repo;
   if (!repo) {
     report($("start-result"), "Choose a repository, or give its path.", true);
+    return;
+  }
+  if (!submitted.flow) {
+    report($("start-result"), "Choose a flow for this run.", true);
+    $("start-flow").focus();
     return;
   }
   // The run started opens only while the page is still where it was started from: an operator who moved
@@ -181,6 +218,10 @@ $("start").onsubmit = async (event) => {
       auto_proceed: submitted.auto_proceed, merge_preference: JSON.parse(submitted.destination) };
     const support = await api("/api/landing?repo=" + encodeURIComponent(repo));
     if (support.version !== 1 || !Array.isArray(support.choices)) throw new Error("Reload the Workbench and target worker before choosing a Merge destination.");
+    if (submitted.repositoryRevision !== support.repository_revision) {
+      throw new Error("The repository changed since its Merge destinations were read. Refresh destinations.");
+    }
+    if (submitted.repositoryRevision !== undefined) request.repository_revision = submitted.repositoryRevision;
     sent = true;
     const started = await api("/api/runs", request);
     report($("start-result"), "started " + started.run_id);

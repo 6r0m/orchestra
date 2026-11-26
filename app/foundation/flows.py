@@ -14,6 +14,8 @@ from app.foundation import paths
 from app.foundation import stages
 
 FLOWS_DIR = os.path.join(paths.REPO, "flows")
+_PLANNING_FLOWS = ("architect-plan", "engineer-plan")
+_RENAMED_FLOWS = {"architect-auto": "architect-plan", "engineer-code": "engineer-plan"}
 # The operator's own steps: an approval where the flow schedules one, and the final gate — the only way
 # to a merge.
 OPERATOR = "you"
@@ -112,9 +114,15 @@ def closes_out(steps):
     return steps
 
 
+def _path(name):
+    return os.path.join(FLOWS_DIR, "%s.json" % name)
+
+
 def load(name):
     """The steps of the flow `name` in `flows/`, checked as a flow a run may start on."""
-    path = os.path.join(FLOWS_DIR, "%s.json" % name) if is_name(name) else None
+    path = _path(name) if is_name(name) else None
+    if path and name in _RENAMED_FLOWS and not os.path.lexists(path):
+        path = _path(_RENAMED_FLOWS[name])
     if path is None or not os.path.isfile(path):
         raise InvalidFlow("no flow %r in %s" % (name, FLOWS_DIR))
     try:
@@ -131,16 +139,20 @@ def load(name):
 
 
 def available():
-    """Every flow in `flows/`, by name: its steps, or why it is refused."""
+    """Every flow in `flows/`, with the planning flows first, its steps or refusal, and any former names."""
     found = []
-    names = sorted(os.listdir(FLOWS_DIR)) if os.path.isdir(FLOWS_DIR) else []
-    for name, extension in (os.path.splitext(file) for file in names):
-        if extension != ".json":
-            continue
+    files = os.listdir(FLOWS_DIR) if os.path.isdir(FLOWS_DIR) else []
+    names = [name for name, extension in map(os.path.splitext, files) if extension == ".json"]
+    for name in sorted(names, key=lambda value: (value not in _PLANNING_FLOWS, value)):
+        entry = {"name": name}
         try:
-            found.append({"name": name, "steps": load(name)})
+            entry["steps"] = load(name)
         except InvalidFlow as exc:
-            found.append({"name": name, "error": str(exc)})
+            entry["error"] = str(exc)
+        aliases = [old for old, current in _RENAMED_FLOWS.items() if current == name and old not in names]
+        if aliases:
+            entry["aliases"] = aliases
+        found.append(entry)
     return found
 
 

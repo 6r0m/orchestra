@@ -3,6 +3,12 @@
 
 export const $ = (id) => document.getElementById(id);
 
+export function showReading(id, pending) {
+  const bar = $(id);
+  bar.hidden = !pending;
+  bar.parentElement.setAttribute("aria-busy", String(pending));
+}
+
 export function el(tag, text, className) {
   const node = document.createElement(tag);
   if (text !== undefined && text !== null) node.textContent = String(text);
@@ -257,6 +263,12 @@ export function drainingBy(view) {
 
 // ---- a flow ---------------------------------------------------------------------------------
 
+export function listedFlowName(flows, name) {
+  return flows.find((flow) => flow.aliases?.includes(name))?.name ?? name;
+}
+
+const FLOW_STEP_LABELS = { "architect:research": "plan", "you:merge": "approve merge" };
+
 // A flow drawn as its line of cues into `list`: each step `role action`, those before `current` done and
 // the one at `current` ringed; `ended` marks where a closed run stopped, or every step done.
 export function score(list, steps, current, ended, moving) {
@@ -276,7 +288,7 @@ export function score(list, steps, current, ended, moving) {
     }
     const mark = el("span", null, "mark");
     mark.setAttribute("aria-hidden", "true");
-    item.append(mark, el("span", role, "role-word"), " " + action);
+    item.append(mark, el("span", role, "role-word"), " " + (FLOW_STEP_LABELS[step] || action));
     if (state !== "plain") item.title = { done: "done", current: "now", next: "to come", stopped: "where it stopped" }[state];
     return item;
   }));

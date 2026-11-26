@@ -130,10 +130,11 @@ OPEN = "(id => { location.hash = '#run=' + encodeURIComponent(id); return true; 
 OPENED = "document.getElementById('run-task').textContent.length > 0"
 
 
-def button(scope, label):
+def button(scope, label, *, accessible=False):
     """The button with that label in `scope`, once it is shown and enabled."""
-    return ("[...document.querySelectorAll('%s button')].find((b) => b.textContent.trim() === %s"
-            " && !b.disabled && b.offsetParent !== null)" % (scope, json.dumps(label)))
+    name = "b.getAttribute('aria-label')" if accessible else "b.textContent.trim()"
+    return ("[...document.querySelectorAll('%s button')].find((b) => %s === %s"
+            " && !b.disabled && b.offsetParent !== null)" % (scope, name, json.dumps(label)))
 
 
 # Whether the run's view shows a button with that label, enabled or not.
@@ -250,14 +251,6 @@ LISTS = ("(() => Object.fromEntries(['runs-waiting', 'runs-running', 'runs-finis
          " const list = document.getElementById(id); const rows = [...list.querySelectorAll('a.row')];"
          " return [id, { rows: rows.length, scrolls: list.scrollHeight - list.clientHeight > 1,"
          " runs: rows.map((row) => row.dataset.run) }]; })))()")
-# The rail that holds them, where it is pinned beside the run: how far it scrolls as a whole, and how many rows'
-# height the tallest list past five still shows. Null where the window is too narrow for a rail beside the run.
-RAIL = ("(() => { const rail = document.querySelector('.rail');"
-        " if (getComputedStyle(document.getElementById('runs-panel')).position !== 'sticky') return null;"
-        " const tall = [...rail.querySelectorAll('.runs')].filter((list) => list.querySelectorAll('a.row').length > 5)"
-        ".map((list) => list.clientHeight / list.querySelector('a.row').offsetHeight);"
-        " return { scrolls: rail.scrollHeight - rail.clientHeight, shown: Math.max(0, ...tall),"
-        " least: Math.min(...tall) }; })()")
 
 # The page's window saying a run was refused, while it is open: what it says, its parts in order.
 REFUSAL = ("(d => d && d.open ? [...d.querySelectorAll('h2, p, pre')].filter((n) => !n.hidden)"
@@ -273,7 +266,7 @@ YES = "document.getElementById('confirm-yes').click(); true"
 def laid_out(page, run_id, size, said):
     """The run's page at the window size it was opened at: its pinned controls seen whole at the top of the
     run's page and with the page scrolled to its history; nothing that takes the keyboard left under them;
-    each list of runs scrolling inside itself once it holds more than five, and never before; and each run
+    history collapsed at first, then shown with one sidebar scrollbar at most; and each run
     `said` names, as `list:run`, in that list — `none` names none. Prints what it saw; 0 when all of it holds."""
     page.value(OPEN % json.dumps(run_id))
     wait(lambda: page.value(OPENED), 60, "the run")
@@ -283,10 +276,8 @@ def laid_out(page, run_id, size, said):
     if narrow and not page.value(
             "(() => { const panel = document.getElementById('runs-panel');"
             " const strip = document.getElementById('run-strip').getBoundingClientRect();"
-            " return panel && !panel.open && panel.querySelector('summary').checkVisibility()"
-            " && strip.bottom <= innerHeight"
-            " && Math.abs(document.getElementById('main').getBoundingClientRect().top"
-            " - panel.getBoundingClientRect().bottom) < 1; })()"):
+            " return panel.hidden && document.getElementById('runs-toggle').checkVisibility()"
+            " && strip.bottom <= innerHeight; })()"):
         wrong.append("the run controls do not fit in the first view with the run list collapsed")
     page.value("document.getElementById('run-strip').scrollIntoView(); true")
     time.sleep(0.5)
@@ -299,35 +290,28 @@ def laid_out(page, run_id, size, said):
     below = page.value(FOCUS_BELOW)
     if below < 0:
         wrong.append("what took the keyboard is %d px under the pinned controls" % -below)
-    if narrow:
-        page.value("document.querySelector('#runs-panel > summary')?.click(); true")
+    page.value("if (document.getElementById('runs-panel').hidden) document.getElementById('runs-toggle').click(); true")
+    if page.value("document.getElementById('runs-rejected').closest('details').open"):
+        wrong.append("rejected history did not start collapsed")
+    page.value("document.querySelectorAll('.run-history:not([open]) > summary').forEach(summary => summary.click()); true")
     lists = page.value(LISTS)
     for name, found in lists.items():
-        if found["rows"] > 5 and not found["scrolls"]:
-            wrong.append("%s holds %d runs and does not scroll" % (name, found["rows"]))
-        if found["rows"] <= 5 and found["scrolls"]:
-            wrong.append("%s holds %d runs and scrolls" % (name, found["rows"]))
+        if found["scrolls"]:
+            wrong.append("%s scrolls inside the run list" % name)
     if not any(found["rows"] > 5 for found in lists.values()):
-        wrong.append("no list holds more than five runs, so no scrolling was proven")
-    rail = page.value(RAIL)
-    if rail and any(found["rows"] > 5 for found in lists.values()):
-        if rail["least"] < 0.99:
-            wrong.append("a list of more than five runs shows less than one of them")
-        if rail["scrolls"] > 1 and rail["shown"] > 1.05:      # a heading's few pixels are not a row to give up
-            wrong.append("the runs' lists scroll as a whole by %d px while one past five still shows %.1f rows"
-                         % (rail["scrolls"], rail["shown"]))
+        wrong.append("no list holds enough runs to exercise the full sidebar")
+    overflow = page.value("getComputedStyle(document.querySelector('.rail')).overflowY")
+    if overflow != "auto":
+        wrong.append("unexpected sidebar overflow mode %s" % overflow)
     for placed in filter(None, said.split(",")) if said != "none" else ():
         name, run = placed.split(":", 1)
         if run not in lists.get(name, {}).get("runs", ()):
             wrong.append("run %s is not listed under %s" % (run, name))
     print("laid the page out at %s: its controls %s, seen whole at the top and with the page scrolled %d px; what "
-          "took the keyboard is %s px below them; the lists hold %s runs and %s scroll; %s"
+          "took the keyboard is %s px below them; the lists hold %s runs and their sidebar overflow is %s"
           % (size, ", ".join(control["label"] for control in top) or "none, the run being closed",
              max([control["scrolled"] for control in scrolled] or [0]), below,
-             ", ".join("%s %d" % (name[len("runs-"):], found["rows"]) for name, found in lists.items()),
-             ", ".join(name[len("runs-"):] for name, found in lists.items() if found["scrolls"]) or "none",
-             "beside the run they scroll as a whole by %d px, a list past five showing %.1f rows"
-             % (rail["scrolls"], rail["shown"]) if rail else "they lie above the run, not beside it"))
+             ", ".join("%s %d" % (name[len("runs-"):], found["rows"]) for name, found in lists.items()), overflow))
     for text in wrong:
         print("wrong: %s" % text)
     return 1 if wrong else 0
@@ -338,13 +322,12 @@ def refused(page, repo, task, said):
     window the page then opens — whether it says `said`, stays open through the page's reads and a move to
     another view, and closes on its own Close. Prints what it saw; 0 when all of it holds."""
     page.value("location.hash = '#new'; true")
-    wait(lambda: page.value("[...document.getElementById('start-repo').options].some((o) => o.value === %s)"
-                            % json.dumps(repo)), 30, "the page offering the repository %s" % repo)
     wait(lambda: page.value("!document.getElementById('start-destination').disabled"), 30,
          "the first repository's destination")
     page.value("document.querySelector('#start-source .picker-button').click(); true")
-    page.value("[...document.querySelectorAll('#start-source .menu button')]"
-               ".find(button => button.title === %s).click(); true" % json.dumps(repo))
+    choice = "[...document.querySelectorAll('#repo-results button')].find(button => button.title === %s)" % json.dumps(repo)
+    wait(lambda: page.value(choice + " !== undefined"), 30, "the page offering the repository %s" % repo)
+    page.value(choice + ".click(); true")
     page.value("document.getElementById('start-name').value='demo-change';"
                " document.getElementById('start-task').value = %s; true" % json.dumps(task))
     wait(lambda: page.value("document.getElementById('start-landing').textContent.includes(%s)" % json.dumps(said)),
@@ -391,8 +374,6 @@ def answered(page, status, said):
     is refused, anything else not confirmed — the page sent the start once, and the window closes on its Close.
     Prints what it saw; 0 when all of it holds."""
     page.value("location.hash = '#new'; true")
-    wait(lambda: page.value("document.getElementById('start-repo').options.length > 0"), 30,
-         "the repositories the page offers")
     wait(lambda: page.value("!document.getElementById('start-destination').disabled"), 30,
          "an available destination")
     page.value(ANSWER_STARTS % json.dumps(status))
@@ -815,6 +796,7 @@ SETTINGS_POLICY_STAND_IN = """(() => {
     shown = await (await real(path, options)).json();
     shown.writable = true;
     shown.settings.timeout_seconds = 3600;
+    shown.settings.roles.engineer.agent = 'deepseek-engineer';
     delete shown.settings.agents['deepseek-engineer'].provider;
     return new Response(JSON.stringify(shown), { status: 200 });
   };
@@ -826,12 +808,13 @@ def settings_policy(page):
     page.value("location.hash = '#settings'; true")
     wait(lambda: page.value("Boolean(document.getElementById('settings-turn-hours'))"), 30, "Settings controls")
     page.value("""(() => {
-      document.getElementById('settings-profile-disclosure').open = true;
-      for (const [id, value] of [['settings-turn-hours', '48'], ['settings-provider-deepseek-engineer', 'deepseek']]) {
+      document.querySelector('#settings-role-panel-engineer [aria-label="Edit profile"]').click();
+      for (const [id, value] of [['settings-turn-hours', '48'], ['settings-edit-provider-deepseek-engineer', 'deepseek']]) {
         const field = document.getElementById(id);
         field.value = value;
         field.dispatchEvent(new Event('change'));
       }
+      document.getElementById('settings-profile-done').click();
       document.getElementById('settings-apply').click();
       return true;
     })()""")
@@ -840,6 +823,210 @@ def settings_policy(page):
     correct = len(sent) == len(expected) and {change["pointer"]: change.get("value") for change in sent} == expected
     print("Settings Apply captured, no settings written: %s" % sent)
     return 0 if correct else 1
+
+
+def settings_workspace(page):
+    def check(expression, what):
+        wait(lambda: page.value(expression), 6, what)
+
+    page.call("Emulation.setDeviceMetricsOverride", width=1440, height=960, deviceScaleFactor=1, mobile=False)
+    page.value("location.hash = '#settings-roles-title'; true")
+    check("document.activeElement.id === 'settings-roles-title' && "
+          "document.querySelector('#settings-jumps [aria-current=location]').hash === '#settings-roles-title' && "
+          "document.getElementById('settings-role-picker').checkVisibility() && "
+          "document.querySelectorAll('#settings-form button[aria-label^=Revert]').length === 2 && "
+          "!document.querySelector('#settings-agent-engineer option[value$=\"-architect\"]') && "
+          "Boolean(document.querySelector('#settings-role-panel-engineer .settings-profile-picker [aria-label=\"Add profile\"]'))",
+          "two section reverts and an in-context Agent picker with Add")
+    check("document.querySelector('#settings-skill-plan [aria-label=\"Add investigate-change to Plan\"]')?.checkVisibility() && "
+          "document.getElementById('settings-skill-plan').textContent.includes('Built-in instructions')",
+          "active instructions and available skills are visible at the start of each stage")
+    page.value("document.querySelector('#settings-jumps a[href=\"#settings-workflow-title\"]').click(); true")
+    check("document.activeElement.id === 'settings-workflow-title' && document.getElementById('settings-turn-hours').checkVisibility() && "
+          "document.getElementById('settings-flow').value === 'architect-plan' && "
+          "document.querySelector('#settings-flow-steps li:last-child').textContent.trim() === 'you approve merge' && "
+          "document.querySelector('#settings-rounds').closest('table').rows.length === 3",
+          "the workflow section, role-first flow and review table")
+    page.value("document.querySelector('[aria-label=\"About rounds after reflection\"]').focus(); true")
+    check("document.getElementById('extra-rounds-help').checkVisibility() && "
+          "document.getElementById('extra-rounds-help').textContent.includes('reflection instructions once')",
+          "keyboard access to the rounds explanation")
+    page.value("""(() => {
+      const hours = document.getElementById('settings-turn-hours');
+      hours.value = '36';
+      hours.dispatchEvent(new Event('change'));
+      document.querySelector('#settings-skills-engineer button[title]').click();
+      document.getElementById('settings-revert-roles').click();
+    })()""")
+    check("document.getElementById('settings-turn-hours').value === '36' && "
+          "!document.querySelector('#settings-skills-engineer .skill-tags button')",
+          "Revert Roles leaves the Workflow draft intact")
+    page.value("""(() => {
+      document.querySelector('#settings-skills-engineer button[title]').click();
+      document.querySelector('#settings-skill-plan [aria-label="Add fixture-support to Plan"]').click();
+      document.getElementById('settings-revert-workflow').click();
+    })()""")
+    check("document.getElementById('settings-turn-hours').value === '1' && "
+          "[...document.querySelectorAll('#settings-skill-plan .skill-tags button')].map(tag=>tag.textContent.trim()).join(',') === 'investigate-change ×,fixture-support ×'",
+          "Revert Workflow leaves the ordered stage skills intact")
+    page.value("""(() => {
+      const hours = document.getElementById('settings-turn-hours');
+      hours.value = '48';
+      hours.dispatchEvent(new Event('change'));
+      document.querySelector('#settings-skill-build .skill-name-entry').click();
+      document.getElementById('settings-skill-build-name').value = 'remote-build';
+      document.querySelector('#settings-skill-build .skill-manual button').click();
+      const agent = document.getElementById('settings-agent-engineer').value;
+      const model = document.getElementById('settings-model-' + agent);
+      model.value = 'fixture-model';
+      model.dispatchEvent(new Event('change'));
+      document.getElementById('settings-edit-instructions-engineer').click();
+    })()""")
+    check("document.getElementById('settings-instructions').open && document.getElementById('settings-persona-engineer').checkVisibility()",
+          "one instructions editor with the role's saved instructions")
+    page.value("""(() => {
+      const persona = document.getElementById('settings-persona-engineer');
+      window.originalPersona = persona.value;
+      persona.value = 'Discard this instruction draft';
+      document.querySelector('#settings-instructions [data-close-settings-dialog]').click();
+      document.getElementById('settings-edit-instructions-engineer').click();
+    })()""")
+    check("document.getElementById('settings-persona-engineer').value === window.originalPersona",
+          "Cancel drops only edits made inside the instructions editor")
+    page.value("""(() => {
+      document.querySelector('#settings-instructions footer [data-close-settings-dialog]').click();
+      document.querySelector('#settings-instruction-links-engineer + .settings-instruction-list [aria-label="When Final round applies"]').focus();
+    })()""")
+    check("document.getElementById('settings-instruction-help-at_limit-engineer')?.checkVisibility() && "
+          "document.getElementById('settings-instruction-help-at_limit-engineer').textContent.includes('final budgeted turn')",
+          "keyboard help explains when the final-round instructions apply")
+    page.call("Input.dispatchKeyEvent", type="keyDown", key="Escape", code="Escape", windowsVirtualKeyCode=27)
+    page.call("Input.dispatchKeyEvent", type="keyUp", key="Escape", code="Escape", windowsVirtualKeyCode=27)
+    check("!document.getElementById('settings-instruction-help-at_limit-engineer').checkVisibility()",
+          "Escape dismisses the prompt timing help")
+    page.call("Input.dispatchKeyEvent", type="keyDown", key="Enter", code="Enter", windowsVirtualKeyCode=13,
+              nativeVirtualKeyCode=13, text="\r")
+    page.call("Input.dispatchKeyEvent", type="keyUp", key="Enter", code="Enter", windowsVirtualKeyCode=13,
+              nativeVirtualKeyCode=13)
+    check("document.getElementById('settings-instruction-help-at_limit-engineer').checkVisibility()",
+          "Enter reopens timing help without moving focus")
+    page.value("document.getElementById('settings-edit-at_limit-engineer').click(); true")
+    check("document.querySelector('#settings-prompt-at_limit-engineer-panel pre').checkVisibility() && "
+          "document.querySelector('#settings-prompt-at_limit-engineer-panel pre').textContent.includes('final budgeted engineer turn') && "
+          "document.getElementById('settings-prompt-at_limit-engineer').checkVisibility()",
+          "the built-in final-round instructions sit alongside the optional editor")
+    page.value("""(() => {
+      document.querySelector('#settings-instructions footer [data-close-settings-dialog]').click();
+      document.getElementById('settings-edit-after_normal-engineer').click();
+    })()""")
+    check("document.querySelector('#settings-prompt-after_normal-engineer-panel pre').checkVisibility() && "
+          "document.querySelector('#settings-prompt-after_normal-engineer-panel pre').textContent.includes('diagnose why this phase has not converged')",
+          "the built-in instructions are visible after normal rounds")
+    page.value("""(() => {
+      document.querySelector('label[for=settings-prompt-after_normal-engineer-tab]').click();
+      document.getElementById('settings-prompt-after_normal-engineer').value = 'x'.repeat(5000);
+      document.getElementById('settings-instructions-done').click();
+      document.querySelector('label[for=settings-role-choice-architect]').click();
+      document.getElementById('settings-apply').click();
+    })()""")
+    check("document.getElementById('settings-instructions').open && document.activeElement.id === 'settings-prompt-after_normal-engineer' && "
+          "document.activeElement.closest('.field').querySelector('.alert').textContent.length > 0",
+          "server validation reopens the correct role and instructions tab")
+    page.value("""(() => {
+      document.getElementById('settings-prompt-after_normal-engineer').value = 'Check the evidence.';
+      document.getElementById('settings-instructions-done').click();
+      document.getElementById('settings-role-choice-engineer').focus();
+    })()""")
+    page.call("Input.dispatchKeyEvent", type="keyDown", key="ArrowRight", code="ArrowRight", windowsVirtualKeyCode=39)
+    page.call("Input.dispatchKeyEvent", type="keyUp", key="ArrowRight", code="ArrowRight", windowsVirtualKeyCode=39)
+    check("document.getElementById('settings-role-choice-architect').checked", "keyboard role switching")
+    page.value("document.querySelector('#settings-role-panel-architect [aria-label=\"Edit profile\"]').click(); true")
+    check("document.getElementById('settings-profiles-dialog').open && "
+          "document.getElementById('settings-profiles-intro').textContent.includes('Codex') && "
+          "!document.querySelector('#settings-role-panel-architect input[data-pointer$=\"/launcher\"]') && "
+          "[...document.querySelectorAll('#settings-profiles-body input')].map(input=>input.name.split('.').at(-1)).join(',') === 'model,effort'",
+          "Codex opens a profile editor with its runtime and both supported fields")
+    page.value("document.querySelector('#settings-profiles-dialog footer [data-close-settings-dialog]').click(); true")
+    page.value("""(() => {
+      const agent = document.getElementById('settings-agent-architect');
+      agent.value = '#browse';
+      agent.dispatchEvent(new Event('change'));
+    })()""")
+    check("document.getElementById('settings-profiles-title').textContent === 'Choose a profile' && "
+          "document.getElementById('settings-profile-done').hidden && "
+          "Boolean(document.querySelector('#settings-profiles-dialog .profile-list'))", "switching uses a separate profile chooser")
+    page.value("""(() => {
+      const engineer = document.getElementById('settings-agent-engineer').value;
+      document.querySelector('#settings-profiles-dialog [aria-label="Select ' + engineer + '"]').click();
+      return true;
+    })()""")
+    check("document.getElementById('settings-agent-architect').value === document.getElementById('settings-agent-engineer').value && "
+          "document.getElementById('settings-model-' + document.getElementById('settings-agent-architect').value).value === 'fixture-model'",
+          "sharing an existing profile keeps its staged model")
+    page.value("""(() => {
+      document.querySelector('#settings-role-panel-architect [aria-label="Add profile"]').click();
+      document.getElementById('settings-add-name').value = 'fixture-review';
+      const runtime = document.getElementById('settings-add-kind');
+      runtime.value = 'pi';
+      runtime.dispatchEvent(new Event('change'));
+    })()""")
+    check("document.getElementById('settings-add-model')?.checkVisibility() && "
+          "document.getElementById('settings-add-effort')?.checkVisibility() && "
+          "!document.getElementById('settings-add-launcher')?.checkVisibility()",
+          "Add profile includes model and effort with advanced settings collapsed")
+    page.value("""(() => {
+      for (const [option, value] of [['model', 'review-model'], ['effort', 'high']]) {
+        document.getElementById('settings-add-' + option).value = value;
+      }
+      const runtime = document.getElementById('settings-add-kind');
+      runtime.value = [...runtime.options].find(option => option.value !== 'pi').value;
+      runtime.dispatchEvent(new Event('change'));
+      runtime.value = 'pi';
+      runtime.dispatchEvent(new Event('change'));
+      document.getElementById('settings-profile-done').click();
+    })()""")
+    check("document.getElementById('settings-agent-architect').value === 'fixture-review' && "
+          "document.getElementById('settings-model-fixture-review').value === 'review-model' && "
+          "document.getElementById('settings-effort-fixture-review').value === 'high'",
+          "switching runtimes and back preserves the new profile's model and effort")
+    page.value("""(() => {
+      document.querySelector('#settings-role-panel-architect [aria-label="Edit profile"]').click();
+    })()""")
+    check("document.getElementById('settings-profiles-dialog').open && "
+          "document.getElementById('settings-profiles-title').textContent === 'Edit profile' && "
+          "document.getElementById('settings-profile-done').textContent === 'Save' && "
+          "document.getElementById('settings-profiles-intro').textContent.includes('fixture-review') && "
+          "document.getElementById('settings-edit-model-fixture-review').value === 'review-model' && "
+          "document.getElementById('settings-edit-effort-fixture-review').value === 'high' && "
+          "document.getElementById('settings-edit-provider-fixture-review').checkVisibility() && "
+          "document.getElementById('settings-edit-launcher-fixture-review').checkVisibility() && "
+          "!document.querySelector('#settings-profiles-dialog .profile-list')", "the Pi editor shows every field of the selected profile")
+    page.value("""(() => {
+      document.getElementById('settings-edit-model-fixture-review').value = 'review-model-edited';
+      document.getElementById('settings-edit-launcher-fixture-review').value = 'pi-local';
+      document.getElementById('settings-profile-done').click();
+      document.querySelector('#settings-skills-architect button[title]').click();
+    })()""")
+    check("document.getElementById('settings-agent-architect').value === 'fixture-review' && "
+          "document.getElementById('settings-model-fixture-review').value === 'review-model-edited' && "
+          "document.getElementById('settings-launcher-fixture-review')?.value === 'pi-local' && "
+          "document.querySelectorAll('#settings-skills-architect .skill-tags .skill-tag').length === 3",
+          "the model and launcher edits appear in the role row alongside the selected profile")
+    page.value("""(() => {
+      const launcher = document.getElementById('settings-launcher-fixture-review');
+      launcher.value = 'pi-worker';
+      launcher.dispatchEvent(new Event('change'));
+    })()""")
+    page.call("Emulation.setDeviceMetricsOverride", width=320, height=760, deviceScaleFactor=1, mobile=False)
+    page.value("document.getElementById('settings-edit-instructions-architect').click(); true")
+    check("document.documentElement.scrollWidth <= innerWidth && "
+          "document.getElementById('settings-instructions').getBoundingClientRect().width < innerWidth && "
+          "document.getElementById('settings-instructions-done').getBoundingClientRect().bottom <= innerHeight",
+          "the large editor and its footer fit at 320 pixels")
+    page.value("document.querySelector('#settings-instructions [data-close-settings-dialog]').click(); "
+               "document.getElementById('settings-apply').click(); true")
+    check("document.getElementById('settings-result').textContent.startsWith('Applied.')", "saving the Settings draft")
+    return 0
 
 
 def terminal_rows(page, run_id, role):
@@ -1798,8 +1985,9 @@ def instruction_skills(page, run_id, port):
     page.value("location.hash='#new'")
     wait(lambda: page.value("!document.querySelector('#view-new').hidden"), 10, 'new-run form')
     page.value("document.querySelector('#start-task').value='Keep this original task';"
-               "document.querySelector('#start-path').value='/fixture/repository';"
-               "document.querySelector('#start-source input[value=path]').click()")
+               "document.querySelector('#start-repo').click();document.querySelector('#repo-enter-path').click()")
+    wait(lambda: page.value("document.activeElement.id==='start-path'"), 5, 'the manual repository path')
+    page.call("Input.insertText", text="/fixture/repository")
     choose('#start-skills', '#start-task', 'This request')
     if not page.value("document.querySelector('#start-task').value.startsWith('Keep this original task')"):
         raise SystemExit('skill insertion replaced the original task')
@@ -1883,10 +2071,13 @@ def merge_navigation(page, run_id):
     reopen(2)
     away()
     reopen(3)
-    release(2, current=True)
-    wait(lambda: page.value("document.getElementById('merge-destination').options.length > 1"), 15,
-         "destinations from the reopened final gate")
     release(1)
+    if not page.value("document.getElementById('merge-destination-reading').checkVisibility()"):
+        raise SystemExit("an obsolete response dismissed the reopened gate's progress")
+    release(2, current=True)
+    wait(lambda: page.value("document.getElementById('merge-destination').options.length > 1 && "
+                            "document.getElementById('merge-destination-reading').hidden"), 15,
+         "destinations from the reopened final gate")
     if not page.value("""(() => {
       const select = document.getElementById('merge-destination');
       return select.options.length > 1 && [...select.options].every(option => !option.textContent.includes('obsolete'));
@@ -1895,6 +2086,476 @@ def merge_navigation(page, run_id):
     if not page.value("document.getElementById('merge-work-message').value==='Draft kept across Settings' && "
                       "document.getElementById('merge-message-preview').textContent==='Merge Draft kept across Settings'"):
         raise SystemExit('the reopened final gate lost its message draft')
+
+
+WORKBENCH_HOME_STAND_IN = """(() => {
+  const real = window.fetch;
+  const now = new Date().toISOString();
+  const merged = {run_id: 'trim-cache-a0000000', short_name: 'trim-cache', repo: 'services/cache',
+    state: 'closed', status: 'MERGED', closed: now, blocked_by: []};
+  const rejected = {...merged, run_id: 'refresh-ui-b0000000', short_name: 'refresh-ui', status: 'REJECTED'};
+  const refused = {...merged, run_id: 'read-input-e0000000', short_name: 'read-input', status: 'REFUSED'};
+  const stopped = {...merged, run_id: 'check-path-f0000000', short_name: 'check-path', status: 'STOPPED'};
+  const waiting = {...merged, run_id: 'ready-c0000000', short_name: 'review-cache', state: 'waiting',
+    status: 'READY_FOR_HUMAN', stop: {reason: 'final'}};
+  const running = {...merged, run_id: 'working-d0000000', short_name: 'trace-retry', state: 'running',
+    status: 'RUNNING', role: 'engineer', stage: 'build', since: now};
+  window.__home = { runs: [merged, rejected, refused, stopped], available: true, healthy: true, waiting, running,
+    stackRequests: 0 };
+  window.fetch = (path, options) => {
+    if (path === '/api/settings' && __home.holdSettings) {
+      return new Promise(resolve => { __home.releaseSettings = ok => resolve(ok
+        ? Response.json({settings: {roles: {}, agents: {}, timeout_seconds: 3600}, shared: {}, overrides: {},
+          revision: 'fixture', roles: {}, kinds: [], phases: [], writable: true, max_review_prompt_bytes: 4096})
+        : Response.json({error: 'fixture read failed'}, {status: 503})); });
+    }
+    if (path === '/api/flows' && __home.holdFlows) {
+      return new Promise(resolve => { __home.releaseFlows = () => resolve(Response.json({flows: []})); });
+    }
+    if (path === '/api/runs') return Promise.resolve(__home.available
+      ? Response.json({runs: __home.runs, cursor: null}) : Response.json({error: 'reader unavailable'}, {status: 503}));
+    if (path === '/api/health') return Promise.resolve(Response.json({components: ['temporal', 'wsl', 'windows']
+      .map(name => ({name, state: !__home.healthy && name === 'wsl' ? 'down' : 'up', managed: true, startable: true,
+        pid: name === 'windows' ? 123 : null, detail: name === 'windows' ? 'polls target:windows:fixture' : ''}))}));
+    if (path === '/api/stack') {
+      __home.stackRequests++;
+      return Promise.resolve(Response.json({error: 'fixture does not change the stack'}, {status: 409}));
+    }
+    return real(path, options);
+  };
+})();"""
+
+
+def workbench_home(page):
+    page.call("Emulation.setDeviceMetricsOverride", width=1440, height=900, deviceScaleFactor=1, mobile=False)
+
+    def idle():
+        return page.value("document.getElementById('resting-state').dataset.state === 'idle'")
+
+    def runs(change):
+        page.call("Runtime.evaluate", expression="(async () => { %s; await (await import('/rail.js')).refreshRuns(); })()" % change,
+                  awaitPromise=True)
+
+    def centered_chevron(button):
+        return page.value("""(() => {
+          const control = document.getElementById(%s);
+          const box = control.getBoundingClientRect();
+          const arrow = control.querySelector('.rail-arrow').getBoundingClientRect();
+          return box.height >= innerHeight - document.getElementById('top').offsetHeight - 1 &&
+            Math.abs(arrow.y + arrow.height / 2 - box.y - box.height / 2) < 2;
+        })()""" % json.dumps(button))
+
+    wait(lambda: idle() and page.value("document.querySelector('#stack-chips .chip[data-state=up]') !== null"),
+         10, "the healthy resting view")
+    wait(lambda: page.value("!document.getElementById('runs-panel').hidden && "
+                            "document.getElementById('runs-finished').closest('details').open"),
+         5, "the spacious window opening the run list and recent history")
+    if not centered_chevron("runs-close"):
+        raise SystemExit("the collapse arrow should be centered on the full-height sidebar edge")
+    runs("__home.original = __home.runs; __home.runs = [...__home.runs, "
+         "...Array.from({length: 7}, (_, i) => ({...__home.runs[0], run_id: 'recent-' + i}))]")
+    if not page.value("""(() => {
+      const rows = [...document.querySelectorAll('#runs-finished .row')];
+      const rail = document.querySelector('.rail').getBoundingClientRect();
+      return rows.length === 10 && rows.at(-1).getBoundingClientRect().bottom <= rail.bottom;
+    })()"""):
+        raise SystemExit("a spacious sidebar should fit ten recent runs")
+    runs("__home.runs = __home.original")
+    page.value("document.getElementById('runs-close').click(); true")
+    page.value("document.getElementById('stack-button').click()")
+    if not page.value("""(() => {
+      const rows = [...document.querySelectorAll('#stack-parts .part')];
+      const windows = rows[2];
+      const labels = [...windows.querySelectorAll('button')];
+      return document.getElementById('stack-panel-status')?.textContent === 'All components up'
+        && rows.every(row => row.querySelector('.state')?.textContent === 'Running')
+        && labels[0]?.textContent === 'Restart' && labels[0].getAttribute('aria-label') === 'Restart Windows worker'
+        && labels[1]?.textContent === 'Stop' && labels[1].getAttribute('aria-label') === 'Stop Windows worker'
+        && labels[1].classList.contains('quiet') && getComputedStyle(labels[1]).borderColor === 'rgba(0, 0, 0, 0)'
+        && windows.querySelector('.detail')?.textContent.includes('PID 123 · polls target:windows:fixture')
+        && document.querySelector('#stack-all [aria-label="Restart all components"]')?.textContent === 'Restart all';
+    })()"""):
+        raise SystemExit("the Stack panel lost its health, details, short labels or full accessible names")
+    page.value(button("#stack-panel", "Restart Windows worker", accessible=True) + ".focus()")
+    page.call("Input.dispatchKeyEvent", type="keyDown", key="Enter", code="Enter", windowsVirtualKeyCode=13,
+              nativeVirtualKeyCode=13, text="\r")
+    page.call("Input.dispatchKeyEvent", type="keyUp", key="Enter", code="Enter", windowsVirtualKeyCode=13,
+              nativeVirtualKeyCode=13)
+    wait(lambda: page.value("document.getElementById('confirm').open && document.activeElement.id === 'confirm-no' && "
+                            "document.getElementById('confirm-title').textContent === 'Restart the Windows worker?'"),
+         5, "the existing Restart confirmation")
+    page.call("Input.dispatchKeyEvent", type="keyDown", key="Escape", code="Escape", windowsVirtualKeyCode=27)
+    page.call("Input.dispatchKeyEvent", type="keyUp", key="Escape", code="Escape", windowsVirtualKeyCode=27)
+    wait(lambda: page.value("document.activeElement.id === 'stack-button' && __home.stackRequests === 0"),
+         5, "focus returning from the canceled confirmation")
+    if not page.value("document.getElementById('empty-counts').textContent === '3 closed runs · 1 rejected' && "
+                      "document.querySelectorAll('.run-history[open]').length === 1"):
+        raise SystemExit("the resting view omitted its history or expanded rejected runs")
+    if not page.value("""(() => {
+      const navigation = [...document.querySelectorAll('.top-nav a')].map(link => link.id);
+      const action = document.querySelector('.top-actions > #nav-new');
+      const opener = document.querySelector('.layout > #runs-toggle');
+      return document.getElementById('runs-panel').hidden &&
+        opener && opener.getAttribute('aria-expanded') === 'false' &&
+        opener.getBoundingClientRect().height >= innerHeight - document.getElementById('top').offsetHeight - 1 &&
+        opener.getBoundingClientRect().right <= document.getElementById('main').getBoundingClientRect().left &&
+        navigation.join(',') === 'nav-runs,nav-worktrees,nav-settings' &&
+        action && action.getBoundingClientRect().left > document.getElementById('stack-button').getBoundingClientRect().right;
+    })()"""):
+        raise SystemExit("the desktop starts with a left-edge run list opener and New run in the right-hand action group")
+    page.value("document.getElementById('runs-toggle').click(); true")
+    if not page.value("""(() => {
+      const panel = document.getElementById('runs-panel');
+      return !panel.hidden && document.getElementById('runs-toggle').getAttribute('aria-expanded') === 'true' &&
+        panel.getBoundingClientRect().right <= document.getElementById('main').getBoundingClientRect().left &&
+        !document.getElementById('runs-toggle').checkVisibility() &&
+        document.activeElement.id === 'runs-list-title';
+    })()"""):
+        raise SystemExit("the run list did not open to the left, replace the opener, and take focus")
+    page.value("document.getElementById('runs-close').click(); true")
+    if not page.value("document.getElementById('runs-panel').hidden && document.activeElement.id === 'runs-toggle'"):
+        raise SystemExit("collapsing the run list did not restore focus to the left-edge opener")
+    page.value("document.getElementById('runs-toggle').click(); true")
+    if not page.value("document.querySelector('#runs-finished .row-task').textContent === 'trim-cache' && "
+                      "!document.querySelector('#runs-finished .row').textContent.includes('a0000000')"):
+        raise SystemExit("the task row exposed a technical ID or obscured its name")
+    if not page.value("""(() => {
+      const rejected = document.getElementById('runs-rejected').closest('details');
+      rejected.open = true;
+      const swatch = document.body.appendChild(document.createElement('span'));
+      const matches = (id, token) => {
+        swatch.style.color = `var(--${token})`;
+        const status = document.querySelector(`[data-run="${id}"] .row-what`);
+        return getComputedStyle(status).color === getComputedStyle(swatch).color;
+      };
+      const valid = matches('trim-cache-a0000000', 'pass') && matches('refresh-ui-b0000000', 'bad')
+        && matches('read-input-e0000000', 'bad') && matches('check-path-f0000000', 'quiet');
+      swatch.remove();
+      rejected.open = false;
+      return valid;
+    })()"""):
+        raise SystemExit("historical status colors do not distinguish outcomes and routine stops")
+
+    runs("__home.runs = [__home.running, __home.waiting, ...__home.runs]")
+    if not page.value("document.getElementById('empty-action').hash === '#run=ready-c0000000' && "
+                      "document.querySelectorAll('.run-history[open]').length === 1"):
+        raise SystemExit("the home action skipped the waiting run or closed expanded history")
+    page.value("location.hash = '#worktrees'; true")
+    wait(lambda: page.value("!document.querySelector('#view-worktrees').hidden && !document.querySelector('#runs-panel').hidden && "
+                            "document.querySelector('#nav-runs-count').hidden"),
+         5, "Repositories keeping the global run rail open")
+    if not page.value("""(() => {
+      const pane = document.getElementById('worktrees-form').getBoundingClientRect();
+      const heading = document.getElementById('worktrees-title');
+      const main = document.getElementById('main').getBoundingClientRect();
+      return Math.abs(pane.x + pane.width / 2 - main.x - main.width / 2) < 2 &&
+        document.activeElement === heading && getComputedStyle(heading).outlineStyle === 'none';
+    })()"""):
+        raise SystemExit("the repository controls should be centered and the focused static heading should have no control ring")
+    page.value("__home.holdSettings = true; location.hash = '#settings'; true")
+    wait(lambda: page.value("Boolean(__home.releaseSettings) && !document.getElementById('runs-panel').hidden && "
+                            "document.getElementById('settings-reading').checkVisibility() && "
+                            "document.getElementById('view-settings').getAttribute('aria-busy') === 'true' && "
+                            "document.getElementById('settings-form').hidden"),
+         5, "Settings showing progress while its first read is pending")
+    page.value("__home.releaseSettings(false); true")
+    wait(lambda: page.value("document.getElementById('settings-reading').hidden && "
+                            "document.getElementById('settings-notice').checkVisibility() && "
+                            "document.getElementById('settings-notice-said').textContent.includes('fixture read failed')"),
+         5, "initial Settings failure replacing progress with a visible retry")
+    page.value("__home.releaseSettings = null; __home.holdFlows = true; document.getElementById('settings-reread').click(); true")
+    wait(lambda: page.value("Boolean(__home.releaseSettings)"), 5, "the pending Settings retry")
+    page.value("__home.releaseSettings(true); true")
+    wait(lambda: page.value("Boolean(__home.releaseFlows) && document.getElementById('settings-reading').checkVisibility()"),
+         5, "Settings staying busy until flows arrive")
+    page.value("__home.releaseFlows(); __home.holdFlows = false; true")
+    wait(lambda: page.value("document.getElementById('settings-form').checkVisibility() && "
+                            "document.getElementById('settings-reading').hidden && "
+                            "document.getElementById('view-settings').getAttribute('aria-busy') === 'false'"),
+         5, "Settings replacing progress with its loaded form")
+    page.value("location.hash = '#runs'; true")
+    wait(lambda: page.value("!document.querySelector('#runs-panel').hidden && document.querySelector('#nav-runs-count').hidden"),
+         5, "Runs restoring its rail without duplicating the attention count")
+    page.call("Runtime.evaluate", expression="(async () => { __home.healthy = false; "
+              "await (await import('/stack.js')).refreshStack(); })()", awaitPromise=True)
+    if not page.value("document.getElementById('stack-chips').textContent === 'Stack · 1 issue' && "
+                      "document.querySelector('.banner.stack').textContent.includes('WSL worker')"):
+        raise SystemExit("the stack summary hid an issue or its affected worker")
+
+    runs("__home.available = false")
+    if not page.value("document.getElementById('resting-state').dataset.state === 'unavailable' && "
+                      "document.getElementById('empty-action').hidden"):
+        raise SystemExit("the home view showed a run action while its list was unavailable")
+    runs("__home.available = true; __home.runs = []")
+    if not idle() or not page.value("document.getElementById('empty-counts').hidden"):
+        raise SystemExit("the fresh Workbench did not recover to its resting view")
+    page.value("document.getElementById('empty-action').click()")
+    wait(lambda: page.value("location.hash === '#new' && document.activeElement.id === 'start-task'"),
+         5, "the New run form taking focus")
+    if not page.value("document.querySelector('#nav-runs').getAttribute('aria-current') === 'location'"):
+        raise SystemExit("New run should identify its Runs workspace")
+    if page.value("document.getElementById('runs-panel').hidden"):
+        raise SystemExit("New run lost the global run list")
+
+    page.call("Emulation.setDeviceMetricsOverride", width=1060, height=1200, deviceScaleFactor=1, mobile=False)
+    page.value("location.hash = '#runs'; true")
+    page.call("Page.reload")
+    wait(lambda: idle() and page.value("document.getElementById('runs-toggle').checkVisibility()"),
+         10, "the collapsed rail in a tall 1060-pixel window")
+    if not centered_chevron("runs-toggle"):
+        raise SystemExit("the expand arrow should be centered on the full-height collapsed rail")
+    page.value("document.getElementById('runs-toggle').click(); true")
+    if not page.value("document.querySelector('#runs-finished .row').checkVisibility()"):
+        raise SystemExit("manually opening the rail should reveal recent closed runs")
+    page.value("document.querySelector('#runs-finished').closest('details').querySelector('summary').click(); "
+               "document.getElementById('runs-close').click(); document.getElementById('runs-toggle').click(); true")
+    if page.value("document.querySelector('#runs-finished .row').checkVisibility()"):
+        raise SystemExit("reopening the rail should keep deliberately collapsed history closed")
+
+
+WORKTREE_PICKER_STAND_IN = """(() => {
+  const real = window.fetch;
+  const probe = window.__worktrees = {reads: [], removals: 0};
+  window.fetch = async (path, options) => {
+    if (path === '/api/runs') return Response.json({runs: [], cursor: null});
+    if (path === '/api/repos') return Response.json([
+      {id: 'engineering/alpha', target: 'windows'}, {id: 'infra/beta', target: 'wsl'}]);
+    if (path.startsWith('/api/landing?')) return Response.json({branch: 'develop', identity_ready: true,
+      choices: [{branch: 'develop', remote: null}]});
+    if (path.startsWith('/api/worktrees?')) {
+      const repo = new URL(path, location.href).searchParams.get('repo');
+      probe.reads.push(repo);
+      if (repo === 'engineering/alpha' && probe.reads.length === 1) {
+        await new Promise(resolve => { probe.releaseAlpha = resolve; });
+      }
+      if (repo === 'infra/beta' && !probe.releaseBeta) {
+        await new Promise(resolve => { probe.releaseBeta = resolve; });
+      }
+      const rows = [{branch: 'develop', state: 'base', path: '/checkouts/' + repo}];
+      if (repo === 'infra/beta') rows.push(
+        {branch: 'kept-a0000000', state: 'unmerged', path: '/worktrees/kept', run: 'COMPLETED', removable: true},
+        {branch: 'other', state: 'merged', path: '/worktrees/other', run: null, removable: false});
+      return Response.json({repo, base_branch: 'develop', rows});
+    }
+    if (path.endsWith('/remove')) {
+      probe.removals++;
+      return Response.json({error: 'fixture does not remove worktrees'}, {status: 409});
+    }
+    return real(path, options);
+  };
+})();"""
+
+
+def click_backdrop(page):
+    for event in ("mousePressed", "mouseReleased"):
+        page.call("Input.dispatchMouseEvent", type=event, x=2, y=2, button="left", clickCount=1)
+
+
+def worktree_picker(page):
+    def check(expression, what):
+        wait(lambda: page.value(expression), 5, what)
+
+    page.value("location.hash = '#worktrees'; true")
+    check("typeof __worktrees.releaseAlpha === 'function'", "the default repository loading automatically")
+    page.value("document.querySelector('#worktrees-repo').click(); true")
+    check("document.activeElement.id === 'repo-search' && "
+          "document.querySelector('#repo-results [aria-current=true]').title === 'engineering/alpha'",
+          "the shared picker selecting its current repository and focusing search")
+    click_backdrop(page)
+    check("!document.querySelector('#repo-picker').open && document.activeElement.id === 'worktrees-repo'",
+          "backdrop click closing the picker and restoring focus")
+    page.value("document.querySelector('#worktrees-repo').click(); true")
+    page.call("Input.insertText", text="infra/bet")
+    check("document.querySelectorAll('#repo-results button').length === 1 && "
+          "document.querySelector('#repo-results button').getAttribute('aria-label') === 'infra/beta (WSL)'",
+          "search matching the full repository name")
+    page.call("Input.dispatchKeyEvent", type="keyDown", key="ArrowDown", code="ArrowDown", windowsVirtualKeyCode=40)
+    page.call("Input.dispatchKeyEvent", type="keyUp", key="ArrowDown", code="ArrowDown", windowsVirtualKeyCode=40)
+    check("document.activeElement.matches('#repo-results button')", "the arrow key reaching the matching repository")
+    page.call("Input.dispatchKeyEvent", type="keyDown", key="Enter", code="Enter", windowsVirtualKeyCode=13,
+              nativeVirtualKeyCode=13, text="\r")
+    page.call("Input.dispatchKeyEvent", type="keyUp", key="Enter", code="Enter", windowsVirtualKeyCode=13,
+              nativeVirtualKeyCode=13)
+    check("typeof __worktrees.releaseBeta === 'function' && !document.querySelector('#repo-picker').open && "
+          "document.activeElement.id === 'worktrees-repo' && document.getElementById('worktrees-reading').checkVisibility()",
+          "keyboard choice showing progress and returning focus")
+    page.value("__worktrees.releaseBeta(); true")
+    check("document.querySelector('#worktrees-count').textContent === '3' && document.querySelector('#worktrees-base').hidden && "
+          "document.querySelector('#worktrees-checkout .worktree-path code').textContent === '/checkouts/infra/beta' && "
+          "document.querySelector('#worktrees a').hash === '#run=kept-a0000000' && "
+          "document.querySelectorAll('#worktrees button.danger').length === 1 && "
+          "document.querySelectorAll('#worktrees button.copy, #worktrees-checkout button.copy').length === 3 && "
+          "document.getElementById('worktrees-reading').hidden",
+          "separate base checkout, linked run, and removal restricted to the eligible row")
+    page.call("Runtime.evaluate", expression="(async () => { __worktrees.releaseAlpha(); "
+              "await new Promise(resolve => setTimeout(resolve, 50)); })()", awaitPromise=True)
+    check("document.querySelector('#worktrees-checkout .worktree-path code').textContent === '/checkouts/infra/beta' && "
+          "document.getElementById('worktrees-reading').hidden",
+          "the late default repository never replacing the selected repository")
+    page.call("Emulation.setDeviceMetricsOverride", width=320, height=800, deviceScaleFactor=1, mobile=False)
+    check("document.documentElement.scrollWidth <= innerWidth && "
+          "document.querySelector('#worktrees-table-wrap').scrollWidth === "
+          "document.querySelector('#worktrees-table-wrap').clientWidth", "the worktrees fitting at 320 pixels")
+    page.value("document.querySelector('#worktrees button.danger').click(); true")
+    check("document.querySelector('#confirm').open && document.activeElement.id === 'confirm-no'",
+          "the existing confirmation protecting removal")
+    click_backdrop(page)
+    check("document.querySelector('#confirm').open && __worktrees.removals === 0",
+          "backdrop click leaving the confirmation and worktree intact")
+    page.value("document.querySelector('#confirm-no').click(); true")
+    check("!document.querySelector('#confirm').open && __worktrees.removals === 0",
+          "cancel leaving the worktree untouched")
+    page.value("document.querySelector('#worktrees-repo').click(); document.querySelector('#repo-enter-path').click(); true")
+    check("document.activeElement.id === 'worktrees-path' && document.querySelector('#worktrees-overview').hidden",
+          "manual entry clearing the previous repository and focusing the path")
+    page.call("Input.insertText", text="/manual/repository")
+    check("__worktrees.reads.length === 2", "typing a path without reading it")
+    page.value("document.querySelector('#worktrees-load').click(); true")
+    check("__worktrees.reads.at(-1) === '/manual/repository' && !document.querySelector('#worktrees-none').hidden",
+          "an explicit manual read showing its own base checkout")
+    page.value("document.querySelector('#worktrees-load').click(); true")
+    check("__worktrees.reads.length === 4 && __worktrees.reads.at(-1) === '/manual/repository' && "
+          "document.querySelector('#worktrees-load').textContent === 'Refresh'", "refreshing the same repository")
+    page.value("location.hash = '#new'; true")
+    check("!document.querySelector('#view-new').hidden", "opening New run")
+    page.value("document.querySelector('#start-repo').click(); true")
+    check("document.querySelector('#repo-picker').open && "
+          "document.querySelector('#repo-results [aria-current=true]').title === 'engineering/alpha' && "
+          "document.querySelectorAll('#repo-results h3').length === 2 && "
+          "new Set([...document.querySelectorAll('#repo-results h3, #repo-results .repo-platform')]"
+          ".map(node => getComputedStyle(node).color)).size === 4",
+          "New run sharing the picker and keeping its own choice")
+    page.value("document.querySelector('#repo-results button[title=\"infra/beta\"]').click(); true")
+    check("document.querySelector('#start-repo').textContent.includes('infra/beta') && "
+          "!document.querySelector('#start-destination').disabled", "the New run choice refreshing its destination")
+
+
+def repository_editor(page, path):
+    def check(expression, what):
+        wait(lambda: page.value(expression), 7, what)
+
+    def click(selector):
+        page.value("document.querySelector(%s).click(); true" % json.dumps(selector))
+
+    def fill(selector, value):
+        page.value("(() => { const field = document.querySelector(%s); field.value = %s;"
+                   "field.dispatchEvent(new Event('input', { bubbles: true })); return true; })()"
+                   % (json.dumps(selector), json.dumps(value)))
+
+    page.call("Emulation.setDeviceMetricsOverride", width=320, height=740, deviceScaleFactor=1, mobile=False)
+    page.value("location.hash = '#new'; true")
+    check("!document.querySelector('#view-new').hidden", "New run")
+    click("#start-repo")
+    click("#repo-add")
+    check("document.activeElement.id === 'repository-name' && document.querySelector('#repository-editor').open",
+          "the shared Add dialog focusing its first field")
+    click_backdrop(page)
+    check("!document.querySelector('#repository-editor').open && document.activeElement.id === 'start-repo'",
+          "backdrop click closing a clean editor")
+    click("#start-repo")
+    click("#repo-add")
+    check("document.activeElement.id === 'repository-name'", "the reopened Add dialog")
+    fill("#repository-name", "team/repository")
+    fill("#repository-path", path)
+    fill("#repository-target", "wsl")
+    click("#repository-advanced summary")
+    check("""(() => {
+      const body = document.querySelector('#repository-editor .repository-editor-body');
+      const remote = document.querySelector('#repository-field-remote');
+      const path = document.querySelector('#repository-path');
+      const labels = [...document.querySelectorAll('#repository-fields legend')].map(node => node.textContent);
+      const button = document.querySelector('#repository-save').getBoundingClientRect();
+      return labels.join('|') === 'Git and execution|Todo lifecycle|Closeout permissions'
+        && remote.type === 'text' && getComputedStyle(remote).borderColor === getComputedStyle(path).borderColor
+        && body.scrollHeight > body.clientHeight && button.bottom <= innerHeight;
+    })()""", "grouped advanced settings with shared controls and a visible Save action")
+    page.call("Emulation.setDeviceMetricsOverride", width=1280, height=760, deviceScaleFactor=1, mobile=False)
+    check("""(() => {
+      const input = document.querySelector('#repository-field-todo_done_dir');
+      const label = input.previousElementSibling;
+      const check = input.nextElementSibling;
+      const value = input.getBoundingClientRect(), name = label.getBoundingClientRect();
+      return getComputedStyle(label).fontWeight === '500' && value.left > name.left &&
+        Math.abs(check.getBoundingClientRect().left - value.left) < 2;
+    })()""", "wide todo rows aligning labels, fields, and deletion choices")
+    page.call("Emulation.setDeviceMetricsOverride", width=320, height=740, deviceScaleFactor=1, mobile=False)
+    click('label[for="repository-field-todo_done_dir-disabled"]')
+    fill("#repository-field-lfs_pointers", "false")
+    check("document.querySelector('#repository-field-lfs_pointers').value === 'false'", "choosing the advanced Git LFS option")
+    click_backdrop(page)
+    check("document.querySelector('#repository-editor').open && "
+          "document.querySelector('#repository-name').value === 'team/repository'",
+          "backdrop click preserving the unsaved repository draft")
+    click("#repository-save")
+    check("!document.querySelector('#repository-editor').open && "
+          "document.querySelector('#start-repo').textContent.includes('team/repository')", "saving from New run")
+    stored = page.call("Runtime.evaluate", expression="""(async () => {
+      const {api} = await import('/api.js');
+      const entry = (await api('/api/repos/editor')).entries['team/repository'];
+      return entry.lfs_pointers === false && Object.hasOwn(entry, 'todo_done_dir') && entry.todo_done_dir === null
+        && !Object.hasOwn(entry, 'base_branch');
+    })()""", awaitPromise=True, returnByValue=True)
+    if stored["result"].get("value") is not True:
+        raise SystemExit("the catalog lost an explicit Git LFS or completed-todo choice")
+    click("#nav-worktrees")
+    check("document.querySelector('#nav-worktrees').getAttribute('aria-current') === 'page' && "
+          "document.documentElement.scrollWidth <= innerWidth", "Repositories navigation fitting at 320 pixels")
+    click("#worktrees-repo")
+    click('#repo-results button[title="team/repository"]')
+    check("!document.querySelector('#repository-edit').hidden && !document.querySelector('#worktrees-count').hidden",
+          "editing the selected saved repository after reading its Git facts")
+    click("#repository-edit")
+    check("!document.querySelector('#repository-save').disabled", "the selected repository editor")
+    check("document.querySelector('#repository-base').placeholder === 'Automatic (develop)' && "
+          "document.querySelector('#repository-base').value === '' && "
+          "document.querySelector('#repository-target option').textContent === 'Automatic (WSL)'",
+          "the detected base and host as hints")
+    fill("#repository-path", "/fixture/different")
+    check("document.querySelector('#repository-base').placeholder === 'Automatic' && "
+          "document.querySelector('#repository-target option').textContent === 'Automatic'",
+          "a changed path hiding the previous detection")
+    fill("#repository-path", path)
+    flag = page.value("document.querySelector('#repository-field-lfs_pointers')?.value")
+    if flag != "false":
+        raise SystemExit("the stored Git LFS option opened as %r" % flag)
+    fill("#repository-name", "team/renamed")
+    click("#repository-save")
+    check("!document.querySelector('#repository-editor').open && "
+          "document.querySelector('#worktrees-repo').textContent.includes('team/renamed')", "renaming the saved entry")
+    check("!document.querySelector('#repository-edit').hidden", "Edit after rename")
+    click("#repository-edit")
+    check("document.querySelector('#repository-field-lfs_pointers')?.value === 'false' && "
+          "!document.querySelector('#repository-remove').hidden", "rename preserving advanced settings")
+    click("#repository-remove")
+    check("document.querySelector('#confirm').open && document.activeElement.id === 'confirm-no'",
+          "removal confirmation")
+    click("#confirm-no")
+    check("document.querySelector('#repository-editor').open && !document.querySelector('#confirm').open && "
+          "document.activeElement.id === 'repository-remove'",
+          "cancel keeping the editor open and returning focus to Remove from list")
+    click("#repository-remove")
+    click("#confirm-yes")
+    check("!document.querySelector('#repository-editor').open && document.querySelector('#repository-edit').hidden",
+          "confirmed removal clearing the saved choice")
+    click("#nav-runs")
+    check("document.querySelector('#nav-runs').getAttribute('aria-current') === 'page' && "
+          "!document.querySelector('#view-empty').hidden && document.querySelector('#runs-panel').hidden",
+          "explicit Runs navigation leaving the list collapsed")
+    click("#runs-toggle")
+    check("!document.querySelector('#runs-panel').hidden && "
+          "document.querySelector('#runs-panel').getBoundingClientRect().bottom <= "
+          "document.querySelector('#main').getBoundingClientRect().top + 1",
+          "the mobile run list opening above the content")
+    page.call("Input.dispatchKeyEvent", type="keyDown", key="Escape", code="Escape", windowsVirtualKeyCode=27)
+    page.call("Input.dispatchKeyEvent", type="keyUp", key="Escape", code="Escape", windowsVirtualKeyCode=27)
+    check("document.querySelector('#runs-panel').hidden && document.activeElement.id === 'runs-toggle'",
+          "Escape hiding the mobile run list and restoring focus")
+    click("#stack-button")
+    check("""(() => {
+      const panel = document.querySelector('#stack-panel');
+      const {left, right} = panel.getBoundingClientRect();
+      return panel.matches(':popover-open') && left >= 0 && right <= innerWidth;
+    })()""", "the relocated Stack control keeping its popover in view")
 
 
 def main(url, run_id, label, said, note=None):
@@ -1978,6 +2639,21 @@ window.WebSocket=class extends NativeSocket{
             if label.startswith("change:") or label == "review-closed":
                 page.call("Page.enable")
                 page.call("Page.addScriptToEvaluateOnNewDocument", source=CLIPBOARD_STAND_IN)
+            if label == "workbench-home":
+                page.call("Page.enable")
+                page.call("Page.addScriptToEvaluateOnNewDocument", source=WORKBENCH_HOME_STAND_IN)
+            if label == "worktree-picker":
+                page.call("Page.enable")
+                page.call("Page.addScriptToEvaluateOnNewDocument", source=WORKTREE_PICKER_STAND_IN)
+            if label == "repository-editor":
+                page.call("Page.enable")
+                page.call("Page.addScriptToEvaluateOnNewDocument", source=WORKBENCH_HOME_STAND_IN + """(() => {
+                  const real = window.fetch;
+                  window.fetch = (path, options) => path.startsWith('/api/landing?')
+                    ? Promise.resolve(Response.json({branch: 'develop', identity_ready: true,
+                        choices: [{branch: 'develop', remote: null}]}))
+                    : real(path, options);
+                })();""")
             if label == "merge-navigation":
                 page.call("Page.enable")
                 page.call("Page.addScriptToEvaluateOnNewDocument", source=MERGE_NAVIGATION_STAND_IN)
@@ -1997,6 +2673,15 @@ window.WebSocket=class extends NativeSocket{
                   };
                 })();""")
             page.call("Page.navigate", url=url)
+            if label == "workbench-home":
+                workbench_home(page)
+                return 0
+            if label == "worktree-picker":
+                worktree_picker(page)
+                return 0
+            if label == "repository-editor":
+                repository_editor(page, said)
+                return 0
             if label == 'terminal-archive':
                 return terminal_archive(page, port)
             if label == 'archive-observe':
@@ -2043,12 +2728,16 @@ window.WebSocket=class extends NativeSocket{
             if label == "settings-policy":
                 wait(lambda: page.value("document.readyState === 'complete'"), 30, "the Workbench page")
                 return settings_policy(page)
+            if label == "settings-workspace":
+                wait(lambda: page.value("document.readyState === 'complete'"), 30, "the Workbench page")
+                return settings_workspace(page)
             if label == "hints":
                 # Its views read no run, so neither does it wait for the list of runs.
                 wait(lambda: page.value("document.readyState === 'complete'"), 30, "the Workbench page")
                 return hints(page, run_id)
             wait(lambda: page.value("document.readyState === 'complete' && "
-                                    "document.querySelector('#runs-finished li') !== null"), 30, "the Workbench page")
+                                    "/^[0-9]+$/.test(document.getElementById('runs-finished-count').textContent)"),
+                 30, "the run list to be read")
             if label.startswith("layout:"):
                 return laid_out(page, run_id, size, said)
             if label == "accounting":
@@ -2290,7 +2979,7 @@ window.WebSocket=class extends NativeSocket{
                     # The stack's controls are in the popover its chips open.
                     page.value("(p => { if (!p.matches(':popover-open')) document.getElementById('stack-button')"
                                ".click(); return true; })(document.getElementById('stack-panel'))")
-                    pressed = button("#stack-panel", label)
+                    pressed = button("#stack-panel", label, accessible=True)
                     # The stack's result shows under the top bar, not in the popover a confirmation closes.
                 else:
                     page.value(OPEN % json.dumps(run_id))

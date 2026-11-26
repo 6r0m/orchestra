@@ -803,6 +803,9 @@ PROMPT_CASES = {
     "plan, a later turn": dict(
         stage="plan", stage_cfg=ENGINEER, is_review=False, state=dict(TURN, round=1, feedback="Name the test."),
         session_first=False, stage_first=False, skills={"plan": "investigate-change"}),
+    "plan, with a supporting skill": dict(
+        stage="plan", stage_cfg=ENGINEER, is_review=False, state=dict(TURN, repo_path="/fixture"),
+        session_first=True, stage_first=True, skills={"plan": ["investigate-change", "evidence-check"]}),
     "plan, a later turn with your words": dict(
         stage="plan", stage_cfg=ENGINEER, is_review=False,
         state=dict(TURN, round=1, feedback="Name the test.", guidance="Keep it to one module."),
@@ -850,7 +853,12 @@ class PromptParts(unittest.TestCase):
     """A turn's prompt is built as labelled parts and rendered from them, byte for byte the prompt it was."""
 
     def test_every_prompt_renders_from_its_parts_exactly_as_it_was(self):
+        from unittest import mock
         from app.agents import nodes as N
+        mock_skills = mock.patch.object(N.adapters.load("claude-code"), "skill_folders",
+                                       side_effect=lambda name, repo: [repo + "/skills/" + name])
+        mock_skills.start()
+        self.addCleanup(mock_skills.stop)
         with open(os.path.join(HERE, "fixtures", "prompts.json"), encoding="utf-8") as fh:
             captured = json.load(fh)
         self.assertEqual(sorted(captured), sorted(PROMPT_CASES))
@@ -1043,6 +1051,24 @@ class Flows(Scenario):
         for said in ("# Task", "You are the architect", "# Your previous brief", "Brief: use the platform's scheduler.",
                      "narrow it to one queue"):
             self.assertIn(said, prompt)
+
+    def test_architect_plan_runs_from_the_brief_to_the_human_merge_gate(self):
+        from app.foundation import flows
+
+        brief = "Brief: use the platform's scheduler."
+        flow = {"name": "architect-plan", "steps": flows.load("architect-plan")}
+        git = self.watched()
+        run = self.drive([
+            ("research-e1-1", 0, codex_first_out(brief)[0]),
+            ("plan-e2-1", 0, "planned\n"), ("assess-e2-1", 0, codex_review_resumed("PASS")),
+            ("build-e3-1", 0, "built\n"), ("verify-e3-1", 0, codex_review_resumed("PASS")),
+            ("closeout-e4-1", 0, "closed out\n"),
+        ], git=git, handed=flow, auto=False)
+        self.assertEqual((run.state["flow"], run.stop["reason"]), (flow, "final"))
+        self.assertEqual(self.names(), ["research-e1-1", "plan-e2-1", "assess-e2-1", "build-e3-1",
+                                        "verify-e3-1", "closeout-e4-1"])
+        self.assertIn(brief, self.agent.calls[1]["prompt"])
+        self.assertNotIn("merge", [call[0] for call in git.calls])
 
     def test_research_alone_ends_done_once_its_brief_is_approved_and_closes_its_terminals(self):
         from unittest import mock

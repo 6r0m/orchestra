@@ -21,6 +21,7 @@ _files = {}
 def settings(**roles):
     """The shipped settings, each role run by the profile named for it here — this cast's where none is."""
     made = json.loads(json.dumps(S.load()))
+    made["default_flow"] = "engineer-plan"
     for role, profile in dict(ROLES, **roles).items():
         if profile not in made["agents"]:
             raise AssertionError("the settings define no profile %r for the %s to run" % (profile, role))

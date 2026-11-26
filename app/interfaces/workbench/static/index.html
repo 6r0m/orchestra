@@ -15,58 +15,87 @@
 <a class="skip" id="skip" href="#main">Skip to the main view</a>
 <header class="top" id="top">
   <a class="brand" href="#" translate="no">Orchestra <span>Workbench</span></a>
-  <button type="button" class="stack-button" id="stack-button" popovertarget="stack-panel"
-    aria-describedby="stack-button-hint" title="Temporal and each host's worker: open to start, stop or restart them"><span class="chips" id="stack-chips">Reading the stack…</span></button>
-  <span class="visually-hidden" id="stack-button-hint">Opens the stack's controls</span>
-  <div class="panel" id="stack-panel" popover="auto" aria-labelledby="stack-panel-title">
-    <h2 id="stack-panel-title">The stack</h2>
-    <p class="hint">Temporal holds every run; each host's worker runs that host's agents. Stopping or
-      restarting a part asks first, and says what it interrupts.</p>
-    <div class="parts" id="stack-parts"></div>
-    <div class="stack-all" id="stack-all"></div>
-  </div>
   <nav class="top-nav" aria-label="Views">
-    <a href="#worktrees" id="nav-worktrees">Worktrees</a>
+    <a href="#runs" id="nav-runs">Runs<span class="nav-attention" id="nav-runs-count" hidden></span></a>
+    <a href="#worktrees" id="nav-worktrees">Repositories</a>
     <a href="#settings" id="nav-settings">Settings</a>
-    <a class="button primary" href="#new" id="nav-new" title="Open the form that starts a run">New run</a>
   </nav>
+  <div class="top-actions">
+    <button type="button" class="stack-button" id="stack-button" popovertarget="stack-panel"
+      aria-describedby="stack-button-hint" title="Temporal and each host's worker: open to start, stop or restart them"><span id="stack-chips" aria-live="polite">Reading stack…</span></button>
+    <span class="visually-hidden" id="stack-button-hint">Opens the stack's controls</span>
+    <div class="panel" id="stack-panel" popover="auto" aria-labelledby="stack-panel-title" aria-busy="true">
+      <div class="stack-heading">
+        <h2 id="stack-panel-title">Stack</h2>
+        <span class="chip stack-health" id="stack-panel-health" role="status">
+          <span class="dot" aria-hidden="true"></span><span id="stack-panel-status">Reading stack…</span>
+        </span>
+      </div>
+      <div class="reading-bar" id="stack-reading" role="progressbar" aria-label="Reading stack"></div>
+      <div class="parts" id="stack-parts"></div>
+      <div class="stack-all" id="stack-all" hidden></div>
+      <p class="hint">Stopping or restarting requires confirmation.</p>
+    </div>
+    <a class="button primary" href="#new" id="nav-new" title="Open the form that starts a run">New run</a>
+  </div>
 </header>
 <div class="banners" id="banners">
   <p class="result stack-result" id="stack-result" role="status"></p>
   <p class="banner bad" id="connection" hidden></p>
 </div>
 <div class="layout">
-  <details class="runs-panel" id="runs-panel" open>
-    <summary>Runs<span id="runs-summary"></span></summary>
-  <nav class="rail" aria-label="Runs">
-    <section class="group" aria-labelledby="runs-waiting-title">
-      <h2 id="runs-waiting-title">Operator action <span class="count" id="runs-waiting-count"></span></h2>
-      <ul class="runs" id="runs-waiting"></ul>
-    </section>
-    <section class="group" aria-labelledby="runs-running-title">
-      <h2 id="runs-running-title">Working <span class="count" id="runs-running-count"></span></h2>
-      <ul class="runs" id="runs-running"></ul>
-    </section>
-    <section class="group" aria-labelledby="runs-finished-title">
-      <h2 id="runs-finished-title">Closed <span class="count" id="runs-finished-count"></span></h2>
-      <ul class="runs" id="runs-finished"></ul>
-    </section>
-    <section class="group" aria-labelledby="runs-rejected-title">
-      <h2 id="runs-rejected-title">Rejected <span class="count" id="runs-rejected-count"></span></h2>
-      <ul class="runs" id="runs-rejected"></ul>
-    </section>
-    <button type="button" class="quiet" id="runs-older" hidden
-          title="List closed runs older than these: Temporal keeps them, and the list shows the newest first">Load older runs</button>
-  </nav>
-  </details>
+  <button type="button" class="rail-button runs-toggle" id="runs-toggle" aria-label="Show run list" aria-controls="runs-panel"
+    aria-expanded="false" title="Show run list" hidden>
+    <span class="rail-arrow" aria-hidden="true"></span><span class="run-list-label">Run list</span>
+  </button>
+  <aside class="runs-panel" id="runs-panel" aria-labelledby="runs-list-title" hidden>
+    <button type="button" class="rail-button runs-close" id="runs-close" aria-label="Hide run list" title="Hide run list">
+      <span class="rail-arrow" aria-hidden="true"></span>
+    </button>
+    <nav class="rail" aria-label="Run list" aria-busy="true">
+      <header class="rail-header">
+        <h2 class="rail-title" id="runs-list-title" tabindex="-1">Runs</h2>
+      </header>
+      <div class="reading-bar" id="rail-reading" role="progressbar" aria-label="Reading runs"></div>
+      <section aria-labelledby="runs-waiting-title">
+        <h3 class="group-heading" id="runs-waiting-title">Needs attention <span class="count" id="runs-waiting-count">–</span></h3>
+        <ul class="runs" id="runs-waiting"></ul>
+      </section>
+      <section aria-labelledby="runs-running-title">
+        <h3 class="group-heading" id="runs-running-title">Running <span class="count" id="runs-running-count">–</span></h3>
+        <ul class="runs" id="runs-running"></ul>
+      </section>
+      <div class="rail-history">
+        <details class="run-history" open>
+          <summary class="group-heading">Closed <span class="count" id="runs-finished-count">–</span></summary>
+          <ul class="runs" id="runs-finished" aria-label="Closed runs"></ul>
+        </details>
+        <details class="run-history">
+          <summary class="group-heading">Rejected <span class="count" id="runs-rejected-count">–</span></summary>
+          <ul class="runs" id="runs-rejected" aria-label="Rejected runs"></ul>
+        </details>
+        <button type="button" class="quiet" id="runs-older" hidden
+          title="List closed and rejected runs older than these">Load older runs</button>
+      </div>
+    </nav>
+  </aside>
   <main id="main" tabindex="-1">
     <section class="view empty" id="view-empty" hidden aria-labelledby="empty-title">
-      <h1 id="empty-title">Select a run</h1>
-      <p id="empty-said">Reading the runs…</p>
+      <div class="resting-state" id="resting-state">
+        <div class="resting-message" aria-live="polite">
+          <span class="resting-mark" aria-hidden="true"></span>
+          <h1 id="empty-title">Reading runs…</h1>
+          <p id="empty-said" hidden></p>
+        </div>
+        <div class="reading-bar" id="home-reading" role="progressbar" aria-label="Reading runs" hidden></div>
+        <a class="button primary" href="#new" id="empty-action" title="Open the form that starts a run" hidden>New run</a>
+        <p class="resting-history" id="empty-counts" hidden></p>
+      </div>
     </section>
 
     <section class="view" id="view-new" hidden aria-labelledby="new-title">
       <h1 id="new-title">Start a run</h1>
+      <div class="reading-bar" id="start-reading" role="progressbar" aria-label="Reading run options" hidden></div>
       <form class="form" id="start" autocomplete="off">
         <div class="field">
           <label for="start-task">Task</label>
@@ -80,34 +109,35 @@
           <input id="start-name" name="short_name" type="text" required maxlength="16" pattern="[A-Za-z0-9]+(-[A-Za-z0-9]+)*"
             autocomplete="off" spellcheck="false" placeholder="terminal-cache" aria-describedby="start-name-hint">
           <p class="hint" id="start-name-hint">Temporary worktree folder and Git branch: <span id="start-name-preview">your-name</span>-xxxxxxxx. Up to 16 letters, digits and internal hyphens. Commit messages are proposed after the work is complete; review and edit them before Merge.</p>
-          <p class="hint" id="start-landing" role="status">Choose a repository to see where Merge lands.</p>
-          <label for="start-destination">Preferred Merge destination</label>
-          <select id="start-destination" name="merge_preference" disabled></select>
-          <button type="button" id="start-landing-retry"
-            title="Read the selected repository's Merge destinations again">Refresh destinations</button>
         </div>
         <fieldset class="field source" id="start-source">
           <legend>Repository</legend>
-          <div class="choices">
-            <label><input type="radio" name="start-source" value="listed" checked> From repos.json</label>
-            <label><input type="radio" name="start-source" value="path"> A path</label>
-          </div>
-          <div class="source-listed"><select id="start-repo" name="repo" aria-label="Repository"></select></div>
-          <div class="source-path" hidden>
-            <input id="start-path" name="path" type="text" spellcheck="false" aria-label="Repository path"
+          <button type="button" class="picker-button" id="start-repo" aria-haspopup="dialog" aria-controls="repo-picker"
+            title="Choose a saved repository or enter its path">Choose a repository</button>
+          <div class="field" id="start-path-field" hidden>
+            <label for="start-path">Repository path</label>
+            <input id="start-path" name="path" type="text" spellcheck="false"
               placeholder="/mnt/e/Repos/name…" aria-describedby="start-path-hint">
             <p class="hint" id="start-path-hint">As WSL sees it: <span translate="no">/mnt/e/…</span> for a
               Windows drive.</p>
           </div>
         </fieldset>
         <div class="field">
-          <label for="start-flow">Flow</label>
-          <select id="start-flow" name="flow" aria-describedby="start-flow-hint"></select>
-          <ol class="score compact" id="start-flow-steps" aria-label="The flow's steps"></ol>
-          <p class="hint" id="start-flow-hint">The order the roles work in, and where you approve. Each flow is
-            a file in <span translate="no">flows/</span>; the list reads them again each time it opens.</p>
+          <label for="start-destination">Preferred Merge destination</label>
+          <select id="start-destination" name="merge_preference" disabled></select>
+          <div class="reading-bar" id="start-landing-reading" role="progressbar" aria-label="Reading destinations" hidden></div>
+          <p class="hint" id="start-landing" role="status">Choose a repository to see where Merge lands.</p>
+          <button type="button" id="start-landing-retry"
+            title="Read the selected repository's Merge destinations again">Refresh destinations</button>
         </div>
         <div class="field">
+          <label for="start-flow">Flow</label>
+          <select id="start-flow" name="flow" required aria-describedby="start-flow-hint"></select>
+          <ol class="score compact" id="start-flow-steps" aria-label="The flow's steps"></ol>
+          <p class="hint" id="start-flow-hint">The order the roles work in and when you need to act. Each flow is
+            a file in <span translate="no">flows/</span>; the list reads them again each time it opens.</p>
+        </div>
+        <div class="field" id="start-approval-options">
           <label class="check"><input type="checkbox" id="start-auto" name="auto_proceed"> Skip approvals</label>
           <p class="hint">Skips each “you approve” step of the flow. A blocker, a spent round budget, a failed
             step and the merge still wait for you.</p>
@@ -123,110 +153,122 @@
     </section>
 
     <section class="view" id="view-worktrees" hidden aria-labelledby="worktrees-title">
-      <h1 id="worktrees-title">Worktrees</h1>
-      <p class="lead">Every worktree of a repository, and whether its work is merged. What a closed run kept can
-        be removed here.</p>
-      <form class="form inline" id="worktrees-form" autocomplete="off">
+      <header class="repository-heading">
+        <h1 id="worktrees-title">Repositories</h1>
+        <button type="button" id="repository-add" title="Save a repository in the list">Add repository</button>
+      </header>
+      <form class="form inline worktrees-form" id="worktrees-form" autocomplete="off">
         <fieldset class="field source" id="worktrees-source">
-          <legend>Repository</legend>
-          <div class="choices">
-            <label><input type="radio" name="worktrees-source" value="listed" checked> From repos.json</label>
-            <label><input type="radio" name="worktrees-source" value="path"> A path</label>
-          </div>
-          <div class="source-listed"><select id="worktrees-repo" name="repo" aria-label="Repository"></select></div>
-          <div class="source-path" hidden>
-            <input id="worktrees-path" name="path" type="text" spellcheck="false" aria-label="Repository path"
-              placeholder="/mnt/e/Repos/name…">
+          <legend>Selected repository</legend>
+          <button type="button" class="picker-button" id="worktrees-repo" aria-haspopup="dialog" aria-controls="repo-picker"
+            title="Choose a saved repository or enter its path">Choose a repository</button>
+          <div class="field" id="worktrees-path-field" hidden>
+            <label for="worktrees-path">Repository path</label>
+            <input id="worktrees-path" name="path" type="text" spellcheck="false"
+              placeholder="/mnt/e/Repos/name…" aria-describedby="worktrees-path-hint">
+            <p class="hint" id="worktrees-path-hint">Use the path as WSL sees it. For example, <span translate="no">/mnt/e/…</span> for a Windows drive.</p>
           </div>
         </fieldset>
         <div class="form-end">
-          <button type="submit" id="worktrees-load"
-            title="List the chosen repository's worktrees and whether each is merged, as its host's git reads them">Show worktrees</button>
+          <button type="button" id="repository-edit" hidden title="Edit the selected saved repository">Edit</button>
         </div>
       </form>
-      <p class="hint" id="worktrees-base"></p>
-      <div class="table-wrap">
-        <table class="worktrees" id="worktrees-table" hidden>
-          <thead><tr><th scope="col">Branch</th><th scope="col">State</th><th scope="col">Run</th>
-            <th scope="col">Path</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
-          <tbody id="worktrees"></tbody>
-        </table>
-      </div>
+      <p class="hint" id="repositories-managed" hidden>The repository list is managed outside the Workbench.</p>
+      <p class="hint" id="worktrees-recorded" hidden>Showing the repository recorded by this run.</p>
+      <header class="worktree-overview worktree-toolbar">
+        <h2 id="worktrees-heading">Worktrees <span class="worktree-count" id="worktrees-count" aria-live="polite" hidden></span></h2>
+        <button type="submit" id="worktrees-load" form="worktrees-form" disabled
+          title="Read the chosen repository's worktrees again">Refresh</button>
+      </header>
+      <div class="reading-bar" id="worktrees-reading" role="progressbar" aria-label="Loading repository details" hidden></div>
       <p class="result" id="worktrees-result" role="status"></p>
+      <section class="worktree-results" id="worktrees-overview" hidden aria-labelledby="worktrees-heading">
+        <p class="hint" id="worktrees-base" hidden></p>
+        <div class="worktree-base-card" id="worktrees-checkout" hidden></div>
+        <p class="hint worktree-none" id="worktrees-none" hidden>No additional worktrees.</p>
+        <div class="table-wrap" id="worktrees-table-wrap" hidden>
+          <table class="worktrees" id="worktrees-table" role="table" aria-label="Additional worktrees">
+            <thead role="rowgroup"><tr role="row"><th scope="col" role="columnheader">Branch</th>
+              <th scope="col" role="columnheader">Git state</th><th scope="col" role="columnheader">Run</th>
+              <th scope="col" role="columnheader">Path</th><th scope="col" role="columnheader"><span class="visually-hidden">Actions</span></th></tr></thead>
+            <tbody id="worktrees" role="rowgroup"></tbody>
+          </table>
+        </div>
+      </section>
     </section>
 
     <section class="view settings" id="view-settings" hidden aria-labelledby="settings-title">
       <h1 id="settings-title">Settings</h1>
-      <p class="lead">Who plays each role, what each is told, and how the roles work together. A run keeps the
-        settings it started with: what you apply here reaches the runs started after it.</p>
+      <p class="lead">Choose who works and how new runs proceed. Each run keeps the settings it started with.</p>
+      <div class="reading-bar" id="settings-reading" role="progressbar" aria-label="Loading settings" hidden></div>
       <div class="notice" id="settings-notice" hidden>
-        <p id="settings-notice-said"></p>
+        <p id="settings-notice-said" role="status"></p>
         <div class="actions"><button type="button" id="settings-reread"
           title="Read the settings from their files again; changes made here and not applied are dropped">Read the settings again</button></div>
       </div>
       <form class="settings-form" id="settings-form" autocomplete="off" novalidate hidden>
-        <section class="settings-part" aria-labelledby="settings-roles-title">
-          <h2 id="settings-roles-title">Roles</h2>
-          <div class="cast" id="settings-roles"></div>
-        </section>
-        <section class="settings-part" aria-labelledby="settings-together-title">
-          <h2 id="settings-together-title">Review loop</h2>
-          <fieldset class="field rounds">
-            <legend>Review rounds</legend>
-            <p class="hint">If still not PASS at the normal budget and after-reflection rounds remain, both roles reflect once. BLOCKER stops immediately.</p>
-            <div class="choices" id="settings-rounds"></div>
+        <nav class="settings-jumps" id="settings-jumps" aria-label="Settings sections">
+          <a href="#settings-roles-title">Roles</a>
+          <a href="#settings-workflow-title">Workflow defaults</a>
+        </nav>
+        <details class="settings-disclosure settings-workflow" id="settings-workflow-details">
+          <summary id="settings-workflow-title">Workflow defaults <span class="hint" id="settings-workflow-flow"></span></summary>
+          <button type="button" class="quiet settings-workflow-revert" id="settings-revert-workflow"
+            aria-label="Revert Workflow defaults">Revert</button>
+          <div class="workflow-row">
+            <div class="workflow-label">
+              <label for="settings-flow">Default flow</label>
+              <p class="hint" id="settings-flow-hint">The sequence for new runs that use the default flow.</p>
+            </div>
+            <div class="field workflow-flow-controls">
+              <select id="settings-flow" data-pointer="/default_flow" aria-describedby="settings-flow-hint"></select>
+              <p class="alert" role="alert"></p>
+              <ol class="score compact" id="settings-flow-steps" aria-label="The flow's steps"></ol>
+            </div>
+          </div>
+          <section class="workflow-row" aria-labelledby="settings-review-rounds-title">
+            <h2 class="workflow-label" id="settings-review-rounds-title">Review rounds</h2>
+            <div class="workflow-rounds">
+              <div class="review-table-wrap">
+                <table class="review-table" aria-labelledby="settings-review-rounds-title" aria-describedby="settings-rounds-hint">
+                  <thead><tr><th scope="col">Phase</th><th scope="col">Normal
+                    <span class="round-help"><button type="button" aria-label="About normal rounds"
+                      aria-describedby="normal-rounds-help">?</button><span role="tooltip" id="normal-rounds-help">
+                      A round pairs work with its review. A PASS moves the run forward. A BLOCKER stops it immediately.
+                    </span></span></th>
+                    <th scope="col">After reflection <span class="round-help"><button type="button"
+                      aria-label="About rounds after reflection" aria-describedby="extra-rounds-help">?</button>
+                      <span role="tooltip" id="extra-rounds-help">Extra rounds begin after the normal budget ends without a PASS.
+                        Each role receives reflection instructions once. The run waits for you if the extra rounds run out.</span>
+                    </span></th><th scope="col">Maximum</th></tr></thead>
+                  <tbody id="settings-rounds"></tbody>
+                </table>
+              </div>
+              <p class="hint" id="settings-rounds-hint">After reflection adds rounds when the normal budget ends without PASS. BLOCKER stops immediately.</p>
+            </div>
+          </section>
+          <div class="workflow-row">
+            <div class="workflow-label">
+              <label for="settings-turn-hours">Turn limit</label>
+              <p class="hint" id="settings-turn-hint">Maximum time for one role turn on new runs.</p>
+            </div>
+            <div class="field" id="settings-timeout"></div>
+          </div>
+        </details>
+        <section class="settings-part settings-cast" aria-labelledby="settings-roles-title">
+          <div class="settings-section-head">
+            <h2 id="settings-roles-title" tabindex="-1">Roles</h2>
+            <button type="button" class="quiet" id="settings-revert-roles" aria-label="Revert Roles">Revert</button>
+          </div>
+          <fieldset class="field" id="settings-role-picker">
+            <legend class="visually-hidden">Role to configure</legend>
+            <div class="settings-role-options" id="settings-role-options"></div>
           </fieldset>
-          <div id="settings-timeout"></div>
+          <div id="settings-roles"></div>
         </section>
-        <section class="settings-part" aria-labelledby="settings-flow-title">
-          <h2 id="settings-flow-title">Default flow</h2>
-          <div class="field">
-            <label class="visually-hidden" for="settings-flow">Default flow</label>
-            <select id="settings-flow" data-pointer="/default_flow" aria-describedby="settings-flow-hint"></select>
-            <ol class="score compact" id="settings-flow-steps" aria-label="The flow's steps"></ol>
-            <p class="hint" id="settings-flow-hint">What a run follows when it names no flow of its own.</p>
-            <p class="alert" role="alert"></p>
-          </div>
-        </section>
-        <details class="settings-disclosure" id="settings-profile-disclosure">
-          <summary id="settings-profile-summary">Agent profiles</summary>
-          <p class="hint">Each role above uses one profile. A blank Provider uses the CLI's existing configuration.
-            DeepSeek requires its model and DEEPSEEK_API_KEY in .env or the worker environment.</p>
-          <div class="table-wrap">
-            <table class="profiles">
-              <thead><tr><th scope="col">Profile</th><th scope="col">Kind</th><th scope="col">Model</th>
-                <th scope="col">Effort</th><th scope="col">Provider</th>
-                <th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
-              <tbody id="settings-profiles"></tbody>
-            </table>
-          </div>
-          <div class="add-agent">
-            <div class="field">
-              <label for="settings-add-name">New profile</label>
-              <input id="settings-add-name" name="profile-name" type="text" spellcheck="false" placeholder="codex-fast…"
-                aria-describedby="settings-add-hint" data-pointer="/agents">
-            </div>
-            <div class="field">
-              <label for="settings-add-kind">Kind</label>
-              <select id="settings-add-kind" name="profile-kind"></select>
-            </div>
-            <button type="button" id="settings-add"
-            title="Add an agent profile of this name and kind; Apply saves it">Add profile</button>
-            <p class="hint" id="settings-add-hint">Lowercase letters and digits, words joined by single hyphens.</p>
-            <p class="alert" id="settings-add-alert" role="alert"></p>
-          </div>
-          <ul class="unusable" id="settings-unusable"></ul>
-        </details>
-        <details class="settings-disclosure" id="settings-review-prompt-disclosure">
-          <summary id="settings-review-prompt-summary">Advanced: extra review guidance (none)</summary>
-          <p class="hint" id="settings-review-prompt-limit"></p>
-          <div class="prompt-groups" id="settings-review-prompts"></div>
-        </details>
         <div class="apply-bar">
-          <p id="settings-pending">No changes.</p>
+          <p id="settings-pending" role="status">No changes.</p>
           <div class="actions">
-            <button type="button" class="quiet" id="settings-reset"
-              title="Drop your own values for the settings shown, back to the shared defaults; Apply saves it">Reset visible settings to defaults</button>
             <button type="button" class="quiet" id="settings-discard"
               title="Forget the changes made here and not applied; what is applied stays">Discard changes</button>
             <button type="submit" class="primary" id="settings-apply"
@@ -235,14 +277,6 @@
           <p class="result" id="settings-result" role="status"></p>
         </div>
       </form>
-      <dialog id="settings-skill-picker" aria-labelledby="settings-skill-picker-title">
-        <div class="skill-picker-head">
-          <h2 id="settings-skill-picker-title">Choose a skill</h2>
-          <button type="button" class="quiet" id="settings-skill-picker-close" title="Close, choosing no skill">Close</button>
-        </div>
-        <p class="hint">Choose an available skill for this stage.</p>
-        <div class="skill-options" id="settings-skill-options"></div>
-      </dialog>
     </section>
 
     <article class="view run" id="run" hidden aria-labelledby="run-task">
@@ -269,6 +303,7 @@
           <p class="result" id="run-kept-result" role="status"></p>
         </div>
       </div>
+      <div class="reading-bar" id="run-reading" role="progressbar" aria-label="Loading run" hidden></div>
 
       <header class="run-head">
         <p class="hint" id="run-controls-hint"></p>
@@ -315,6 +350,7 @@
           <legend>Merge destination and commit message</legend>
           <label for="merge-destination">Land on</label>
           <select id="merge-destination" name="merge_destination"></select>
+          <div class="reading-bar" id="merge-destination-reading" role="progressbar" aria-label="Reading compatible destinations" hidden></div>
           <p class="hint" id="merge-destination-hint" role="status"></p>
           <button type="button" id="merge-retry" hidden>Retry destinations</button>
           <label for="merge-work-message">Commit message</label>
@@ -413,7 +449,103 @@
     </section>
   </main>
 </div>
-<dialog class="confirm" id="confirm" aria-labelledby="confirm-title" aria-describedby="confirm-body">
+<dialog class="repo-dialog" id="repo-picker" closedby="any" aria-labelledby="repo-picker-title">
+  <header>
+    <h2 id="repo-picker-title">Repository</h2>
+    <button type="button" class="quiet" id="repo-picker-close" title="Close the repository picker">Close</button>
+  </header>
+  <div class="field">
+    <label class="visually-hidden" for="repo-search">Find repository</label>
+    <input type="search" id="repo-search" name="repo-search" autocomplete="off" spellcheck="false" placeholder="Find repository…">
+    <div class="reading-bar" id="repo-picker-reading" role="progressbar" aria-label="Reading saved repositories" hidden></div>
+    <p class="result" id="repo-picker-status" role="status"></p>
+  </div>
+  <div class="repo-results" id="repo-results"></div>
+  <footer class="actions">
+    <button type="button" id="repo-add" title="Save a repository in the list">Add repository</button>
+    <button type="button" class="quiet" id="repo-enter-path" title="Use a repository path without saving it">Use a repository path once…</button>
+  </footer>
+</dialog>
+<dialog class="repository-editor settings-editor" id="settings-profiles-dialog" closedby="any" aria-labelledby="settings-profiles-title">
+  <form id="settings-profile-form" autocomplete="off">
+    <header class="repository-editor-header">
+      <div class="settings-dialog-heading">
+        <h2 id="settings-profiles-title">Edit profile</h2>
+        <button type="button" class="quiet settings-dialog-close" aria-label="Close profile dialog" data-close-settings-dialog>×</button>
+      </div>
+      <p class="hint" id="settings-profiles-intro" hidden></p>
+    </header>
+    <div class="repository-editor-body" id="settings-profiles-body"></div>
+    <footer class="repository-editor-footer actions">
+      <button type="button" data-close-settings-dialog>Cancel</button>
+      <button type="submit" class="primary" id="settings-profile-done">Done</button>
+    </footer>
+  </form>
+</dialog>
+<dialog class="repository-editor settings-instructions" id="settings-instructions" closedby="any" aria-labelledby="settings-instructions-title">
+  <form id="settings-instructions-form" autocomplete="off">
+    <header class="repository-editor-header">
+      <div class="settings-dialog-heading">
+        <h2 id="settings-instructions-title">Instructions</h2>
+        <button type="button" class="quiet settings-dialog-close" aria-label="Close instructions" data-close-settings-dialog>×</button>
+      </div>
+      <fieldset class="settings-instruction-nav" id="settings-instructions-nav">
+        <legend class="visually-hidden">Instructions to edit</legend>
+      </fieldset>
+    </header>
+    <div class="repository-editor-body" id="settings-instructions-body"></div>
+    <footer class="repository-editor-footer actions">
+      <button type="button" data-close-settings-dialog>Cancel</button>
+      <button type="submit" class="primary" id="settings-instructions-done">Save to draft</button>
+    </footer>
+  </form>
+</dialog>
+<dialog class="repository-editor" id="repository-editor" closedby="any" aria-labelledby="repository-editor-title">
+  <form id="repository-form" autocomplete="off">
+    <header class="repository-editor-header"><h2 id="repository-editor-title">Add repository</h2></header>
+    <div class="repository-editor-body">
+      <div class="reading-bar" id="repository-reading" role="progressbar" aria-label="Reading repository settings" hidden></div>
+      <div class="field">
+        <label for="repository-name">Repository name</label>
+        <input type="text" id="repository-name" name="name" required spellcheck="false" placeholder="team/project…">
+      </div>
+      <div class="field">
+        <label for="repository-path">Repository path</label>
+        <input type="text" id="repository-path" name="path" required spellcheck="false" placeholder="/mnt/e/Repos/project…" aria-describedby="repository-path-hint">
+        <p id="repository-path-hint" class="hint">Use the path as WSL sees it. For example, <span translate="no">/mnt/e/…</span> for a Windows drive.</p>
+      </div>
+      <div class="repository-basics">
+        <div class="field">
+          <label for="repository-target">Execution host</label>
+          <select id="repository-target" name="target">
+            <option value="">Automatic</option>
+            <option value="windows">Windows</option>
+            <option value="wsl">WSL</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="repository-base">Base branch</label>
+          <input type="text" id="repository-base" name="base_branch" spellcheck="false" placeholder="Automatic">
+        </div>
+      </div>
+      <details id="repository-advanced">
+        <summary>Advanced settings</summary>
+        <div id="repository-fields"></div>
+      </details>
+    </div>
+    <footer class="repository-editor-footer">
+      <div class="repository-editor-status"><p class="result" id="repository-result" role="status"></p></div>
+      <div class="repository-editor-actions">
+        <button type="button" class="danger quiet" id="repository-remove" hidden title="Remove this entry from the saved list">Remove from list</button>
+        <div class="actions">
+          <button type="button" id="repository-cancel" title="Close the editor without saving">Cancel</button>
+          <button type="submit" class="primary" id="repository-save" disabled title="Save this repository entry">Save repository</button>
+        </div>
+      </div>
+    </footer>
+  </form>
+</dialog>
+<dialog class="confirm" id="confirm" closedby="closerequest" aria-labelledby="confirm-title" aria-describedby="confirm-body">
   <form method="dialog">
     <h2 id="confirm-title"></h2>
     <p id="confirm-body"></p>
@@ -423,7 +555,7 @@
     </div>
   </form>
 </dialog>
-<dialog class="confirm refusal" id="refusal" role="alertdialog" aria-labelledby="refusal-title"
+<dialog class="confirm refusal" id="refusal" closedby="closerequest" role="alertdialog" aria-labelledby="refusal-title"
   aria-describedby="refusal-said refusal-reason">
   <form method="dialog">
     <h2 id="refusal-title"></h2>
@@ -435,13 +567,14 @@
     </div>
   </form>
 </dialog>
-<dialog class="confirm" id="instruction-skills" aria-labelledby="instruction-skills-title">
+<dialog class="confirm" id="instruction-skills" closedby="any" aria-labelledby="instruction-skills-title">
   <h2 id="instruction-skills-title">Skills for your instructions</h2>
   <p class="hint">Choose a stage, select skills, and add their exact references to your task or note. You can edit the instructions before sending. Shared defaults stay unchanged.</p>
   <label for="instruction-skills-stage">Use during</label>
   <select id="instruction-skills-stage" name="skill_stage"></select>
   <label for="instruction-skills-search">Find a skill</label>
   <input id="instruction-skills-search" name="skill_search" type="search" autocomplete="off" spellcheck="false">
+  <div class="reading-bar" id="instruction-skills-reading" role="progressbar" aria-label="Reading skills" hidden></div>
   <p id="instruction-skills-status" role="status"></p>
   <div id="instruction-skills-options"></div>
   <div class="actions"><button type="button" id="instruction-skills-add">Add selected skills</button><button type="button" id="instruction-skills-cancel">Cancel</button></div>

@@ -1,10 +1,12 @@
-// The stack: its reading as chips in the top bar, its start, stop and restart in a popover under them, and
+// The stack: its summary in the top bar, its start, stop and restart in a popover, and
 // a banner for each part that holds runs up — all as the stack's one owner reads and does them.
 
 import { api } from "./api.js";
-import { $, PARTS, confirmAction, el, report, unchanged, wrote } from "./ui.js";
+import { $, PARTS, confirmAction, el, report, showReading, unchanged, wrote } from "./ui.js";
 
 const VERBS = { start: "Start", stop: "Stop", restart: "Restart" };
+const STATES = { up: "Running", down: "Down", running: "Running, polling unknown", starting: "Starting",
+  unknown: "Unknown", draining: "Updating" };
 // What stopping a part interrupts, said before the operator confirms it; a restart stops it first.
 const INTERRUPTS = {
   temporal: "Stopping Temporal pauses every run until it starts again. An agent at work goes on, but if " +
@@ -29,7 +31,10 @@ export async function refreshStack() {
   try {
     reading = await api("/api/health");
   } catch (error) {
+    renderSummary([]);
     return;
+  } finally {
+    showReading("stack-reading", false);
   }
   render(reading);
 }
@@ -49,24 +54,30 @@ function named(part) {
 }
 
 function render(health) {
-  renderChips(health);
+  renderSummary(health.components);
   renderPanel(health);
   renderBanners(health);
 }
 
-// Each part's state at a glance: a dot, and its state in words whenever it is not up.
-function renderChips(health) {
-  const chips = $("stack-chips");
-  if (unchanged(chips, health.components.map((part) => [part.name, part.state]))) return;
-  chips.replaceChildren(...health.components.map((part) => {
-    const chip = el("span", null, "chip");
-    chip.dataset.state = part.state;
-    const dot = el("span", null, "dot");
-    dot.setAttribute("aria-hidden", "true");
-    chip.append(dot, PARTS[part.name] || part.name,
-      el("span", " " + part.state, part.state === "up" ? "state visually-hidden" : "state"));
-    return chip;
-  }));
+function renderSummary(parts) {
+  const summary = $("stack-chips");
+  const issues = parts.filter((part) => part.state === "down" || part.state === "unknown");
+  const updating = parts.some((part) => part.state === "draining");
+  const healthy = parts.length > 0 && parts.every((part) => part.state === "up");
+  const state = healthy ? "up" : issues.some((part) => part.state === "down") ? "down" : "attention";
+  const status = healthy ? "All components up" : !parts.length ? "Unavailable"
+    : issues.length ? issues.length + (issues.length === 1 ? " issue" : " issues")
+      : updating ? "Updating" : "Starting";
+  if (unchanged(summary, [state, status])) return;
+  const chip = el("span", null, "chip");
+  chip.dataset.state = state;
+  const dot = el("span", null, "dot");
+  dot.setAttribute("aria-hidden", "true");
+  chip.append(dot, healthy ? "Stack" : issues.length ? "Stack · " + status : "Stack " + status.toLowerCase());
+  if (healthy) chip.append(el("span", " healthy", "visually-hidden"));
+  summary.replaceChildren(chip);
+  $("stack-panel-health").dataset.state = state;
+  $("stack-panel-status").textContent = status;
 }
 
 // What a part offers, as its owner reads it: a part down, its Start; any other, its Restart and Stop —
@@ -89,19 +100,32 @@ function wholeActions(health) {
   return actions;
 }
 
+function panelActions(actions, part) {
+  const target = part ? PARTS[part] || part : "all components";
+  const group = el("div", null, "actions");
+  for (const action of actions) {
+    const button = stackButton(action, part, VERBS[action] + (part ? "" : " all"));
+    button.setAttribute("aria-label", VERBS[action] + " " + target);
+    if (action === "stop") button.classList.add("quiet");
+    group.append(button);
+  }
+  return group;
+}
+
 function renderPanel(health) {
   const parts = $("stack-parts");
   if (!unchanged(parts, health.components)) {
     parts.replaceChildren(...health.components.map((part) => {
       const row = el("div", null, "part");
-      row.append(el("span", PARTS[part.name] || part.name, "name"), el("span", part.state, "state " + part.state));
-      const actions = el("div", null, "actions");
-      if (part.managed) for (const action of partActions(part)) actions.appendChild(stackButton(action, part.name));
-      row.appendChild(actions);
-      const detail = [part.pid && "pid " + part.pid, (part.detail || "").replace(/^\s*—\s*/, ""),
+      const info = el("div", null, "part-summary");
+      info.append(el("span", PARTS[part.name] || part.name, "name"),
+        el("span", STATES[part.state] || part.state, "state " + part.state));
+      row.append(info);
+      if (part.managed) row.append(panelActions(partActions(part), part.name));
+      const detail = [part.pid && "PID " + part.pid, (part.detail || "").replace(/^\s*—\s*/, ""),
         !part.managed && "not this stack's to start or stop",
         part.managed && !part.startable && (part.state === "unknown" ? "its state cannot be read" : "cannot be started from here")]
-        .filter(Boolean).join("; ");
+        .filter(Boolean).join(" · ");
       if (detail) row.appendChild(el("p", detail, "detail"));
       return row;
     }));
@@ -110,7 +134,8 @@ function renderPanel(health) {
   const whole = wholeActions(health);
   if (unchanged(all, whole)) return;
   all.replaceChildren();
-  if (whole.length) all.append(el("span", "The whole stack", "label"), ...whole.map((action) => stackButton(action, null)));
+  all.hidden = !whole.length;
+  if (whole.length) all.append(el("h3", "Entire stack"), panelActions(whole, null));
 }
 
 // A banner for each part that holds runs up: what is wrong, what it holds up, and — only for a part its

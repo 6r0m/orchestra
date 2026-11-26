@@ -1142,6 +1142,46 @@ class Runs(Scenario):
                 self.assertEqual(status, 400, body)
                 self.assertIn("is not a git repository", body["error"])
 
+    def test_repository_editor_validates_on_the_worker_and_only_removes_catalog_entries(self):
+        self.host, self.agent = E.host([], repositories=runs.repos)
+        root = tempfile.mkdtemp(prefix="orchestra-editor-")
+        self.addCleanup(shutil.rmtree, root, True)
+        config = os.path.join(root, ".orchestra")
+        os.makedirs(config)
+        with open(os.path.join(config, "settings.json"), "w", encoding="utf-8") as fh:
+            json.dump(E.SETTINGS, fh)
+        at = settings_server(self, root, {}, call=lambda work, timeout=300: E.run(work(E.client()), timeout))
+        endpoint = "/api/repos/editor"
+        _, initial = request("GET", endpoint, at=at)
+        entry = {"path": self.repo, "target": "wsl", "base_branch": "develop", "worktree_root": root}
+        body = {"original": None, "name": "team/repo", "entry": entry, "revision": initial["revision"]}
+        status, error = request("POST", endpoint, body, at=at)
+        self.assertEqual(status, 400, error)
+        self.assertIn("is not a git repository", error["error"])
+        self.assertFalse(os.path.exists(os.path.join(config, "repos.json")))
+
+        def git(*args):
+            subprocess.run(["git", "-C", self.repo, *args], check=True, capture_output=True)
+        git("init", "-q", "-b", "develop")
+        git("-c", "user.name=Test", "-c", "user.email=fixture@localhost", "-c", "commit.gpgsign=false",
+            "commit", "--allow-empty", "-qm", "base")
+        status, saved = request("POST", endpoint, body, at=at)
+        self.assertEqual(status, 200, saved)
+        self.assertEqual(request("GET", "/api/repos", at=at)[1], [{"id": "team/repo", "target": "wsl"}])
+        status, editor = request("GET", endpoint + "?name=team%2Frepo", at=at)
+        self.assertEqual(status, 200, editor)
+        status, worktrees = request("GET", "/api/worktrees?repo=team%2Frepo", at=at)
+        self.assertEqual(status, 200, worktrees)
+        self.assertEqual(editor["automatic_target"], "wsl")
+        self.assertEqual(editor["descriptor_revision"], worktrees["descriptor_revision"])
+        self.assertEqual(editor["defaults"], runs.repos.TODO_DEFAULTS)
+        self.assertEqual(request("POST", endpoint, body, at=at)[0], 409)
+        remove = {"original": "team/repo", "name": None, "entry": None, "revision": saved["revision"]}
+        self.assertEqual(request("POST", endpoint, remove, at=at)[0], 400)
+        self.assertEqual(request("POST", endpoint, dict(remove, confirm=True), at=at)[0], 200)
+        self.assertEqual(request("GET", "/api/repos", at=at)[1], [])
+        git("rev-parse", "refs/heads/develop")
+
     def test_a_waiting_run_says_what_it_waits_at_since_when_and_what_it_takes(self):
         a1, _ = configured_review_first("PASS", "Direction: A.")
         self.host, self.agent = E.host([("plan-e1-1", 0, "planned\n"), ("assess-e1-1", 0, a1)], git=FakeWorktrees())
@@ -1154,8 +1194,8 @@ class Runs(Scenario):
         self.assertTrue(datetime.datetime.fromisoformat(view["since"]), "since when it waits")
         self.assertEqual(view["blocked_by"], [])
         self.assertTrue(view["worktree"], "where its work is")
-        self.assertEqual((view["flow"]["name"], view["step"]), (S.load()["default_flow"], 2),
-                         "none named: the policy's default flow, at its approval")
+        self.assertEqual((view["flow"]["name"], view["step"]), ("engineer-plan", 2),
+                         "none named: the fixture's default flow, at its approval")
 
     def test_a_working_run_says_its_stage_its_role_and_since_when(self):
         release = threading.Event()
@@ -1241,7 +1281,7 @@ class Runs(Scenario):
     def test_the_page_lists_the_flows_and_starts_a_run_on_the_one_chosen(self):
         status, body = request("GET", "/api/flows")
         self.assertEqual(status, 200, body)
-        self.assertEqual(body["default"], S.load()["default_flow"])
+        self.assertEqual(body["default"], S.load(path=cast.file())["default_flow"])
         listed = {found["name"]: found for found in body["flows"]}
         self.assertEqual(listed["architect-research"]["steps"][:2], ["architect:research", "you:approve"])
         status, refused = request("POST", "/api/runs", {"task": "a task", "repo": self.repo, "flow": "no-such-flow"})
@@ -1734,6 +1774,10 @@ class Runs(Scenario):
         self.assertEqual((view["kept"], view["worktrees_of"]), (True, "/fake/repo"))
         rows = request("GET", "/api/worktrees?repo=" + urllib.parse.quote(self.repo))[1]["rows"]
         self.assertEqual([(row["run"], row["removable"]) for row in rows], [("CANCELED", True), (None, False)])
+        status, recorded = request("GET", "/api/worktrees?run=" + run_id)
+        self.assertEqual(status, 200, recorded)
+        self.assertEqual(recorded["recorded"], {"path": "/fake/repo", "target": "wsl"})
+        self.assertEqual(recorded["rows"], rows)
         bounds, saved = [], runs.status
 
         async def unanswered(client, run_id, timeout=None):

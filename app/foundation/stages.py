@@ -25,6 +25,12 @@ FINAL = ("closeout",)
 ANSWERS = ("research",)
 PHASES = ("plan", "build")            # the bounded loops: the work each review judges
 
+
+def skill_stack(value):
+    """The ordered names in a stage binding, including the scalar stored by older runs."""
+    names = (value,) if isinstance(value, str) else value or ()
+    return tuple(name.removeprefix("/") for name in names)
+
 # What an architect may answer, and the only words that route (D4).
 VERDICTS = ("PASS", "PATCH", "BLOCKER", "UNVERIFIED")
 

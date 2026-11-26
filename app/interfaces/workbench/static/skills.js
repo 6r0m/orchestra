@@ -1,6 +1,6 @@
 // A typing aid for operator-authored instructions; selections never answer a stop or change the workflow.
 import { api } from "./api.js";
-import { $, el } from "./ui.js";
+import { $, el, showReading } from "./ui.js";
 
 let generation = 0;
 export async function pickSkills({ repo, run, input, stages = [], isCurrent = () => true }) {
@@ -37,11 +37,13 @@ export async function pickSkills({ repo, run, input, stages = [], isCurrent = ()
       options.append(label);
     }
     const bound = catalog.stage_skills[target.value.split(":")[1]];
-    status.textContent = rows.length + " available skills." + (bound ? " Stage default: " + bound + "." : "");
+    const defaults = Array.isArray(bound) ? bound.join(", ") : bound;
+    status.textContent = rows.length + " available skills." + (defaults ? " Stage defaults: " + defaults + "." : "");
   };
   search.value = "";
   options.replaceChildren();
   status.textContent = "Reading repository and global skills on the execution host…";
+  showReading("instruction-skills-reading", true);
   add.disabled = true;
   $("instruction-skills-cancel").onclick = () => dialog.close();
   dialog.showModal();
@@ -70,5 +72,7 @@ export async function pickSkills({ repo, run, input, stages = [], isCurrent = ()
     };
   } catch (error) {
     if (dialog.open && request === generation) status.textContent = "Skills unavailable: " + error.message + " Close and retry after the worker is available.";
+  } finally {
+    if (request === generation) showReading("instruction-skills-reading", false);
   }
 }

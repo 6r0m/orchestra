@@ -10,8 +10,12 @@ and a flow that breaks one is refused with the rule it broke. A flow's name is i
 
 | flow | file |
 |---|---|
-| the engineer starts, from the code: plan, assessment, your approval, build, verification, the engineer's closeout of the todo, the merge | [engineer-code.json](engineer-code.json) |
-| the architect starts, researching: its brief, your approval, then as `engineer-code` | [architect-research.json](architect-research.json) |
+| the architect writes a planning brief, then the engineer plans and the roles continue after reviews pass. You decide whether to merge | [architect-plan.json](architect-plan.json) |
+| the engineer plans from the code. You approve the assessed plan before the build | [engineer-plan.json](engineer-plan.json) |
+| the architect starts with a brief. You approve the brief and the assessed implementation plan | [architect-research.json](architect-research.json) |
+
+Saved settings and CLI commands may still use the former names `architect-auto` and `engineer-code`.
+If their original files are absent, they resolve to `architect-plan` and `engineer-plan` respectively.
 
 A flow that builds closes out before its merge: one without `engineer:closeout` is listed as broken
 and starts no run. Only the runs started before closeouts follow such steps, to their end.

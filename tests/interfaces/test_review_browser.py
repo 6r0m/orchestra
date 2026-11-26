@@ -1,4 +1,5 @@
 """Real browser acceptance on disposable Git snapshots; no live stack, vendor or clipboard writes."""
+import asyncio
 import json
 import os
 import shutil
@@ -9,7 +10,7 @@ import threading
 import unittest
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from app.interfaces.workbench.server import PAGE, STATIC
 from app.agents import terminal
@@ -21,6 +22,79 @@ EDGE = Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "M
 
 @unittest.skipUnless(sys.platform.startswith("win") and EDGE.is_file(), "the real browser acceptance runs on Windows")
 class ReviewBrowser(Repo):
+    def test_settings_workspace_keeps_jumps_and_validation_bound_to_the_draft(self):
+        import temporal_env as E
+        from tests.interfaces.test_workbench import settings_server
+
+        settings = Path(self.tmp) / ".orchestra"
+        settings.mkdir()
+        config = dict(E.SETTINGS, default_flow="architect-auto", timeout_seconds=3600, stage_skills={})
+        (settings / "settings.json").write_text(json.dumps(config), encoding="utf-8")
+        at = settings_server(self, self.tmp, {})
+        script = Path(__file__).resolve().parents[2] / "tools/demo_press.py"
+        engineer = E.SETTINGS["roles"]["engineer"]["agent"]
+        runtime = E.SETTINGS["agents"][engineer]["kind"]
+        with patch("app.application.settings.adapters.skill_names",
+                   return_value={runtime: ["investigate-change", "fixture-support"], "pi": ["architect"]}):
+            result = subprocess.run([sys.executable, str(script), "http://127.0.0.1:%d" % at,
+                                     "page", "settings-workspace", "PASS"], capture_output=True, text=True, timeout=45)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        local = json.loads((settings / "settings.local.json").read_text(encoding="utf-8"))
+        self.assertEqual(local, {
+            "timeout_seconds": 172800,
+            "agents": {
+                engineer: {"model": "fixture-model"},
+                "fixture-review": {"kind": "pi", "model": "review-model-edited", "effort": "high", "launcher": "pi-worker"},
+            },
+            "roles": {"architect": {"agent": "fixture-review"}},
+            "stage_skills": {"plan": ["investigate-change", "fixture-support"], "build": "remote-build",
+                             "research": "architect", "assess": "architect", "verify": "architect"},
+            "review_prompts": {"after_normal": {"engineer": "Check the evidence."}},
+        })
+
+    def test_repository_editor_saves_the_local_catalog_and_removes_only_the_entry(self):
+        import temporal_env as E
+        from app.application import client as runs
+        from tests.interfaces.test_workbench import request, settings_server
+
+        settings = Path(self.tmp) / ".orchestra"
+        settings.mkdir()
+        (settings / "settings.json").write_text(json.dumps(E.SETTINGS), encoding="utf-8")
+        at = settings_server(self, self.tmp, {}, call=lambda work, timeout=300: asyncio.run(work(None)))
+        endpoint = "/api/repos/editor"
+        self.assertEqual(request("POST", endpoint, token=False, at=at)[0], 403)
+
+        async def on_host(_client, *, repo, descriptors, **_):
+            selected = runs.repos.select(repo, descriptors)
+            self.assertEqual(selected["path"], self.repo)
+            return selected, {"base_branch": "develop", "rows": []}
+
+        script = Path(__file__).resolve().parents[2] / "tools/demo_press.py"
+        worker = AsyncMock(side_effect=on_host)
+        with patch.object(runs, "worktrees_of", worker):
+            result = subprocess.run([sys.executable, str(script), "http://127.0.0.1:%d" % at,
+                                     "page", "repository-editor", self.repo], capture_output=True, text=True, timeout=45)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertGreaterEqual(worker.await_count, 2, "Add and Edit validate the selected repository")
+        self.assertEqual(json.loads((settings / "repos.json").read_text(encoding="utf-8")), {})
+        self.assertEqual(git(self.repo, "status", "--porcelain"), "")
+
+    def test_worktree_picker_binds_reads_to_the_current_repository(self):
+        from tests.interfaces.test_workbench import port
+
+        script = Path(__file__).resolve().parents[2] / "tools/demo_press.py"
+        result = subprocess.run([sys.executable, str(script), "http://127.0.0.1:%d" % port(),
+                                 "page", "worktree-picker", "PASS"], capture_output=True, text=True, timeout=45)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_home_distinguishes_idle_active_and_unavailable_runs(self):
+        from tests.interfaces.test_workbench import port
+
+        script = Path(__file__).resolve().parents[2] / "tools/demo_press.py"
+        result = subprocess.run([sys.executable, str(script), "http://127.0.0.1:%d" % port(),
+                                 "page", "workbench-home", "PASS"], capture_output=True, text=True, timeout=45)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_discarded_run_keeps_historical_exports_on_its_normal_page_after_cleanup(self):
         import temporal_env as E
         from fakes import FakeRepos, FakeWorktrees

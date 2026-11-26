@@ -4,22 +4,34 @@
 // the change the page sends, and the refusal the server answers with, both name it that way.
 
 import { api } from "./api.js";
-import { $, code, confirmAction, el, report, score } from "./ui.js";
+import { $, code, confirmAction, el, listedFlowName, report, score, showReading } from "./ui.js";
 
 // The last read, the flows there are, and the changes made here since, by the pointer of the setting each
 // changes: its new value, its removal, or its revert to what lies below the operator's own settings.
 let shown = null;
 let flows = [];
+let selectedRole = null;
 const staged = new Map();
-const promptEditors = new Set();
+const profilesDialog = $("settings-profiles-dialog");
+const instructionsDialog = $("settings-instructions");
 const NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const ACCESS = { write: "Writes in the run's worktree.", read: "Reads only: its agent runs read-only." };
-const RESET = ["agents", "roles", "stage_skills", "review_rounds", "review_prompts", "default_flow", "timeout_seconds"];
-const PROMPT_EVENTS = [
-  { key: "after_normal", title: "After normal budget",
-    hint: "Added once to each role's next turn when after-reflection rounds remain." },
-  { key: "at_limit", title: "Final budget",
-    hint: "Added to both roles' final turns. If the run exhausts, the architect's feedback is the operator handoff." },
+const SECTIONS = {
+  roles: ["agents", "roles", "stage_skills", "review_prompts"],
+  workflow: ["review_rounds", "default_flow", "timeout_seconds"],
+};
+const TEAM_SKILLS = { research: "architect", plan: "investigate-change", assess: "architect",
+  build: "implement-approved-change", verify: "architect" };
+const PROFILE_FIELDS = {
+  model: "Model", effort: "Reasoning effort", provider: "Provider override", launcher: "Launcher",
+};
+const INSTRUCTIONS = [
+  { key: "persona", title: "Role instructions",
+    hint: "Sent when this role starts an agent session." },
+  { key: "after_normal", title: "After normal rounds",
+    hint: "Used on the first turn after the normal budget is exhausted, when extra review rounds are available." },
+  { key: "at_limit", title: "Final round",
+    hint: "Used on the final budgeted turn. If the review runs out of rounds, you receive the architect’s feedback." },
 ];
 
 export const settingsUnsent = () => staged.size > 0;
@@ -60,9 +72,8 @@ function pending(excluding = null) {
   return settings;
 }
 
-function hasVisibleOverride() {
-  const settings = pending();
-  return RESET.some((key) => {
+function canRevert(section, settings) {
+  return SECTIONS[section].some((key) => {
     const root = pointer(key);
     const touched = [...staged.values()].some((change) => change.pointer === root
       || change.pointer.startsWith(root + "/"));
@@ -105,50 +116,22 @@ function kindName(kind) {
   return found && found.name ? found.name : kind;
 }
 
-// What a skill named `name` is typed as in a stage's prompt by the kind `kind`.
-function invocation(kind, name) {
-  const found = kinds()[kind];
-  if (!found || !found.skill) return el("span", kindName(kind) + " takes no skill.");
-  if (!name) return "";
-  const said = el("span", "Invoked as ");
-  said.append(code(found.skill.replace("{name}", name)));
-  return said;
-}
-
-// A setting the operator's own settings hold says so, with a way back to what lies below it. `what` names the
-// setting in words, for whoever cannot see beside what the Revert sits.
-function yours(text, redraw, what) {
-  const marks = el("span", null, "marks");
-  if (hasStaged(text)) marks.append(el("span", "changed", "yours"));
-  else if (overridden(text)) {
-    marks.append(el("span", "yours", "yours"));
-    const back = el("button", "Revert", "quiet");
-    back.type = "button";
-    back.setAttribute("aria-label", "Revert " + what + " to the shared settings");
-    back.title = "Drop your own value for " + what + ", back to the shared settings' one";
-    back.onclick = () => {
-      stage(text, { revert: true });
-      redraw();
-    };
-    marks.append(back);
-  }
-  return marks;
-}
-
 // ---- drawing ------------------------------------------------------------------------------------
 
-function field(labelText, control, text, extra, what, target = control) {
+function field(labelText, control, text, extra = [], target = control) {
   const wrap = el("div", null, "field");
   const label = el("label", labelText);
   label.htmlFor = target.id;
   const head = el("div", null, "field-head");
-  head.append(label, yours(text, draw, what || labelText));
-  target.name = keysOf(text).join(".");
-  target.dataset.pointer = text;
-  if (hasStaged(text)) target.dataset.staged = "";
+  head.append(label);
+  target.name = text ? keysOf(text).join(".") : target.id;
+  if (text) {
+    target.dataset.pointer = text;
+    if (hasStaged(text)) target.dataset.staged = "";
+  }
   const alert = el("p", null, "alert");
   alert.setAttribute("role", "alert");
-  wrap.append(head, control, ...(extra || []), alert);
+  wrap.append(head, control, ...extra, alert);
   return wrap;
 }
 
@@ -162,301 +145,518 @@ function textInput(id, value, placeholder) {
   return input;
 }
 
+function profileGroups(entries) {
+  const groups = new Map();
+  for (const entry of entries) {
+    const runtime = entry[1].kind;
+    if (!groups.has(runtime)) groups.set(runtime, []);
+    groups.get(runtime).push(entry);
+  }
+  return groups;
+}
+
+function canServe(kind, role) {
+  return !kind?.refused && kind?.access?.includes(shown.roles[role].access);
+}
+
+function profileDescription(profile) {
+  return [profile.model, profile.effort && profile.effort + " effort"].filter(Boolean).join(" · ");
+}
+
+function profileName(name, role) {
+  return name.endsWith("-" + role) ? name.slice(0, -(role.length + 1)) : name;
+}
+
+function profileLabel(name, profile, role) {
+  const short = profileName(name, role);
+  const description = profileDescription(profile);
+  const repeated = short !== name && [profile.kind, profile.model].some((value) =>
+    value === short || value?.startsWith(short + "-"));
+  return [description && repeated ? "" : short, description].filter(Boolean).join(" · ");
+}
+
+function roleProfile(settings, role, name) {
+  if (settings.roles[role].agent === name) return true;
+  const suggested = Object.keys(settings.roles).find((role) => name.endsWith("-" + role));
+  return (suggested ?? assignedRoles(settings, name)[0] ?? role) === role;
+}
+
+function chooseProfile(role, name) {
+  const text = pointer("roles", role, "agent");
+  stage(text, { value: name });
+  draw();
+  focusSetting(text);
+}
+
+function selectRole(role, settings = pending()) {
+  selectedRole = role;
+  for (const panel of $("settings-roles").children) panel.hidden = panel.dataset.role !== role;
+  for (const choice of $("settings-role-options").querySelectorAll("input")) choice.checked = choice.value === role;
+  const place = $("settings-profile-for-" + role);
+  const previous = $("settings-role-profile");
+  if (place && previous?.parentElement === place) return;
+  previous?.remove();
+  if (place) {
+    const editor = el("div", null, "profile-fields");
+    editor.id = "settings-role-profile";
+    editor.append(...profileFields(settings, settings.roles[role].agent));
+    place.append(editor);
+  }
+}
+
 function drawRoles(settings) {
-  $("settings-roles").replaceChildren(...Object.entries(shown.roles).map(([role, contract]) => {
+  const roles = Object.entries(shown.roles);
+  const runtimes = kinds();
+  const profiles = profileGroups(Object.entries(settings.agents));
+  $("settings-role-options").replaceChildren(...roles.map(([role]) => {
+    const option = el("div", null, "settings-role-option");
+    const choice = el("input", null, "visually-hidden settings-role-choice");
+    choice.type = "radio";
+    choice.name = "settings-role";
+    choice.id = "settings-role-choice-" + role;
+    choice.value = role;
+    choice.setAttribute("aria-controls", "settings-role-panel-" + role);
+    choice.onchange = () => {
+      selectRole(role);
+      markSettingsSection($("settings-roles-title"));
+    };
+    const label = el("label");
+    label.htmlFor = choice.id;
+    const name = settings.roles[role].agent;
+    const runtime = settings.agents[name]?.kind;
+    label.append(el("span", role, "role " + role), el("span", kindName(runtime), "hint"));
+    option.append(choice, label);
+    return option;
+  }));
+
+  $("settings-roles").replaceChildren(...roles.map(([role, contract]) => {
     const block = el("section", null, "cast-role");
+    block.id = "settings-role-panel-" + role;
     block.dataset.role = role;
-    const title = el("h3", role, "role " + role);
+    const title = el("h3", role, "visually-hidden");
     title.id = "settings-role-" + role;
     block.setAttribute("aria-labelledby", title.id);
     const bound = settings.roles[role].agent;
-    const profile = settings.agents[bound] || {};
-
     const agent = el("select");
     agent.id = "settings-agent-" + role;
-    for (const [name, each] of Object.entries(settings.agents)) {
-      const option = el("option", name + " (" + kindName(each.kind) + ")");
-      option.value = name;
-      option.translate = false;
-      agent.append(option);
+    for (const [runtime, entries] of profiles) {
+      const compatible = canServe(runtimes[runtime], role);
+      const group = el("optgroup");
+      group.label = (runtimes[runtime]?.name || runtime) + (compatible ? "" : " (unavailable)");
+      for (const [name, each] of entries) {
+        if (name !== bound && (!compatible || !roleProfile(settings, role, name))) continue;
+        const short = profileName(name, role);
+        const runtimeName = kindName(runtime);
+        const agentName = runtime === short || runtime.startsWith(short + "-") ? runtimeName : runtimeName + " · " + short;
+        const option = el("option", name === bound ? agentName : profileLabel(name, each, role));
+        option.value = name;
+        option.translate = false;
+        option.disabled = !compatible;
+        group.append(option);
+      }
+      if (group.children.length) agent.append(group);
     }
+    const hasOtherProfiles = Object.keys(settings.agents).some((name) => name !== bound);
+    if (hasOtherProfiles) agent.add(new Option("Browse other profiles…", "#browse"));
     agent.value = bound;
     const agentPointer = pointer("roles", role, "agent");
     agent.onchange = () => {
-      stage(agentPointer, { value: agent.value });
-      draw();
-      focusSetting(agentPointer);
+      if (agent.value === "#browse") {
+        agent.value = bound;
+        openProfiles("browse");
+      } else chooseProfile(role, agent.value);
     };
-    // What the role may do, then what holds the agent chosen for it to that: its kind's own words.
-    const held = ((kinds()[profile.kind] || {}).boundary || {})[contract.access];
-    const facts = el("p", ACCESS[contract.access] + (held ? " " + held : ""), "hint");
-
-    // Its persona: the text the run carries from its start — its file's, or the operator's own.
-    const personaPointer = pointer("roles", role, "persona");
-    const change = staged.get(personaPointer);
-    const mine = change ? "value" in change : overridden(personaPointer);
-    const read = change ? (mine ? change.value : null) : shown.personas[role];
-    const persona = el("details", null, "persona");
-    const summary = el("summary");
-    const size = el("span", null, "bytes");
-    const source = el("span", null, mine ? "yours" : "hint");
-    if (mine) source.textContent = "yours";
-    else if ("persona" in settings.roles[role]) source.textContent = "from the shared settings";
-    else source.append("from ", code(settings.roles[role].persona_file));
-    summary.append(el("span", "Persona", "label"), " ", source, " ", size);
-    const text = el("textarea");
-    text.id = "settings-persona-" + role;
-    text.name = keysOf(personaPointer).join(".");
-    text.rows = 12;
-    text.spellcheck = false;
-    text.dataset.pointer = personaPointer;
-    if (staged.has(personaPointer)) text.dataset.staged = "";
-    const measure = () => {
-      const bytes = new TextEncoder().encode(text.value).length;
-      size.textContent = bytes.toLocaleString() + " of " + shown.max_persona_bytes.toLocaleString() + " bytes";
-      size.classList.toggle("over", bytes > shown.max_persona_bytes);
-    };
-    if (read === null) {
-      text.value = "";
-      text.placeholder = "The text of " + settings.roles[role].persona_file + ", once applied.";
-      size.textContent = "";
-    } else {
-      text.value = read;
-      measure();
-    }
-    text.oninput = measure;
-    text.onchange = () => {
-      if (!("persona" in shown.settings.roles[role]) && text.value === shown.personas[role]) {
-        staged.delete(personaPointer);
-        text.removeAttribute("data-staged");
-        noteChanges();
-      } else stage(personaPointer, { value: text.value }, text);
-    };
-    const label = el("label", "What the " + role + " is told when its session begins", "visually-hidden");
-    label.htmlFor = text.id;
-    const personaAlert = el("p", null, "alert");
-    personaAlert.setAttribute("role", "alert");
-    const actions = el("div", null, "actions");
-    if (mine || change) {
-      const back = el("button", "Use ", "quiet");
-      back.append(code(settings.roles[role].persona_file));
-      back.type = "button";
-      back.title = "Give the " + role + " its persona file's text again, in place of the text written here";
-      back.onclick = () => {
-        stage(personaPointer, overridden(personaPointer) ? { revert: true } : { remove: true });
-        draw();
-      };
-      actions.append(back);
-    }
-    persona.append(summary, label, text, personaAlert, actions);
-
-    // The skill that leads each of its stages, as its bound kind invokes it.
-    const skills = el("div", null, "skills");
-    skills.append(el("h4", "Skills"));
-    for (const stage_ of contract.stages) {
-      const skillPointer = pointer("stage_skills", stage_);
-      const input = textInput("settings-skill-" + stage_, at(settings, ["stage_skills", stage_]), "none");
-      const row = el("div", null, "skill-input");
-      const choose = el("button", "+ Skill", "quiet");
-      choose.type = "button";
-      choose.setAttribute("aria-label", "Choose an installed skill for " + stage_);
-      choose.title = "Choose, from the skills installed for this agent, the one the " + stage_ + " stage starts with";
-      choose.disabled = !(kinds()[profile.kind] || {}).skill;
-      choose.onclick = () => openSkillPicker(input, profile.kind, stage_);
-      row.append(input, choose);
-      const said = el("p", null, "hint");
-      const show = () => said.replaceChildren(input.value.trim()
-        ? invocation(profile.kind, input.value.trim()) : el("span", "No stage skill is explicitly bound."));
-      show();
-      input.oninput = show;
-      input.disabled = !(kinds()[profile.kind] || {}).skill;
-      input.onchange = () => {
-        const name = input.value.trim();
-        stage(skillPointer, name ? { value: name } : { remove: true }, input);
-      };
-      skills.append(field(stage_, row, skillPointer, [said], "the " + stage_ + " stage's skill", input));
-    }
-    block.append(title, field("Agent", agent, agentPointer, [facts], "the " + role + "'s agent"), persona, skills);
+    const profilePlace = el("div", null, "settings-profile-values");
+    profilePlace.id = "settings-profile-for-" + role;
+    const profile = el("div", null, "cast-profile");
+    const picker = el("div", null, "settings-profile-picker");
+    const add = el("button", "+", "settings-profile-action");
+    add.type = "button";
+    add.title = "Add profile";
+    add.setAttribute("aria-label", add.title);
+    add.disabled = !shown.writable;
+    add.onclick = () => openProfiles("add");
+    const options = el("button", "Edit", "settings-profile-action settings-edit-profile");
+    options.type = "button";
+    options.title = shown.writable ? "Edit profile" : "View profile";
+    options.textContent = shown.writable ? "Edit" : "View";
+    options.setAttribute("aria-label", options.title);
+    options.classList.add("settings-view-button");
+    options.onclick = () => openProfiles("edit");
+    picker.append(agent, add, options);
+    profile.append(field("Agent profile", picker, agentPointer, [], agent), profilePlace);
+    block.append(title, profile, stageSkills(settings, role, contract.stages, runtimes[settings.agents[bound]?.kind]),
+      instructionPreviews(role));
     return block;
   }));
+  selectRole(Object.hasOwn(shown.roles, selectedRole) ? selectedRole : roles[0]?.[0], settings);
 }
 
-function openSkillPicker(input, kind, stage_) {
-  const dialog = $("settings-skill-picker");
-  const options = $("settings-skill-options");
-  dialog.querySelector(".hint").textContent = "Choose an available skill for the " + stage_ + " stage.";
-  const names = shown.skills[kind] || [];
-  const controls = [];
-  for (const name of names) {
-    const option = el("button", name, "quiet skill-option");
-    option.type = "button";
-    option.translate = false;
-    option.title = "Start the stage with the skill " + name;
-    option.onclick = () => {
-      input.value = name;
-      input.dispatchEvent(new Event("input"));
-      input.dispatchEvent(new Event("change"));
-      dialog.close();
-      input.focus();
+function skillStack(value) {
+  return Array.isArray(value) ? value : value ? [value] : [];
+}
+
+function skillBinding(names) {
+  return names.length ? { value: names.length === 1 ? names[0] : names } : { remove: true };
+}
+
+function stageSkills(settings, role, stages, runtime) {
+  const skills = el("section", null, "settings-role-section skills");
+  skills.id = "settings-skills-" + role;
+  const header = el("div", null, "settings-section-head");
+  header.append(el("h4", "Stage skills"));
+  const picker = el("div", null, "stage-skill-fields");
+  const available = runtime?.skill ? shown.skills[runtime.kind] || [] : [];
+  const defaults = stages.filter((stage) => available.includes(TEAM_SKILLS[stage]) &&
+    !skillStack(settings.stage_skills?.[stage]).length);
+  if (defaults.length && shown.writable) {
+    const use = el("button", "Use installed defaults", "quiet");
+    use.type = "button";
+    use.title = "Fill empty stages with the installed GenosAI skills suggested for them";
+    use.onclick = () => {
+      for (const stage_ of defaults) stage(pointer("stage_skills", stage_), { value: TEAM_SKILLS[stage_] });
+      draw();
+      $("settings-skill-" + defaults[0]).focus();
     };
-    controls.push(option);
+    header.append(use);
   }
-  const clear = el("button", "No explicit skill", "quiet skill-option");
-  clear.type = "button";
-  clear.title = "Start the stage with no skill named: the agent works from its instructions alone";
-  clear.onclick = () => {
-    input.value = "";
-    input.dispatchEvent(new Event("input"));
-    input.dispatchEvent(new Event("change"));
-    dialog.close();
-    input.focus();
-  };
-  controls.push(clear);
-  if (!names.length) controls.unshift(el("p", "No installed skills were discovered for this agent."));
-  options.replaceChildren(...controls);
-  dialog.showModal();
-}
-
-function drawProfiles(settings) {
-  const bound = Object.fromEntries(Object.entries(settings.roles).map(([role, each]) => [each.agent, role]));
-  $("settings-profile-summary").textContent = "Agent profiles: " + Object.keys(settings.agents).length
-    + " profiles, " + Object.keys(bound).length + " in use";
-  $("settings-profiles").replaceChildren(...Object.entries(settings.agents).map(([name, profile]) => {
-    const kind = kinds()[profile.kind] || { name: profile.kind, refused: "no module answers for this kind" };
-    const row = el("tr");
-    const who = el("td");
-    who.append(code(name), yours(pointer("agents", name), draw, "the profile " + name));
-    const what = el("td");
-    what.append(kind.name || profile.kind, el("span", kind.refused ? "Unusable: " + kind.refused
-      : (kind.access.includes("read") ? "Can review. " : "Cannot review. ")
-        + (kind.access.includes("write") ? "Can build." : "Cannot build."), "gloss"));
-    const cells = ["model", "effort", "provider"].map((option) => {
-      const cell = el("td");
-      const text = pointer("agents", name, option);
-      if (!kind.options || !kind.options.includes(option)) {
-        cell.append(el("span", "not taken", "gloss"));
-        return cell;
-      }
-      const input = textInput("settings-" + option + "-" + name, profile[option]);
-      input.name = keysOf(text).join(".");
-      input.setAttribute("aria-label", name + "'s " + option);
-      input.dataset.pointer = text;
-      if (hasStaged(text)) input.dataset.staged = "";
-      input.onchange = () => {
-        const value = input.value.trim();
-        stage(text, value ? { value } : { remove: true }, input);
-      };
-      const alert = el("p", null, "alert");
-      alert.setAttribute("role", "alert");
-      cell.append(input, yours(text, draw, "the profile " + name + "'s " + option), alert);
-      return cell;
-    });
-    const act = el("td");
-    const remove = el("button", "Remove", "danger quiet");
-    remove.type = "button";
-    remove.setAttribute("aria-label", "Remove the profile " + name);
-    remove.title = "Remove the profile " + name + "; Apply saves it";
-    if (bound[name]) {
-      remove.disabled = true;
-      remove.title = "The " + bound[name] + " runs it";
+  const hint = runtime?.skill ? "Skills apply on each turn of the stage. The first skill leads."
+    : "This runtime has no explicit skill binding.";
+  skills.append(header, el("p", hint, "hint"), picker);
+  for (const stage_ of stages) {
+    const title = stage_ === "research" ? "Plan" : stage_[0].toUpperCase() + stage_.slice(1);
+    const text = pointer("stage_skills", stage_);
+    const fieldset = el("fieldset", null, "field stage-skill");
+    fieldset.id = "settings-skill-" + stage_;
+    fieldset.tabIndex = -1;
+    fieldset.dataset.pointer = text;
+    fieldset.append(el("legend", title, "visually-hidden"));
+    const current = skillStack(settings.stage_skills?.[stage_]);
+    const stageHead = el("div", null, "settings-skill-head");
+    stageHead.append(el("span", title));
+    if (current.length) stageHead.append(el("span", current.length === 1 ? "1 skill" : current.length + " skills",
+      "hint settings-skill-count"));
+    fieldset.append(stageHead);
+    const tags = el("div", null, "skill-tags");
+    const manual = el("div", null, "skill-manual");
+    manual.hidden = true;
+    const input = textInput(fieldset.id + "-name", "", "Skill name…");
+    input.maxLength = 64;
+    input.setAttribute("aria-label", "Skill name for " + title);
+    const add = el("button", "Add", "quiet");
+    add.type = "button";
+    manual.append(input, add);
+    const alert = el("p", null, "alert");
+    alert.setAttribute("role", "alert");
+    const save = (next) => {
+      stage(text, skillBinding(next));
+      draw();
+      $(fieldset.id).focus({ preventScroll: true });
+    };
+    for (const name of current) {
+      const tag = el("button", name + (shown.writable ? " ×" : ""), "skill-tag");
+      tag.type = "button";
+      tag.disabled = !shown.writable;
+      tag.setAttribute("aria-label", shown.writable ? "Remove " + name + " from " + title : name);
+      tag.onclick = () => save(current.filter((skill) => skill !== name));
+      tags.append(tag);
     }
-    remove.onclick = async () => {
-      const go = await confirmAction({ title: "Remove the profile " + name + "?",
-        body: "It is removed from your settings when you apply. The shared settings keep theirs.",
-        confirm: "Remove", danger: true, returnTo: $("settings-add-name") });
-      if (!go) return;
-      stage(pointer("agents", name), { remove: true });
-      draw();
+    if (!current.length) tags.append(el("span", "Built-in instructions", "hint"));
+    fieldset.append(el("p", "In use", "hint"), tags);
+    if (runtime?.skill) {
+      const suggestion = TEAM_SKILLS[stage_];
+      const candidates = [...new Set([...(available.includes(suggestion) ? [suggestion] : []), ...available])]
+        .filter((name) => !current.includes(name));
+      const choices = el("div", null, "skill-available");
+      for (const name of candidates) {
+        const choice = el("button", "+ " + name, "skill-tag");
+        choice.type = "button";
+        choice.disabled = !shown.writable;
+        choice.setAttribute("aria-label", "Add " + name + " to " + title);
+        if (name === suggestion) {
+          choice.title = "Suggested for this stage";
+          choice.classList.add("skill-suggestion");
+        }
+        choice.onclick = () => save([...current, name]);
+        choices.append(choice);
+      }
+      if (!candidates.length) choices.append(el("span", available.length ? "All installed skills are in use."
+        : "No installed skills found.", "hint"));
+      fieldset.append(el("p", "Available skills", "hint"), choices);
+      if (shown.writable) {
+        const enter = el("button", "Enter a skill name…", "quiet skill-name-entry");
+        enter.type = "button";
+        enter.onclick = () => {
+          manual.hidden = false;
+          enter.hidden = true;
+          input.focus();
+        };
+        fieldset.append(enter, manual);
+      }
+    }
+    add.onclick = () => {
+      const name = input.value.trim();
+      if (!NAME.test(name) || name.length > 64 || current.includes(name)) {
+        alert.textContent = current.includes(name) ? "This skill is already selected."
+          : "Use lowercase letters and digits with single hyphens between words.";
+        input.focus();
+        return;
+      }
+      save([...current, name]);
     };
-    act.append(remove);
-    row.append(who, what, ...cells, act);
-    return row;
-  }), ...Object.entries(shown.overrides.agents || {}).filter(([name, value]) => value === null
-    && !staged.has(pointer("agents", name))).map(([name]) => {
-    const row = el("tr", null, "removed");
-    const who = el("td");
-    who.append(code(name));
-    const said = el("td", "Removed in your settings; the shared settings still hold it.");
-    said.colSpan = 3;
-    const act = el("td");
-    const restore = el("button", "Restore", "quiet");
-    restore.type = "button";
-    restore.setAttribute("aria-label", "Restore the profile " + name);
-    restore.title = "Bring back the profile " + name + ", which your settings removed and the shared ones hold";
-    restore.onclick = () => {
-      stage(pointer("agents", name), { revert: true });
-      draw();
-    };
-    act.append(restore);
-    row.append(who, said, act);
-    return row;
-  }));
-  const usable = shown.kinds.filter((kind) => !kind.refused);
-  const choose = $("settings-add-kind");
-  const chosen = choose.value;
-  choose.replaceChildren(...usable.map((kind) => {
-    const option = el("option", kind.name + " (" + kind.kind + ")");
-    option.value = kind.kind;
-    option.translate = false;
-    return option;
-  }));
-  if (usable.some((kind) => kind.kind === chosen)) choose.value = chosen;
-  $("settings-unusable").replaceChildren(...shown.kinds.filter((kind) => kind.refused).map((kind) => {
-    const item = el("li");
-    item.append(code(kind.kind), " cannot be used: " + kind.refused);
-    return item;
-  }));
+    input.onkeydown = (event) => { if (event.key === "Enter") { event.preventDefault(); add.click(); } };
+    fieldset.append(alert);
+    picker.append(fieldset);
+  }
+  return skills;
 }
 
-function drawTogether(settings) {
+function assignedRoles(settings, name) {
+  return Object.keys(settings.roles).filter((role) => settings.roles[role].agent === name);
+}
+
+function primaryProfileOption(option) {
+  return option === "model" || option === "effort";
+}
+
+function profileOption(option, id, value, path) {
+  const input = textInput(id, value, "Runtime default");
+  input.disabled = !shown.writable;
+  const help = [];
+  if (option === "provider" || option === "launcher") {
+    const hint = el("p", null, "hint");
+    hint.id = input.id + "-hint";
+    input.setAttribute("aria-describedby", hint.id);
+    const describe = () => {
+      hint.textContent = option === "launcher" ? "Optional launcher executable on the worker. Leave blank for the runtime default."
+        : input.value.trim() === "deepseek" ? "DeepSeek needs a model and DEEPSEEK_API_KEY on the worker."
+        : "Leave blank to use the runtime's configured model provider.";
+    };
+    describe();
+    input.oninput = describe;
+    help.push(hint);
+  }
+  return { input, row: field(PROFILE_FIELDS[option] || option, input, path, help) };
+}
+
+function profileFields(settings, name, save) {
+  const profile = settings.agents[name];
+  if (!profile) return [];
+  const options = kinds()[profile.kind]?.options || [];
+  const prefix = save ? "settings-edit-" : "settings-";
+  return options.filter((option) => save || primaryProfileOption(option) || option === "launcher")
+    .map((option) => {
+      const path = pointer("agents", name, option);
+      const { input, row } = profileOption(option, prefix + option + "-" + name, profile[option], path);
+      const update = () => {
+        const value = input.value.trim();
+        stage(path, value ? { value } : { remove: true }, input);
+      };
+      if (save) {
+        const original = input.value;
+        save.push(() => { if (input.value !== original) update(); });
+      } else input.onchange = update;
+      return row;
+    });
+}
+
+function openProfiles(mode, name) {
+  const role = selectedRole;
+  const settings = pending();
+  const body = $("settings-profiles-body");
+  const form = $("settings-profile-form");
+  const done = $("settings-profile-done");
+  const adding = mode === "add";
+  const browsing = mode === "browse";
+  const bound = settings.roles[role].agent;
+  const close = profilesDialog.querySelector("footer [data-close-settings-dialog]");
+  $("settings-profiles-title").textContent = adding ? "Add profile" : browsing ? "Choose a profile"
+    : shown.writable ? "Edit profile" : "Profile details";
+  const intro = $("settings-profiles-intro");
+  intro.textContent = adding ? "Create a reusable profile and select it for this role." : "";
+  intro.hidden = !adding;
+  done.textContent = adding ? "Add and select" : "Save";
+  done.title = mode === "edit" ? "Apply in Settings saves these changes for new runs." : "";
+  done.hidden = browsing || !shown.writable;
+  close.textContent = done.hidden ? "Close" : "Cancel";
+  body.replaceChildren();
+  if (browsing) {
+    const runtimes = kinds();
+    const entries = Object.entries(settings.agents).filter(([profile]) => profile !== bound);
+    const list = el("ul", null, "profile-list");
+    for (const [profile, details] of entries) {
+      const row = el("li", null, "profile-row");
+      const info = el("div");
+      info.append(code(profileName(profile, role)), el("p", [kindName(details.kind), profileDescription(details)]
+        .filter(Boolean).join(" · "), "hint"));
+      const buttons = el("div", null, "actions");
+      if (canServe(runtimes[details.kind], role)) {
+        const use = el("button", "Select profile", "quiet");
+        use.type = "button";
+        use.disabled = !shown.writable;
+        use.setAttribute("aria-label", "Select " + profile);
+        use.onclick = () => {
+          profilesDialog.close();
+          chooseProfile(role, profile);
+        };
+        buttons.append(use);
+      }
+      if (!assignedRoles(settings, profile).length && shown.writable) {
+        const remove = el("button", "Remove", "quiet danger");
+        remove.type = "button";
+        remove.setAttribute("aria-label", "Remove the profile " + profile);
+        remove.onclick = async () => {
+          if (!await confirmAction({ title: "Remove " + profile + "?", body: "Apply saves this removal.",
+            confirm: "Remove", danger: true })) return;
+          stage(pointer("agents", profile), { remove: true });
+          draw();
+          openProfiles("browse");
+        };
+        buttons.append(remove);
+      }
+      row.append(info, buttons);
+      list.append(row);
+    }
+    body.append(entries.length ? list : el("p", "No other profiles.", "hint"));
+    form.onsubmit = (event) => event.preventDefault();
+  } else if (adding) {
+    const profile = textInput("settings-add-name", "", "review-fast…");
+    const runtime = el("select");
+    runtime.id = "settings-add-kind";
+    const runtimes = shown.kinds.filter((kind) => canServe(kind, role));
+    for (const kind of runtimes) {
+      runtime.add(new Option(kind.name, kind.kind));
+    }
+    runtime.value = settings.agents[bound]?.kind;
+    if (runtime.selectedIndex < 0) runtime.selectedIndex = 0;
+    const basics = el("div", null, "profile-form-fields");
+    const nameField = field("Profile name", profile);
+    basics.append(nameField, field("Runtime", runtime));
+    const options = el("div", null, "profile-form-fields");
+    const advanced = el("details", null, "settings-profile-advanced");
+    const advancedFields = el("div", null, "profile-form-fields");
+    advanced.append(el("summary", "Advanced profile options"), advancedFields);
+    body.append(basics, options, advanced);
+    const runtimeFields = new Map();
+    const drawOptions = () => {
+      const kind = runtimes.find((item) => item.kind === runtime.value);
+      if (!runtimeFields.has(runtime.value)) {
+        runtimeFields.set(runtime.value, (kind?.options || []).map((option) =>
+          [option, profileOption(option, "settings-add-" + option)]));
+      }
+      const fields = runtimeFields.get(runtime.value);
+      options.replaceChildren(...fields.filter(([option]) => primaryProfileOption(option)).map(([, field]) => field.row));
+      advancedFields.replaceChildren(...fields.filter(([option]) => !primaryProfileOption(option)).map(([, field]) => field.row));
+      advanced.hidden = !advancedFields.children.length;
+      advanced.open = false;
+    };
+    drawOptions();
+    runtime.onchange = drawOptions;
+    profile.autofocus = true;
+    form.onsubmit = (event) => {
+      event.preventDefault();
+      if (!shown.writable) return;
+      const name = profile.value.trim();
+      const alert = nameField.querySelector(".alert");
+      if (!NAME.test(name) || Object.hasOwn(settings.agents, name) || !runtime.value) {
+        alert.textContent = !NAME.test(name) ? "Use lowercase letters and digits joined by single hyphens."
+          : Object.hasOwn(settings.agents, name) ? "This profile name is already in use." : "Choose a runtime.";
+        profile.focus();
+        return;
+      }
+      const value = { kind: runtime.value };
+      for (const [option, { input }] of runtimeFields.get(runtime.value)) {
+        if (input.value.trim()) value[option] = input.value.trim();
+      }
+      stage(pointer("agents", name), { value });
+      profilesDialog.close();
+      chooseProfile(role, name);
+    };
+  } else {
+    const save = [];
+    const editing = name || bound;
+    intro.textContent = kindName(settings.agents[editing].kind) + " · " + editing;
+    intro.hidden = false;
+    const fields = profileFields(settings, editing, save);
+    if (fields.length) {
+      const controls = el("div", null, "profile-form-fields");
+      controls.append(...fields);
+      body.append(controls);
+    } else {
+      body.append(el("p", "This runtime uses its own settings.", "hint"));
+      done.hidden = true;
+      close.textContent = "Close";
+    }
+    if (assignedRoles(settings, editing).length > 1) {
+      body.append(el("p", "Changes to this shared profile apply to both roles on new runs.", "hint"));
+    }
+    form.onsubmit = (event) => {
+      event.preventDefault();
+      if (!shown.writable) return;
+      save.forEach((update) => update());
+      profilesDialog.close();
+      draw();
+      focusSetting(pointer("roles", role, "agent"));
+    };
+  }
+  if (!profilesDialog.open) profilesDialog.showModal();
+}
+
+function drawWorkflow(settings) {
   const timeout = el("input");
   timeout.id = "settings-turn-hours";
   timeout.type = "number";
+  timeout.name = "timeout_seconds";
   timeout.min = "0";
   timeout.step = "any";
   timeout.value = settings.timeout_seconds / 3600;
-  timeout.setAttribute("aria-describedby", "settings-turn-hint");
+  timeout.dataset.pointer = "/timeout_seconds";
+  timeout.toggleAttribute("data-staged", hasStaged(timeout.dataset.pointer));
+  timeout.setAttribute("aria-describedby", "settings-turn-unit settings-turn-hint");
   timeout.onchange = () => stage("/timeout_seconds", { value: Math.round(Number(timeout.value) * 3600) }, timeout);
-  const hint = el("p", "Maximum time for one role turn. Healthy quiet work can continue until this cap. "
-    + "Stop and known startup or context failures still end it earlier. Existing runs keep their limit.", "hint");
-  hint.id = "settings-turn-hint";
-  $("settings-timeout").replaceChildren(field("Turn limit (hours)", timeout, "/timeout_seconds", [hint]));
+  const unit = el("span", "hours");
+  unit.id = "settings-turn-unit";
+  const duration = el("div", null, "workflow-duration");
+  duration.append(timeout, unit);
+  const controls = el("div", null, "workflow-turn-controls");
+  controls.append(duration);
+  const alert = el("p", null, "alert");
+  alert.setAttribute("role", "alert");
+  $("settings-timeout").replaceChildren(controls, alert);
   const rounds = settings.review_rounds || Object.fromEntries(shown.phases.map((phase) =>
     [phase, { normal: settings.max_rounds[phase], extended: 0 }]));
-  $("settings-rounds").replaceChildren(...shown.phases.flatMap((phase) => {
-    const group = el("section", null, "review-budget");
-    group.append(el("h3", phase[0].toUpperCase() + phase.slice(1)));
-    const equation = el("div", null, "review-equation");
-    const fields = ["normal", "extended"].map((threshold) => {
+  $("settings-rounds").replaceChildren(...shown.phases.map((phase) => {
+    const row = el("tr");
+    const title = phase[0].toUpperCase() + phase.slice(1);
+    const heading = el("th", title);
+    heading.scope = "row";
+    row.append(heading);
+    for (const threshold of ["normal", "extended"]) {
       const text = pointer("review_rounds", phase, threshold);
       const input = el("input");
       input.type = "number";
       input.min = threshold === "normal" ? "1" : "0";
       input.step = "1";
       input.id = "settings-rounds-" + phase + "-" + threshold;
-      input.name = keysOf(text).join(".");
       input.value = rounds[phase][threshold];
       input.onchange = () => stage(text, { value: Number(input.value) }, input);
       input.oninput = () => updateReviewMaximum(phase);
-      const wrap = field(threshold === "normal" ? "Normal" : "After reflection", input, text, [],
-        "the " + phase + " review budget "
-        + (threshold === "normal" ? "before reflection" : "after reflection"));
+      const when = threshold === "normal" ? "normal rounds" : "rounds after reflection";
+      const wrap = field(title + " " + when, input, text);
+      wrap.querySelector("label").classList.add("visually-hidden");
       wrap.classList.add("review-count");
-      return wrap;
-    });
-    const maximum = el("output", null, "review-maximum");
+      row.insertCell().append(wrap);
+    }
+    const maximum = el("output");
     maximum.id = "settings-rounds-" + phase + "-maximum";
     maximum.htmlFor = "settings-rounds-" + phase + "-normal settings-rounds-" + phase + "-extended";
-    equation.append(fields[0], el("span", "+", "review-operator"), fields[1], el("span", "=", "review-operator"),
-      maximum);
-    group.append(equation);
-    updateReviewMaximum(phase);
-    return group;
+    row.insertCell().append(maximum);
+    return row;
   }));
   shown.phases.forEach(updateReviewMaximum);
   const select = $("settings-flow");
   select.name = "default_flow";
-  const choosing = settings.default_flow || "";
+  const choosing = listedFlowName(flows, settings.default_flow || "");
   const options = flows.map((flow) => {
     const option = el("option", flow.error ? flow.name + " (refused)" : flow.name);
     option.value = flow.name;
@@ -469,21 +669,25 @@ function drawTogether(settings) {
     missing.value = choosing;
     options.unshift(missing);
   }
-  const none = el("option", "none: the order runs took before flows");
-  none.value = "";
-  options.unshift(none);
+  if (!choosing) {
+    const placeholder = el("option", "Choose a default flow");
+    placeholder.value = "";
+    placeholder.disabled = true;
+    options.unshift(placeholder);
+  }
   select.replaceChildren(...options);
   select.value = choosing;
   if (staged.has("/default_flow")) select.dataset.staged = "";
   else delete select.dataset.staged;
   const steps = () => {
     const flow = flows.find((each) => each.name === select.value);
+    $("settings-workflow-flow").textContent = select.value ? select.selectedOptions[0].textContent : "No default selected";
     $("settings-flow-steps").hidden = !(flow && flow.steps);
     if (flow && flow.steps) score($("settings-flow-steps"), flow.steps);
   };
   steps();
   select.onchange = () => {
-    stage("/default_flow", select.value ? { value: select.value } : { remove: true }, select);
+    if (select.value) stage("/default_flow", { value: select.value }, select);
     steps();
   };
 }
@@ -497,92 +701,149 @@ function updateReviewMaximum(phase) {
   const valid = counts.every((input) => input.value !== "" && Number.isInteger(Number(input.value))
     && Number(input.value) >= Number(input.min));
   const total = valid ? counts.reduce((sum, input) => sum + Number(input.value), 0) : null;
-  maximum.textContent = total === null ? "max pending" : "max " + total;
+  maximum.textContent = total === null ? "—" : total + (total === 1 ? " round" : " rounds");
   maximum.setAttribute("aria-label", total === null ? "Maximum " + phase + " iterations pending valid values"
     : "Maximum " + phase + " iterations: " + total);
 }
 
-function drawReviewPrompts(settings) {
-  const prompts = settings.review_prompts || {};
-  const builtIns = shown.code_owned_review_guidance || {};
-  const container = $("settings-review-prompts");
-  const openDetails = new Set([...container.querySelectorAll("details[data-prompt-detail][open]")]
-    .map((detail) => detail.dataset.promptDetail));
-  const additions = Object.values(prompts).flatMap((roles) => Object.values(roles || {}))
-    .filter((value) => typeof value === "string" && value.trim()).length;
-  $("settings-review-prompt-summary").textContent = "Advanced: extra review guidance ("
-    + (additions ? additions + (additions === 1 ? " addition" : " additions") : "none") + ")";
-  $("settings-review-prompt-limit").textContent = "Built-in reflection and final handoff instructions always apply. "
-    + "These optional additions follow them; add project-specific guidance only when needed. "
-    + "Plan and Build share these additions. Combined limit: "
-    + shown.max_review_prompt_bytes.toLocaleString() + " UTF-8 bytes.";
-  container.replaceChildren(...PROMPT_EVENTS.map((event) => {
-    const group = el("details", null, "prompt-group");
-    group.dataset.promptDetail = "event:" + event.key;
-    group.open = openDetails.has(group.dataset.promptDetail);
-    const legend = el("summary", event.title);
-    const hint = el("p", event.hint, "hint");
-    hint.id = "settings-review-" + event.key + "-hint";
-    group.append(legend, hint);
-    const roles = el("div", null, "prompt-roles");
-    for (const role of Object.keys(shown.roles)) {
-      const text = pointer("review_prompts", event.key, role);
-      const value = at(settings, keysOf(text));
-      const roleView = el("section", null, "prompt-role");
-      roleView.dataset.role = role;
-      roleView.append(el("h3", role[0].toUpperCase() + role.slice(1)));
+function instructionPreviews(role) {
+  const block = el("section", null, "settings-role-section settings-instruction-links");
+  const heading = el("h4", "Instructions");
+  heading.id = "settings-instruction-links-" + role;
+  block.setAttribute("aria-labelledby", heading.id);
+  const list = el("ul", null, "settings-instruction-list");
+  for (const { key, title, hint } of INSTRUCTIONS) {
+    const row = el("li");
+    const help = el("span", null, "round-help instruction-help");
+    const question = el("button", "?");
+    question.type = "button";
+    question.setAttribute("aria-label", "When " + title + " applies");
+    const answer = el("span", hint);
+    answer.id = "settings-instruction-help-" + key + "-" + role;
+    answer.setAttribute("role", "tooltip");
+    question.setAttribute("aria-describedby", answer.id);
+    help.onpointerenter = question.onfocus = () => delete help.dataset.dismissed;
+    question.onclick = () => {
+      delete help.dataset.dismissed;
+      question.focus();
+    };
+    question.onkeydown = (event) => {
+      if (event.key === "Escape") help.dataset.dismissed = "";
+    };
+    help.append(question, answer);
+    const preview = el("button", "Preview", "settings-view-button");
+    preview.type = "button";
+    preview.id = "settings-edit-" + (key === "persona" ? "instructions" : key) + "-" + role;
+    preview.setAttribute("aria-label", "Preview " + title);
+    preview.onclick = () => openInstructions(role, key);
+    row.append(el("span", title), help, preview);
+    list.append(row);
+  }
+  block.append(heading, list);
+  return block;
+}
 
-      const builtIn = el("details", null, "prompt-built-in");
-      builtIn.dataset.promptDetail = "builtin:" + event.key + ":" + role;
-      builtIn.open = openDetails.has(builtIn.dataset.promptDetail);
-      builtIn.append(el("summary", "Built-in instructions"));
-      const body = el("pre");
-      const codeOwned = builtIns[event.key] && builtIns[event.key][role];
-      body.textContent = typeof codeOwned === "string" ? codeOwned : "Built-in guidance is unavailable. Read Settings again.";
-      builtIn.append(body);
-      roleView.append(builtIn);
-
-      if ((typeof value === "string" && value.trim()) || overridden(text) || promptEditors.has(text)) {
-        const input = el("textarea");
-        input.id = "settings-prompt-" + event.key + "-" + role;
-        input.rows = 4;
-        input.spellcheck = false;
-        input.setAttribute("aria-describedby", hint.id + " settings-review-prompt-limit");
-        input.placeholder = "Optional extra guidance\u2026";
-        input.value = typeof value === "string" ? value : "";
-        input.oninput = () => stage(text, input.value.trim() ? { value: input.value } : { remove: true }, input);
-        const editor = field("Extra guidance", input, text, [],
-          "the " + role + " " + event.title.toLowerCase() + " extra guidance");
-        editor.classList.add("prompt-addition");
-        roleView.append(editor);
-      } else {
-        const add = el("button", "+ Add extra guidance", "quiet prompt-add");
-        add.type = "button";
-        add.setAttribute("aria-label", "Add extra guidance for " + role + " " + event.title.toLowerCase());
-        add.title = "Add words the " + role + " is given at " + event.title.toLowerCase() + ", beside its own";
-        add.onclick = () => {
-          promptEditors.add(text);
-          drawReviewPrompts(pending());
-          focusSetting(text);
-        };
-        roleView.append(add);
-      }
-      roles.append(roleView);
+function openInstructions(role, target = "persona") {
+  const settings = pending();
+  const configured = settings.roles[role];
+  const saved = shown.settings.roles[role];
+  const body = $("settings-instructions-body");
+  const tabs = $("settings-instructions-nav");
+  tabs.querySelectorAll(".settings-role-option").forEach((option) => option.remove());
+  body.replaceChildren();
+  const save = [];
+  const view = (section) => {
+    for (const panel of body.children) panel.hidden = panel.dataset.section !== section;
+    for (const choice of tabs.querySelectorAll("input")) choice.checked = choice.value === section;
+  };
+  for (const event of INSTRUCTIONS) {
+    const persona = event.key === "persona";
+    const id = persona ? "settings-persona-" + role : "settings-prompt-" + event.key + "-" + role;
+    const text = persona ? pointer("roles", role, "persona") : pointer("review_prompts", event.key, role);
+    const willReadDefault = persona && !("persona" in configured) && "persona" in saved;
+    const old = persona ? configured.persona ?? (willReadDefault ? "" : shown.personas[role] ?? "")
+      : at(settings, keysOf(text)) || "";
+    const panel = el("section", null, "settings-instruction-panel");
+    panel.id = id + "-panel";
+    panel.dataset.section = event.key;
+    const input = el("textarea");
+    input.id = id;
+    input.value = old;
+    input.spellcheck = false;
+    input.readOnly = !shown.writable;
+    const hint = el("p", persona ? (willReadDefault ? "The default instructions will be read when you apply."
+      : event.hint)
+      : event.hint + " Plan and Build share these additions. Up to "
+        + shown.max_review_prompt_bytes.toLocaleString() + " UTF-8 bytes across both roles.", "hint");
+    hint.id = id + "-hint";
+    input.setAttribute("aria-describedby", hint.id);
+    const editor = field(persona ? event.title : "Additional guidance (optional)", input, text);
+    panel.append(hint);
+    if (persona) {
+      editor.querySelector("label").classList.add("visually-hidden");
+      panel.append(editor);
+      const profile = settings.agents[configured.agent];
+      const access = shown.roles[role].access;
+      const boundary = kinds()[profile?.kind]?.boundary?.[access];
+      const limits = el("details", null, "settings-detail");
+      limits.append(el("summary", "Workspace access"), el("p", ACCESS[access] + (boundary ? " " + boundary : ""), "hint"));
+      panel.append(limits);
+    } else {
+      input.placeholder = "Add guidance for this round…";
+      const panes = el("div", null, "settings-review-panes");
+      const builtIn = el("section", null, "prompt-built-in");
+      const heading = el("h3", "Built-in instructions");
+      heading.id = id + "-built-in-title";
+      const instructions = el("pre", shown.code_owned_review_guidance?.[event.key]?.[role] ?? "Built-in guidance is unavailable.");
+      instructions.tabIndex = 0;
+      instructions.setAttribute("aria-labelledby", heading.id);
+      builtIn.append(heading, instructions);
+      panes.append(builtIn, editor);
+      panel.append(panes);
     }
-    group.append(roles);
-    return group;
-  }));
+    save.push(() => {
+      if (input.value === old) return;
+      if (persona && !("persona" in saved) && input.value === shown.personas[role]) staged.delete(text);
+      else stage(text, persona || input.value.trim() ? { value: input.value } : { remove: true });
+    });
+    const tab = el("div", null, "settings-role-option");
+    const choice = el("input", null, "visually-hidden");
+    choice.type = "radio";
+    choice.name = "instructions-tab";
+    choice.id = id + "-tab";
+    choice.value = event.key;
+    choice.setAttribute("aria-controls", panel.id);
+    choice.onchange = () => view(event.key);
+    const label = el("label", event.title);
+    label.htmlFor = choice.id;
+    tab.append(choice, label);
+    tabs.append(tab);
+    body.append(panel);
+  }
+  $("settings-instructions-title").textContent = role[0].toUpperCase() + role.slice(1) + " instructions";
+  $("settings-instructions-done").hidden = !shown.writable;
+  $("settings-instructions-form").onsubmit = (event) => {
+    event.preventDefault();
+    if (!shown.writable) return;
+    save.forEach((update) => update());
+    instructionsDialog.close();
+    noteChanges();
+  };
+  view(target);
+  if (!instructionsDialog.open) instructionsDialog.showModal();
 }
 
 function noteChanges() {
+  const settings = pending();
+  for (const section of Object.keys(SECTIONS)) {
+    $("settings-revert-" + section).disabled = !shown.writable || !canRevert(section, settings);
+  }
   const count = staged.size;
   $("settings-pending").textContent = !shown.writable ? "These settings take no changes here."
     : count ? count + (count === 1 ? " change" : " changes") + " to apply. Runs started from now on take them."
       : "No changes.";
   $("settings-apply").disabled = !shown.writable || !count;
   $("settings-discard").hidden = !count;
-  $("settings-reset").hidden = !hasVisibleOverride();
-  $("settings-reset").disabled = !shown.writable;
 }
 
 function draw() {
@@ -605,37 +866,76 @@ function draw() {
   }
   const settings = pending();
   drawRoles(settings);
-  drawProfiles(settings);
-  drawTogether(settings);
-  drawReviewPrompts(settings);
+  drawWorkflow(settings);
   form.hidden = false;
-  for (const id of ["settings-add-name", "settings-add-kind", "settings-add", "settings-flow", "settings-reset"]) {
-    $(id).disabled = !shown.writable;
-  }
+  $("settings-flow").disabled = !shown.writable;
   if (!shown.writable) {
-    for (const control of form.querySelectorAll("input, select, textarea, button")) control.disabled = true;
+    for (const control of form.querySelectorAll(
+      "input:not(.settings-role-choice), select, textarea, button:not(.settings-view-button, .round-help button)"
+    )) {
+      control.disabled = true;
+    }
   }
   noteChanges();
 }
 
+function revealSetting(control) {
+  const rolePanel = control.closest(".cast-role");
+  if (rolePanel) selectRole(rolePanel.dataset.role);
+  const section = control.closest(".settings-part, .settings-disclosure");
+  if (section) markSettingsSection($(section.id === "settings-workflow-details" ? "settings-workflow-title" : "settings-roles-title"));
+  for (let parent = control.parentElement; parent; parent = parent.parentElement) {
+    if (parent.tagName === "DETAILS") parent.open = true;
+    if (parent.id === "settings-form") break;
+  }
+  control.focus();
+}
+
+function settingControl(text) {
+  const match = '[data-pointer="' + CSS.escape(text) + '"]';
+  const find = () => document.querySelector('#view-settings ' + match + ', .settings-editor[open] ' + match
+    + ', .settings-instructions[open] ' + match);
+  const visible = find();
+  if (visible) return visible;
+  const [group, name, field] = keysOf(text);
+  if ((group === "roles" && field === "persona") || (group === "review_prompts" && field)) {
+    const role = group === "roles" ? name : field;
+    selectRole(role);
+    openInstructions(role, group === "roles" ? "persona" : name);
+    return find();
+  }
+  if (group !== "agents" || !name) return null;
+  const settings = pending();
+  if (!Object.hasOwn(settings.agents, name)) return null;
+  const roles = assignedRoles(settings, name);
+  if (roles.length) {
+    selectRole(roles.includes(selectedRole) ? selectedRole : roles[0], settings);
+    const input = find();
+    if (input) return input;
+  }
+  openProfiles("edit", name);
+  return find();
+}
+
 function focusSetting(text) {
-  const found = $("view-settings").querySelector('[data-pointer="' + CSS.escape(text) + '"]');
-  if (found) found.focus();
+  const found = settingControl(text);
+  if (found) revealSetting(found);
 }
 
 // A refusal said beside the setting its pointer names, or the nearest one shown, else at the Apply.
 function refuse(text, reason) {
-  for (const alert of $("settings-form").querySelectorAll(".alert")) alert.textContent = "";
+  for (const alert of document.querySelectorAll("#settings-form .alert, .settings-editor .alert, .settings-instructions .alert")) {
+    alert.textContent = "";
+  }
   let keys = text ? keysOf(text) : [];
   while (keys.length) {
-    const found = $("view-settings").querySelector('[data-pointer="' + CSS.escape(pointer(...keys)) + '"]');
+    const found = settingControl(pointer(...keys));
     if (found) {
-      const holder = found.closest(".field, td, details, .add-agent") || found.parentElement;
+      const holder = found.closest(".field, td, details") || found.parentElement;
       const alert = holder.querySelector(".alert");
       if (alert) {
         alert.textContent = reason;
-        if (found.closest("details")) found.closest("details").open = true;
-        found.focus();
+        revealSetting(found);
         return true;
       }
     }
@@ -646,31 +946,95 @@ function refuse(text, reason) {
 
 // ---- reading and applying -----------------------------------------------------------------------
 
+export function settingsSection(hash) {
+  if (["#settings-review-prompt-summary", "#settings-profile-summary"].includes(hash)) return $("settings-roles-title");
+  const link = [...$("settings-jumps").querySelectorAll("a")].find((link) => link.hash === hash);
+  return link ? $(hash.slice(1)) : null;
+}
+
+function markSettingsSection(target) {
+  const active = target.id;
+  for (const link of $("settings-jumps").querySelectorAll("a")) {
+    if (link.hash === "#" + active) link.setAttribute("aria-current", "location");
+    else link.removeAttribute("aria-current");
+  }
+  const current = $("settings-form").querySelector("[data-settings-current]");
+  const section = target.closest(".settings-part, .settings-disclosure");
+  if (current !== section) {
+    current?.removeAttribute("data-settings-current");
+    section?.setAttribute("data-settings-current", "");
+  }
+}
+
+export function jumpToSettingsSection(target) {
+  if ($("view-settings").hidden || $("settings-form").hidden || $("settings-form").inert) return false;
+  markSettingsSection(target || $("settings-roles-title"));
+  if (!target) return false;
+  if (target.parentElement.tagName === "DETAILS") target.parentElement.open = true;
+  target.focus({ preventScroll: true });
+  target.scrollIntoView({ block: "start" });
+  if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    target.animate([{ opacity: 0.55 }, { opacity: 1 }], 240);
+  }
+  return true;
+}
+
+$("settings-jumps").onclick = (event) => {
+  const link = event.target.closest("a");
+  if (!link || link.hash !== location.hash || event.button || event.ctrlKey || event.metaKey ||
+      event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  jumpToSettingsSection(settingsSection(link.hash));
+};
+
+$("settings-workflow-title").onclick = (event) => markSettingsSection(event.currentTarget.parentElement.open
+  ? $("settings-roles-title") : event.currentTarget);
+
+for (const button of document.querySelectorAll("[data-close-settings-dialog]")) {
+  button.onclick = () => button.closest("dialog").close();
+}
+window.addEventListener("hashchange", () => {
+  if (!location.hash.startsWith("#settings")) {
+    if (profilesDialog.open) profilesDialog.close();
+    if (instructionsDialog.open) instructionsDialog.close();
+  }
+});
+
 export async function openSettings() {
+  if (!$("settings-reading").hidden) return;
+  const form = $("settings-form");
+  const retry = $("settings-reread");
   const before = shown && shown.revision;
-  let read;
+  showReading("settings-reading", true);
+  form.inert = true;
+  retry.disabled = true;
   try {
-    read = await api("/api/settings");
+    const read = await api("/api/settings");
     // The flows' default is read from the settings, so settings that do not load list none: their
     // refusal, and where to fix it, is what the view shows.
     flows = read.refused ? [] : (await api("/api/flows")).flows;
+    shown = read;
+    if (staged.size && before !== shown.revision) {
+      staged.clear();
+      report($("settings-result"), "The settings changed since you last saw them, so the changes you had made "
+        + "here are gone. Make them again.", true);
+    }
+    draw();
   } catch (error) {
-    report($("settings-result"), "The settings cannot be read: " + error.message + ". Read them again once "
-      + "the Workbench answers.", true);
-    return;
+    const notice = $("settings-notice");
+    notice.classList.add("bad");
+    $("settings-notice-said").textContent = "The settings cannot be read: " + error.message;
+    notice.hidden = false;
+  } finally {
+    form.inert = false;
+    retry.disabled = false;
+    showReading("settings-reading", false);
   }
-  shown = read;
-  if (staged.size && before !== shown.revision) {
-    staged.clear();
-    report($("settings-result"), "The settings changed since you last saw them, so the changes you had made "
-      + "here are gone. Make them again.", true);
-  }
-  draw();
+  jumpToSettingsSection(settingsSection(location.hash));
 }
 
 $("settings-reread").onclick = () => {
   staged.clear();
-  promptEditors.clear();
   report($("settings-result"), "");
   openSettings();
 };
@@ -682,34 +1046,17 @@ $("settings-discard").onclick = async () => {
     returnTo: $("settings-apply") });
   if (!go) return;
   staged.clear();
-  promptEditors.clear();
   report($("settings-result"), "Changes discarded.");
   draw();
 };
 
-$("settings-reset").onclick = () => {
-  for (const key of RESET) stage(pointer(key), { revert: true });
-  draw();
-  report($("settings-result"), staged.size ? "Reset staged. Apply to restore the shared defaults."
-    : "The visible settings already match the shared defaults.");
-};
-
-$("settings-skill-picker-close").onclick = () => $("settings-skill-picker").close();
-
-$("settings-add").onclick = () => {
-  const name = $("settings-add-name").value.trim();
-  const kind = $("settings-add-kind").value;
-  const alert = $("settings-add-alert");
-  const settings = pending();
-  alert.textContent = !NAME.test(name) ? "A profile's name is lowercase letters and digits, words joined by "
-    + "single hyphens." : settings.agents[name] ? "There is a profile named " + name + " already." : "";
-  if (alert.textContent) $("settings-add-name").focus();
-  if (alert.textContent || !kind) return;
-  stage(pointer("agents", name), { value: { kind } });
-  $("settings-add-name").value = "";
-  draw();
-  focusSetting(pointer("agents", name, "model"));
-};
+for (const [section, keys] of Object.entries(SECTIONS)) {
+  $("settings-revert-" + section).onclick = () => {
+    for (const key of keys) stage(pointer(key), { revert: true });
+    draw();
+    report($("settings-result"), "Section reset in the draft. Apply to save it.");
+  };
+}
 
 $("settings-form").onsubmit = async (event) => {
   event.preventDefault();

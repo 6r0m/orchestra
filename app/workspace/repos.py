@@ -17,12 +17,15 @@ This owns the repositories a run operates on. Where Orchestra itself is installe
 where its runs write is `app.foundation.paths`, which is a different fact: a descriptor
 file happens to sit in this checkout, and the default target happens to be it.
 """
+import hashlib
 import json
 import ntpath
 import os
 import re
 import shutil
 import subprocess
+import tempfile
+import threading
 
 from app.foundation import paths
 
@@ -48,6 +51,7 @@ PATHS = {"closeout_docs"}
 # Where a run's plan is written, where it moves once merged, and its name: this
 # repository's own convention unless the entry states the repository's.
 TODO_DEFAULTS = {"todo_dir": "todo", "todo_done_dir": "todo/done", "todo_name": "%Y-%m-%d_%H%M-{slug}"}
+TODO_CHILDREN = {"todo_parked_dir": "parked", "todo_backlog_dir": "backlog"}
 # Keys whose null is a setting of its own: a null `todo_done_dir` means the repository deletes
 # a finished task rather than moving it to a done folder.
 NULLABLE = {"todo_done_dir", "todo_parked_dir", "todo_backlog_dir"}
@@ -58,10 +62,19 @@ _DRIVE = re.compile(r"^/mnt/([a-zA-Z])(/.*)?$")
 _WINDOWS_DRIVE = re.compile(r"^([a-zA-Z]):(?:[\\/](.*))?$")
 UNC_REASON = ("a Windows process given a Linux path as its working directory silently runs "
               "in C:\\Windows instead")
+_SAVING = threading.Lock()
 
 
 class Refused(ValueError):
     """The run cannot start as configured; nothing has been changed."""
+
+
+class Stale(Refused):
+    """The catalog changed while the editor was open."""
+
+
+class ReadOnly(Refused):
+    """The catalog is managed outside the Workbench."""
 
 
 def descriptor_file(root=paths.REPO, environ=os.environ):
@@ -85,17 +98,20 @@ def descriptor_file(root=paths.REPO, environ=os.environ):
     return current if os.path.exists(current) else None
 
 
-def load(path=None):
+def load(path=None, root=paths.REPO, environ=os.environ):
     """The descriptor entries, validated strictly: an unknown key is a typo that would do nothing.
 
     No file at all means no descriptors, not an error: the file names the operator's own
     repositories, so a fresh checkout has none and a run then works on this repository itself.
     """
-    path = path or descriptor_file()
+    path = path or descriptor_file(root, environ)
     if path is None or not os.path.exists(path):
         return {}
     with open(path, encoding="utf-8") as fh:
-        raw = json.load(fh)
+        return _validated(json.load(fh), path)
+
+
+def _validated(raw, path):
     if not isinstance(raw, dict):
         raise Refused("%s must hold an object of repositories" % path)
     for name, entry in raw.items():
@@ -123,6 +139,97 @@ def load(path=None):
             if value is not None and not literal_todo_path(value):
                 raise Refused('repository %r: %s must be a literal directory inside the repository' % (name, key))
     return raw
+
+
+def effective_target(entry):
+    return entry.get("target") or ("windows" if windows_path(entry["path"]) else "wsl")
+
+
+def repository_revision(selected):
+    encoded = json.dumps(selected, sort_keys=True, ensure_ascii=True).encode("ascii")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def writable(root=paths.REPO, environ=os.environ):
+    folder = os.path.join(root, ".orchestra")
+    return not (environ.get(VARIABLE) or os.path.islink(folder) or os.path.islink(os.path.join(folder, "repos.json")))
+
+
+def catalog(root=paths.REPO, environ=os.environ):
+    path = descriptor_file(root, environ)
+    data = None
+    if path is not None:
+        with open(path, "rb") as fh:
+            data = fh.read()
+    try:
+        entries = _validated(json.loads(data.decode("utf-8")), path) if data is not None else {}
+    except ValueError as exc:
+        raise Refused(str(exc)) from exc
+    return {"entries": entries, "revision": hashlib.sha256(data if data is not None else b"").hexdigest(),
+            "writable": writable(root, environ)}
+
+
+def editor_fields():
+    return {key: ("flag" if key in FLAGS else "paths" if key in PATHS else
+                  "nullable" if key in NULLABLE else "text")
+            for key in sorted(ENTRY_KEYS - {"path", "target", "base_branch"})}
+
+
+def editor_metadata(entry):
+    """Defaults and saved descriptor identity for presentation in the editor."""
+    return {"defaults": TODO_DEFAULTS, "todo_children": TODO_CHILDREN,
+            "automatic_target": effective_target({"path": os.path.abspath(entry["path"])}) if entry else None,
+            "descriptor_revision": repository_revision(entry) if entry else None}
+
+
+def changed(current, original, name, entry):
+    if not current["writable"]:
+        raise ReadOnly("This repository list is managed outside the Workbench.")
+    entries = current["entries"].copy()
+    if original is not None and (not isinstance(original, str) or original not in entries):
+        raise Stale("The saved repository changed. Close and reopen the editor.")
+    if name is None:
+        if original is None or entry is not None:
+            raise Refused("Choose a saved repository to remove.")
+        del entries[original]
+        return entries
+    if not isinstance(name, str) or not name or (name != original and (
+            name != name.strip() or any(part in ("", ".", "..") for part in name.split("/"))
+            or any(char in "\\:" or ord(char) < 32 for char in name))):
+        raise Refused("Enter a repository name such as team/project.")
+    if name != original and name in entries:
+        raise Refused("A repository named %r already exists." % name)
+    _validated({name: entry}, ".orchestra/repos.json")
+    if entry["path"] != entries.get(original, {}).get("path") and not os.path.isabs(entry["path"]):
+        raise Refused("Enter an absolute repository path as the Workbench host sees it.")
+    if original is not None:
+        return {name if key == original else key: entry if key == original else value
+                for key, value in entries.items()}
+    entries[name] = entry
+    return entries
+
+
+def save(entries, revision, root=paths.REPO, environ=os.environ):
+    """Recheck the catalog under the Workbench writer lock before replacing it."""
+    folder = os.path.join(root, ".orchestra")
+    path = os.path.join(folder, "repos.json")
+    with _SAVING:
+        if not writable(root, environ):
+            raise ReadOnly("This repository list is managed outside the Workbench.")
+        if catalog(root, environ)["revision"] != revision:
+            raise Stale("The repository list changed. Close and reopen the editor.")
+        _validated(entries, path)
+        data = (json.dumps(entries, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+        os.makedirs(folder, exist_ok=True)
+        handle, staged = tempfile.mkstemp(dir=folder, prefix=".repos-")
+        try:
+            with os.fdopen(handle, "wb") as fh:
+                fh.write(data)
+            os.replace(staged, path)
+        finally:
+            if os.path.exists(staged):
+                os.unlink(staged)
+        return {"entries": entries, "revision": hashlib.sha256(data).hexdigest(), "writable": True}
 
 
 def _inside(path):
@@ -192,7 +299,7 @@ def select(repo=None, descriptors=None):
     path = os.path.abspath(entry["path"])
     if not os.path.isdir(path):
         raise Refused("repository %r: %s does not exist" % (name, path))
-    target = entry.get("target") or ("windows" if windows_path(path) else "wsl")
+    target = effective_target(dict(entry, path=path))
     if target == "windows" and windows_path(path) is None:
         raise Refused("repository %r at %s cannot run on Windows: %s" % (name, path, UNC_REASON))
     selected = {"id": name, "path": path, "target": target}
@@ -266,7 +373,7 @@ def resolve(selected, target_root, which=shutil.which):
         raise Refused("the worktree root %s is not on a Windows drive: %s" % (root, UNC_REASON))
     resolved = {"repo_path": path, "base_branch": base, "remote": remote, "worktree_root": root}
     resolved.update({key: selected.get(key, value) for key, value in TODO_DEFAULTS.items()})
-    for key, leaf in (('todo_parked_dir', 'parked'), ('todo_backlog_dir', 'backlog')):
+    for key, leaf in TODO_CHILDREN.items():
         resolved[key] = selected.get(key, resolved['todo_dir'].rstrip('/') + '/' + leaf)
     resolved["closeout_docs"] = list(selected.get("closeout_docs", ()))
     resolved["lfs_pointers"] = selected.get("lfs_pointers", False)

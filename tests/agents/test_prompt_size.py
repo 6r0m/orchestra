@@ -109,6 +109,16 @@ class TurnContract(unittest.TestCase):
         self.assertNotIn("/skill:planning", build)
         self.assertNotIn(stages.STAGE_ASK["plan"].split("{{TODO_PATH}}")[0], build)
 
+    def test_ordered_skill_stack_invokes_one_lead_and_lists_the_supporting_methods(self):
+        state = {"task": "t", "todo_path": "todo/approved.md", "repo_path": "/repo", "phase": "plan"}
+        parts = N.compose_parts("plan", {"kind": "pi", "persona": "Saved engineer"}, False, state, True, True,
+                                skills={"plan": ["planning", "evidence", "architecture"]})
+        self.assertTrue(N.render(parts).startswith("/skill:planning "))
+        supporting = next(part["text"] for part in parts if part["part"] == "supporting-skills")
+        self.assertLess(supporting.index("evidence"), supporting.index("architecture"))
+        self.assertIn("SKILL.md", supporting)
+        self.assertNotIn("/skill:evidence", N.render(parts))
+
 
 class Attach(unittest.TestCase):
     def setUp(self):

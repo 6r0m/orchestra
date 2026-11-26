@@ -39,8 +39,8 @@ graph TD
     final -. "discard, confirmed" .-> discarded([DISCARDED])
 ```
 
-This is the default flow, `engineer-code`, with the stops a run's flow may add or leave out
-([structure D13](../structure.md)): research first, whose brief waits at an approval; an approval
+This traces `engineer-plan` with the stops a run's flow may add or leave out
+([structure D13](../structure.md)): a planning brief from the architect, with an optional approval; an approval
 the flow does not schedule, or one *skip approvals* skips, going straight on; and a flow with no build
 ending `DONE`, its worktree kept, where this one reaches the final gate. After the verify's `PASS` the
 run's base is looked at: one that moved is brought into the worktree and judged — by the architect alone

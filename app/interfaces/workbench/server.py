@@ -54,6 +54,7 @@ STATIC = {"/": ("index.html", "text/html; charset=utf-8"),
           "/ui.js": ("ui.js", JS),
           "/stack.js": ("stack.js", JS),
           "/picker.js": ("picker.js", JS),
+          "/repository-editor.js": ("repository-editor.js", JS),
           "/start.js": ("start.js", JS),
           "/skills.js": ("skills.js", JS),
           "/rail.js": ("rail.js", JS),
@@ -258,9 +259,13 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
     hosts = {"127.0.0.1:%d" % port, "localhost:%d" % port}
     origins = terminal.allowed_origins(port)
     config = {"token": token, "temporal_ui": TEMPORAL_UI,
+              "repositories_writable": repos.writable(root, environ),
               "terminal_ports": {name: target["terminal_port"] for name, target in policy["targets"].items()},
               "terminal_size": {"cols": terminal.COLS, "rows": terminal.ROWS,
                                 "min_rows": terminal.MIN_ROWS, "max_rows": terminal.MAX_ROWS}}
+
+    def descriptors():
+        return repos.load(root=root, environ=environ)
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "workbench"
@@ -293,6 +298,10 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
             return None
 
         def _error(self, exc):
+            if isinstance(exc, repos.ReadOnly):
+                return self._send(HTTPStatus.FORBIDDEN, {"error": str(exc)})
+            if isinstance(exc, repos.Stale):
+                return self._send(HTTPStatus.CONFLICT, {"error": str(exc)})
             if isinstance(exc, (runs.NotWaiting, stack.Busy)):
                 return self._send(HTTPStatus.CONFLICT, {"error": str(exc)})
             if isinstance(exc, (runs.Refusal, repos.Refused, P.InvalidPolicy, flows.InvalidFlow)):
@@ -324,19 +333,33 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
                     return self._send(HTTPStatus.OK, self._run_page((query.get("cursor") or [None])[0]))
                 if parts == ["worktrees"]:
                     query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
-                    return self._send(HTTPStatus.OK, self._worktrees((query.get("repo") or [None])[0]))
+                    run_id = (query.get("run") or [None])[0]
+                    if run_id is not None and not RUN_ID.fullmatch(run_id):
+                        raise repos.Refused("Enter a valid run ID.")
+                    return self._send(HTTPStatus.OK, self._worktrees((query.get("repo") or [None])[0], run_id))
                 if parts == ["landing"]:
                     query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                    configured = settings.load(root=root, environ=environ)
+                    catalog = descriptors()
                     return self._send(HTTPStatus.OK, call(lambda client: runs.landing_options(
-                        client, repo=(query.get("repo") or [None])[0])))
+                        client, repo=(query.get("repo") or [None])[0], descriptors=catalog, settings=configured)))
                 if parts == ["skills"]:
                     query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                    run_id = (query.get("run") or [None])[0]
+                    catalog = None if run_id else descriptors()
+                    configured = None if run_id else settings.load(root=root, environ=environ)
                     return self._send(HTTPStatus.OK, call(lambda client: runs.skill_catalog(
-                        client, repo=(query.get("repo") or [None])[0], run_id=(query.get("run") or [None])[0])))
+                        client, repo=(query.get("repo") or [None])[0], run_id=run_id,
+                        descriptors=catalog, settings=configured)))
                 if parts == ["repos"]:
-                    return self._send(HTTPStatus.OK, [{"id": name, "target": entry.get("target") or (
-                        "windows" if repos.windows_path(entry["path"]) else "wsl")}
-                        for name, entry in repos.load().items()])
+                    return self._send(HTTPStatus.OK, [{"id": name, "target": repos.effective_target(entry)}
+                        for name, entry in descriptors().items()])
+                if parts == ["repos", "editor"]:
+                    query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                    catalog = repos.catalog(root, environ)
+                    entry = catalog["entries"].get((query.get("name") or [None])[0])
+                    return self._send(HTTPStatus.OK, dict(catalog, fields=repos.editor_fields(),
+                                                          **repos.editor_metadata(entry)))
                 if parts == ["settings"]:
                     return self._send(HTTPStatus.OK, settings.read(root, environ))
                 if parts == ["flows"]:
@@ -411,8 +434,11 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
                                                             flow=body.get("flow") or None,
                                                             short_name=body.get("short_name"),
                                                             merge_preference=body.get("merge_preference"),
+                                                            repository_revision=body.get("repository_revision"),
                                                             settings_root=root, settings_environ=environ))
                     return self._send(HTTPStatus.OK, {"run_id": handle.id})
+                if parts == ["repos", "editor"]:
+                    return self._edit_repository(body)
                 if len(parts) == 3 and parts[0] == "runs" and RUN_ID.match(parts[1]) and parts[2] == "answer":
                     answer = {key: value for key, value in body.items() if key in ANSWER_KEYS}
                     if not answer.get("stop"):
@@ -513,12 +539,34 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
             shown, older = call(read)
             return {"runs": shown, "cursor": base64.urlsafe_b64encode(older).decode() if older else None}
 
-        def _worktrees(self, repo):
+        def _edit_repository(self, body):
+            if not repos.writable(root, environ):
+                raise repos.ReadOnly("This repository list is managed outside the Workbench.")
+            current = repos.catalog(root, environ)
+            if body.get("revision") != current["revision"]:
+                raise repos.Stale("The repository list changed. Close and reopen the editor.")
+            if not {"original", "name", "entry"} <= body.keys():
+                raise repos.Refused("The editor must specify which repository to save or remove.")
+            original, name, entry = (body[key] for key in ("original", "name", "entry"))
+            if name is None and body.get("confirm") is not True:
+                raise repos.Refused("Removing a saved repository requires confirmation.")
+            candidate = repos.changed(current, original, name, entry)
+            if name is not None:
+                configured = settings.load(root=root, environ=environ)
+                call(lambda client: runs.worktrees_of(client, repo=name, descriptors=candidate, settings=configured))
+            saved = repos.save(candidate, current["revision"], root, environ)
+            return self._send(HTTPStatus.OK, {"name": name, "revision": saved["revision"]})
+
+        def _worktrees(self, repo, run_id=None):
             """Every worktree of one repository and its merge state, read by that repository's own host,
             with the run each belongs to — its branch is the run's id — and whether that run has closed,
             so that what it kept can be removed."""
+            catalog = None if run_id else descriptors()
+            configured = None if run_id else settings.load(root=root, environ=environ)
+
             async def read(client):
-                selected, view = await runs.worktrees_of(client, repo)
+                selected, view = await runs.worktrees_of(client, repo=repo, descriptors=catalog,
+                                                         settings=configured, run_id=run_id)
                 rows = []
                 for row in view["rows"]:
                     listed = (await runs.execution(client, row["branch"])
@@ -533,7 +581,12 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
                     rows.append(dict(row, run=listed and listed["execution"], removable=kept))
                 return selected, view, rows
             selected, view, rows = call(read)
-            return {"repo": selected["id"], "base_branch": view["base_branch"], "rows": rows}
+            result = {"repo": selected["id"], "base_branch": view["base_branch"], "rows": rows}
+            if run_id:
+                result["recorded"] = {"path": selected["path"], "target": selected["target"]}
+            elif repo in catalog:
+                result["descriptor_revision"] = repos.repository_revision(catalog[repo])
+            return result
 
         def _run(self, run_id):
             health = stack_reading()
@@ -564,7 +617,7 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
                 # What its Worktrees view is opened on: the repository as the worktree view takes it again.
                 state = status["state"]
                 status["view"]["worktrees_of"] = repos.selector(state.get("repo"), state.get("repo_path"),
-                                                                state.get("target"))
+                                              state.get("target"))
             trace_id = status["state"].get("trace_id")
             status["links"] = {"temporal": "%s/namespaces/%s/workflows/%s" % (TEMPORAL_UI, runs.NAMESPACE, run_id),
                                "trace": links(trace_id) if links and trace_id else None}

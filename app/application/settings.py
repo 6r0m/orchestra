@@ -119,10 +119,10 @@ def check(settings):
         access = P.ROLE_ACCESS[role_name]
         if access not in adapter.ACCESS:
             raise P.InvalidPolicy(CANNOT[access] % (role_name, adapter.NAME), P.pointer("roles", role_name, "agent"))
-    for stage in settings.get("stage_skills") or {}:
+    for stage, skills in (settings.get("stage_skills") or {}).items():
         role_name = stages.STAGE_ROLE[stage]
         adapter = kind_of(settings, role_name)
-        if not adapter.SKILL:
+        if skills and not adapter.SKILL:
             raise P.InvalidPolicy("the %s runs %s, which takes no skill" % (role_name, adapter.NAME),
                                   P.pointer("stage_skills", stage))
 

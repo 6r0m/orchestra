@@ -22,7 +22,8 @@ const catalog={version:1,roles:{engineer:'pi'},stage_skills:{},skills:{pi:[
 globalThis.fixture={get,node,api:async()=>catalog};
 const source=fs.readFileSync(process.argv[1],'utf8')
   .replace(/import \{ api \} from "\.\/api.js";/,'const api=globalThis.fixture.api;')
-  .replace(/import \{ \$, el \} from "\.\/ui.js";/,'const $=globalThis.fixture.get,el=globalThis.fixture.node;');
+  .replace(/import \{[^}]+\} from "\.\/ui.js";/,
+    'const $=globalThis.fixture.get,el=globalThis.fixture.node,showReading=()=>{};');
 const {pickSkills}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
 let stop='run:1';const input=node();input.value='Original stop note';
 await pickSkills({run:'run',input,isCurrent:()=>stop==='run:1'});
@@ -52,7 +53,8 @@ const get=id=>{if(!nodes.has(id))nodes.set(id,node());return nodes.get(id);};
 globalThis.fixture={get,node,api:()=>new Promise(resolve=>pending.push(resolve))};
 let source=fs.readFileSync(process.argv[1],'utf8')
   .replace(/import \{ api \} from "\.\/api.js";/,'const api=globalThis.fixture.api;')
-  .replace(/import \{ \$, el \} from "\.\/ui.js";/,'const $=globalThis.fixture.get,el=globalThis.fixture.node;');
+  .replace(/import \{[^}]+\} from "\.\/ui.js";/,
+    'const $=globalThis.fixture.get,el=globalThis.fixture.node,showReading=(id,pending)=>{$(id).hidden=!pending;};');
 const {pickSkills}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
 const first=node(),second=node();first.value='Original task';second.value='Original note';
 const a=pickSkills({repo:'first',input:first});
@@ -60,8 +62,10 @@ get('instruction-skills-cancel').onclick();
 const b=pickSkills({repo:'second',input:second});
 const catalog=name=>({version:1,roles:{engineer:'pi'},stage_skills:{},
   skills:{pi:[{name,scope:'repository',reference:'/fixture/'+name+'/SKILL.md'}]}});
-pending[1](catalog('second-skill'));await b;
 pending[0](catalog('first-skill'));await a;
+assert.equal(get('instruction-skills-reading').hidden,false,'a cancelled read cannot end current progress');
+pending[1](catalog('second-skill'));await b;
+assert.equal(get('instruction-skills-reading').hidden,true);
 const label=get('instruction-skills-options').children[0];
 assert.match(label.children[1].textContent,/second-skill/);
 get('instruction-skills-stage').value='This request';

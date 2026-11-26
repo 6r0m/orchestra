@@ -5,7 +5,7 @@
 
 import { api } from "./api.js";
 import { $, PARTS, at, blockedBy, clock, code, confirmAction, copyButton, decisionTitle, doing, drainingBy, el, ending, headline,
-  lasted, outcome, report, score, unchanged, wrote } from "./ui.js";
+  lasted, outcome, report, score, showReading, unchanged, wrote } from "./ui.js";
 import { stackButton, stackReading } from "./stack.js";
 import { interrupt, showTerminals, updateTerminals } from "./terminals.js";
 import { placeChange, readOnceFor, showChangeFor, showReviews, watchChange } from "./change.js";
@@ -108,10 +108,14 @@ export const unsent = () => [...drafts.values()].some((text) => text.trim());
 // The texts the decision shows, which the history then keeps closed, marked as shown above.
 let shownAbove = new Set();
 
+let runVisit = 0;
+
 // The run `runId` on the page, or none.
 export function show(runId) {
   if (selected === runId) return;
   selected = runId;
+  runVisit++;
+  showReading("run-reading", Boolean(runId));
   taskExpanded = false;
   taskObserver?.disconnect();
   taskObserver = null;
@@ -151,18 +155,20 @@ export function show(runId) {
 
 export async function refreshRun() {
   if (!selected) return;
-  const runId = selected;
+  const runId = selected, visit = runVisit;
   let status;
   try {
     status = await api("/api/runs/" + encodeURIComponent(runId));
   } catch (error) {
-    if (runId !== selected) return;
+    if (visit !== runVisit) return;
     if (!$("run-task").textContent) $("run-task").textContent = runId;
     $("run-now").textContent = "It cannot be read: " + error.message;
     delete $("run-now").dataset.drew;
+    showReading("run-reading", false);
     return;
   }
-  if (runId !== selected) return;
+  if (visit !== runVisit) return;
+  showReading("run-reading", false);
   const view = status.view;
   const state = status.state;
   updateAccounting(view);
@@ -420,7 +426,7 @@ function renderKept(runId, view) {
     code(view.worktree), " and its branch ", code(runId),
     rejected ? ". Remove them with the button above." : ". Read its change, then remove them once you are done with them.");
   // Its repository as the Worktrees view takes it: its repos.json name, or its path.
-  $("run-kept-show").href = "#worktrees=" + encodeURIComponent(view.worktrees_of);
+  $("run-kept-show").href = "#worktrees-run=" + encodeURIComponent(runId);
   $("run-remove").onclick = () => removeKept(runId, $("run-kept-result"), refreshRun, $("run-remove"),
     () => runId === selected);
 }
@@ -563,6 +569,7 @@ function hideMerge() {
   panel.hidden = true;
   delete panel.dataset.key;
   activeMergeDiscovery = null;
+  showReading("merge-destination-reading", false);
 }
 
 function renderMerge(status) {
@@ -607,6 +614,7 @@ function renderMerge(status) {
     const discovery = Symbol();
     activeMergeDiscovery = discovery;
     retry.hidden = true;
+    showReading("merge-destination-reading", true);
     $("merge-destination-hint").textContent = "Reading compatible destinations…";
     return api("/api/runs/" + encodeURIComponent(run) + "/landing").then((result) => {
       if (activeMergeDiscovery !== discovery) return;
@@ -632,6 +640,8 @@ function renderMerge(status) {
         $("merge-destination-hint").textContent = "Destination unavailable: " + error.message + ". Retry destinations when the worker is available.";
         retry.hidden = false;
       }
+    }).finally(() => {
+      if (activeMergeDiscovery === discovery) showReading("merge-destination-reading", false);
     });
   };
   retry.onclick = discover;
@@ -947,7 +957,7 @@ const PART_NAMES = { skill: "The stage's skill", task: "The task", persona: "The
   instructions: "The stage's instructions", recheck: "Re-check your findings", brief: "The research brief to check",
   "previous-brief": "Its previous brief", guidance: "Your guidance", reflection: "A convergence reflection",
   "reflection-guidance": "Your reflection guidance", handoff: "The final-budget handoff",
-  "handoff-guidance": "Your final-turn guidance" };
+  "handoff-guidance": "Your final-turn guidance", "supporting-skills": "Supporting skills" };
 
 function partName(part, role) {
   if (part === "findings") return role === "architect" ? "Its findings to re-check" : "The findings to address";

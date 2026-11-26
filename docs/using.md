@@ -71,19 +71,9 @@ git -C "$fixture/repository" commit -m 'Initial fixture'
 printf '%s\n' "$fixture/repository" "$fixture/worktrees"
 ```
 
-Add this entry to the ignored `.orchestra/repos.json`, using the two paths printed above. The
-[descriptor example](../.orchestra/repos.example.json) shows the available options.
-
-```json
-{
-  "first-run": {
-    "path": "/path/to/fixture/repository",
-    "target": "wsl",
-    "base_branch": "main",
-    "worktree_root": "/path/to/fixture/worktrees"
-  }
-}
-```
+Open **Repositories** and select **Add repository**. Name it `first-run`, enter the first path as
+**Repository path**, and choose **WSL** and the `main` base branch. Under **Advanced settings**, enter
+the second path as **Worktree root**. Select **Save repository**.
 
 ### Start, review and finish
 
@@ -117,10 +107,10 @@ maintenance; everything else is done from the page.
 
 ## The stack
 
-The top bar shows each part of the stack — Temporal, the WSL worker, which also runs the workflows, and
-the Windows worker — as up, starting (running, not yet polling) or down; a worker reads as running while
-Temporal cannot be asked, and unknown while its process cannot be read. Its chips open the stack's
-controls: Start, Stop and Restart for each part and for the whole stack. The whole stack's Start shows
+**Stack** in the top bar summarizes the health of Temporal, the WSL worker and the Windows worker.
+Open it to read each part’s state and reach Start, Stop and Restart for each part or the whole stack.
+A worker can be running before it starts polling, and reads as unknown when its process cannot be read.
+The whole stack's Start shows
 only while a part is down and every part can safely be started, and its Restart not while a part is
 unknown, because both start every part. A part that is down raises a banner saying what it holds up,
 with its Start when this side can start it; one whose state cannot be read says so and offers no Start.
@@ -146,21 +136,24 @@ the Workbench comes back with WSL. Nothing is exposed beyond loopback.
 
 ## The page
 
-The runs are grouped under Operator action, Working, Closed and Rejected. On a narrow screen, open
-**Runs** above the active view to see the list. Each row shows the repository, task, worktree branch,
-and how long the run has been waiting or working. A run ready to merge stays under Operator action
-until you answer its final gate; Closed also includes stopped and
-discarded runs, and Rejected holds only the runs you ended with *Reject* — each saying whether its
-worktree and branch are gone, or that its cleanup is still required. Each list shows up to five runs and
-scrolls inside itself beyond that; on a window too short for all four, the lists past five give up height
-and the shorter ones stay whole. Older closed
-runs are a page away, so nothing Temporal
-still retains is out of reach, and the tab's title counts the runs that need you. Each run is a link:
-the page's address names the run open, so a reload keeps it and a new tab opens it.
-On a narrow screen, use **Runs** to open the lists. The disclosure shows how many runs need attention
-and closes when you open a view.
+The Workbench shows the next run to review or open when work is active. Use **New run** beside
+**Stack** to start a task. The run list groups runs under **Needs attention**, **Running**, **Closed**
+and **Rejected**. Each row shows the task, repository, status and time. The run page shows its full
+ID and worktree branch. A run ready to merge stays under **Needs attention** until you answer its
+final gate. When the list is hidden, the Runs link shows how many runs need attention.
 
-If a vendor dialog waits in a live terminal, that running run also appears under Operator action.
+Open **Closed** or **Rejected** to see past runs, including whether a rejected run still needs cleanup.
+Use **Load older runs** to read more of the retained history. The tab title counts runs that need you.
+Each run’s link opens its detail view and can be used in a new tab. The centered chevron on the left
+rail opens the run list from any Workbench view. Roomy windows open the list automatically, and
+**Closed** starts expanded. On narrow screens **Run list** opens above the content and
+closes when you choose a run. The arrow in the list and Escape both hide it.
+
+In browsers with click-outside dismissal, clicking the dimmed page closes repository and skill pickers
+and a repository editor with no unsaved changes. Confirmations and refusal notices use their buttons
+or Escape. Clicks outside the editor leave unsaved changes and saves in progress in place.
+
+If a vendor dialog waits in a live terminal, that run appears under **Needs attention**.
 Open its terminal to answer or interrupt it. This is a terminal prompt, not a workflow stop; routine
 agent questions are denied and real blockers reach the normal workflow stop. Only a Claude role
 reports such a dialog, through its hooks, and in practice a Claude architect: a Claude engineer is
@@ -175,13 +168,12 @@ it for you: Codex's *Trust all* would trust whatever waits. Left unanswered for 
 says what waits; Continue, and answer it in the terminal then. *Continue without trusting* leaves the turn unable
 to end.
 
-*New run* opens the form that starts one — and with no runs at all, the page opens on it: on a
-repository named in `.orchestra/repos.json` or in the file named by `ORCHESTRA_REPOS` — its menu
-reads the file again each time it is opened, and a name that
-carries its owners, `work/platform/service`, is found under `work`, then `platform`, each opening in
-view as you hover it — or on any other one given as its path as WSL sees it (`/mnt/e/...` for a Windows
-drive); only the one chosen is sent. Give a meaningful **Run and worktree name** for the temporary Git branch and folder:
-1–16 ASCII letters/digits with internal hyphens, for example `terminal-cache`. The form previews the
+*New run* opens the start form. The **Repository** picker searches the names from `.orchestra/repos.json`
+or the file named by `ORCHESTRA_REPOS`. It groups a name such as `work/platform/service` under
+`work/platform` and shows which host runs it. Use **Add repository** to save an entry, or
+**Use a repository path once…** for a single task. Give the path as WSL sees it (`/mnt/e/...` for a Windows drive).
+Give the temporary Git branch and folder a meaningful **Run and worktree name** of 1–16 ASCII
+letters or digits with internal hyphens, such as `terminal-cache`. The form previews the
 complete name with its random suffix; it never shortens a name silently. The full task still reaches
 both roles. Commit messages are separate: they describe the completed change and are proposed and edited
 at the final Merge gate. Existing runs keep their original names and sessions.
@@ -203,17 +195,18 @@ the inserted references and add your own instructions before sending. Cancel cha
 If the run or selected context changes while the picker is open, close and reopen it before adding skills.
 Start uses the form as submitted; edits made while its checks run remain available for the next run.
 
-The run follows the
-flow chosen in its Flow list, whose steps show under it: `engineer-code`, the default — `default_flow`
-in `.orchestra/settings.json` — has the engineer plan from the code; `architect-research` has the architect research
-first and its brief wait for your approval. With no `default_flow`, a run that names no flow takes the
-order runs took before flows, and the list offers that first. Each flow is a file in
+The run follows the flow chosen in the Flow list, which shows its steps below. The shipped default,
+`architect-plan`, starts with the architect's planning brief. The engineer turns it into an
+implementation plan, and the run continues after reviews pass. `engineer-plan` starts with the
+engineer and asks you to approve the assessed plan before building. `architect-research` also asks
+you to approve the architect's brief. Orchestra lands the change after you confirm the final merge.
+Choose a flow in New run or set one in Settings to preselect it for new runs. Each flow is a file in
 [flows/](../flows/README.md), read again each time the list is opened, so a flow you add or edit there
 shows at once; one that breaks a rule is listed with the reason and cannot be chosen. The one already
 chosen, or named the default, stays chosen when its file breaks a rule or is gone — marked refused or
 missing — so Start answers with the reason rather than starting another flow. A run keeps the flow it
-started with. *Skip approvals* skips every approval the flow schedules, never a blocker, an exhausted
-budget, a failed stage or the final gate.
+started with. *Skip approvals* skips approvals scheduled before Merge. Blockers, exhausted review
+budgets, failed stages and Merge still need your attention.
 
 A start that is refused says why in a window that stays until you close it: refused by the Workbench at
 once, or by the run's host before any work — its repository no git repository there, say, or an agent's
@@ -495,15 +488,40 @@ with no build, or closed any other way short of a merge or a discard — says so
 its change, then *Remove worktree and branch*, in the same strip,
 confirmed, deletes them through its host's own git as a discard would. It is refused while a merge
 or discard of that run still runs on its host, and when git itself refuses, the page says why.
-*Worktrees*, at the top, lists any repository's worktrees, which of them are still unmerged and which
-run each is, and removes a closed run's from there too.
+
+### Repositories
+
+**Repositories** shares the picker with **New run**. Choose **Add repository** or **Edit** to set the
+path, execution host and base branch. Automatic fields show their detected values when available.
+**Advanced settings** groups Git and execution, todo lifecycle and closeout permissions. Blank
+todo fields use the defaults shown. **Delete completed todo files** explicitly changes what happens
+to a todo on completion.
+Save checks the repository on its execution host. **Remove from list** removes only its saved entry.
+Previously started runs keep their recorded repository and host. A list named by `ORCHESTRA_REPOS`
+or linked from another location is managed outside the Workbench. For file-based setup, see the
+[descriptor example](../.orchestra/repos.example.json).
+
+Choosing a saved repository reads its worktrees immediately. For an unlisted repository, enter its path and choose
+**Load worktrees**. Use **Refresh** to reread the selected repository. The base checkout appears
+separately. Additional worktrees show their Git state, a copyable path and a link to any
+associated run. **Remove** appears only for worktrees the backend marks eligible and requires confirmation.
 
 ### Settings
 
-Settings shows the profiles bound to each role, each profile's model and effort, the one optional
-methodology skill named for each stage, the plan and build review budgets, and the default flow. The
-skill picker lists names found through each agent adapter; unbound installed skills remain available to
-the vendor CLI. A run snapshots the effective settings when it starts. The page reads the settings files
+**Workflow defaults** shows the default flow above the role workspace. Open it to edit the flow, review
+budgets or turn limit. The question marks beside the round columns explain when each budget applies.
+In **Roles**, choose a profile and edit its model, reasoning effort and launcher where supported. **Edit** shows
+all fields that runtime supports. **Save** returns the edits to Settings, where **Apply** writes them to disk.
+Use **+** to configure, add and select a profile.
+When adding a profile, **Advanced profile options** contains provider and launcher overrides where supported.
+Choose **Browse other profiles…** in the Agent profile picker to reuse a compatible profile.
+Edits to a shared profile affect every role that uses it on new runs.
+
+**Stage skills** shows what each stage uses and the installed skills you can add. Select an available
+skill or enter a name for another execution host. Click an active tag to remove it. Under **Instructions**,
+choose **Preview** beside an item to open that part of the editor. The question mark explains when the
+instructions apply. **Save to draft** keeps edits until you apply Settings.
+A run snapshots the effective settings when it starts. The page reads the settings files
 each time it loads, so a default edited in `.orchestra/settings.json` shows at the next reload, with no
 restart.
 
@@ -514,7 +532,7 @@ starts a fresh engineer conversation on the next turn if its profile changed. It
 stays with the run. The Workbench's run facts show the effective engineer and per-turn limit.
 Then use the stop's normal answer, such as Continue for a failed step, when ready to resume.
 
-Under each role's agent the page says what that role may do, and what holds the agent you chose to it.
+The instructions editor's **Workspace access** disclosure describes what holds the role to its limits.
 Codex is held by its own sandbox, which the operating system enforces: a read-only role cannot write, and
 a writing one cannot write outside its worktree — which also keeps a tool whose cache or environment lies
 elsewhere, such as this repository's test runner, from running in its turn. Claude Code is held by its own
@@ -524,9 +542,8 @@ session of yours there, so a guard you keep in them — one that refuses a recur
 working folder, say — stands under a run's engineer too.
 
 Apply writes only changed values to `.orchestra/settings.local.json`, so a fresh Workbench read keeps
-them and unrelated hand-written local members survive. Revert removes one override to reveal its shared
-value. **Reset visible settings to defaults** stages Revert for every Settings page value; Apply is still
-required. Model identifiers and available efforts are passed to their vendor CLI as configured.
+them and unrelated hand-written local members survive. **Revert** in a section stages a return to its
+shared defaults. **Apply** saves the draft. Model identifiers and efforts pass to the vendor CLI as configured.
 
 Review budgets show the normal count plus the **After reflection** count as each phase's maximum (the
 settings file calls the second value `extended`). After a non-`PASS` at the normal boundary, if the
@@ -534,9 +551,9 @@ second count is greater than zero, the engineer and architect each receive one c
 reflection on their next turn; the loop then continues through the remaining budget. `BLOCKER` stops
 immediately, and a non-`PASS` at the combined limit waits for operator guidance.
 
-Advanced review guidance shows the code-owned instructions used at each boundary. It can add separate
-instructions for each role after the normal budget and on the last budgeted iteration; these optional
-additions follow the built-in guidance, which always applies. Additions are shared by Plan and Build and
+The **After normal rounds** and **Final round** previews show the built-in instructions
+beside the editor. Optional additions follow the built-in guidance, which always applies.
+Additions are shared by Plan and Build and
 limited to 4,096 combined UTF-8 bytes. At exhaustion, the engineer gives the architect a factual
 handoff in its final message. The architect's final feedback separates both roles' contributions,
 explains why the phase did not converge with evidence, lists unresolved or disputed findings, and
@@ -545,12 +562,14 @@ states any operator decision needed.
 #### Optional team skills
 
 Install your team's skills where the selected agent CLI can find them on the host that runs the task.
-In **Settings**, choose or enter a skill name for each stage you want to configure, then select **Apply**.
-Leave a stage blank to use the built-in instructions. The target worker checks each explicit binding
-for the chosen flow before it creates a worktree.
+In **Settings**, add skills in order for each stage you want to configure, then select **Apply**.
+The first skill leads the prompt and the agent reads each supporting skill's `SKILL.md` in order.
+The target worker checks the full stack before creating a worktree. Empty stages use built-in
+instructions. Saved settings accept a single skill name or an ordered array of names.
 
 To use GenosAI's approach, install its three skills using the [GenosAI skills guide](https://github.com/6r0m/GenosAI/tree/develop/agents#skills).
-Use these names in **Settings**, or merge the `stage_skills` member into `.orchestra/settings.local.json`.
+**Use installed defaults** fills empty stages for the selected role when its suggested skills are found.
+You can also merge the `stage_skills` member into `.orchestra/settings.local.json`.
 This example also restores the bindings for future runs if you used the previous shared defaults.
 
 ```json

@@ -62,7 +62,7 @@ Persistent snapshot validation requires the complete geometry bounds; legacy pag
 ordinary replay without restoring persisted snapshots.
 Settings exposes the per-turn cap in hours and a profile's
 optional provider; the application settings owner stores their validated values for new runs.
-Its Operator action list also projects a waiting vendor dialog from the active turn's local
+Its Needs attention list also projects a waiting vendor dialog from the active turn's local
 hook events — Claude's; Codex reports none — and the workflow still owns actual stops and their answers.
 At a stop that takes guidance, the run's view also carries what the role the operator talked with last
 answered them in its terminal since its turn (`role_reply`), read from each role's newest turn's hook events by
@@ -107,6 +107,10 @@ when the decision above moves on; nothing else of it is read again.
   The instruction skill picker reads the execution host's native roots and inserts selected exact references
   into the visible task or note. It is a typing aid, not a second stage-binding or workflow authority.
   Search, multiple selection and cancellation preserve the existing operator input; global settings stay unchanged.
+- New run and Repositories share the catalog and picker. Start checks the descriptor revision from
+  its destination preview. A run's Worktrees link uses the run's recorded repository and queues.
+  The view renders only the latest read for the current selection. The server decides which kept
+  worktrees can be removed.
   Insertion revalidates the originating form or run/stop identity before editing the input; a changed context
   refuses insertion without altering its draft. Start captures one form snapshot before asynchronous checks.
   Subsequent edits cannot enter that request or be cleared by its successful completion.

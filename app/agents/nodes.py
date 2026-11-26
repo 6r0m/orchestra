@@ -211,7 +211,7 @@ def _verdict_object(value):
 
 
 # What a prompt can carry: the current contract, followed by feedback and other context for this turn.
-PARTS = ("skill", "task", "persona", "instructions", "recheck", "brief", "previous-brief", "findings", "guidance",
+PARTS = ("skill", "supporting-skills", "task", "persona", "instructions", "recheck", "brief", "previous-brief", "findings", "guidance",
          "reflection", "reflection-guidance", "handoff", "handoff-guidance", "authority", "context")
 
 
@@ -293,19 +293,29 @@ def compose_parts(stage, stage_cfg, is_review, state, session_first,
         # Each part holds at least one line, so the prompt its parts render is exactly its lines joined.
         parts.append({"part": part, "text": "\n".join(lines)})
 
-    # The operator may bind a skill to a stage (`stage_skills`): its methodology, which this component
-    # does not own. An invocation only takes effect as the prompt's very first characters (measured: a
+    # The first stage skill leads the method. A native invocation only takes effect at the start (measured: a
     # trailing one is inert), so it leads the composed prompt and everything after it — task, persona,
     # stage ask — is its argument; how it is spelled is the role's kind's. Reload the applicable method
     # even in a resumed session: its earlier expansion may no longer be in active context.
-    named = (skills or {}).get(stage)
-    skill = adapters.skill(adapters.for_role(stage_cfg), named[1:] if named and named.startswith("/") else named)
-    if skill:
-        add("skill", skill, "")
+    stack = stages.skill_stack((skills or {}).get(stage))
+    if stack:
+        adapter = adapters.for_role(stage_cfg)
+        lead = adapters.skill(adapter, stack[0])
+        if lead:
+            add("skill", lead, "")
     add("authority", AUTHORITY)
     add("task", "# Task (operator input, JSON)", "", json.dumps(state["task"], ensure_ascii=False))
     add("persona", _template(stage_cfg, todo))
     add("instructions", "# Current stage: " + stage, _ask(stage, state, todo, logs))
+    if len(stack) > 1:
+        paths = []
+        for name in stack[1:]:
+            folders = adapter.skill_folders(name, state["repo_path"])
+            candidates = [os.path.join(folder, "SKILL.md").replace(os.sep, "/") for folder in folders]
+            paths.append("- %s: %s" % (name, json.dumps(candidates, ensure_ascii=False)))
+        add("supporting-skills", "# Supporting skills",
+            "In this order, read the first available SKILL.md for each skill and follow its applicable instructions "
+            "within the current stage contract.", *paths)
     if stage_first or session_first:
         # A flow that began with research hands its brief to the plan that turns it into a todo, and a
         # research session born again gets the brief it gave, which the operator's feedback is about.

@@ -128,8 +128,8 @@ Do not re-derive a `states/` layer here.
   **architect** (read-only — researches where a flow begins with it, assesses the
   plan, then verifies the build; one session, so the judge of the plan is the
   verifier of its execution). Six stages — `research`, `plan`, `assess`, `build`,
-  `verify`, `closeout` — in the order the run's flow gives them, one workflow;
-  `engineer-code`, `plan → assess → build → verify → closeout`, is the default.
+  `verify`, `closeout` — in the order the run's flow gives them, one workflow.
+  The shipped [default flow](../../.orchestra/settings.json) starts with the architect's planning brief.
 - **D13** **Config vs code:** which brain, model and reasoning effort a role
   uses, budgets, access, target hosts, repository descriptors and role
   personalities (`roles/engineer.md`, `roles/architect.md` — snapshotted at run

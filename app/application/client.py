@@ -243,7 +243,8 @@ def view(listed, status, health):
 
 
 async def start(client, task, repo=None, auto_proceed=False, settings_path=None, check=True, flow=None,
-                settings_root=paths.REPO, settings_environ=os.environ, short_name=None, merge_preference=None):
+                settings_root=paths.REPO, settings_environ=os.environ, short_name=None, merge_preference=None,
+                repository_revision=None):
     """Start a run on `repo` (a descriptor's name, a path, or this repository), following `flow` (a file in
     `flows/`, the settings' `default_flow` when none is named); returns its handle.
 
@@ -253,7 +254,9 @@ async def start(client, task, repo=None, auto_proceed=False, settings_path=None,
     if short_name is not None:
         short_name = worktrees.short_name(short_name)
     settings = S.load(settings_path, root=settings_root, environ=settings_environ)
-    selected = repos.select(repo)
+    selected = repos.select(repo, repos.load(root=settings_root, environ=settings_environ))
+    if repository_revision is not None and repository_revision != repos.repository_revision(selected):
+        raise Refusal("The repository changed since its Merge destinations were read. Refresh destinations.")
     queue = policy_mod.queue(settings, selected["target"])
     name = flow or settings.get("default_flow")
     chosen = {"name": name, "steps": flows.load(name)} if name else None
@@ -269,7 +272,7 @@ async def start(client, task, repo=None, auto_proceed=False, settings_path=None,
         if (short_name is None or not isinstance(merge_preference, dict) or
                 set(merge_preference) != {"branch", "remote"}):
             raise Refusal("choose an existing preferred Merge destination for this named run")
-        options = await landing_options(client, repo=repo, check=check, settings=settings)
+        options = await landing_options(client, selected=selected, check=check, settings=settings)
         if not any({key: row[key] for key in ("branch", "remote")} == merge_preference for row in options["choices"]):
             raise Refusal("the preferred Merge destination is unavailable or incompatible")
     if short_name is not None:
@@ -892,20 +895,31 @@ async def _worktree_view(client, args, kind, workflow_queue):
         raise
 
 
-async def worktrees_of(client, repo=None, settings_path=None, check=True):
+async def worktrees_of(client, repo=None, settings_path=None, check=True, *, descriptors=None, settings=None, run_id=None):
     """Every worktree of a repository and whether it is merged, read by its target host's git."""
-    pol = S.load(settings_path)
-    selected = repos.select(repo)
-    queue = policy_mod.queue(pol, selected["target"])
+    if run_id:
+        current = await (readable_status(client, run_id) if check else status(client, run_id))
+        state = current and current["state"]
+        if not state or not all(state.get(key) for key in ("repo_path", "base_branch", "worktree_root", "target")):
+            raise Refusal("This run has no recorded repository to inspect.")
+        selected = {"id": state["repo"], "path": state["repo_path"], "target": state["target"],
+                    "base_branch": state["base_branch"], "remote": state.get("remote"),
+                    "worktree_root": state["worktree_root"]}
+        queue, workflow_queue = current["queue"], current["workflow_queue"]
+        root = state["worktree_root"]
+    else:
+        pol = settings or S.load(settings_path)
+        selected = repos.select(repo, descriptors)
+        queue, workflow_queue = policy_mod.queue(pol, selected["target"]), policy_mod.workflow_queue(pol)
+        root = pol["targets"][selected["target"]]["worktree_root"]
     if check:
-        await preflight(client, queues(policy_mod.workflow_queue(pol), queue))
+        await preflight(client, queues(workflow_queue, queue))
     view = await _worktree_view(client, {"repository": selected, "queue": queue,
-                                        "worktree_root": pol["targets"][selected["target"]]["worktree_root"]},
-                                "worktrees", policy_mod.workflow_queue(pol))
+                                        "worktree_root": root}, "worktrees", workflow_queue)
     return selected, view
 
 
-async def landing_options(client, run_id=None, repo=None, check=True, settings=None):
+async def landing_options(client, run_id=None, repo=None, check=True, settings=None, *, selected=None, descriptors=None):
     """Ask the target host for landing facts; dropdown reads never fetch or mutate Git."""
     if run_id:
         current = await (readable_status(client, run_id) if check else status(client, run_id))
@@ -915,16 +929,17 @@ async def landing_options(client, run_id=None, repo=None, check=True, settings=N
         args = {"merge_state": current["state"], "queue": queue}
     else:
         settings = settings or S.load()
-        selected = repos.select(repo)
+        selected = selected or repos.select(repo, descriptors)
         queue, workflow_queue = policy_mod.queue(settings, selected["target"]), policy_mod.workflow_queue(settings)
         args = {"repository": selected, "queue": queue, "landing_preview": True,
                 "worktree_root": settings["targets"][selected["target"]]["worktree_root"]}
     if check:
         await preflight(client, queues(workflow_queue, queue))
-    return await _worktree_view(client, args, "landing", workflow_queue)
+    view = await _worktree_view(client, args, "landing", workflow_queue)
+    return view if run_id else dict(view, repository_revision=repos.repository_revision(selected))
 
 
-async def skill_catalog(client, repo=None, run_id=None):
+async def skill_catalog(client, repo=None, run_id=None, *, descriptors=None, settings=None):
     """Read native roots on the selected execution host; never scan the Workbench's unrelated checkout."""
     skill_root = None
     if run_id:
@@ -939,8 +954,8 @@ async def skill_catalog(client, repo=None, run_id=None):
             configured = dict(configured, roles=dict(configured["roles"], engineer=engineer))
         queue, workflow_queue = current["queue"], current["workflow_queue"]
     else:
-        settings = S.load()
-        selected, configured = repos.select(repo), S.run_policy(settings)
+        settings = settings or S.load()
+        selected, configured = repos.select(repo, descriptors), S.run_policy(settings)
         queue, workflow_queue = policy_mod.queue(settings, selected["target"]), policy_mod.workflow_queue(settings)
     await preflight(client, queues(workflow_queue, queue))
     result = await _worktree_view(client,

@@ -117,7 +117,7 @@ class Skills(unittest.TestCase):
         # Where the stand-in finds a skill of that name: inside the repository the run resolved.
         self.folder = os.path.join(self.repo, ".stand-in", "skills", "plan-it")
 
-    def prepare(self, holds_skill=activities.holds_skill):
+    def prepare(self, holds_skill=activities.holds_skill, skills="plan-it"):
         repo = self.repo
 
         class Here(FakeRepos):
@@ -126,7 +126,7 @@ class Skills(unittest.TestCase):
         host = activities.Activities(runner=None, git=None, repositories=Here(), telemetry=None,
                                      which=installed, holds_skill=holds_skill)
         return host.prepare({"repository": self.SELECTED,
-                             "policy": policy(stand_in.KIND, stage_skills={"plan": "plan-it"})})
+                             "policy": policy(stand_in.KIND, stage_skills={"plan": skills})})
 
     def test_a_skill_where_its_kind_finds_it_lets_the_run_go_on(self):
         os.makedirs(self.folder)
@@ -157,6 +157,10 @@ class Skills(unittest.TestCase):
 
     def test_control_a_preparation_that_looks_nowhere_starts_the_run(self):
         self.assertEqual(self.prepare(holds_skill=lambda folder: True)["repo_path"], self.repo)
+
+    def test_a_missing_supporting_skill_refuses_the_stack_before_worktree_creation(self):
+        with self.assertRaisesRegex(ApplicationError, "plan stage's skill evidence-check"):
+            self.prepare(holds_skill=lambda folder: folder == self.folder, skills=["plan-it", "evidence-check"])
 
 
 class Environment(unittest.TestCase):

@@ -49,7 +49,7 @@
     }
   },
   "auto_proceed": false,
-  "default_flow": "engineer-code",
+  "default_flow": "architect-plan",
   "timeout_seconds": 3600,
   "workbench_port": 8390,
   "heartbeat_seconds": 120,

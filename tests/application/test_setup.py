@@ -8,6 +8,31 @@ from tests import cast
 
 
 class Preferences(unittest.IsolatedAsyncioTestCase):
+    async def test_a_changed_repository_refuses_the_old_preview_with_the_same_branch(self):
+        selected = {'id': 'fixture', 'path': '/fixture/new', 'target': 'wsl', 'base_branch': 'develop'}
+        previous = runs.repos.repository_revision(dict(selected, path='/fixture/old'))
+        client = SimpleNamespace(start_workflow=AsyncMock())
+        with patch.object(runs.S, 'load', return_value=cast.settings()), \
+             patch.object(runs.repos, 'load', return_value={}), \
+             patch.object(runs.repos, 'select', return_value=selected):
+            with self.assertRaisesRegex(runs.Refusal, 'Refresh destinations'):
+                await runs.start(client, 'Task', check=False, repository_revision=previous,
+                                 merge_preference={'branch': 'develop', 'remote': None}, short_name='name')
+        client.start_workflow.assert_not_awaited()
+
+    async def test_worktrees_from_a_run_use_its_recorded_repository_and_queue(self):
+        original = {'repo': 'fixture', 'repo_path': '/fixture/original', 'target': 'wsl',
+                    'worktree_root': '/fixture/worktrees', 'base_branch': 'develop', 'remote': None}
+        current = {'queue': 'original-target', 'workflow_queue': 'original-workflow', 'state': original}
+        client = SimpleNamespace(execute_workflow=AsyncMock(return_value={'rows': [], 'base_branch': 'develop'}))
+        with patch.object(runs, 'readable_status', AsyncMock(return_value=current)), \
+             patch.object(runs, 'preflight', AsyncMock()), \
+             patch.object(runs.repos, 'select', side_effect=AssertionError('run links never select a catalog alias')):
+            selected, _ = await runs.worktrees_of(client, run_id='fixture-run')
+        self.assertEqual(selected['path'], original['repo_path'])
+        args = client.execute_workflow.call_args
+        self.assertEqual((args.args[1]['queue'], args.kwargs['task_queue']), ('original-target', 'original-workflow'))
+
     async def test_existing_run_catalog_uses_its_worktree_and_current_engineer_kind(self):
         configured = runs.S.run_policy(cast.settings())
         initial = {'repository': {'id': 'fixture', 'path': '/fixture', 'target': 'wsl'}, 'policy': configured}

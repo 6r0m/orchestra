@@ -38,6 +38,9 @@ reads another host's git — a Windows worktree is read by a Windows process onl
 
 Through the descriptor file: `.orchestra/repos.json` (or the file named by `ORCHESTRA_REPOS`) names
 the operator's own repositories, and a missing file means no descriptors rather than an error.
+The repository owner validates and replaces the checkout's local catalog atomically. It checks the
+file revision under the Workbench writer lock before replacing it. An externally selected or linked
+catalog is read-only in the Workbench.
 
 ## Invariants
 

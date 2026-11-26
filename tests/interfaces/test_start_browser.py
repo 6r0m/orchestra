@@ -27,7 +27,7 @@ globalThis.fixture={get,chosen:()=>repo,api:async(path,body)=>{
 const source=fs.readFileSync(process.argv[1],'utf8')
   .replace(/import \{ api \} from "\.\/api.js";/,'const api=globalThis.fixture.api;')
   .replace(/import \{[^}]+\} from "\.\/ui.js";/,
-    'const $=globalThis.fixture.get,el=()=>({}),report=()=>{},sayRefused=()=>{},score=()=>{},wrote=()=>{};')
+    'const $=globalThis.fixture.get,el=()=>({}),listedFlowName=(_,name)=>name,report=()=>{},sayRefused=()=>{},score=()=>{},showReading=()=>{},wrote=()=>{};')
   .replace(/import \{[^}]+\} from "\.\/picker.js";/,
     'const sourceChoice=()=>globalThis.fixture.chosen,reposRead=async()=>{};');
 await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
@@ -55,18 +55,24 @@ assert.equal(button.disabled,false);
         script = r'''
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
+import { pathToFileURL } from 'node:url';
+globalThis.document={getElementById:()=>({addEventListener(){}})};
+const ui=new URL('./ui.js',pathToFileURL(process.argv[1]));
+const {listedFlowName}=await import('data:text/javascript;base64,'+fs.readFileSync(ui).toString('base64'));
 const nodes = new Map();
 const get = id => {
-  if (!nodes.has(id)) nodes.set(id, {value:'',textContent:'',hidden:false,addEventListener(){},
+  if (!nodes.has(id)) nodes.set(id, {value:'',textContent:'',hidden:false,addEventListener(){},focus(){},
     options:[],replaceChildren(...children){this.children=children;this.options=children;},append(child){this.options.push(child);},querySelector(){return {};}});
   return nodes.get(id);
 };
-let chosen = null, release, calls = 0, fail = false;
+let chosen = null, release, calls = 0, fail = false, defaultFlow = 'engineer-code';
 const submitted = [], dialogs = [];
 const ready = new Promise(resolve => {release=()=>{chosen='example';resolve();};});
 globalThis.location = {hash:'#new'};
-globalThis.fixture = {get, ready, dialogs, chosen:()=>chosen, api:async (path, body) => {
-  if(path==='/api/flows') return {default:'engineer-code',flows:[{name:'engineer-code',steps:[]}]};
+globalThis.fixture = {get, ready, dialogs, listedFlowName, chosen:()=>chosen, api:async (path, body) => {
+  if(path==='/api/flows') return {default:defaultFlow,flows:[
+    {name:'architect-plan',aliases:['architect-auto'],steps:['architect:research','you:merge']},
+    {name:'engineer-plan',aliases:['engineer-code'],steps:['engineer:plan','architect:assess','you:approve']}]};
   if(path==='/api/runs') { submitted.push(body); return {run_id:'new-run'}; }
   assert.ok(['/api/landing?repo=example','/api/landing?repo=other'].includes(path),path);
   calls++;
@@ -78,7 +84,7 @@ let source = fs.readFileSync(process.argv[1], 'utf8');
 source=source.replace(/import \{ api \} from "\.\/api.js";/,
   'const api=globalThis.fixture.api;');
 source=source.replace(/import \{[^}]+\} from "\.\/ui.js";/,
-  'const $=globalThis.fixture.get, el=()=>({}), report=()=>{},sayRefused=details=>globalThis.fixture.dialogs.push(details),score=()=>{},wrote=()=>{};');
+  'const {get:$,listedFlowName}=globalThis.fixture, el=()=>({}), report=()=>{},sayRefused=details=>globalThis.fixture.dialogs.push(details),score=()=>{},showReading=(id,pending)=>{$(id).hidden=!pending;},wrote=()=>{};');
 source=source.replace(/import \{ pickSkills \} from "\.\/skills.js";/,'const pickSkills=()=>{};');
 source=source.replace(/import \{[^}]+\} from "\.\/picker.js";/,
   'const sourceChoice=()=>globalThis.fixture.chosen,reposRead=()=>globalThis.fixture.ready;');
@@ -86,10 +92,13 @@ const module=await import('data:text/javascript;base64,'+Buffer.from(source).toS
 const reading=module.reloadFlows();
 await Promise.resolve();
 assert.equal(calls,0,'preview must not guess while the initial repository is unavailable');
+assert.equal(get('start-reading').hidden,false,'show progress while repositories are pending');
 release();
 await reading;
+assert.equal(get('start-reading').hidden,true,'hide progress only after startup reads finish');
 assert.equal(calls,1,'the first real repository must refresh its landing without operator interaction');
 assert.match(get('start-landing').textContent,/Work starts from: main \(local base\)/);
+assert.equal(get('start-flow').value,'engineer-plan','a saved former name selects the renamed flow');
 get('start-task').value='Preserve this complete task';
 get('start-name').value='work-name';
 get('start-destination').value=JSON.stringify({branch:'release',remote:null});
@@ -130,6 +139,22 @@ await submit();
 assert.equal(submitted.length,2);
 assert.equal(submitted[1].repo,'other');
 assert.deepEqual(submitted[1].merge_preference,{branch:'develop',remote:null});
+
+defaultFlow=null;
+await module.reloadFlows();
+const flow=get('start-flow');
+assert.equal(flow.options[0].value,'');
+assert.equal(flow.options[0].disabled,true);
+await submit();
+assert.equal(submitted.length,2,'a Workbench start must choose a named flow');
+flow.value='architect-plan';
+flow.onchange();
+assert.equal(get('start-approval-options').hidden,true);
+await submit();
+assert.equal(submitted[2].flow,'architect-plan');
+flow.value='engineer-plan';
+flow.onchange();
+assert.equal(get('start-approval-options').hidden,false);
 '''
         result = subprocess.run(['node', '--input-type=module', '-e', script, str(source)],
                                 capture_output=True, text=True, timeout=15)

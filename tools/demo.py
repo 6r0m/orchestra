@@ -23,7 +23,7 @@ turn reaches it; that run is discarded. What the run stopped at its approval kep
 from the top of its page while its engineer works — the engineer, sent nothing by the page's terminal as
 that connects, interrupted, its terminal given the keyboard, a line typed there reaching it and that line
 alone — then read at three window sizes, its controls pinned while the
-page scrolls and each list of runs scrolling inside itself, and rejected at work: ended, its worktree and
+page scrolls and its history groups opening inside one sidebar, and rejected at work: ended, its worktree and
 branch removed, its history kept, and listed apart from the runs that were only stopped. The demo's
 worker is stopped from its Workbench, and everything it made is removed, its runs, the reads of their
 changes and the removals from Temporal too: the Workbench lists every run Temporal retains.
@@ -287,6 +287,7 @@ class Demo:
         # The deployment's own settings, with a host and a workflow queue of the demo's own: its queues are
         # polled by no worker but the demo's, and its ports are free now.
         policy = json.load(open(P.SETTINGS_FILE, encoding="utf-8"))
+        policy["default_flow"] = "engineer-plan"
         # These fakes speak Claude's engineer contract and Codex's review contract, independent of defaults.
         policy["roles"]["engineer"]["agent"] = "claude-engineer"
         policy["roles"]["architect"]["agent"] = "codex-architect"
@@ -720,8 +721,8 @@ class Demo:
                              ("1280x520", "a short one")):
             check(self.press(rejected, "layout:" + size, "none"),
                   "at %s, %s: Pause, Stop run and Reject seen whole at the top and with the page scrolled to its "
-                  "history, nothing that takes the keyboard under them, and each list of runs scrolling inside "
-                  "itself only past five" % (size, window))
+                  "history, keyboard focus clear of the controls, and run history opening without nested lists "
+                  "that scroll" % (size, window))
 
         step("a run rejected while its engineer works: ended, and its work removed, in one press")
         check(self.press(rejected, "Reject", "rejected: its worktree and branch are removed"),
