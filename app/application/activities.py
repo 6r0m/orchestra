@@ -717,8 +717,16 @@ class Activities:
 
     @activity.defn
     def worktree_view(self, args):
-        """Every worktree the target's git reports, and whether it is merged. Reads only."""
+        """Read worktree facts on the target host, including its filesystem's identity for two paths."""
         try:
+            if "worktree_identity" in args:
+                try:
+                    same = os.path.samefile(*args["worktree_identity"])
+                except (FileNotFoundError, NotADirectoryError):
+                    same = False
+                except OSError as exc:
+                    raise repos.Refused("The execution worker could not verify this worktree: %s" % exc) from exc
+                return {"same_worktree": same}
             if args.get("merge_state") is not None:
                 state = args["merge_state"]
                 return self.git.merge_destinations(state["repo_path"], state["base_tip"], state["run_id"],

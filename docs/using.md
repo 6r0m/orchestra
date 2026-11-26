@@ -506,7 +506,8 @@ Choosing a saved repository reads its worktrees immediately. For an unlisted rep
 **Load worktrees**. Use **Refresh** to reread the selected repository. The base checkout appears
 separately. Additional worktrees show their Git state and a copyable path. A run link requires the
 displayed path and execution worker to match the run's recorded worktree. **Remove** appears for eligible
-worktrees and requires confirmation.
+worktrees and requires confirmation. When Git reports a Windows path with different letter case, the
+execution worker checks that both spellings point to the same directory.
 
 ### Settings
 

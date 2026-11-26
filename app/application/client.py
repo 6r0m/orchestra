@@ -854,8 +854,8 @@ async def removal(client, run_id):
     return removed and removed["execution"]
 
 
-def matches_worktree(current, displayed):
-    """Compare paths in the execution host's format, even when another host serves the request."""
+async def matches_worktree(client, current, displayed):
+    """Compare the recorded and displayed paths on the same execution host."""
     current = current or {}
     state = current.get("state") or {}
     if not isinstance(displayed, dict) or state.get("target") not in ("windows", "wsl"):
@@ -864,8 +864,20 @@ def matches_worktree(current, displayed):
         return False
     path, recorded = displayed.get("path"), state.get("worktree_path")
     path_module = ntpath if state["target"] == "windows" else posixpath
-    return (isinstance(path, str) and isinstance(recorded, str) and path_module.isabs(path)
-            and path_module.normpath(path) == path_module.normpath(recorded))
+    if not all(isinstance(item, str) and path_module.isabs(item) for item in (path, recorded)):
+        return False
+    path, recorded = path_module.normpath(path), path_module.normpath(recorded)
+    if path == recorded:
+        return True
+    if path_module is not ntpath or ntpath.normcase(path) != ntpath.normcase(recorded):
+        return False
+    # Git can canonicalize a Windows path's case, and Windows can also store distinct case variants.
+    try:
+        checked = await _worktree_view(client, {"worktree_identity": [recorded, path], "queue": current["queue"]},
+                                      "worktree-identity", current["workflow_queue"], timeout=READ)
+    except (WorkflowFailureError, RPCError) as error:
+        raise Refusal("The execution worker could not verify this worktree. Refresh and try again.") from error
+    return checked.get("same_worktree") is True
 
 
 async def remove_worktree(client, run_id, *, displayed=None):
@@ -878,7 +890,7 @@ async def remove_worktree(client, run_id, *, displayed=None):
     if listed["execution"] == "RUNNING":
         raise Refusal(not_kept(listed, None))
     current = await readable_status(client, run_id)
-    if displayed is not None and not matches_worktree(current, displayed):
+    if displayed is not None and not await matches_worktree(client, current, displayed):
         raise Refusal("The displayed worktree does not match this run. Refresh the repository's worktrees.")
     reason = not_kept(listed, current, await removal(client, run_id))
     if reason:
@@ -902,10 +914,11 @@ async def remove_worktree(client, run_id, *, displayed=None):
         raise Refusal("run %s's worktree was not removed: %s" % (run_id, getattr(cause, "message", cause))) from error
 
 
-async def _worktree_view(client, args, kind, workflow_queue):
+async def _worktree_view(client, args, kind, workflow_queue, *, timeout=None):
     try:
         return await client.execute_workflow(
-            WF.WorktreeView.run, args, id="%s-%s" % (kind, os.urandom(6).hex()), task_queue=workflow_queue)
+            WF.WorktreeView.run, args, id="%s-%s" % (kind, os.urandom(6).hex()), task_queue=workflow_queue,
+            execution_timeout=timeout)
     except WorkflowFailureError as error:
         cause = _workflow_cause(error)
         if isinstance(cause, ApplicationError) and cause.type == "Refused":

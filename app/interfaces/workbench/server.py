@@ -577,8 +577,8 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
                     if listed:
                         try:
                             current = await runs.status(client, row["branch"], STATUS_SECONDS)
-                            if not runs.matches_worktree(current, {"target": selected["target"], "path": row["path"],
-                                                                  "queue": view["target_queue"]}):
+                            displayed = {"target": selected["target"], "path": row["path"], "queue": view["target_queue"]}
+                            if not await runs.matches_worktree(client, current, displayed):
                                 listed = None
                             elif listed["execution"] != "RUNNING":
                                 kept = runs.not_kept(listed, current, await runs.removal(client, row["branch"])) is None

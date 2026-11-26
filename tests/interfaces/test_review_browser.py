@@ -53,6 +53,38 @@ class ReviewBrowser(Repo):
                 row = next(row for row in body["rows"] if row["branch"] == branch)
                 self.assertEqual((row["run"], row["removable"]), expected)
 
+    def test_git_canonicalizes_a_windows_worktree_path_before_listing_it(self):
+        from app.application import activities, client as runs
+
+        root = Path(self.tmp) / "WorktreeSpelling"
+        root.mkdir()
+        alternate = root.with_name(root.name.lower())
+        if not alternate.is_dir():
+            self.skipTest("the fixture directory has case-sensitive names")
+        drive, rest = os.path.splitdrive(str(alternate))
+        branch = "same-worktree"
+        recorded = W.create(self.repo, "develop", drive.lower() + rest, branch, TARGET)
+        shown = next(row["path"] for row in W.view(self.repo, "develop") if row["branch"] == branch)
+        self.assertNotEqual(shown, recorded, "Git lists the filesystem spelling, not the requested spelling")
+        self.assertTrue(os.path.samefile(shown, recorded))
+        queue = "target:windows:fixture"
+        current = {"queue": queue, "workflow_queue": "fixture",
+                   "state": {"target": TARGET, "worktree_path": recorded}}
+        displayed = {"path": shown, "target": TARGET, "queue": queue}
+        worker = activities.Activities(runner=None, telemetry=None)
+
+        async def on_worker(_workflow, args, **_):
+            self.assertEqual(args["queue"], queue)
+            return worker.worktree_view(args)
+
+        client = AsyncMock()
+        client.execute_workflow.side_effect = on_worker
+
+        self.assertTrue(asyncio.run(runs.matches_worktree(client, current, displayed)))
+        with patch.object(activities.os.path, "samefile", return_value=False):
+            self.assertFalse(asyncio.run(runs.matches_worktree(client, current, displayed)),
+                             "case-distinct native directories must stay distinct")
+
     def test_settings_workspace_keeps_jumps_and_validation_bound_to_the_draft(self):
         import temporal_env as E
         from tests.interfaces.test_workbench import settings_server
