@@ -841,6 +841,17 @@ def settings_workspace(page):
     check("document.querySelector('#settings-skill-plan [aria-label=\"Add investigate-change to Plan\"]')?.checkVisibility() && "
           "document.getElementById('settings-skill-plan').textContent.includes('Built-in instructions')",
           "active instructions and available skills are visible at the start of each stage")
+    page.value("""(() => {
+      const agent = document.getElementById('settings-agent-engineer');
+      agent.value = '#browse';
+      agent.dispatchEvent(new Event('change'));
+    })()""")
+    check("document.querySelector('#settings-profiles-dialog [aria-label=\"Restore the profile codex-engineer\"]')?.checkVisibility()",
+          "the chooser offers to restore a removed shared profile")
+    page.value("document.querySelector('#settings-profiles-dialog [aria-label=\"Restore the profile codex-engineer\"]').click(); true")
+    check("document.querySelector('#settings-profiles-dialog [aria-label=\"Edit the profile codex-engineer\"]')?.checkVisibility()",
+          "the restored profile is available without changing the selected profile")
+    page.value("document.querySelector('#settings-profiles-dialog footer [data-close-settings-dialog]').click(); true")
     page.value("document.querySelector('#settings-jumps a[href=\"#settings-workflow-title\"]').click(); true")
     check("document.activeElement.id === 'settings-workflow-title' && document.getElementById('settings-turn-hours').checkVisibility() && "
           "document.getElementById('settings-flow').value === 'architect-plan' && "
@@ -888,13 +899,28 @@ def settings_workspace(page):
       const persona = document.getElementById('settings-persona-engineer');
       window.originalPersona = persona.value;
       persona.value = 'Discard this instruction draft';
+      persona.dispatchEvent(new Event('input', {bubbles:true}));
+    })()""")
+    check("document.getElementById('settings-instructions').getAttribute('closedby') === 'closerequest'",
+          "dirty instructions prevent a backdrop dismissal")
+    click_backdrop(page)
+    check("document.getElementById('settings-instructions').open && "
+          "document.getElementById('settings-persona-engineer').value === 'Discard this instruction draft'",
+          "a real backdrop click preserves the typed instructions")
+    page.value("""(() => {
       document.querySelector('#settings-instructions [data-close-settings-dialog]').click();
       document.getElementById('settings-edit-instructions-engineer').click();
     })()""")
     check("document.getElementById('settings-persona-engineer').value === window.originalPersona",
           "Cancel drops only edits made inside the instructions editor")
+    check("document.getElementById('settings-use-persona-file-engineer')?.checkVisibility()",
+          "the custom persona can be returned to its file")
     page.value("""(() => {
-      document.querySelector('#settings-instructions footer [data-close-settings-dialog]').click();
+      document.getElementById('settings-use-persona-file-engineer').click();
+      document.getElementById('settings-instructions-done').click();
+    })()""")
+    check("!document.getElementById('settings-instructions').open", "restoring the persona file saves to the Settings draft")
+    page.value("""(() => {
       document.querySelector('#settings-instruction-links-engineer + .settings-instruction-list [aria-label="When Final round applies"]').focus();
     })()""")
     check("document.getElementById('settings-instruction-help-at_limit-engineer')?.checkVisibility() && "
@@ -955,13 +981,42 @@ def settings_workspace(page):
     check("document.getElementById('settings-profiles-title').textContent === 'Choose a profile' && "
           "document.getElementById('settings-profile-done').hidden && "
           "Boolean(document.querySelector('#settings-profiles-dialog .profile-list'))", "switching uses a separate profile chooser")
+    page.value("document.querySelector('#settings-profiles-dialog [aria-label=\"Edit the profile codex-engineer\"]').click(); true")
+    check("document.getElementById('settings-agent-architect').value === 'codex-architect' && "
+          "document.getElementById('settings-edit-model-codex-engineer').checkVisibility()",
+          "an unassigned shared profile can be restored and edited without assigning it")
+    page.value("""(() => {
+      const model = document.getElementById('settings-edit-model-codex-engineer');
+      model.value = 'a-draft-model';
+      model.dispatchEvent(new Event('input', {bubbles:true}));
+    })()""")
+    check("document.getElementById('settings-profiles-dialog').getAttribute('closedby') === 'closerequest'",
+          "dirty profile values prevent a backdrop dismissal")
+    click_backdrop(page)
+    check("document.getElementById('settings-profiles-dialog').open && "
+          "document.getElementById('settings-edit-model-codex-engineer').value === 'a-draft-model'",
+          "a real backdrop click preserves the typed profile values")
+    page.value("""(() => {
+      document.getElementById('settings-profile-done').click();
+      const agent = document.getElementById('settings-agent-architect');
+      agent.value = '#browse';
+      agent.dispatchEvent(new Event('change'));
+      document.querySelector('#settings-profiles-dialog [aria-label="Edit the profile codex-engineer"]').click();
+      document.getElementById('settings-revert-profile').click();
+      document.getElementById('settings-profile-done').click();
+      const picker = document.getElementById('settings-agent-architect');
+      picker.value = '#browse';
+      picker.dispatchEvent(new Event('change'));
+    })()""")
     page.value("""(() => {
       const engineer = document.getElementById('settings-agent-engineer').value;
       document.querySelector('#settings-profiles-dialog [aria-label="Select ' + engineer + '"]').click();
       return true;
     })()""")
     check("document.getElementById('settings-agent-architect').value === document.getElementById('settings-agent-engineer').value && "
-          "document.getElementById('settings-model-' + document.getElementById('settings-agent-architect').value).value === 'fixture-model'",
+          "document.getElementById('settings-model-' + document.getElementById('settings-agent-architect').value).value === 'fixture-model' && "
+          "document.querySelector('#settings-role-panel-architect .settings-shared-profile').checkVisibility() && "
+          "document.querySelector('#settings-role-panel-architect .settings-role-access summary').checkVisibility()",
           "sharing an existing profile keeps its staged model")
     page.value("""(() => {
       document.querySelector('#settings-role-panel-architect [aria-label="Add profile"]').click();
@@ -2335,10 +2390,12 @@ WORKTREE_PICKER_STAND_IN = """(() => {
       if (repo === 'infra/beta') rows.push(
         {branch: 'kept-a0000000', state: 'unmerged', path: '/worktrees/kept', run: 'COMPLETED', removable: true},
         {branch: 'other', state: 'merged', path: '/worktrees/other', run: null, removable: false});
-      return Response.json({repo, base_branch: 'develop', rows});
+      const target = repo === 'engineering/alpha' ? 'windows' : 'wsl';
+      return Response.json({repo, target, target_queue: 'target:' + target + ':fixture', base_branch: 'develop', rows});
     }
     if (path.endsWith('/remove')) {
       probe.removals++;
+      probe.displayed = JSON.parse(options.body);
       return Response.json({error: 'fixture does not remove worktrees'}, {status: 409});
     }
     return real(path, options);
@@ -2403,8 +2460,16 @@ def worktree_picker(page):
     check("document.querySelector('#confirm').open && __worktrees.removals === 0",
           "backdrop click leaving the confirmation and worktree intact")
     page.value("document.querySelector('#confirm-no').click(); true")
-    check("!document.querySelector('#confirm').open && __worktrees.removals === 0",
+    check("!document.querySelector('#confirm').open && __worktrees.removals === 0 && "
+          "document.activeElement === document.querySelector('#worktrees button.danger')",
           "cancel leaving the worktree untouched")
+    page.value("document.querySelector('#worktrees button.danger').click(); "
+               "document.querySelector('#confirm-yes').click(); true")
+    check("__worktrees.removals === 1 && __worktrees.displayed.confirm === true && "
+          "__worktrees.displayed.worktree.path === '/worktrees/kept' && "
+          "__worktrees.displayed.worktree.target === 'wsl' && "
+          "__worktrees.displayed.worktree.queue === 'target:wsl:fixture'",
+          "confirmed removal carries the displayed worktree's exact path and worker")
     page.value("document.querySelector('#worktrees-repo').click(); document.querySelector('#repo-enter-path').click(); true")
     check("document.activeElement.id === 'worktrees-path' && document.querySelector('#worktrees-overview').hidden",
           "manual entry clearing the previous repository and focusing the path")

@@ -137,6 +137,13 @@ for path in .env secrets tmp .orchestra/settings.local.json; do
     fi
 done
 
+private_writes="$(tracked ':(glob).orchestra/.repos-*' ':(glob).orchestra/.settings-*' || true)"
+if [ -n "$private_writes" ]; then
+    fail "temporary private settings or repository files are tracked: $(echo "$private_writes" | tr '\n' ' ')"
+else
+    pass "no temporary private configuration is tracked"
+fi
+
 # Your own repositories, wherever a descriptor file sits: `.orchestra/`, or the root it moved from.
 own="$(tracked ':(glob)**/repos.json' || true)"
 if [ -n "$own" ]; then

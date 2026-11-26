@@ -613,6 +613,9 @@ details.answer > .answer-words { margin: 4px 0 10px calc(10px + 1em + 6px); }
 .settings-role-section h4 { margin: 0; }
 .settings-detail { border-top: 1px solid var(--rule); }
 .settings-detail[open] > summary { margin-bottom: 6px; }
+.settings-role-access { padding-bottom: 6px; }
+.settings-role-access[open] { padding-bottom: 12px; }
+.settings-shared-profile { margin: -6px 0 10px; }
 .settings-workflow { position: relative; }
 .settings-workflow[open] { gap: 0; padding: 12px 18px 16px; }
 .settings-workflow[open] > summary { color: var(--ink); font-size: 18px; padding-inline-end: 74px;

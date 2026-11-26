@@ -22,6 +22,37 @@ EDGE = Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "M
 
 @unittest.skipUnless(sys.platform.startswith("win") and EDGE.is_file(), "the real browser acceptance runs on Windows")
 class ReviewBrowser(Repo):
+    def test_same_branch_in_two_git_repositories_only_links_the_recorded_worktree(self):
+        import temporal_env as E
+        from app.application import client as runs
+        from tests.interfaces.test_workbench import request, settings_server
+
+        settings = Path(self.tmp) / ".orchestra"
+        settings.mkdir()
+        (settings / "settings.json").write_text(json.dumps(E.SETTINGS), encoding="utf-8")
+        at = settings_server(self, self.tmp, {}, call=lambda work, timeout=300: asyncio.run(work(None)))
+        branch = "same-run-branch"
+        real = self.worktree(branch, change=False)
+        other = os.path.join(self.tmp, "other-repo")
+        git(self.repo, "clone", "--local", self.repo, other)
+        W.create(other, "develop", os.path.join(self.tmp, "other-worktrees"), branch, TARGET)
+        queue = E.WINDOWS_QUEUE if TARGET == "windows" else E.WSL_QUEUE
+
+        async def worktrees(_client, *, repo, **kwargs):
+            return {"id": repo, "target": TARGET}, {"base_branch": "develop", "rows": W.view(repo, "develop"),
+                                                    "target_queue": queue}
+
+        with (patch.object(runs, "worktrees_of", side_effect=worktrees),
+              patch.object(runs, "execution", return_value={"run_id": branch, "execution": "CANCELED"}),
+              patch.object(runs, "status", return_value={"queue": queue,
+                                                         "state": {"target": TARGET, "worktree_path": real}}),
+              patch.object(runs, "removal", return_value=None)):
+            for repo, expected in ((self.repo, ("CANCELED", True)), (other, (None, False))):
+                status, body = request("GET", "/api/worktrees?repo=" + urllib.parse.quote(repo), at=at)
+                self.assertEqual(status, 200, body)
+                row = next(row for row in body["rows"] if row["branch"] == branch)
+                self.assertEqual((row["run"], row["removable"]), expected)
+
     def test_settings_workspace_keeps_jumps_and_validation_bound_to_the_draft(self):
         import temporal_env as E
         from tests.interfaces.test_workbench import settings_server
@@ -29,7 +60,9 @@ class ReviewBrowser(Repo):
         settings = Path(self.tmp) / ".orchestra"
         settings.mkdir()
         config = dict(E.SETTINGS, default_flow="architect-auto", timeout_seconds=3600, stage_skills={})
+        config["roles"] = dict(config["roles"], engineer=dict(config["roles"]["engineer"], persona="A shared persona."))
         (settings / "settings.json").write_text(json.dumps(config), encoding="utf-8")
+        (settings / "settings.local.json").write_text(json.dumps({"agents": {"codex-engineer": None}}), encoding="utf-8")
         at = settings_server(self, self.tmp, {})
         script = Path(__file__).resolve().parents[2] / "tools/demo_press.py"
         engineer = E.SETTINGS["roles"]["engineer"]["agent"]
@@ -46,7 +79,7 @@ class ReviewBrowser(Repo):
                 engineer: {"model": "fixture-model"},
                 "fixture-review": {"kind": "pi", "model": "review-model-edited", "effort": "high", "launcher": "pi-worker"},
             },
-            "roles": {"architect": {"agent": "fixture-review"}},
+            "roles": {"architect": {"agent": "fixture-review"}, "engineer": {"persona": None}},
             "stage_skills": {"plan": ["investigate-change", "fixture-support"], "build": "remote-build",
                              "research": "architect", "assess": "architect", "verify": "architect"},
             "review_prompts": {"after_normal": {"engineer": "Check the evidence."}},
@@ -67,7 +100,8 @@ class ReviewBrowser(Repo):
         async def on_host(_client, *, repo, descriptors, **_):
             selected = runs.repos.select(repo, descriptors)
             self.assertEqual(selected["path"], self.repo)
-            return selected, {"base_branch": "develop", "rows": []}
+            return selected, {"base_branch": "develop", "rows": [],
+                              "target_queue": E.WINDOWS_QUEUE if selected["target"] == "windows" else E.WSL_QUEUE}
 
         script = Path(__file__).resolve().parents[2] / "tools/demo_press.py"
         worker = AsyncMock(side_effect=on_host)

@@ -8,7 +8,9 @@ validators, or Temporal's own lifecycle. Nothing here prints.
 import asyncio
 import datetime
 import hashlib
+import ntpath
 import os
+import posixpath
 import time
 
 from temporalio.api.enums.v1 import TaskQueueType
@@ -852,7 +854,21 @@ async def removal(client, run_id):
     return removed and removed["execution"]
 
 
-async def remove_worktree(client, run_id):
+def matches_worktree(current, displayed):
+    """Compare paths in the execution host's format, even when another host serves the request."""
+    current = current or {}
+    state = current.get("state") or {}
+    if not isinstance(displayed, dict) or state.get("target") not in ("windows", "wsl"):
+        return False
+    if displayed.get("target") != state["target"] or not current.get("queue") or displayed.get("queue") != current["queue"]:
+        return False
+    path, recorded = displayed.get("path"), state.get("worktree_path")
+    path_module = ntpath if state["target"] == "windows" else posixpath
+    return (isinstance(path, str) and isinstance(recorded, str) and path_module.isabs(path)
+            and path_module.normpath(path) == path_module.normpath(recorded))
+
+
+async def remove_worktree(client, run_id, *, displayed=None):
     """Remove what a closed run kept — its worktree, its branch and the worktree's environment — through
     its target host's own git, as a discard removes them; refused as `not_kept` says. A git side effect
     of the run still running on its host — a terminated run's merge goes on — refuses it there."""
@@ -862,6 +878,8 @@ async def remove_worktree(client, run_id):
     if listed["execution"] == "RUNNING":
         raise Refusal(not_kept(listed, None))
     current = await readable_status(client, run_id)
+    if displayed is not None and not matches_worktree(current, displayed):
+        raise Refusal("The displayed worktree does not match this run. Refresh the repository's worktrees.")
     reason = not_kept(listed, current, await removal(client, run_id))
     if reason:
         raise NothingKept(reason)
@@ -916,7 +934,7 @@ async def worktrees_of(client, repo=None, settings_path=None, check=True, *, des
         await preflight(client, queues(workflow_queue, queue))
     view = await _worktree_view(client, {"repository": selected, "queue": queue,
                                         "worktree_root": root}, "worktrees", workflow_queue)
-    return selected, view
+    return selected, dict(view, target_queue=queue)
 
 
 async def landing_options(client, run_id=None, repo=None, check=True, settings=None, *, selected=None, descriptors=None):

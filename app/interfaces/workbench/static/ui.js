@@ -3,6 +3,10 @@
 
 export const $ = (id) => document.getElementById(id);
 
+export function setDialogDismissal(dialog, protect) {
+  dialog.setAttribute("closedby", protect ? "closerequest" : "any");
+}
+
 export function showReading(id, pending) {
   const bar = $(id);
   bar.hidden = !pending;

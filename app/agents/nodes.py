@@ -310,7 +310,7 @@ def compose_parts(stage, stage_cfg, is_review, state, session_first,
     if len(stack) > 1:
         paths = []
         for name in stack[1:]:
-            folders = adapter.skill_folders(name, state["repo_path"])
+            folders = adapter.skill_folders(name, state["worktree_path"])
             candidates = [os.path.join(folder, "SKILL.md").replace(os.sep, "/") for folder in folders]
             paths.append("- %s: %s" % (name, json.dumps(candidates, ensure_ascii=False)))
         add("supporting-skills", "# Supporting skills",

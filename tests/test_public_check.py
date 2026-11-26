@@ -113,6 +113,19 @@ def ref(commit, to="refs/heads/main"):
 
 @unittest.skipUnless(os.name == "posix", "the public gate's shell controls run on WSL")
 class PublicCheckSnapshots(Gate):
+    def test_private_atomic_write_files_are_ignored_and_rejected_if_tracked(self):
+        shutil.copyfile(SOURCE.parent.parent / ".gitignore", self.repo / ".gitignore")
+        (self.repo / ".orchestra").mkdir()
+        for name in (".orchestra/.repos-fixture", ".orchestra/.settings-fixture"):
+            with self.subTest(name=name):
+                (self.repo / name).write_text("{\"private\": true}\n", encoding="utf-8")
+                self.assertEqual(self.git("check-ignore", name, check=False).returncode, 0, name)
+                self.git("add", "-f", "--", name)
+                result = self.check()
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn(name, result.stdout)
+                self.git("rm", "--cached", "--", name)
+
     def test_vendor_export_exception_cannot_hide_a_real_generic_key(self):
         result = self.check(CONTROL_IGNORE_GENERIC="1")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)

@@ -684,8 +684,8 @@ still lands on a checkout.
   depending on remembered instructions after compaction. Vendor-specific
   protection within a long turn belongs to [agents](../../app/agents/docs/architecture/structure.md).
 - **D19** **Team methodology is opt-in.** Stages use the built-in role and stage
-  instructions by default. Settings can bind one installed skill per stage.
-  The target worker checks explicit bindings before work. The agent adapter owns
+  instructions by default. Settings can bind an ordered stack of installed skills per stage.
+  The target worker checks explicit bindings before work and at turn launch in the run's worktree. The agent adapter owns
   discovery and invocation. A bound skill supplies the team's methodology and
   leads each turn of that stage, including retries and resumed reviews. The
   workflow still owns the stage result and routing (D4). New runs capture their

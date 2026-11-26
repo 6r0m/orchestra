@@ -458,7 +458,10 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
                     if body.get("confirm") is not True:
                         return self._send(HTTPStatus.BAD_REQUEST, {"error": "removing what a run kept deletes its "
                                                                             "unmerged work, so it must be confirmed"})
-                    call(lambda client: runs.remove_worktree(client, parts[1]),
+                    displayed = body.get("worktree")
+                    if "worktree" in body and not isinstance(displayed, dict):
+                        return self._send(HTTPStatus.BAD_REQUEST, {"error": "Invalid displayed worktree."})
+                    call(lambda client: runs.remove_worktree(client, parts[1], displayed=displayed),
                          timeout=runs.REMOVAL.total_seconds() + 60)
                     return self._send(HTTPStatus.OK, {"removed": parts[1]})
                 if len(parts) == 3 and parts[0] == "runs" and RUN_ID.match(parts[1]) and parts[2] == "reject":
@@ -559,8 +562,7 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
 
         def _worktrees(self, repo, run_id=None):
             """Every worktree of one repository and its merge state, read by that repository's own host,
-            with the run each belongs to — its branch is the run's id — and whether that run has closed,
-            so that what it kept can be removed."""
+            with the run whose recorded worktree it matches, and whether that run has closed."""
             catalog = None if run_id else descriptors()
             configured = None if run_id else settings.load(root=root, environ=environ)
 
@@ -570,18 +572,23 @@ def make_handler(call, policy, token, links=None, root=paths.REPO, environ=os.en
                 rows = []
                 for row in view["rows"]:
                     listed = (await runs.execution(client, row["branch"])
-                              if row["branch"] and RUN_ID.match(row["branch"]) else None)
+                              if row["state"] != "base" and row["branch"] and RUN_ID.match(row["branch"]) else None)
                     kept = False
-                    if listed and listed["execution"] != "RUNNING":
+                    if listed:
                         try:
-                            kept = runs.not_kept(listed, await runs.status(client, row["branch"], STATUS_SECONDS),
-                                                 await runs.removal(client, row["branch"])) is None
+                            current = await runs.status(client, row["branch"], STATUS_SECONDS)
+                            if not runs.matches_worktree(current, {"target": selected["target"], "path": row["path"],
+                                                                  "queue": view["target_queue"]}):
+                                listed = None
+                            elif listed["execution"] != "RUNNING":
+                                kept = runs.not_kept(listed, current, await runs.removal(client, row["branch"])) is None
                         except Exception:           # noqa: BLE001 - its worker down: removable is not known
-                            kept = False
+                            listed = None
                     rows.append(dict(row, run=listed and listed["execution"], removable=kept))
                 return selected, view, rows
             selected, view, rows = call(read)
-            result = {"repo": selected["id"], "base_branch": view["base_branch"], "rows": rows}
+            result = {"repo": selected["id"], "target": selected["target"], "target_queue": view["target_queue"],
+                      "base_branch": view["base_branch"], "rows": rows}
             if run_id:
                 result["recorded"] = {"path": selected["path"], "target": selected["target"]}
             elif repo in catalog:

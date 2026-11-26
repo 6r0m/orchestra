@@ -70,7 +70,7 @@ async function loadWorktrees() {
   clearWorktrees();
   const request = reading, route = (run ? "#worktrees-run=" : "#worktrees=") + encodeURIComponent(run || repo);
   if (location.hash !== route) history.replaceState(null, "", route);
-  const here = () => location.hash === route && recordedRun === run && (run || chosenRepo() === repo);
+  const here = () => request === reading && location.hash === route && recordedRun === run && (run || chosenRepo() === repo);
   updateLoad();
   showReading("worktrees-reading", true);
   report(line, "Reading worktrees…");
@@ -113,11 +113,11 @@ function renderWorktrees(view, here) {
   }
   $("worktrees-none").hidden = !base || additional.length > 0;
   $("worktrees-table-wrap").hidden = !additional.length;
-  $("worktrees").replaceChildren(...additional.map((worktree) => row(worktree, here)));
+  $("worktrees").replaceChildren(...additional.map((worktree) => row(worktree, view, here)));
   overview.hidden = !view.rows.length;
 }
 
-function row(worktree, here) {
+function row(worktree, view, here) {
   const tr = el("tr");
   tr.setAttribute("role", "row");
   const branch = el("td");
@@ -144,7 +144,8 @@ function row(worktree, here) {
     remove.type = "button";
     remove.setAttribute("aria-label", "Remove run " + worktree.branch + "'s worktree and branch");
     remove.title = "Delete run " + worktree.branch + "'s worktree and branch, through its host's git";
-    remove.onclick = () => removeKept(worktree.branch, line, loadWorktrees, remove, here);
+    const displayed = { path: worktree.path, target: view.target, queue: view.target_queue };
+    remove.onclick = () => removeKept(worktree.branch, line, loadWorktrees, remove, here, displayed);
     act.appendChild(remove);
   }
   for (const cell of [branch, state, run, path, act]) {
@@ -175,14 +176,14 @@ $("worktrees-form").onsubmit = (event) => {
 // What a closed run kept — its worktree and branch, unmerged — removed through its host's own git, once
 // the operator confirms it. What came of it is said at `line`, and `then` follows, only while `here` holds:
 // while the page still shows what it was asked from.
-export async function removeKept(runId, line, then, button, here = () => true) {
+export async function removeKept(runId, line, then, button, here = () => true, worktree) {
   const go = await confirmAction({ title: "Remove this run's worktree and branch?",
     body: "Remove deletes run " + runId + "'s worktree and its branch, with any of its work that is not merged.",
     confirm: "Remove", danger: true, returnTo: button });
   if (!go || !here()) return;
   report(line, "sending…");
   try {
-    await api("/api/runs/" + encodeURIComponent(runId) + "/remove", { confirm: true });
+    await api("/api/runs/" + encodeURIComponent(runId) + "/remove", { confirm: true, worktree });
   } catch (error) {
     if (here()) report(line, "not accepted: " + error.message, true);
     return;

@@ -1,5 +1,5 @@
 import { api, CONFIG } from "./api.js";
-import { $, confirmAction, el, report, showReading } from "./ui.js";
+import { $, confirmAction, el, report, setDialogDismissal, showReading } from "./ui.js";
 import { chooseRepository, closeRepositoryPicker, refreshRepositoryChoice, reloadRepos } from "./picker.js";
 
 const dialog = $("repository-editor");
@@ -105,7 +105,7 @@ function draftEntry(session) {
 function updateDismissal() {
   const dirty = current?.entry && (nameInput.value !== (current.original || "") ||
     JSON.stringify(draftEntry(current)) !== JSON.stringify(current.entry));
-  dialog.setAttribute("closedby", current?.saving || dirty ? "closerequest" : "any");
+  setDialogDismissal(dialog, current?.saving || dirty);
 }
 
 function updateHints() {

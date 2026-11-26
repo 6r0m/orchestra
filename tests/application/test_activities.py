@@ -162,6 +162,22 @@ class Skills(unittest.TestCase):
         with self.assertRaisesRegex(ApplicationError, "plan stage's skill evidence-check"):
             self.prepare(holds_skill=lambda folder: folder == self.folder, skills=["plan-it", "evidence-check"])
 
+    def test_a_skill_missing_from_the_worktree_stops_the_turn_before_launch(self):
+        run = dict(state("test-missing-worktree-skill"), repo_path=self.repo, target="wsl")
+        self.addCleanup(shutil.rmtree, activities.run_dir(run["run_id"]), True)
+        runner = mock.Mock(return_value=(1, "the agent should not start"))
+        kind = stand_in.KIND
+        holds = lambda folder: (folder == self.folder or
+                                folder == os.path.join(run["worktree_path"], ".stand-in", "skills", "plan-it") or
+                                folder == os.path.join(self.repo, ".stand-in", "skills", "evidence-check"))
+        args = {"stage": "plan", "state": run, "policy": policy(kind, stage_skills={"plan": ["plan-it", "evidence-check"]})}
+        host = activities.Activities(runner=runner, git=FakeWorktrees(), repositories=FakeRepos(), telemetry=None,
+                                     which=installed, holds_skill=holds)
+        self.prepare(holds_skill=holds, skills=["plan-it", "evidence-check"])
+        with mock.patch.object(activities.trust, "ensure"), self.assertRaisesRegex(ApplicationError, "evidence-check"):
+            host.run_role(args)
+        runner.assert_not_called()
+
 
 class Environment(unittest.TestCase):
     """No agent, of whatever kind, inherits a marker that any kind's sessions leave."""

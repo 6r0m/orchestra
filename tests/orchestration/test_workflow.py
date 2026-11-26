@@ -804,7 +804,7 @@ PROMPT_CASES = {
         stage="plan", stage_cfg=ENGINEER, is_review=False, state=dict(TURN, round=1, feedback="Name the test."),
         session_first=False, stage_first=False, skills={"plan": "investigate-change"}),
     "plan, with a supporting skill": dict(
-        stage="plan", stage_cfg=ENGINEER, is_review=False, state=dict(TURN, repo_path="/fixture"),
+        stage="plan", stage_cfg=ENGINEER, is_review=False, state=TURN,
         session_first=True, stage_first=True, skills={"plan": ["investigate-change", "evidence-check"]}),
     "plan, a later turn with your words": dict(
         stage="plan", stage_cfg=ENGINEER, is_review=False,

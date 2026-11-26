@@ -251,16 +251,19 @@ class Activities:
         # for where its kind finds skills. The run was handed only its flow's stages' skills.
         for stage, binding in sorted((policy.get("stage_skills") or {}).items()):
             adapter = adapters.for_role(policy["roles"][stages.STAGE_ROLE[stage]])
-            for skill in stages.skill_stack(binding):
-                folders = adapter.skill_folders(skill, resolved["repo_path"])
-                if not any(self.holds_skill(folder) for folder in folders):
-                    raise ApplicationError("the %s stage's skill %s is in none of %s on the %s host"
-                                           % (stage, skill, ", ".join(folders), selected["target"]),
-                                           type="Refused", non_retryable=True)
+            self._require_skills(adapter, stage, binding, resolved["repo_path"], selected["target"])
         # A CLI's trust dialog asks what starting a run on this repository already answered, and would stop
         # this run's first turn until someone answered it in the page. Best effort; never fails the run.
         trust.ensure(resolved["repo_path"], [adapters.kind_name(adapter) for adapter in kinds])
         return resolved
+
+    def _require_skills(self, adapter, stage, binding, root, target):
+        for skill in stages.skill_stack(binding):
+            folders = adapter.skill_folders(skill, root)
+            if not any(self.holds_skill(folder) for folder in folders):
+                raise ApplicationError("the %s stage's skill %s is in none of %s on the %s host"
+                                       % (stage, skill, ", ".join(folders), target),
+                                       type="Refused", non_retryable=True)
 
     @activity.defn
     def create_worktree(self, args):
@@ -370,14 +373,17 @@ class Activities:
         name = terminal.turn_name(stage, episode, attempt)
         worktree = state["worktree_path"]
         client = self.client()
+        skills = policy.get("stage_skills") or {}
 
         def compose(session_first, named):
             """The turn's prompt, its parts kept beside it under the attempt's own name for whoever shows it — a
             part too long for the command line attached as a file in the run's folder (`N.attach`) — and the files
             it attached."""
+            self._require_skills(adapter, stage, skills.get(stage), worktree,
+                                 state.get("target", "windows" if os.name == "nt" else "wsl"))
             parts = N.compose_parts(stage, role, is_review, state, session_first=session_first,
                                     stage_first=attempt == 1, logs=os.path.join(rdir, "logs"),
-                                    skills=policy.get("stage_skills"), review_rounds=policy.get("review_rounds"),
+                                    skills=skills, review_rounds=policy.get("review_rounds"),
                                     review_prompts=policy.get("review_prompts"))
             parts, attached = N.attach(parts, os.path.join(rdir, "attachments"), named)
             terminal.record_parts(rdir, named, parts)

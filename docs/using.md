@@ -81,8 +81,9 @@ the second path as **Worktree root**. Select **Save repository**.
    Ask the engineer to add `greeting.txt` containing `Hello, Orchestra!` and verify its contents.
 2. Select **Start run**. If Codex asks to review hooks, inspect them and answer in the role's terminal.
    The [run walkthrough](#the-page) explains what the hooks do and how to resume after a timeout.
-3. Read the architect's plan assessment and approve it when ready. At the final gate, inspect the
-   changed file and confirm **Merge** into the fixture's local `main`, or choose **Discard**.
+3. The default `architect-plan` flow continues to Build when the plan review passes. At the final gate,
+   inspect the changed file and approve **Merge** into the fixture's local `main`, or choose **Discard**.
+   Choose `engineer-plan` in **New run** if you want to approve the plan before Build.
 
 This calls the selected vendor and uses its quota. To exercise the Workbench with scripted agents,
 run `make demo` from WSL while the stack is up. See the [demo guide](../tools/README.md) for its scope.
@@ -503,8 +504,9 @@ or linked from another location is managed outside the Workbench. For file-based
 
 Choosing a saved repository reads its worktrees immediately. For an unlisted repository, enter its path and choose
 **Load worktrees**. Use **Refresh** to reread the selected repository. The base checkout appears
-separately. Additional worktrees show their Git state, a copyable path and a link to any
-associated run. **Remove** appears only for worktrees the backend marks eligible and requires confirmation.
+separately. Additional worktrees show their Git state and a copyable path. A run link requires the
+displayed path and execution worker to match the run's recorded worktree. **Remove** appears for eligible
+worktrees and requires confirmation.
 
 ### Settings
 
@@ -514,13 +516,15 @@ In **Roles**, choose a profile and edit its model, reasoning effort and launcher
 all fields that runtime supports. **Save** returns the edits to Settings, where **Apply** writes them to disk.
 Use **+** to configure, add and select a profile.
 When adding a profile, **Advanced profile options** contains provider and launcher overrides where supported.
-Choose **Browse other profiles…** in the Agent profile picker to reuse a compatible profile.
-Edits to a shared profile affect every role that uses it on new runs.
+Choose **Browse other profiles…** in the Agent profile picker to select, edit or restore a profile.
+**Use shared profile values** restores the profile's shared settings when available. Edits to a profile
+used by both roles affect both on new runs.
 
 **Stage skills** shows what each stage uses and the installed skills you can add. Select an available
 skill or enter a name for another execution host. Click an active tag to remove it. Under **Instructions**,
 choose **Preview** beside an item to open that part of the editor. The question mark explains when the
-instructions apply. **Save to draft** keeps edits until you apply Settings.
+instructions apply. **Use persona file** restores file-based instructions for the selected role.
+**Save to draft** keeps edits until you apply Settings.
 A run snapshots the effective settings when it starts. The page reads the settings files
 each time it loads, so a default edited in `.orchestra/settings.json` shows at the next reload, with no
 restart.
@@ -532,7 +536,7 @@ starts a fresh engineer conversation on the next turn if its profile changed. It
 stays with the run. The Workbench's run facts show the effective engineer and per-turn limit.
 Then use the stop's normal answer, such as Continue for a failed step, when ready to resume.
 
-The instructions editor's **Workspace access** disclosure describes what holds the role to its limits.
+The role's **Workspace access** disclosure describes what holds it to its limits.
 Codex is held by its own sandbox, which the operating system enforces: a read-only role cannot write, and
 a writing one cannot write outside its worktree — which also keeps a tool whose cache or environment lies
 elsewhere, such as this repository's test runner, from running in its turn. Claude Code is held by its own
@@ -563,9 +567,12 @@ states any operator decision needed.
 
 Install your team's skills where the selected agent CLI can find them on the host that runs the task.
 In **Settings**, add skills in order for each stage you want to configure, then select **Apply**.
-The first skill leads the prompt and the agent reads each supporting skill's `SKILL.md` in order.
-The target worker checks the full stack before creating a worktree. Empty stages use built-in
-instructions. Saved settings accept a single skill name or an ordered array of names.
+The first skill leads the prompt. The prompt asks the agent to read each supporting skill's `SKILL.md`
+in order, using the run's worktree for repository-local discovery. The target worker checks the binding
+before creating a worktree and checks the active stack again in the worktree before launching each turn.
+Empty stages use built-in instructions. Saved settings accept a single skill name or an ordered array.
+Before using ordered stacks after upgrading, run `make reload` to update the execution workers after
+their current activities finish.
 
 To use GenosAI's approach, install its three skills using the [GenosAI skills guide](https://github.com/6r0m/GenosAI/tree/develop/agents#skills).
 **Use installed defaults** fills empty stages for the selected role when its suggested skills are found.

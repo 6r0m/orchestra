@@ -1778,6 +1778,18 @@ class Runs(Scenario):
         self.assertEqual(status, 200, recorded)
         self.assertEqual(recorded["recorded"], {"path": "/fake/repo", "target": "wsl"})
         self.assertEqual(recorded["rows"], rows)
+        original = git.rows
+        other_path = "/another/worktree/" + run_id
+        git.rows = [{"path": other_path, "branch": run_id, "state": "unmerged"}]
+        other = request("GET", "/api/worktrees?repo=" + urllib.parse.quote(self.repo))[1]["rows"][0]
+        self.assertEqual((other["run"], other["removable"]), (None, False))
+        git.rows = original
+        displayed = {"path": original[0]["path"], "target": "wsl", "queue": E.WSL_QUEUE}
+        for expected in (dict(displayed, path=other_path), dict(displayed, target="windows"),
+                         dict(displayed, queue="target:wsl:another-host")):
+            status, body = request("POST", "/api/runs/%s/remove" % run_id, {"confirm": True, "worktree": expected})
+            self.assertEqual(status, 400, body)
+            self.assertNotIn("discard", [call[0] for call in git.calls])
         bounds, saved = [], runs.status
 
         async def unanswered(client, run_id, timeout=None):
@@ -1795,7 +1807,8 @@ class Runs(Scenario):
                          "a status not read in time is not removable")
         self.assertEqual(request("POST", "/api/runs/%s/remove" % run_id, {})[0], 400, "unconfirmed")
         self.assertNotIn("discard", [call[0] for call in git.calls], "nothing was removed unconfirmed")
-        status, body = request("POST", "/api/runs/%s/remove" % run_id, {"confirm": True})
+        status, body = request("POST", "/api/runs/%s/remove" % run_id,
+                               {"confirm": True, "worktree": displayed})
         self.assertEqual((status, body), (200, {"removed": run_id}))
         self.assertEqual([call for call in git.calls if call[0] == "discard"], [("discard", run_id)],
                          "removed once, by its host's git, as a discard removes it")

@@ -1,4 +1,5 @@
 """Every turn refreshes its current contract; oversized prompt parts remain readable as whole attachments."""
+import json
 import os
 import sys
 import tempfile
@@ -110,11 +111,26 @@ class TurnContract(unittest.TestCase):
         self.assertNotIn(stages.STAGE_ASK["plan"].split("{{TODO_PATH}}")[0], build)
 
     def test_ordered_skill_stack_invokes_one_lead_and_lists_the_supporting_methods(self):
-        state = {"task": "t", "todo_path": "todo/approved.md", "repo_path": "/repo", "phase": "plan"}
-        parts = N.compose_parts("plan", {"kind": "pi", "persona": "Saved engineer"}, False, state, True, True,
-                                skills={"plan": ["planning", "evidence", "architecture"]})
+        with tempfile.TemporaryDirectory(prefix="orchestra-skill-source-") as folder:
+            repo, tree = (os.path.join(folder, name) for name in ("repo", "worktree"))
+            for root, text in ((repo, "original checkout"), (tree, "run worktree")):
+                skill = os.path.join(root, ".pi", "skills", "evidence", "SKILL.md")
+                os.makedirs(os.path.dirname(skill))
+                with open(skill, "w", encoding="utf-8") as file:
+                    file.write(text)
+            state = {"task": "t", "todo_path": "todo/approved.md", "repo_path": repo, "worktree_path": tree,
+                     "phase": "plan"}
+            parts = N.compose_parts("plan", {"kind": "pi", "persona": "Saved engineer"}, False, state, True, True,
+                                    skills={"plan": ["planning", "evidence", "architecture"]})
+            supporting = next(part["text"] for part in parts if part["part"] == "supporting-skills")
+            evidence = next(line for line in supporting.splitlines() if line.startswith("- evidence: "))
+            candidates = json.loads(evidence.split(": ", 1)[1])
+            expected = os.path.join(tree, ".pi", "skills", "evidence", "SKILL.md").replace(os.sep, "/")
+            self.assertIn(expected, candidates)
+            self.assertNotIn(os.path.join(repo, ".pi", "skills", "evidence", "SKILL.md").replace(os.sep, "/"), candidates)
+            with open(expected, encoding="utf-8") as file:
+                self.assertEqual(file.read(), "run worktree")
         self.assertTrue(N.render(parts).startswith("/skill:planning "))
-        supporting = next(part["text"] for part in parts if part["part"] == "supporting-skills")
         self.assertLess(supporting.index("evidence"), supporting.index("architecture"))
         self.assertIn("SKILL.md", supporting)
         self.assertNotIn("/skill:evidence", N.render(parts))
