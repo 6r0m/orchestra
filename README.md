@@ -1,13 +1,18 @@
 # Orchestra
 
-Orchestra is a local-first workbench that lets you **delegate coding work and keep control of what merges**.
+**Orchestra automates engineering workflows and gives you control over how the work proceeds.**
 
-Give it a task. An engineer plans and implements the change in a dedicated Git worktree. An architect
-reviews the plan and implementation in a separate agent session. In the Workbench, inspect the diff,
-request revisions or approve the merge.
+It is a local-first workbench for delegating software changes to coding agents.
 
-Claude Code, Codex and Pi run in their native terminals. Temporal records workflow progress and
-decisions so runs can resume after an interruption.
+Give it a task. An engineer plans and implements the change in a dedicated Git worktree, and an
+architect reviews the plan and implementation in a separate session. The stages, review budgets and
+approval gates you choose govern how the work progresses.
+
+From one Workbench, follow both agents in their native terminals and inspect their decisions and
+changes. Pause a turn to give guidance, request revisions, continue a failed step or approve the merge.
+
+Temporal preserves workflow progress and decisions across interruptions. Orchestra manages Git
+integration. Claude Code, Codex and Pi retain their native sessions across turns.
 
 The supported setup is **Windows with WSL 2 and systemd**. The first-run guide covers Docker Compose,
 uv and the agent CLI on the host that runs the task.
